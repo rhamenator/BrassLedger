@@ -1,8 +1,8 @@
 using BrassLedger.Domain.Legacy;
 
-namespace BrassLedger.Application.Modernization;
+namespace BrassLedger.Application.Catalog;
 
-public sealed record ModernizationAssessment(
+public sealed record ProductCatalog(
     string RecommendedLanguage,
     string RecommendedArchitecture,
     string RecommendedDatabase,
@@ -19,3 +19,4 @@ public sealed record ModernizationAssessment(
     IReadOnlyList<string> VisualDifferentiators,
     IReadOnlyList<string> TaxAutomationStrategy,
     IReadOnlyList<OfficialTaxSource> TaxSources);
+

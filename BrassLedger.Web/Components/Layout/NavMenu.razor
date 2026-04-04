@@ -6,7 +6,7 @@
 
 <input type="checkbox" title="Navigation menu" class="navbar-toggler" />
 
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+<div class="nav-scrollable">
     <AuthorizeView>
         <Authorized>
             <nav class="flex-column">
@@ -75,6 +75,12 @@
                         <span class="nav-icon" aria-hidden="true">11</span> Publish
                     </NavLink>
                 </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="help">
+                        <span class="nav-icon" aria-hidden="true">12</span> Help
+                    </NavLink>
+                </div>
             </nav>
         </Authorized>
         <NotAuthorized>
@@ -88,3 +94,4 @@
         </NotAuthorized>
     </AuthorizeView>
 </div>
+

@@ -1,14 +1,14 @@
-using BrassLedger.Application.Modernization;
+using BrassLedger.Application.Catalog;
 using BrassLedger.Domain.Legacy;
 
-namespace BrassLedger.Infrastructure.Modernization;
+namespace BrassLedger.Infrastructure.Catalog;
 
-public sealed class StaticModernizationAssessmentService : IModernizationAssessmentService
+public sealed class StaticProductCatalogService : IProductCatalogService
 {
-    public ModernizationAssessment GetAssessment()
+    public ProductCatalog GetCatalog()
     {
         var inventory = new LegacyArtifactInventory(
-            SourceStack: "Visual FoxPro",
+            SourceStack: "Legacy desktop runtime",
             Projects: 12,
             Programs: 343,
             Forms: 561,
@@ -27,7 +27,7 @@ public sealed class StaticModernizationAssessmentService : IModernizationAssessm
             new LegacyModule("J", "General Ledger", "Core Accounting", "Referenced in Module.txt as G/L."),
             new LegacyModule("F", "Accounts Receivable", "Core Accounting", "Referenced in Module.txt as A/R."),
             new LegacyModule("E", "Accounts Payable", "Core Accounting", "Referenced in Module.txt as A/P."),
-            new LegacyModule("Q", "Payroll", "Payroll", "FoxPro startup files and timecard notes reference payroll procedures."),
+            new LegacyModule("Q", "Payroll", "Payroll", "Startup files and timecard notes reference payroll procedures."),
             new LegacyModule("K", "Inventory", "Operations", "Referenced in Module.txt as Inventory."),
             new LegacyModule("O", "Order Entry", "Operations", "Referenced in Module.txt as O/E."),
             new LegacyModule("S", "Purchase Order", "Operations", "Referenced in Module.txt as P/O."),
@@ -64,36 +64,36 @@ public sealed class StaticModernizationAssessmentService : IModernizationAssessm
                 "Shows that some unemployment and payroll tax rates are employer-specific notices rather than a single public nationwide feed.")
         };
 
-        return new ModernizationAssessment(
+        return new ProductCatalog(
             RecommendedLanguage: "C#",
             RecommendedArchitecture: "ASP.NET Core backend with a separate TypeScript web frontend and dedicated payroll/reporting services",
             RecommendedDatabase: "PostgreSQL as the default operational database, with SQL Server as a viable secondary option",
             LegacyDataStrategy: "Treat DBF and DBC assets as legacy import sources only, then migrate the operational system to a relational database.",
-            WhyCSharp: "C# is the most natural migration target for a large FoxPro business application because it is strong for Windows integration, reporting, long-lived enterprise maintenance, and staged replacement of DBF-era workflows.",
+            WhyCSharp: "C# is a strong migration target for a large legacy business application because it is well suited to Windows integration, reporting, long-lived enterprise maintenance, and staged replacement of DBF-era workflows.",
             Inventory: inventory,
             PrintableInventory: printableInventory,
             Risks: new[]
             {
-                "FoxPro forms and reports are stateful and event-driven, so a direct one-to-one screen port will create brittle code.",
+                "The legacy forms and reports are stateful and event-driven, so a direct one-to-one screen port will create brittle code.",
                 "DBF and DBC structures still need careful semantic mapping before data cutover, even if the new platform uses a relational database.",
                 "Printing, check layouts, tax forms, and report fidelity are likely the highest regression-risk areas.",
                 "Global object usage in startup code and class libraries implies hidden coupling across modules that should be untangled into services.",
-                "ActiveX and FoxPro class libraries must be replaced with native modern components instead of binary compatibility shims."
+                "ActiveX and legacy class libraries must be replaced with supported native components instead of binary compatibility shims."
             },
             Phases: new[]
             {
-                "Document tables, forms, reports, and module boundaries from the FoxPro project.",
+                "Document tables, forms, reports, and module boundaries from the legacy project.",
                 "Design a canonical relational schema and import pipeline from DBF/CDX/FPT data.",
                 "Rebuild shared business rules as testable C# domain and application services.",
                 "Deliver module-by-module replacements starting with authentication, company setup, general ledger, and reporting.",
-                "Run the modern system in parallel with the legacy product until data and printed outputs reconcile."
+                "Run BrassLedger in parallel with the legacy product until data and printed outputs reconcile."
             },
             Modules: modules,
             ProductPrinciples: new[]
             {
                 "Open source and free with every module available to every user.",
                 "No premium subscription logic, no purchased-module gating, and no registration unlock tables.",
-                "Modern, accessible UI that is intentionally distinct from the legacy product's branding and trade dress.",
+                "Accessible UI that is intentionally distinct from the legacy product's branding and trade dress.",
                 "Tax logic and report rendering should be transparent, testable, and data-driven."
             },
             FeaturesToRemove: new[]
@@ -105,16 +105,16 @@ public sealed class StaticModernizationAssessmentService : IModernizationAssessm
             },
             ConversionWorkstreams: new[]
             {
-                "Convert FoxPro FRX/FRT reports into modern report definitions or server-rendered PDF templates.",
+                "Convert FRX/FRT reports into current report definitions or server-rendered PDF templates.",
                 "Convert LBX/LBT label layouts into a reusable label templating system.",
                 "Extract business logic from VCX/VCT class libraries into C# domain and application services.",
-                "Replace OCX and other binary dependencies with supported modern libraries and web-native workflows.",
-                "Reimplement payroll and tax engines from rules and test fixtures rather than copying FoxPro runtime behavior line-for-line."
+                "Replace OCX and other binary dependencies with supported current libraries and web-native workflows.",
+                "Reimplement payroll and tax engines from rules and test fixtures rather than copying legacy runtime behavior line-for-line."
             },
             VisualDifferentiators: new[]
             {
                 "Use a fresh product name, iconography, and color system unrelated to the legacy application.",
-                "Adopt modern layout patterns, typography, spacing, and interaction design rather than reproducing FoxPro windows and toolbars.",
+                "Adopt current layout patterns, typography, spacing, and interaction design rather than reproducing the legacy windows and toolbars.",
                 "Keep accounting workflows familiar while ensuring the UI is recognizably a new product."
             },
             TaxAutomationStrategy: new[]
@@ -128,3 +128,4 @@ public sealed class StaticModernizationAssessmentService : IModernizationAssessm
             TaxSources: taxSources);
     }
 }
+

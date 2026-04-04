@@ -1,5 +1,5 @@
 using BrassLedger.Application.Accounting;
-using BrassLedger.Application.Modernization;
+using BrassLedger.Application.Catalog;
 
 namespace BrassLedger.Web.Tests;
 
@@ -68,15 +68,15 @@ internal static class TestWorkspaceData
                 new[] { new TaxProfileSnapshot("Federal", "FUTA", 0.00600m, new DateOnly(2026, 1, 1), "IRS Publication 15", false) }));
     }
 
-    public static ModernizationAssessment CreateAssessment()
+    public static ProductCatalog CreateAssessment()
     {
-        return new ModernizationAssessment(
+        return new ProductCatalog(
             "C#",
             "ASP.NET Core backend with a separate TypeScript web frontend and dedicated payroll/reporting services",
             "PostgreSQL as the default operational database, with SQL Server as a viable secondary option",
             "Treat DBF and DBC assets as legacy import sources only, then migrate the operational system to a relational database.",
-            "C# is a natural migration target for a large FoxPro business application.",
-            new( "Visual FoxPro", 12, 343, 561, 277, 531 ),
+            "C# is a natural migration target for a large legacy business application.",
+            new( "Legacy desktop runtime", 12, 343, 561, 277, 531 ),
             new(277, 9, 7, 2, 50),
             new[] { "Printing fidelity is a regression risk." },
             new[] { "Design schema", "Migrate modules" },
@@ -105,17 +105,18 @@ internal sealed class StubBusinessWorkspaceService : IBusinessWorkspaceService
     }
 }
 
-internal sealed class StubModernizationAssessmentService : IModernizationAssessmentService
+internal sealed class StubProductCatalogService : IProductCatalogService
 {
-    private readonly ModernizationAssessment _assessment;
+    private readonly ProductCatalog _assessment;
 
-    public StubModernizationAssessmentService(ModernizationAssessment assessment)
+    public StubProductCatalogService(ProductCatalog assessment)
     {
         _assessment = assessment;
     }
 
-    public ModernizationAssessment GetAssessment()
+    public ProductCatalog GetCatalog()
     {
         return _assessment;
     }
 }
+

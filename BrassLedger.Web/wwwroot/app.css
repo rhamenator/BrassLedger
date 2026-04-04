@@ -547,7 +547,8 @@ main {
     .detail-grid,
     .mini-metrics,
     .module-grid,
-    .source-grid {
+    .source-grid,
+    .help-grid {
         grid-template-columns: 1fr;
     }
 }
@@ -695,4 +696,28 @@ button.action-primary,
 button.action-secondary {
     border: none;
     cursor: pointer;
+}
+
+.help-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.help-callout {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.help-callout .action-primary {
+    justify-self: start;
+}
+
+.step-list {
+    margin: 1rem 0 0;
+    padding-left: 1.35rem;
+}
+
+.step-list li {
+    margin-bottom: 0.8rem;
 }

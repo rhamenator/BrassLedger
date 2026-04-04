@@ -1,20 +1,28 @@
 using BrassLedger.Application.Accounting;
-using BrassLedger.Application.Modernization;
+using BrassLedger.Application.Catalog;
 using BrassLedger.Domain.Accounting;
+using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace BrassLedger.Infrastructure.Accounting;
 
 public sealed class BusinessWorkspaceService(
     IDbContextFactory<BrassLedgerDbContext> dbContextFactory,
-    IModernizationAssessmentService assessmentService) : IBusinessWorkspaceService
+    IProductCatalogService assessmentService,
+    IHttpContextAccessor httpContextAccessor) : IBusinessWorkspaceService
 {
     public async Task<BusinessWorkspaceSnapshot> GetWorkspaceAsync(CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var company = await dbContext.Companies.AsNoTracking().OrderBy(x => x.Name).FirstAsync(cancellationToken);
+        var claimValue = httpContextAccessor.HttpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
+        var companies = dbContext.Companies.AsNoTracking();
+        var company = Guid.TryParse(claimValue, out var companyId)
+            ? await companies.SingleAsync(x => x.Id == companyId, cancellationToken)
+            : await companies.OrderBy(x => x.Name).FirstAsync(cancellationToken);
         var users = await dbContext.Users.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsActive).ToListAsync(cancellationToken);
         var accounts = await dbContext.Accounts.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsActive).OrderBy(x => x.Number).ToListAsync(cancellationToken);
         var journalEntries = await dbContext.JournalEntries.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsPosted).OrderByDescending(x => x.PostedOn).Take(8).ToListAsync(cancellationToken);
@@ -46,7 +54,7 @@ public sealed class BusinessWorkspaceService(
             bankAccounts.Count,
             projectJobs.Count);
 
-        var assessment = assessmentService.GetAssessment();
+        var assessment = assessmentService.GetCatalog();
 
         return new BusinessWorkspaceSnapshot(
             GeneratedAtUtc: DateTime.UtcNow,
@@ -209,3 +217,4 @@ public sealed class BusinessWorkspaceService(
         return "***";
     }
 }
+

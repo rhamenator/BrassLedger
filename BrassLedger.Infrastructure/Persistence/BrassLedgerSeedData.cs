@@ -207,8 +207,10 @@ internal static class BrassLedgerSeedData
             UserName = userName,
             DisplayName = displayName,
             Email = email,
+            SecurityStamp = Guid.NewGuid().ToString("N"),
             Role = role,
-            IsActive = true
+            IsActive = true,
+            LastPasswordChangedUtc = DateTimeOffset.UtcNow
         };
 
         user.PasswordHash = passwordHasher.HashPassword(user, BrassLedgerAuthenticationDefaults.SeededPassword);
@@ -253,6 +255,13 @@ internal static class BrassLedgerSeedData
             if (string.IsNullOrWhiteSpace(user.PasswordHash))
             {
                 user.PasswordHash = passwordHasher.HashPassword(user, BrassLedgerAuthenticationDefaults.SeededPassword);
+                user.LastPasswordChangedUtc ??= DateTimeOffset.UtcNow;
+                hasChanges = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(user.SecurityStamp))
+            {
+                user.SecurityStamp = Guid.NewGuid().ToString("N");
                 hasChanges = true;
             }
         }

@@ -1,12 +1,12 @@
 @page "/taxes"
 @attribute [Authorize]
 @inject IBusinessWorkspaceService WorkspaceService
-@inject IModernizationAssessmentService AssessmentService
+@inject IProductCatalogService AssessmentService
 
 <PageTitle>Taxes</PageTitle>
 
 @{
-    var assessment = AssessmentService.GetAssessment();
+    var assessment = AssessmentService.GetCatalog();
 }
 
 @if (Workspace is null)
@@ -24,7 +24,7 @@ else
                 <h1>Automated where possible, reviewable where necessary.</h1>
             </div>
             <p class="page-intro">
-                The old tax update flow relied on opaque FoxPro tables and manual utilities. The new workspace now carries
+                The old tax update flow relied on opaque legacy tables and manual utilities. The new workspace now carries
                 explicit tax profiles and keeps room for official-source import adapters.
             </p>
         </header>
@@ -60,7 +60,7 @@ else
             </article>
 
             <article class="panel">
-                <h2>Modern strategy</h2>
+                <h2>Current strategy</h2>
                 <ul class="feature-list">
                     @foreach (var item in assessment.TaxAutomationStrategy)
                     {
@@ -124,3 +124,4 @@ else
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
 }
+

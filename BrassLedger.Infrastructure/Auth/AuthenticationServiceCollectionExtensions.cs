@@ -9,39 +9,26 @@ public static class AuthenticationServiceCollectionExtensions
 {
     public static IServiceCollection AddBrassLedgerCookieAuthentication(this IServiceCollection services)
     {
+        services.AddScoped<BrassLedgerCookieEvents>();
+
         services
             .AddAuthentication(BrassLedgerAuthenticationDefaults.Scheme)
             .AddCookie(BrassLedgerAuthenticationDefaults.Scheme, options =>
             {
                 options.Cookie.Name = BrassLedgerAuthenticationDefaults.CookieName;
                 options.Cookie.HttpOnly = true;
+                options.Cookie.IsEssential = true;
                 options.Cookie.SameSite = SameSiteMode.Strict;
                 options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
                 options.SlidingExpiration = true;
-                options.ExpireTimeSpan = TimeSpan.FromMinutes(20);
+                options.ExpireTimeSpan = TimeSpan.FromMinutes(BrassLedgerAuthenticationDefaults.SessionMinutes);
                 options.LoginPath = "/login";
                 options.AccessDeniedPath = "/login";
-                options.Events = new CookieAuthenticationEvents
-                {
-                    OnRedirectToLogin = context => HandleApiRedirectAsync(context, StatusCodes.Status401Unauthorized),
-                    OnRedirectToAccessDenied = context => HandleApiRedirectAsync(context, StatusCodes.Status403Forbidden)
-                };
+                options.EventsType = typeof(BrassLedgerCookieEvents);
             });
 
         services.AddAuthorization();
 
         return services;
-    }
-
-    private static Task HandleApiRedirectAsync(RedirectContext<CookieAuthenticationOptions> context, int apiStatusCode)
-    {
-        if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
-        {
-            context.Response.StatusCode = apiStatusCode;
-            return Task.CompletedTask;
-        }
-
-        context.Response.Redirect(context.RedirectUri);
-        return Task.CompletedTask;
     }
 }

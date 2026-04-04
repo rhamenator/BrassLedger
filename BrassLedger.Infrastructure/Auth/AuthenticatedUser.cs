@@ -6,4 +6,5 @@ public sealed record AuthenticatedUser(
     string UserName,
     string DisplayName,
     string Email,
-    string Role);
+    string Role,
+    string SecurityStamp);

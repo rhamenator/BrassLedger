@@ -1,0 +1,50 @@
+@page "/help/administration"
+@attribute [Authorize]
+
+<PageTitle>Administration</PageTitle>
+
+<section class="page-shell">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Administration</p>
+            <h1>Protect the data, keep releases clean, and make support repeatable.</h1>
+        </div>
+        <p class="page-intro">
+            Administrative work includes account hygiene, key management, publish discipline, data handling, and making
+            sure operators can trust the environment they work in every day.
+        </p>
+    </header>
+
+    <section class="content-grid">
+        <article class="panel">
+            <h2>Security baseline</h2>
+            <ul class="feature-list">
+                <li>Require authenticated access before loading accounting data.</li>
+                <li>Keep password hashes and protected fields under managed operational control.</li>
+                <li>Remove stale operator access promptly and review who needs what.</li>
+                <li>Plan for stronger role enforcement, audit logging, and externalized secrets before production use.</li>
+            </ul>
+        </article>
+
+        <article class="panel">
+            <h2>Data and source control</h2>
+            <ul class="feature-list">
+                <li>Local fallback data in <code>App_Data</code> stays out of Git.</li>
+                <li>Source-controlled static assets belong under <code>BrassLedger.Web/wwwroot</code>.</li>
+                <li>Publish output under <code>artifacts</code> is disposable and should be regenerated when needed.</li>
+                <li>Package builds as releases rather than committing generated files to the main repository.</li>
+            </ul>
+        </article>
+    </section>
+
+    <section class="panel">
+        <h2>Recommended admin checklist</h2>
+        <ol class="step-list">
+            <li>Review open issues, failed tests, and operator blockers.</li>
+            <li>Confirm authentication, configuration, and environment assumptions are still valid.</li>
+            <li>Build and test from source before publishing.</li>
+            <li>Publish for the intended platform and smoke-test the result.</li>
+            <li>Update help content whenever operator-visible behavior changes.</li>
+        </ol>
+    </section>
+</section>

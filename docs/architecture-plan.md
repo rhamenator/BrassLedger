@@ -1,4 +1,4 @@
-# Legacy FoxPro Modernization Plan
+# BrassLedger Architecture Plan
 
 ## Product direction
 
@@ -9,13 +9,13 @@ Core product principles:
 - every module is included for every user
 - no premium tiers, purchased-module gating, or registration unlock paths
 - no executable expiration, tax-expiration reminders, or forced-update warnings
-- modern UI and branding that are clearly distinct from the legacy product
+- current UI and branding that are clearly distinct from the legacy product
 
 ## What the current application contains
 
-The codebase under `SourceCode/newproj` is a large Visual FoxPro business application. Current inventory found in this repository:
+The codebase under `SourceCode/newproj` is a large legacy desktop business application. Current inventory found in this repository:
 
-- 12 FoxPro project files (`.PJX`/`.PJT`)
+- 12 legacy project files (`.PJX`/`.PJT`)
 - 343 program modules (`.PRG`)
 - 561 forms (`.SCX`/`.SCT`)
 - 277 reports (`.FRX`/`.FRT`)
@@ -23,9 +23,9 @@ The codebase under `SourceCode/newproj` is a large Visual FoxPro business applic
 - 531 DBF tables
 - 7 class libraries in `newproj` plus a much larger library surface under `SourceCode/classes`
 - 2 ActiveX controls (`.OCX`)
-- 50 compiled FoxPro artifacts (`.FXP`)
+- 50 compiled legacy runtime artifacts (`.FXP`)
 
-The startup code in `account.prg` and `clstart.prg` shows a classic FoxPro desktop architecture with globals, menu composition, registry usage, report dependencies, and module toggles.
+The startup code in `account.prg` and `clstart.prg` shows a classic legacy desktop architecture with globals, menu composition, registry usage, report dependencies, and module toggles.
 
 ## Legacy behaviors to delete
 
@@ -84,7 +84,7 @@ This rewrite must include the printable surface area, not just the data-entry sc
 
 Workstreams:
 
-1. Convert FRX/FRT reports into modern report definitions.
+1. Convert FRX/FRT reports into current report definitions.
 2. Convert LBX/LBT label layouts into a reusable label engine.
 3. Replace VCX/VCT class-library behavior with C# services and UI components.
 4. Replace OCX dependencies with supported libraries or browser-native capabilities.
@@ -148,3 +148,4 @@ The starter .NET solution under `E:\BrassLedger` should next grow in three direc
 1. a PostgreSQL-first schema for companies, users, chart of accounts, customers, and vendors
 2. a report-and-label inventory extractor so each FRX/LBX asset is cataloged for migration
 3. a payroll-tax import subsystem with official-source adapters and versioned rule storage
+

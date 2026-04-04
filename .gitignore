@@ -1,4 +1,5 @@
-# Build output
+# Publish output and local build products
+# Commit the source assets in BrassLedger.Web/wwwroot, not the copied publish files in artifacts.
 artifacts/
 **/bin/
 **/obj/

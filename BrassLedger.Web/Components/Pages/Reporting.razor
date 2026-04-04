@@ -1,12 +1,12 @@
 @page "/reporting"
 @attribute [Authorize]
 @inject IBusinessWorkspaceService WorkspaceService
-@inject IModernizationAssessmentService AssessmentService
+@inject IProductCatalogService AssessmentService
 
 <PageTitle>Reporting</PageTitle>
 
 @{
-    var assessment = AssessmentService.GetAssessment();
+    var assessment = AssessmentService.GetCatalog();
 }
 
 @if (Workspace is null)
@@ -24,8 +24,9 @@ else
                 <h1>Reports, labels, forms, and print fidelity stay in the product.</h1>
             </div>
             <p class="page-intro">
-                The legacy app had a huge printable footprint. The modern workspace now includes a live report catalog and
-                label inventory so the conversion work can move from theory into authored layouts.
+                The product has a huge printable footprint. The workspace now includes a live report catalog and
+                label inventory so the conversion work can move from theory into authored layouts for statements, checks,
+                paychecks, tax forms, year-end employee forms, shipment documents, and labels.
             </p>
         </header>
 
@@ -36,11 +37,11 @@ else
             </article>
             <article class="stat-card accent-sky">
                 <span class="stat-value">@Workspace.Reporting.ReportCount</span>
-                <span class="stat-label">Modern report definitions</span>
+                <span class="stat-label">Current report definitions</span>
             </article>
             <article class="stat-card accent-sage">
                 <span class="stat-value">@Workspace.Reporting.LabelCount</span>
-                <span class="stat-label">Modern label templates</span>
+                <span class="stat-label">Current label templates</span>
             </article>
             <article class="stat-card accent-coral">
                 <span class="stat-value">@assessment.PrintableInventory.ActiveXControls</span>
@@ -134,3 +135,5 @@ else
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
 }
+
+

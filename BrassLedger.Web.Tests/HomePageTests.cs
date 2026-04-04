@@ -1,6 +1,6 @@
 using Bunit;
 using BrassLedger.Application.Accounting;
-using BrassLedger.Application.Modernization;
+using BrassLedger.Application.Catalog;
 using BrassLedger.Web.Components.Pages;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -11,7 +11,7 @@ public sealed class HomePageTests : TestContext
     public HomePageTests()
     {
         Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(TestWorkspaceData.CreateWorkspace()));
-        Services.AddSingleton<IModernizationAssessmentService>(new StubModernizationAssessmentService(TestWorkspaceData.CreateAssessment()));
+        Services.AddSingleton<IProductCatalogService>(new StubProductCatalogService(TestWorkspaceData.CreateAssessment()));
     }
 
     [Fact]
@@ -25,3 +25,4 @@ public sealed class HomePageTests : TestContext
         Assert.Contains("Reports ready", cut.Markup);
     }
 }
+

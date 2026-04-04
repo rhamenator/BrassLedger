@@ -10,7 +10,7 @@
         <p class="eyebrow">Secure Workspace Access</p>
         <h1>Sign in to BrassLedger.</h1>
         <p class="page-intro">
-            The modern remake now requires an authenticated operator before it loads accounting, payroll, reporting,
+            The application now requires an authenticated operator before it loads accounting, payroll, reporting,
             and tax data.
         </p>
 
@@ -29,6 +29,7 @@
         else
         {
             <form class="auth-form" method="post" action="/account/login">
+                <AntiforgeryToken />
                 <input type="hidden" name="returnUrl" value="@TargetPath" />
 
                 <div class="field-group">
@@ -71,6 +72,8 @@
 
     private string? ErrorMessage => string.Equals(Error, "invalid-credentials", StringComparison.OrdinalIgnoreCase)
         ? "The sign-in details did not match an active operator."
+        : string.Equals(Error, "account-locked", StringComparison.OrdinalIgnoreCase)
+            ? "That operator is temporarily locked because of repeated failed sign-in attempts. Try again later."
         : null;
 
     protected override async Task OnInitializedAsync()
@@ -102,3 +105,4 @@
         return returnUrl;
     }
 }
+

@@ -1,0 +1,65 @@
+@page "/help/reporting"
+@attribute [Authorize]
+
+<PageTitle>Reports And Forms</PageTitle>
+
+<section class="page-shell">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Reports And Forms</p>
+            <h1>Keep printed output precise, reviewable, and easy to reproduce.</h1>
+        </div>
+        <p class="page-intro">
+            Reports and labels are a major business surface in this system. That includes financial statements, customer
+            statements, vendor checks, paychecks, tax forms, year-end employee forms, mailing labels, shipment forms,
+            and the many supporting layouts an accounting and operations suite depends on.
+        </p>
+    </header>
+
+    <section class="content-grid">
+        <article class="panel">
+            <h2>Major output families</h2>
+            <ul class="feature-list">
+                <li>Financial statements such as trial balance, balance sheet, income statement, and account detail.</li>
+                <li>Receivables output such as aging, customer statements, and cash-application review.</li>
+                <li>Payables output such as aging, checks, remittance detail, and payment registers.</li>
+                <li>Payroll output such as paychecks, payroll registers, tax liabilities, and year-end employee forms.</li>
+                <li>Tax-facing forms and schedules that depend on current jurisdiction rules.</li>
+                <li>Operations documents and labels such as pick tickets, packing slips, shipment labels, and routing forms.</li>
+            </ul>
+        </article>
+
+        <article class="panel">
+            <h2>Before releasing any report or form</h2>
+            <ol class="step-list">
+                <li>Confirm the company, period, and filters are correct.</li>
+                <li>Verify totals against the owning module or ledger control account.</li>
+                <li>Check page breaks, long names, decimal precision, and date formatting.</li>
+                <li>Preview realistic data, including awkward addresses and long descriptions.</li>
+                <li>Archive the authored source and distribute the published output through release packaging, not Git.</li>
+            </ol>
+        </article>
+    </section>
+
+    <section class="content-grid">
+        <article class="panel">
+            <h2>Labels and stock-sensitive forms</h2>
+            <ul class="feature-list">
+                <li>Design for the real stock or printer target, not an abstract page size.</li>
+                <li>Keep barcodes, postal blocks, and key identifiers out of printer-margin danger zones.</li>
+                <li>Test on the real printer path whenever margins, fonts, or stock change.</li>
+                <li>Separate mailing labels, internal labels, and operational labels when their rules differ.</li>
+            </ul>
+        </article>
+
+        <article class="panel">
+            <h2>Authoring stance</h2>
+            <ul class="feature-list">
+                <li>Commit authored report definitions, tests, and source-side assets.</li>
+                <li>Keep generated publish copies such as bundled CSS, maps, and <code>web.config</code> out of Git.</li>
+                <li>Keep business rules in stable datasets or application code instead of burying them in a layout tool.</li>
+                <li>Treat tax forms, paychecks, and year-end forms as controlled output that deserves explicit review.</li>
+            </ul>
+        </article>
+    </section>
+</section>

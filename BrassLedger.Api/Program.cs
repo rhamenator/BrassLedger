@@ -1,5 +1,5 @@
 using BrassLedger.Application.Accounting;
-using BrassLedger.Application.Modernization;
+using BrassLedger.Application.Catalog;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.Security;
@@ -28,23 +28,23 @@ app.MapBrassLedgerAuthenticationEndpoints();
 
 var api = app.MapGroup("/api").RequireAuthorization();
 
-api.MapGet("/assessment", (IModernizationAssessmentService service) =>
+api.MapGet("/assessment", (IProductCatalogService service) =>
 {
-    return Results.Ok(service.GetAssessment());
+    return Results.Ok(service.GetCatalog());
 })
-.WithName("GetModernizationAssessment")
+.WithName("GetProductCatalog")
 .WithOpenApi();
 
-api.MapGet("/modules", (IModernizationAssessmentService service) =>
+api.MapGet("/modules", (IProductCatalogService service) =>
 {
-    return Results.Ok(service.GetAssessment().Modules);
+    return Results.Ok(service.GetCatalog().Modules);
 })
 .WithName("GetLegacyModules")
 .WithOpenApi();
 
-api.MapGet("/tax-sources", (IModernizationAssessmentService service) =>
+api.MapGet("/tax-sources", (IProductCatalogService service) =>
 {
-    return Results.Ok(service.GetAssessment().TaxSources);
+    return Results.Ok(service.GetCatalog().TaxSources);
 })
 .WithName("GetTaxSources")
 .WithOpenApi();
@@ -122,3 +122,4 @@ api.MapGet("/tax-workspace", async (IBusinessWorkspaceService service, Cancellat
 app.Run();
 
 public partial class Program;
+

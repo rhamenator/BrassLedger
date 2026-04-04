@@ -2,6 +2,7 @@ using BrassLedger.Application.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -60,11 +61,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
         using var scope = services.CreateScope();
         var authenticationService = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
 
-        var user = await authenticationService.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword);
+        var authenticationResult = await authenticationService.AuthenticateAsync(
+            "controller",
+            BrassLedgerAuthenticationDefaults.SeededPassword,
+            "127.0.0.1",
+            "xunit");
 
-        Assert.NotNull(user);
-        Assert.Equal("Controller", user.Role);
-        Assert.Equal("controller", user.UserName);
+        Assert.Equal(AuthenticationOutcome.Succeeded, authenticationResult.Outcome);
+        Assert.NotNull(authenticationResult.User);
+        Assert.Equal("Controller", authenticationResult.User!.Role);
+        Assert.Equal("controller", authenticationResult.User.UserName);
     }
 
     [Fact]
@@ -87,6 +93,43 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.DoesNotContain("84-9923145", rawTaxId, StringComparison.Ordinal);
         Assert.DoesNotContain("erin@brassledger.local", rawUserEmail, StringComparison.Ordinal);
         Assert.DoesNotContain("Red Mesa Builders", rawCustomerName, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AuthenticateAsync_LocksOperatorAfterRepeatedFailures_AndWritesAuditEntries()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+
+        using var scope = services.CreateScope();
+        var authenticationService = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+
+        for (var attempt = 0; attempt < BrassLedgerAuthenticationDefaults.MaxFailedSignInAttempts; attempt++)
+        {
+            var result = await authenticationService.AuthenticateAsync(
+                "controller",
+                "bad-password",
+                "127.0.0.1",
+                "xunit");
+
+            if (attempt < BrassLedgerAuthenticationDefaults.MaxFailedSignInAttempts - 1)
+            {
+                Assert.Equal(AuthenticationOutcome.InvalidCredentials, result.Outcome);
+            }
+            else
+            {
+                Assert.Equal(AuthenticationOutcome.LockedOut, result.Outcome);
+                Assert.NotNull(result.LockoutEndUtc);
+            }
+        }
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+        var user = await dbContext.Users.SingleAsync(x => x.UserName == "controller");
+
+        Assert.True(user.LockoutEndUtc > DateTimeOffset.UtcNow);
+        Assert.Equal(BrassLedgerAuthenticationDefaults.MaxFailedSignInAttempts, user.FailedSignInCount);
+        Assert.True(await dbContext.AuthenticationAuditEntries.CountAsync(x => x.UserName == "controller") >= BrassLedgerAuthenticationDefaults.MaxFailedSignInAttempts);
     }
 
     private ServiceProvider CreateServiceProvider()

@@ -10,6 +10,7 @@ public sealed class BrassLedgerDbContext(
     ISensitiveDataProtector sensitiveDataProtector) : DbContext(options)
 {
     public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<AuthenticationAuditEntry> AuthenticationAuditEntries => Set<AuthenticationAuditEntry>();
     public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<Customer> Customers => Set<Customer>();
@@ -36,6 +37,7 @@ public sealed class BrassLedgerDbContext(
 
         modelBuilder.Entity<Company>().HasKey(x => x.Id);
         modelBuilder.Entity<AppUser>().HasKey(x => x.Id);
+        modelBuilder.Entity<AuthenticationAuditEntry>().HasKey(x => x.Id);
         modelBuilder.Entity<GeneralLedgerAccount>().HasKey(x => x.Id);
         modelBuilder.Entity<JournalEntry>().HasKey(x => x.Id);
         modelBuilder.Entity<JournalEntryLine>().HasKey(x => x.Id);
@@ -96,6 +98,7 @@ public sealed class BrassLedgerDbContext(
 
         modelBuilder.Entity<Company>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.UserName).IsUnique();
+        modelBuilder.Entity<AuthenticationAuditEntry>().HasIndex(x => new { x.UserName, x.OccurredUtc });
         modelBuilder.Entity<GeneralLedgerAccount>().HasIndex(x => new { x.CompanyId, x.Number }).IsUnique();
         modelBuilder.Entity<Customer>().HasIndex(x => new { x.CompanyId, x.CustomerNumber }).IsUnique();
         modelBuilder.Entity<Vendor>().HasIndex(x => new { x.CompanyId, x.VendorNumber }).IsUnique();

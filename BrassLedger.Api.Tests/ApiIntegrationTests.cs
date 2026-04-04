@@ -2,8 +2,11 @@ using System.Net;
 using System.Net.Http.Json;
 using BrassLedger.Application.Accounting;
 using BrassLedger.Infrastructure.Auth;
+using BrassLedger.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace BrassLedger.Api.Tests;
 
@@ -57,9 +60,59 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains(workspace.Taxes.Profiles, profile => profile.Jurisdiction == "Federal" && profile.TaxType == "FUTA");
     }
 
-    private async Task<HttpClient> CreateAuthenticatedClientAsync()
+    [Fact]
+    public async Task ApiLogin_LocksOperatorAfterRepeatedFailures()
     {
-        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        for (var attempt = 0; attempt < BrassLedgerAuthenticationDefaults.MaxFailedSignInAttempts - 1; attempt++)
+        {
+            var failedResponse = await client.PostAsJsonAsync("/api/auth/login", new
+            {
+                UserName = "controller",
+                Password = "wrong-password"
+            });
+
+            Assert.Equal(HttpStatusCode.Unauthorized, failedResponse.StatusCode);
+        }
+
+        var lockedResponse = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = "wrong-password"
+        });
+
+        Assert.Equal(HttpStatusCode.Locked, lockedResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task ExistingSession_IsRejectedAfterSecurityStampChanges()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+            var user = await dbContext.Users.SingleAsync(x => x.UserName == "controller");
+            user.SecurityStamp = Guid.NewGuid().ToString("N");
+            await dbContext.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync("/api/dashboard");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null)
+    {
+        var testFactory = factory ?? _factory;
+        var client = testFactory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
         });

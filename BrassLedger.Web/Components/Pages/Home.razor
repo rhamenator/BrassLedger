@@ -1,12 +1,12 @@
 @page "/"
 @attribute [Authorize]
 @inject IBusinessWorkspaceService WorkspaceService
-@inject IModernizationAssessmentService AssessmentService
+@inject IProductCatalogService AssessmentService
 
 <PageTitle>BrassLedger</PageTitle>
 
 @{
-    var assessment = AssessmentService.GetAssessment();
+    var assessment = AssessmentService.GetCatalog();
 }
 
 @if (Workspace is null)
@@ -24,7 +24,7 @@ else
             <h1>@Workspace.Company.Name is live as a real multi-module workspace.</h1>
             <p class="hero-text">
                 The shell is now backed by a seeded ledger, receivables, payables, operations, payroll, projects,
-                reporting, and tax dataset so we can keep replacing the FoxPro estate with working code.
+                reporting, and tax dataset so we can keep replacing the legacy estate with working code.
             </p>
 
             <div class="hero-actions">
@@ -101,7 +101,7 @@ else
             </article>
 
             <article class="panel">
-                <h2>Modern principles</h2>
+                <h2>Current principles</h2>
                 <ul class="feature-list">
                     @foreach (var item in assessment.ProductPrinciples)
                     {
@@ -136,3 +136,4 @@ else
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
 }
+

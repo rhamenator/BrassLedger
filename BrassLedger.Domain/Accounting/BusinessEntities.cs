@@ -27,8 +27,28 @@ public sealed class AppUser
     public string DisplayName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
+    public string SecurityStamp { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public bool IsActive { get; set; }
+    public int FailedSignInCount { get; set; }
+    public DateTimeOffset? LastFailedSignInUtc { get; set; }
+    public DateTimeOffset? LockoutEndUtc { get; set; }
+    public DateTimeOffset? LastSuccessfulSignInUtc { get; set; }
+    public DateTimeOffset? LastPasswordChangedUtc { get; set; }
+}
+
+public sealed class AuthenticationAuditEntry
+{
+    public Guid Id { get; set; }
+    public Guid? UserId { get; set; }
+    public Guid? CompanyId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public bool Succeeded { get; set; }
+    public DateTimeOffset OccurredUtc { get; set; }
+    public string IpAddress { get; set; } = string.Empty;
+    public string UserAgent { get; set; } = string.Empty;
+    public string Detail { get; set; } = string.Empty;
 }
 
 public sealed class GeneralLedgerAccount

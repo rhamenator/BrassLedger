@@ -1,0 +1,72 @@
+@page "/help"
+@attribute [Authorize]
+
+<PageTitle>Help Center</PageTitle>
+
+<section class="page-shell">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Help Center</p>
+            <h1>Guidance for daily accounting work, printed forms, and administration.</h1>
+        </div>
+        <p class="page-intro">
+            This help center is written for BrassLedger as a current accounting workspace. It covers daily operations,
+            payroll and tax processing, printed output such as checks and year-end forms, and the release habits needed
+            to keep the system stable without copying the old manuals verbatim.
+        </p>
+    </header>
+
+    <section class="help-grid">
+        <article class="panel help-callout">
+            <p class="panel-kicker">Start here</p>
+            <h2>Getting Started</h2>
+            <p>Sign in, review the workspace, and learn the daily review order that keeps balances trustworthy.</p>
+            <a class="action-primary" href="/help/getting-started">Open guide</a>
+        </article>
+
+        <article class="panel help-callout">
+            <p class="panel-kicker">Core work</p>
+            <h2>Accounting Workflows</h2>
+            <p>Run ledger, receivables, payables, operations, payroll, and projects as one connected system.</p>
+            <a class="action-primary" href="/help/accounting">Open guide</a>
+        </article>
+
+        <article class="panel help-callout">
+            <p class="panel-kicker">Output</p>
+            <h2>Reports And Forms</h2>
+            <p>Review statements, checks, paychecks, tax forms, W-2 style year-end output, and label guidance.</p>
+            <a class="action-primary" href="/help/reporting">Open guide</a>
+        </article>
+
+        <article class="panel help-callout">
+            <p class="panel-kicker">Control plane</p>
+            <h2>Administration</h2>
+            <p>Understand access, data handling, publishing, and what belongs in source control.</p>
+            <a class="action-primary" href="/help/administration">Open guide</a>
+        </article>
+    </section>
+
+    <section class="content-grid">
+        <article class="panel">
+            <h2>Recommended daily rhythm</h2>
+            <ol class="step-list">
+                <li>Start on Overview and review cash, receivables, payables, payroll, and open work.</li>
+                <li>Clear urgent customer and vendor issues before posting new batches.</li>
+                <li>Enter activity in the module that owns it instead of masking issues with manual offsets.</li>
+                <li>Run balancing and exception reports before printing or exporting final output.</li>
+                <li>Publish builds only after testing, release notes, and operator communication are ready.</li>
+            </ol>
+        </article>
+
+        <article class="panel">
+            <h2>What this help set covers</h2>
+            <ul class="feature-list">
+                <li>Operator guidance for core accounting and business modules.</li>
+                <li>Printed output guidance for reports, labels, checks, paychecks, and tax-facing forms.</li>
+                <li>Administrative guidance for security, source control, and release packaging.</li>
+                <li>Long-form references in <code>docs/user-guide.md</code>, <code>docs/reporting-guide.md</code>, and <code>docs/administration-guide.md</code>.</li>
+            </ul>
+        </article>
+    </section>
+</section>
+

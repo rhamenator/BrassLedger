@@ -32,16 +32,24 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         var userName = form["userName"].ToString();
         var password = form["password"].ToString();
         var returnUrl = SanitizeReturnUrl(form["returnUrl"].ToString());
+        var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? string.Empty;
+        var userAgent = context.Request.Headers.UserAgent.ToString();
 
-        var authenticatedUser = await authenticationService.AuthenticateAsync(userName, password, context.RequestAborted);
-        if (authenticatedUser is null)
+        ApplyNoStoreHeaders(context.Response);
+
+        var authenticationResult = await authenticationService.AuthenticateAsync(userName, password, ipAddress, userAgent, context.RequestAborted);
+        if (authenticationResult.Outcome != AuthenticationOutcome.Succeeded || authenticationResult.User is null)
         {
-            return Results.LocalRedirect($"/login?error=invalid-credentials&returnUrl={Uri.EscapeDataString(returnUrl)}");
+            var errorCode = authenticationResult.Outcome == AuthenticationOutcome.LockedOut
+                ? "account-locked"
+                : "invalid-credentials";
+
+            return Results.LocalRedirect($"/login?error={errorCode}&returnUrl={Uri.EscapeDataString(returnUrl)}");
         }
 
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(authenticatedUser),
+            CreatePrincipal(authenticationResult.User),
             CreateAuthenticationProperties());
 
         return Results.LocalRedirect(returnUrl);
@@ -55,18 +63,33 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             return Results.BadRequest();
         }
 
-        var authenticatedUser = await authenticationService.AuthenticateAsync(loginRequest.UserName, loginRequest.Password, context.RequestAborted);
-        if (authenticatedUser is null)
+        var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? string.Empty;
+        var userAgent = context.Request.Headers.UserAgent.ToString();
+        ApplyNoStoreHeaders(context.Response);
+
+        var authenticationResult = await authenticationService.AuthenticateAsync(loginRequest.UserName, loginRequest.Password, ipAddress, userAgent, context.RequestAborted);
+        if (authenticationResult.Outcome != AuthenticationOutcome.Succeeded || authenticationResult.User is null)
         {
+            if (authenticationResult.Outcome == AuthenticationOutcome.LockedOut)
+            {
+                return Results.Json(
+                    new
+                    {
+                        Error = "account_locked",
+                        LockedUntilUtc = authenticationResult.LockoutEndUtc
+                    },
+                    statusCode: StatusCodes.Status423Locked);
+            }
+
             return Results.Unauthorized();
         }
 
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(authenticatedUser),
+            CreatePrincipal(authenticationResult.User),
             CreateAuthenticationProperties());
 
-        return Results.Ok(ToResponse(authenticatedUser));
+        return Results.Ok(ToResponse(authenticationResult.User));
     }
 
     private static async Task<IResult> HandleFormLogoutAsync(HttpContext context)
@@ -90,8 +113,9 @@ public static class AuthenticationEndpointRouteBuilderExtensions
                 new Claim(ClaimTypes.Name, authenticatedUser.UserName),
                 new Claim(ClaimTypes.Email, authenticatedUser.Email),
                 new Claim(ClaimTypes.Role, authenticatedUser.Role),
-                new Claim("display_name", authenticatedUser.DisplayName),
-                new Claim("company_id", authenticatedUser.CompanyId.ToString())
+                new Claim(BrassLedgerAuthenticationDefaults.DisplayNameClaimType, authenticatedUser.DisplayName),
+                new Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, authenticatedUser.CompanyId.ToString()),
+                new Claim(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, authenticatedUser.SecurityStamp)
             },
             BrassLedgerAuthenticationDefaults.Scheme);
 
@@ -105,7 +129,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             AllowRefresh = true,
             IsPersistent = false,
             IssuedUtc = DateTimeOffset.UtcNow,
-            ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(20)
+            ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(BrassLedgerAuthenticationDefaults.SessionMinutes)
         };
     }
 
@@ -114,9 +138,10 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         return new
         {
             UserName = principal.Identity?.Name ?? string.Empty,
-            DisplayName = principal.FindFirstValue("display_name") ?? string.Empty,
+            DisplayName = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.DisplayNameClaimType) ?? string.Empty,
             Email = principal.FindFirstValue(ClaimTypes.Email) ?? string.Empty,
-            Role = principal.FindFirstValue(ClaimTypes.Role) ?? string.Empty
+            Role = principal.FindFirstValue(ClaimTypes.Role) ?? string.Empty,
+            CompanyId = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType) ?? string.Empty
         };
     }
 
@@ -127,8 +152,15 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             authenticatedUser.UserName,
             authenticatedUser.DisplayName,
             authenticatedUser.Email,
-            authenticatedUser.Role
+            authenticatedUser.Role,
+            CompanyId = authenticatedUser.CompanyId
         };
+    }
+
+    private static void ApplyNoStoreHeaders(HttpResponse response)
+    {
+        response.Headers.CacheControl = "no-store, no-cache";
+        response.Headers.Pragma = "no-cache";
     }
 
     private static string SanitizeReturnUrl(string? returnUrl)

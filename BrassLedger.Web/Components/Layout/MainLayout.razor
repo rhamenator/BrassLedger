@@ -16,6 +16,7 @@
                     <div class="top-row-actions">
                         <span class="top-row-role">@authenticationState.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value</span>
                         <form class="logout-form" method="post" action="/account/logout">
+                            <AntiforgeryToken />
                             <button class="top-row-link top-row-button" type="submit">Sign out</button>
                         </form>
                     </div>

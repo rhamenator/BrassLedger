@@ -2,9 +2,9 @@ using System.Data;
 using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Application.Accounting;
-using BrassLedger.Application.Modernization;
+using BrassLedger.Application.Catalog;
 using BrassLedger.Infrastructure.Accounting;
-using BrassLedger.Infrastructure.Modernization;
+using BrassLedger.Infrastructure.Catalog;
 using BrassLedger.Infrastructure.Security;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
@@ -56,7 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
         services.AddScoped<IUserAuthenticationService, UserAuthenticationService>();
         services.AddScoped<IBusinessWorkspaceService, BusinessWorkspaceService>();
-        services.AddSingleton<IModernizationAssessmentService, StaticModernizationAssessmentService>();
+        services.AddSingleton<IProductCatalogService, StaticProductCatalogService>();
 
         return services;
     }
@@ -91,6 +91,26 @@ public static class ServiceCollectionExtensions
         {
             await EnsureSqliteColumnAsync(dbContext, "Users", "UserName", @"ALTER TABLE ""Users"" ADD COLUMN ""UserName"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Users", "PasswordHash", @"ALTER TABLE ""Users"" ADD COLUMN ""PasswordHash"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "SecurityStamp", @"ALTER TABLE ""Users"" ADD COLUMN ""SecurityStamp"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "FailedSignInCount", @"ALTER TABLE ""Users"" ADD COLUMN ""FailedSignInCount"" INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "LastFailedSignInUtc", @"ALTER TABLE ""Users"" ADD COLUMN ""LastFailedSignInUtc"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "LockoutEndUtc", @"ALTER TABLE ""Users"" ADD COLUMN ""LockoutEndUtc"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "LastSuccessfulSignInUtc", @"ALTER TABLE ""Users"" ADD COLUMN ""LastSuccessfulSignInUtc"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "LastPasswordChangedUtc", @"ALTER TABLE ""Users"" ADD COLUMN ""LastPasswordChangedUtc"" TEXT NULL;", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                @"CREATE TABLE IF NOT EXISTS ""AuthenticationAuditEntries"" (
+                    ""Id"" TEXT NOT NULL CONSTRAINT ""PK_AuthenticationAuditEntries"" PRIMARY KEY,
+                    ""UserId"" TEXT NULL,
+                    ""CompanyId"" TEXT NULL,
+                    ""UserName"" TEXT NOT NULL,
+                    ""EventType"" TEXT NOT NULL,
+                    ""Succeeded"" INTEGER NOT NULL,
+                    ""OccurredUtc"" TEXT NOT NULL,
+                    ""IpAddress"" TEXT NOT NULL,
+                    ""UserAgent"" TEXT NOT NULL,
+                    ""Detail"" TEXT NOT NULL
+                );",
+                cancellationToken);
             return;
         }
 
@@ -101,6 +121,38 @@ public static class ServiceCollectionExtensions
                 cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "PasswordHash" text NOT NULL DEFAULT '';""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "SecurityStamp" text NOT NULL DEFAULT '';""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "FailedSignInCount" integer NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "LastFailedSignInUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "LockoutEndUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "LastSuccessfulSignInUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "LastPasswordChangedUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                @"CREATE TABLE IF NOT EXISTS ""AuthenticationAuditEntries"" (
+                    ""Id"" uuid NOT NULL PRIMARY KEY,
+                    ""UserId"" uuid NULL,
+                    ""CompanyId"" uuid NULL,
+                    ""UserName"" text NOT NULL,
+                    ""EventType"" text NOT NULL,
+                    ""Succeeded"" boolean NOT NULL,
+                    ""OccurredUtc"" timestamptz NOT NULL,
+                    ""IpAddress"" text NOT NULL,
+                    ""UserAgent"" text NOT NULL,
+                    ""Detail"" text NOT NULL
+                );",
                 cancellationToken);
         }
     }
@@ -145,3 +197,4 @@ public static class ServiceCollectionExtensions
         }
     }
 }
+

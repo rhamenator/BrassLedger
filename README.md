@@ -1,12 +1,12 @@
-# BrassLedger Modern
+# BrassLedger
 
-This folder now contains a compileable cross-platform .NET application shell for the FoxPro remake.
+This folder now contains a compileable cross-platform .NET application shell for the new open-source accounting platform.
 
 Projects:
 
 - `BrassLedger.Domain`: core business concepts and legacy inventory records
-- `BrassLedger.Application`: modernization assessment contracts and planning models
-- `BrassLedger.Infrastructure`: concrete modernization service implementations
+- `BrassLedger.Application`: product catalog contracts and planning models
+- `BrassLedger.Infrastructure`: concrete catalog and platform service implementations
 - `BrassLedger.Api`: JSON endpoints for assessment and source inventories
 - `BrassLedger.Web`: primary end-user web application shell
 
@@ -26,7 +26,7 @@ Why this shape:
 Helpful commands:
 
 ```powershell
-dotnet build .\BrassLedger.Modern.slnx
+dotnet build .\BrassLedger.slnx
 ```
 
 ```powershell
@@ -53,3 +53,10 @@ Current security baseline:
 - sensitive fields are protected at rest with ASP.NET Core Data Protection
 - Data Protection keys are persisted under `App_Data\keys`
 - security headers are applied to both the web app and API
+
+Help and operator guidance:
+
+- In-app help pages live under `BrassLedger.Web/Components/Pages/Help*.razor`.
+- Written guides live in `docs/user-guide.md`, `docs/reporting-guide.md`, and `docs/administration-guide.md`.
+- Source-controlled web assets belong under `BrassLedger.Web/wwwroot`; generated publish output stays under `artifacts` and remains ignored by Git.
+

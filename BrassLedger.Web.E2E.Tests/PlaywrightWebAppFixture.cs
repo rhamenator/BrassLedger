@@ -168,12 +168,12 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
 
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "BrassLedger.Modern.slnx")))
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "BrassLedger.slnx")))
         {
             directory = directory.Parent;
         }
 
-        return directory?.FullName ?? throw new DirectoryNotFoundException("Could not locate BrassLedger.Modern.slnx from the test assembly path.");
+        return directory?.FullName ?? throw new DirectoryNotFoundException("Could not locate BrassLedger.slnx from the test assembly path.");
     }
 
     public static IReadOnlyList<BrowserKind> GetInstalledBrowsers()
@@ -273,3 +273,4 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         return !string.IsNullOrWhiteSpace(executablePath);
     }
 }
+
