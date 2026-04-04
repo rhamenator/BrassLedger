@@ -1,0 +1,126 @@
+@page "/taxes"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+@inject IModernizationAssessmentService AssessmentService
+
+<PageTitle>Taxes</PageTitle>
+
+@{
+    var assessment = AssessmentService.GetAssessment();
+}
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading tax workspace...</h1>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">Payroll Tax Strategy</p>
+                <h1>Automated where possible, reviewable where necessary.</h1>
+            </div>
+            <p class="page-intro">
+                The old tax update flow relied on opaque FoxPro tables and manual utilities. The new workspace now carries
+                explicit tax profiles and keeps room for official-source import adapters.
+            </p>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@Workspace.Taxes.ProfileCount</span>
+                <span class="stat-label">Active tax profiles</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.Taxes.EmployerSpecificCount</span>
+                <span class="stat-label">Employer-specific rates</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@assessment.TaxSources.Count</span>
+                <span class="stat-label">Official source anchors</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@assessment.FeaturesToRemove.Count</span>
+                <span class="stat-label">Legacy behaviors removed</span>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>What we remove</h2>
+                <ul class="feature-list warning-list">
+                    @foreach (var item in assessment.FeaturesToRemove)
+                    {
+                        <li>@item</li>
+                    }
+                </ul>
+            </article>
+
+            <article class="panel">
+                <h2>Modern strategy</h2>
+                <ul class="feature-list">
+                    @foreach (var item in assessment.TaxAutomationStrategy)
+                    {
+                        <li>@item</li>
+                    }
+                </ul>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Current tax profiles</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Jurisdiction</th>
+                            <th>Type</th>
+                            <th>Rate</th>
+                            <th>Effective</th>
+                            <th>Employer-specific</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var profile in Workspace.Taxes.Profiles)
+                        {
+                            <tr>
+                                <td>@profile.Jurisdiction</td>
+                                <td>@profile.TaxType</td>
+                                <td>@profile.Rate.ToString("P3")</td>
+                                <td>@profile.EffectiveOn.ToString("MMM d, yyyy")</td>
+                                <td>@(profile.IsEmployerSpecific ? "Yes" : "No")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+
+            <article class="panel">
+                <h2>Official sources to seed adapters</h2>
+                <div class="source-grid">
+                    @foreach (var source in assessment.TaxSources)
+                    {
+                        <article class="source-card">
+                            <p class="source-jurisdiction">@source.Jurisdiction</p>
+                            <h3>@source.SourceName</h3>
+                            <p>@source.Notes</p>
+                            <a href="@source.Url" target="_blank" rel="noreferrer">Open source</a>
+                        </article>
+                    }
+                </div>
+            </article>
+        </section>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

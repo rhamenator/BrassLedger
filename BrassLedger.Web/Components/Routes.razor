@@ -1,0 +1,38 @@
+<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <ErrorBoundary>
+            <ChildContent>
+                <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+                    <NotAuthorized>
+                        <RedirectToLogin />
+                    </NotAuthorized>
+                </AuthorizeRouteView>
+            </ChildContent>
+            <ErrorContent>
+                <LayoutView Layout="typeof(Layout.MainLayout)">
+                    <section class="panel">
+                        <p class="eyebrow">Recoverable Error</p>
+                        <h1>That screen hit a snag.</h1>
+                        <p class="page-intro">
+                            The page failed safely instead of crashing the whole session. Try the navigation again or return
+                            to the overview while we tighten the workflow behind this screen.
+                        </p>
+                    </section>
+                </LayoutView>
+            </ErrorContent>
+        </ErrorBoundary>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="typeof(Layout.MainLayout)">
+            <section class="panel">
+                <p class="eyebrow">Route Not Found</p>
+                <h1>That page does not exist.</h1>
+                <p class="page-intro">
+                    The route could not be matched, so the app stayed responsive and brought you to a safe fallback.
+                </p>
+                <a class="action-primary" href="/">Return to overview</a>
+            </section>
+        </LayoutView>
+    </NotFound>
+</Router>

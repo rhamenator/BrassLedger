@@ -1,0 +1,104 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+
+<PageTitle>Sign In</PageTitle>
+
+<section class="auth-shell">
+    <article class="auth-card">
+        <p class="eyebrow">Secure Workspace Access</p>
+        <h1>Sign in to BrassLedger.</h1>
+        <p class="page-intro">
+            The modern remake now requires an authenticated operator before it loads accounting, payroll, reporting,
+            and tax data.
+        </p>
+
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="auth-error" role="alert">@ErrorMessage</div>
+        }
+
+        @if (IsAuthenticated)
+        {
+            <div class="panel">
+                <p class="lead">You are already signed in. Continue into the workspace when you are ready.</p>
+                <a class="action-primary" href="@TargetPath">Continue</a>
+            </div>
+        }
+        else
+        {
+            <form class="auth-form" method="post" action="/account/login">
+                <input type="hidden" name="returnUrl" value="@TargetPath" />
+
+                <div class="field-group">
+                    <label class="field-label" for="userName">Username</label>
+                    <input id="userName" class="field-input" name="userName" autocomplete="username" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="password">Password</label>
+                    <input id="password" class="field-input" name="password" type="password" autocomplete="current-password" />
+                </div>
+
+                <button class="action-primary" type="submit">Sign in</button>
+            </form>
+        }
+
+        <div class="auth-note">
+            <p>Seeded operators:</p>
+            <ul class="feature-list">
+                <li><code>controller</code> for accounting review</li>
+                <li><code>operations</code> for operations and inventory</li>
+                <li><code>payroll</code> for payroll and taxes</li>
+                <li><code>sales</code> for receivables and reporting</li>
+            </ul>
+            <p>The initial demo password is documented in the repository README while we build full user administration.</p>
+        </div>
+    </article>
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private bool IsAuthenticated { get; set; }
+
+    private string TargetPath => SanitizeReturnUrl(ReturnUrl);
+
+    private string? ErrorMessage => string.Equals(Error, "invalid-credentials", StringComparison.OrdinalIgnoreCase)
+        ? "The sign-in details did not match an active operator."
+        : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        IsAuthenticated = authenticationState.User.Identity?.IsAuthenticated == true;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender && IsAuthenticated)
+        {
+            NavigationManager.NavigateTo(TargetPath, forceLoad: true);
+        }
+    }
+
+    private static string SanitizeReturnUrl(string? returnUrl)
+    {
+        if (string.IsNullOrWhiteSpace(returnUrl))
+        {
+            return "/";
+        }
+
+        if (!returnUrl.StartsWith("/", StringComparison.Ordinal) || returnUrl.StartsWith("//", StringComparison.Ordinal))
+        {
+            return "/";
+        }
+
+        return returnUrl;
+    }
+}

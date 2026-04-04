@@ -1,0 +1,136 @@
+@page "/reporting"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+@inject IModernizationAssessmentService AssessmentService
+
+<PageTitle>Reporting</PageTitle>
+
+@{
+    var assessment = AssessmentService.GetAssessment();
+}
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading reporting...</h1>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">Printable Surface</p>
+                <h1>Reports, labels, forms, and print fidelity stay in the product.</h1>
+            </div>
+            <p class="page-intro">
+                The legacy app had a huge printable footprint. The modern workspace now includes a live report catalog and
+                label inventory so the conversion work can move from theory into authored layouts.
+            </p>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@assessment.PrintableInventory.Reports</span>
+                <span class="stat-label">Legacy reports discovered</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.Reporting.ReportCount</span>
+                <span class="stat-label">Modern report definitions</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@Workspace.Reporting.LabelCount</span>
+                <span class="stat-label">Modern label templates</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@assessment.PrintableInventory.ActiveXControls</span>
+                <span class="stat-label">Binary controls to replace</span>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Report stance</h2>
+                <p><strong>Preferred designer:</strong> @Workspace.Reporting.PreferredDesigner</p>
+                <p><strong>Rendering strategy:</strong> @Workspace.Reporting.RenderingStrategy</p>
+                <p>
+                    Use stable read models for statements, checks, operational documents, and labels so report layouts
+                    stay portable even when the database provider changes.
+                </p>
+            </article>
+
+            <article class="panel">
+                <h2>Conversion workstreams</h2>
+                <ul class="feature-list">
+                    @foreach (var item in assessment.ConversionWorkstreams)
+                    {
+                        <li>@item</li>
+                    }
+                </ul>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Seeded report catalog</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Layout</th>
+                            <th>VS friendly</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var report in Workspace.Reporting.Reports)
+                        {
+                            <tr>
+                                <td>@report.Code</td>
+                                <td>@report.Name</td>
+                                <td>@report.Category</td>
+                                <td>@report.LayoutType</td>
+                                <td>@(report.SupportsVisualStudioDesign ? "Yes" : "No")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+
+            <article class="panel">
+                <h2>Label templates</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Stock</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var label in Workspace.Reporting.Labels)
+                        {
+                            <tr>
+                                <td>@label.Code</td>
+                                <td>@label.Name</td>
+                                <td>@label.StockType</td>
+                                <td>@label.Description</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+        </section>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

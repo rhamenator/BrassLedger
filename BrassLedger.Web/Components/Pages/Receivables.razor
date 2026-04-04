@@ -1,0 +1,109 @@
+@page "/receivables"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+
+<PageTitle>Receivables</PageTitle>
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading receivables...</h1>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">Accounts Receivable and CRM</p>
+                <h1>Customers, invoices, and open-balance follow-up.</h1>
+            </div>
+            <p class="page-intro">
+                The CRM and receivables concepts are sharing the same customer workspace so we can grow collections,
+                sales history, and account notes without adding module gating.
+            </p>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@Workspace.Receivables.OpenBalance.ToString("C0")</span>
+                <span class="stat-label">Open A/R</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.Receivables.Customers.Count</span>
+                <span class="stat-label">Customers</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@Workspace.Receivables.Invoices.Count</span>
+                <span class="stat-label">Invoices</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@Workspace.Receivables.PastDueCount</span>
+                <span class="stat-label">Past due</span>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Customers</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>State</th>
+                            <th>Credit limit</th>
+                            <th>Open balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var customer in Workspace.Receivables.Customers)
+                        {
+                            <tr>
+                                <td>@customer.CustomerNumber - @customer.Name</td>
+                                <td>@customer.State</td>
+                                <td>@customer.CreditLimit.ToString("C")</td>
+                                <td>@customer.OpenBalance.ToString("C")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+
+            <article class="panel">
+                <h2>Open invoice stack</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Invoice</th>
+                            <th>Customer</th>
+                            <th>Status</th>
+                            <th>Due</th>
+                            <th>Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var invoice in Workspace.Receivables.Invoices)
+                        {
+                            <tr>
+                                <td>@invoice.InvoiceNumber</td>
+                                <td>@invoice.CustomerName</td>
+                                <td>@invoice.Status</td>
+                                <td>@invoice.DueDate.ToString("MMM d, yyyy")</td>
+                                <td>@invoice.BalanceDue.ToString("C")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+        </section>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

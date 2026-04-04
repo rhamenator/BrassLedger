@@ -1,0 +1,11 @@
+<Solution>
+  <Project Path="BrassLedger.Api/BrassLedger.Api.csproj" />
+  <Project Path="BrassLedger.Application/BrassLedger.Application.csproj" />
+  <Project Path="BrassLedger.Domain/BrassLedger.Domain.csproj" />
+  <Project Path="BrassLedger.Infrastructure/BrassLedger.Infrastructure.csproj" />
+  <Project Path="BrassLedger.Web/BrassLedger.Web.csproj" />
+  <Project Path="BrassLedger.Infrastructure.Tests/BrassLedger.Infrastructure.Tests.csproj" />
+  <Project Path="BrassLedger.Api.Tests/BrassLedger.Api.Tests.csproj" />
+  <Project Path="BrassLedger.Web.Tests/BrassLedger.Web.Tests.csproj" />
+  <Project Path="BrassLedger.Web.E2E.Tests/BrassLedger.Web.E2E.Tests.csproj" />
+</Solution>

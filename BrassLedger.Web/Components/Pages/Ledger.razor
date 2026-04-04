@@ -1,0 +1,136 @@
+@page "/ledger"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+
+<PageTitle>Ledger</PageTitle>
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading ledger...</h1>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">General Ledger</p>
+                <h1>Core accounting balances and posting history.</h1>
+            </div>
+            <p class="page-intro">
+                This is the first real accounting slice: chart of accounts, posted journal entries, and treasury balances
+                live in a database-backed model instead of a static assessment.
+            </p>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@Workspace.GeneralLedger.Assets.ToString("C0")</span>
+                <span class="stat-label">Assets</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.GeneralLedger.Liabilities.ToString("C0")</span>
+                <span class="stat-label">Liabilities</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@Workspace.GeneralLedger.Revenue.ToString("C0")</span>
+                <span class="stat-label">Revenue</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@Workspace.GeneralLedger.Expenses.ToString("C0")</span>
+                <span class="stat-label">Expenses</span>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Chart of accounts</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Type</th>
+                            <th>Balance</th>
+                            <th>Control</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var account in Workspace.GeneralLedger.Accounts)
+                        {
+                            <tr>
+                                <td>@account.Number - @account.Name</td>
+                                <td>@account.Type</td>
+                                <td>@account.Balance.ToString("C")</td>
+                                <td>@(account.IsControlAccount ? "Yes" : "No")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+
+            <article class="panel">
+                <h2>Recent journal entries</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Entry</th>
+                            <th>Date</th>
+                            <th>Module</th>
+                            <th>Description</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in Workspace.GeneralLedger.RecentEntries)
+                        {
+                            <tr>
+                                <td>@entry.EntryNumber</td>
+                                <td>@entry.PostedOn.ToString("MMM d, yyyy")</td>
+                                <td>@entry.SourceModule</td>
+                                <td>@entry.Description</td>
+                                <td>@entry.TotalAmount.ToString("C")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+        </section>
+
+        <section class="panel">
+            <h2>Treasury positions</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Account</th>
+                        <th>Masked number</th>
+                        <th>Balance</th>
+                        <th>Unreconciled</th>
+                        <th>Last reconciled</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var account in Workspace.Treasury.BankAccounts)
+                    {
+                        <tr>
+                            <td>@account.Name</td>
+                            <td>@account.AccountNumberMasked</td>
+                            <td>@account.CurrentBalance.ToString("C")</td>
+                            <td>@account.UnreconciledAmount.ToString("C")</td>
+                            <td>@account.LastReconciledOn.ToString("MMM d, yyyy")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

@@ -1,0 +1,6 @@
+@BrassLedger.Api_HostAddress = http://localhost:5080
+
+GET {{BrassLedger.Api_HostAddress}}/api/assessment
+Accept: application/json
+
+###

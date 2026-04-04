@@ -1,0 +1,111 @@
+@page "/payroll"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+
+<PageTitle>Payroll</PageTitle>
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading payroll...</h1>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">Payroll and Time</p>
+                <h1>Employees, labor cost, and tax-ready setup.</h1>
+            </div>
+            <p class="page-intro">
+                Payroll is no longer hidden behind expiring tax tables or module locks. The model is open, seeded,
+                and ready for a rules-driven tax engine.
+            </p>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@Workspace.Payroll.ActiveEmployees</span>
+                <span class="stat-label">Active employees</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.Payroll.MonthlyGross.ToString("C0")</span>
+                <span class="stat-label">Monthly gross</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@Workspace.Taxes.ProfileCount</span>
+                <span class="stat-label">Tax profiles</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@Workspace.Taxes.EmployerSpecificCount</span>
+                <span class="stat-label">Employer-specific rates</span>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Employees</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Department</th>
+                            <th>State</th>
+                            <th>Pay type</th>
+                            <th>Monthly base</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var employee in Workspace.Payroll.Employees)
+                        {
+                            <tr>
+                                <td>@employee.EmployeeNumber - @employee.FullName</td>
+                                <td>@employee.Department</td>
+                                <td>@employee.State</td>
+                                <td>@employee.PayType</td>
+                                <td>@employee.MonthlyBasePay.ToString("C")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+
+            <article class="panel">
+                <h2>Tax profiles in payroll scope</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Jurisdiction</th>
+                            <th>Type</th>
+                            <th>Rate</th>
+                            <th>Effective</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var profile in Workspace.Taxes.Profiles)
+                        {
+                            <tr>
+                                <td>@profile.Jurisdiction</td>
+                                <td>@profile.TaxType</td>
+                                <td>@profile.Rate.ToString("P3")</td>
+                                <td>@profile.EffectiveOn.ToString("MMM d, yyyy")</td>
+                                <td>@profile.Source</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+        </section>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

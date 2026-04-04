@@ -1,0 +1,90 @@
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">BrassLedger</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <AuthorizeView>
+        <Authorized>
+            <nav class="flex-column">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                        <span class="nav-icon" aria-hidden="true">01</span> Overview
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="modules">
+                        <span class="nav-icon" aria-hidden="true">02</span> Modules
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="ledger">
+                        <span class="nav-icon" aria-hidden="true">03</span> Ledger
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="receivables">
+                        <span class="nav-icon" aria-hidden="true">04</span> Receivables
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="payables">
+                        <span class="nav-icon" aria-hidden="true">05</span> Payables
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="operations">
+                        <span class="nav-icon" aria-hidden="true">06</span> Operations
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="payroll">
+                        <span class="nav-icon" aria-hidden="true">07</span> Payroll
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="projects">
+                        <span class="nav-icon" aria-hidden="true">08</span> Projects
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="reporting">
+                        <span class="nav-icon" aria-hidden="true">09</span> Reporting
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="taxes">
+                        <span class="nav-icon" aria-hidden="true">10</span> Taxes
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="publish">
+                        <span class="nav-icon" aria-hidden="true">11</span> Publish
+                    </NavLink>
+                </div>
+            </nav>
+        </Authorized>
+        <NotAuthorized>
+            <nav class="flex-column">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="login">
+                        <span class="nav-icon" aria-hidden="true">01</span> Sign In
+                    </NavLink>
+                </div>
+            </nav>
+        </NotAuthorized>
+    </AuthorizeView>
+</div>

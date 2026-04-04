@@ -1,0 +1,82 @@
+@page "/projects"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+
+<PageTitle>Projects</PageTitle>
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading projects...</h1>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">Projects, Jobs, Property Extensions</p>
+                <h1>Job tracking with room for industry-specific workflows.</h1>
+            </div>
+            <p class="page-intro">
+                Job tracking is live now. Property management can layer on top of the same job ledger instead of becoming
+                a closed-off premium edition.
+            </p>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@Workspace.Projects.OpenJobs</span>
+                <span class="stat-label">Open jobs</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.Projects.BudgetAmount.ToString("C0")</span>
+                <span class="stat-label">Budgeted</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@Workspace.Projects.ActualCost.ToString("C0")</span>
+                <span class="stat-label">Actual cost</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@((Workspace.Projects.BudgetAmount - Workspace.Projects.ActualCost).ToString("C0"))</span>
+                <span class="stat-label">Remaining margin</span>
+            </article>
+        </section>
+
+        <section class="panel">
+            <h2>Job ledger</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Customer</th>
+                        <th>Status</th>
+                        <th>Budget</th>
+                        <th>Actual</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var job in Workspace.Projects.Jobs)
+                    {
+                        <tr>
+                            <td>@job.JobNumber - @job.Name</td>
+                            <td>@job.CustomerName</td>
+                            <td>@job.Status</td>
+                            <td>@job.BudgetAmount.ToString("C")</td>
+                            <td>@job.ActualCost.ToString("C")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

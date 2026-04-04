@@ -1,0 +1,108 @@
+@page "/payables"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+
+<PageTitle>Payables</PageTitle>
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading payables...</h1>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">Accounts Payable</p>
+                <h1>Vendor management and outgoing cash commitments.</h1>
+            </div>
+            <p class="page-intro">
+                Payables are running off the same shared ledger model, so bills, treasury, and reporting stay in sync.
+            </p>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@Workspace.Payables.OpenBalance.ToString("C0")</span>
+                <span class="stat-label">Open A/P</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.Payables.Vendors.Count</span>
+                <span class="stat-label">Vendors</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@Workspace.Payables.Bills.Count</span>
+                <span class="stat-label">Bills</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@Workspace.Payables.DueThisWeekCount</span>
+                <span class="stat-label">Due within 7 days</span>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Vendor roster</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Vendor</th>
+                            <th>State</th>
+                            <th>Terms</th>
+                            <th>Open balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var vendor in Workspace.Payables.Vendors)
+                        {
+                            <tr>
+                                <td>@vendor.VendorNumber - @vendor.Name</td>
+                                <td>@vendor.State</td>
+                                <td>@vendor.PaymentTerms</td>
+                                <td>@vendor.OpenBalance.ToString("C")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+
+            <article class="panel">
+                <h2>Bill queue</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Bill</th>
+                            <th>Vendor</th>
+                            <th>Status</th>
+                            <th>Due</th>
+                            <th>Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var bill in Workspace.Payables.Bills)
+                        {
+                            <tr>
+                                <td>@bill.BillNumber</td>
+                                <td>@bill.VendorName</td>
+                                <td>@bill.Status</td>
+                                <td>@bill.DueDate.ToString("MMM d, yyyy")</td>
+                                <td>@bill.BalanceDue.ToString("C")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+        </section>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

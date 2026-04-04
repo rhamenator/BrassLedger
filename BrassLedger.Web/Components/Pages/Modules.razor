@@ -1,0 +1,69 @@
+@page "/modules"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+
+<PageTitle>Modules</PageTitle>
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading modules...</h1>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">All Modules Included</p>
+                <h1>Every legacy module is open to every user.</h1>
+            </div>
+            <p class="page-intro">
+                The old product sold module access as a feature. BrassLedger ships every module together and the live
+                workspace shows which areas already have active seeded data versus modeled extensions.
+            </p>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@Workspace.Modules.Count</span>
+                <span class="stat-label">Enabled modules</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.Modules.Count(x => x.Status == "Live foundation")</span>
+                <span class="stat-label">Live foundations</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@Workspace.Modules.Sum(x => x.RecordCount)</span>
+                <span class="stat-label">Seeded records mapped</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@Workspace.Company.ActiveUsers</span>
+                <span class="stat-label">Active users</span>
+            </article>
+        </section>
+
+        <div class="module-grid">
+            @foreach (var module in Workspace.Modules)
+            {
+                <article class="module-card">
+                    <span class="module-code">@module.Code</span>
+                    <h2>@module.Name</h2>
+                    <p class="module-area">@module.Area</p>
+                    <p><strong>@module.Status</strong></p>
+                    <p>@module.Summary</p>
+                    <p class="module-count">@module.RecordCount seeded records</p>
+                </article>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

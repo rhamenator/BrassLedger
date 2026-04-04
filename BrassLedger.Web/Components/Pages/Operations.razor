@@ -1,0 +1,138 @@
+@page "/operations"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+
+<PageTitle>Operations</PageTitle>
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading operations...</h1>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">Inventory, Orders, Purchasing, POS</p>
+                <h1>Operational flow from stock to shipment.</h1>
+            </div>
+            <p class="page-intro">
+                Inventory, order entry, purchase order, and point-of-sale are grouped into one operations surface for the
+                modern app, with POS able to reuse the order pipeline instead of staying a siloed legacy module.
+            </p>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@Workspace.Operations.InventoryItemCount</span>
+                <span class="stat-label">Active items</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.Operations.ReorderAlerts</span>
+                <span class="stat-label">Reorder alerts</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@Workspace.Operations.OpenSalesOrderCount</span>
+                <span class="stat-label">Open sales orders</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@Workspace.Operations.OpenPurchaseOrderCount</span>
+                <span class="stat-label">Open purchase orders</span>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Inventory</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th>Description</th>
+                            <th>On hand</th>
+                            <th>Reorder point</th>
+                            <th>Unit price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Workspace.Operations.InventoryItems)
+                        {
+                            <tr>
+                                <td>@item.Sku</td>
+                                <td>@item.Description</td>
+                                <td>@item.QuantityOnHand</td>
+                                <td>@item.ReorderPoint</td>
+                                <td>@item.UnitPrice.ToString("C")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+
+            <article class="panel">
+                <h2>Sales orders</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Customer</th>
+                            <th>Status</th>
+                            <th>Ordered</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var order in Workspace.Operations.SalesOrders)
+                        {
+                            <tr>
+                                <td>@order.OrderNumber</td>
+                                <td>@order.CustomerName</td>
+                                <td>@order.Status</td>
+                                <td>@order.OrderedOn.ToString("MMM d, yyyy")</td>
+                                <td>@order.TotalAmount.ToString("C")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+        </section>
+
+        <section class="panel">
+            <h2>Purchase orders</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Vendor</th>
+                        <th>Status</th>
+                        <th>Ordered</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var order in Workspace.Operations.PurchaseOrders)
+                    {
+                        <tr>
+                            <td>@order.OrderNumber</td>
+                            <td>@order.VendorName</td>
+                            <td>@order.Status</td>
+                            <td>@order.OrderedOn.ToString("MMM d, yyyy")</td>
+                            <td>@order.TotalAmount.ToString("C")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

@@ -1,0 +1,43 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row">
+            <AuthorizeView>
+                <Authorized Context="authenticationState">
+                    <div class="top-row-meta">
+                        <p class="top-row-label">Signed in operator</p>
+                        <strong>@(authenticationState.User.FindFirst("display_name")?.Value ?? authenticationState.User.Identity?.Name)</strong>
+                    </div>
+                    <div class="top-row-actions">
+                        <span class="top-row-role">@authenticationState.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value</span>
+                        <form class="logout-form" method="post" action="/account/logout">
+                            <button class="top-row-link top-row-button" type="submit">Sign out</button>
+                        </form>
+                    </div>
+                </Authorized>
+                <NotAuthorized>
+                    <div>
+                        <p class="top-row-label">Open-source accounting workspace</p>
+                        <strong>Authentication is required before the workspace loads.</strong>
+                    </div>
+                    <a class="top-row-link" href="/login">Sign in</a>
+                </NotAuthorized>
+            </AuthorizeView>
+        </div>
+
+        <article class="content">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" style="display:none;">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">x</a>
+</div>

@@ -1,0 +1,138 @@
+@page "/"
+@attribute [Authorize]
+@inject IBusinessWorkspaceService WorkspaceService
+@inject IModernizationAssessmentService AssessmentService
+
+<PageTitle>BrassLedger</PageTitle>
+
+@{
+    var assessment = AssessmentService.GetAssessment();
+}
+
+@if (Workspace is null)
+{
+    <section class="panel">
+        <h1>Loading workspace...</h1>
+        <p>The accounting seed and operational snapshot are being prepared.</p>
+    </section>
+}
+else
+{
+    <section class="hero">
+        <div class="hero-copy">
+            <p class="eyebrow">Open-source Accounting Remake</p>
+            <h1>@Workspace.Company.Name is live as a real multi-module workspace.</h1>
+            <p class="hero-text">
+                The shell is now backed by a seeded ledger, receivables, payables, operations, payroll, projects,
+                reporting, and tax dataset so we can keep replacing the FoxPro estate with working code.
+            </p>
+
+            <div class="hero-actions">
+                <a class="action-primary" href="/ledger">Open ledger</a>
+                <a class="action-secondary" href="/modules">Review modules</a>
+            </div>
+
+            <div class="hero-badges">
+                <span>PostgreSQL-first</span>
+                <span>SQLite fallback</span>
+                <span>Windows, Linux, macOS</span>
+            </div>
+        </div>
+
+        <aside class="hero-panel">
+            <p class="panel-kicker">Live snapshot</p>
+            <ul class="metric-stack">
+                <li><strong>@Workspace.Modules.Count</strong><span>Enabled modules</span></li>
+                <li><strong>@Workspace.Reporting.ReportCount</strong><span>Report definitions</span></li>
+                <li><strong>@Workspace.Reporting.LabelCount</strong><span>Label templates</span></li>
+                <li><strong>@Workspace.Company.ActiveUsers</strong><span>Active operators</span></li>
+            </ul>
+        </aside>
+    </section>
+
+    <section class="page-shell">
+        <section class="stats-grid">
+            <article class="stat-card accent-sand">
+                <span class="stat-value">@Workspace.Dashboard.CashOnHand.ToString("C0")</span>
+                <span class="stat-label">Cash on hand</span>
+            </article>
+            <article class="stat-card accent-sky">
+                <span class="stat-value">@Workspace.Dashboard.ReceivablesOpen.ToString("C0")</span>
+                <span class="stat-label">Open receivables</span>
+            </article>
+            <article class="stat-card accent-sage">
+                <span class="stat-value">@Workspace.Dashboard.PayablesOpen.ToString("C0")</span>
+                <span class="stat-label">Open payables</span>
+            </article>
+            <article class="stat-card accent-coral">
+                <span class="stat-value">@Workspace.Dashboard.MonthlyPayroll.ToString("C0")</span>
+                <span class="stat-label">Monthly payroll</span>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Current company</h2>
+                <div class="detail-grid">
+                    <div><span class="detail-label">Legal name</span><strong>@Workspace.Company.LegalName</strong></div>
+                    <div><span class="detail-label">Tax ID</span><strong>@Workspace.Company.TaxId</strong></div>
+                    <div><span class="detail-label">Currency</span><strong>@Workspace.Company.BaseCurrency</strong></div>
+                    <div><span class="detail-label">Fiscal start</span><strong>Month @Workspace.Company.FiscalYearStartMonth</strong></div>
+                </div>
+            </article>
+
+            <article class="panel">
+                <h2>Architecture stance</h2>
+                <p class="lead">@assessment.RecommendedArchitecture</p>
+                <p><strong>Primary database:</strong> @assessment.RecommendedDatabase</p>
+                <p><strong>Legacy data strategy:</strong> @assessment.LegacyDataStrategy</p>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Operational pulse</h2>
+                <div class="mini-metrics">
+                    <div class="mini-metric"><span>Inventory items</span><strong>@Workspace.Dashboard.InventoryItems</strong></div>
+                    <div class="mini-metric"><span>Open sales orders</span><strong>@Workspace.Dashboard.OpenSalesOrders</strong></div>
+                    <div class="mini-metric"><span>Open projects</span><strong>@Workspace.Dashboard.OpenProjects</strong></div>
+                    <div class="mini-metric"><span>Reports ready</span><strong>@Workspace.Dashboard.ReportsReady</strong></div>
+                </div>
+            </article>
+
+            <article class="panel">
+                <h2>Modern principles</h2>
+                <ul class="feature-list">
+                    @foreach (var item in assessment.ProductPrinciples)
+                    {
+                        <li>@item</li>
+                    }
+                </ul>
+            </article>
+        </section>
+
+        <section class="panel">
+            <h2>Live module footing</h2>
+            <div class="module-grid">
+                @foreach (var module in Workspace.Modules.Take(6))
+                {
+                    <article class="module-card">
+                        <span class="module-code">@module.Code</span>
+                        <h3>@module.Name</h3>
+                        <p class="module-area">@module.Status</p>
+                        <p>@module.Summary</p>
+                    </article>
+                }
+            </div>
+        </section>
+    </section>
+}
+
+@code {
+    private BusinessWorkspaceSnapshot? Workspace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+}

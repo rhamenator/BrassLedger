@@ -1,0 +1,23 @@
+@inject NavigationManager NavigationManager
+
+<section class="panel">
+    <p class="eyebrow">Authentication Required</p>
+    <h1>Redirecting to sign-in.</h1>
+    <p class="page-intro">
+        This workspace requires an authenticated operator before any accounting data is loaded.
+    </p>
+</section>
+
+@code {
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        var targetPath = string.IsNullOrWhiteSpace(relativePath) ? "/" : $"/{relativePath}";
+        NavigationManager.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(targetPath)}", forceLoad: true);
+    }
+}

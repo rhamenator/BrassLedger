@@ -1,0 +1,57 @@
+@page "/publish"
+@attribute [Authorize]
+
+<PageTitle>Publish</PageTitle>
+
+<section class="page-shell">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Distribution</p>
+            <h1>One .NET web application, packaged per platform.</h1>
+        </div>
+        <p class="page-intro">
+            This interface is browser-based, but it can still be published as a self-contained executable on Windows
+            and as native launchable bundles for Linux and macOS.
+        </p>
+    </header>
+
+    <section class="content-grid">
+        <article class="panel">
+            <h2>Windows EXE</h2>
+            <pre><code>dotnet publish .\BrassLedger.Web\BrassLedger.Web.csproj `
+  -c Release `
+  -r win-x64 `
+  --self-contained true `
+  -p:PublishSingleFile=true</code></pre>
+        </article>
+
+        <article class="panel">
+            <h2>Linux bundle</h2>
+            <pre><code>dotnet publish ./BrassLedger.Web/BrassLedger.Web.csproj \
+  -c Release \
+  -r linux-x64 \
+  --self-contained true \
+  -p:PublishSingleFile=true</code></pre>
+        </article>
+
+        <article class="panel">
+            <h2>macOS bundle</h2>
+            <pre><code>dotnet publish ./BrassLedger.Web/BrassLedger.Web.csproj \
+  -c Release \
+  -r osx-arm64 \
+  --self-contained true \
+  -p:PublishSingleFile=true</code></pre>
+        </article>
+
+        <article class="panel">
+            <h2>Cross-platform notes</h2>
+            <ul class="feature-list">
+                <li>Windows produces an `.exe` plus supporting publish output.</li>
+                <li>Linux and macOS builds publish platform-native executables rather than `.exe` files.</li>
+                <li>The UI stays the same across platforms because it is rendered by ASP.NET Core and opened in a browser.</li>
+                <li>Without a PostgreSQL connection string, the app boots on a local SQLite database in `App_Data`.</li>
+                <li>A desktop shell can be added later if you want a packaged window around this web app.</li>
+            </ul>
+        </article>
+    </section>
+</section>
