@@ -92,9 +92,9 @@ jobs:
       matrix:
         include:
           - runtime: osx-x64
-            runner: macos-13
+            runner: macos-15-intel
           - runtime: osx-arm64
-            runner: macos-14
+            runner: macos-15
     runs-on: ${{ matrix.runner }}
     env:
       APP_VERSION: ${{ needs.metadata.outputs.version }}
