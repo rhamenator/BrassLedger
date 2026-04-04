@@ -29,6 +29,18 @@ dotnet build .\BrassLedger.slnx
 ```
 
 ```powershell
+.\publish-brassledger.ps1 -Runtime osx-x64
+```
+
+```powershell
+.\publish-brassledger.ps1 -Runtime osx-arm64
+```
+
+```powershell
+.\publish-brassledger.ps1 -Runtime linux-x64
+```
+
+```powershell
 .\run-ui-tests.ps1 -InstallBrowsers
 ```
 
@@ -40,6 +52,13 @@ See `docs/publish-guide.md` for platform-specific publish commands.
 UI visual baselines live in `BrassLedger.Web.E2E.Tests\Snapshots` so they can be reviewed and committed with the test suite.
 The Playwright matrix auto-detects Microsoft Edge on Windows and will include it in browser-based test runs when available.
 Firefox is also supported in the local Playwright browser matrix when installed.
+
+Release automation:
+
+- GitHub Actions workflow `.github/workflows/release-installers.yml` builds unsigned installers for Windows, macOS Intel, macOS Apple silicon, and Linux.
+- `workflow_dispatch` creates downloadable workflow artifacts for review.
+- Pushing a `v*` tag also creates a GitHub release and uploads the installer files there.
+- Installer signing is intentionally disabled for now and can be added later once certificate material is available.
 
 Current security baseline:
 

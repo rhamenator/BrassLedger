@@ -1,0 +1,220 @@
+name: Release Installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  metadata:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_name: ${{ steps.version.outputs.release_name }}
+      should_release: ${{ steps.version.outputs.should_release }}
+    steps:
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            release_name="${GITHUB_REF_NAME}"
+            should_release=true
+          else
+            version="0.1.${GITHUB_RUN_NUMBER}"
+            release_name="unsigned-build-${GITHUB_RUN_NUMBER}"
+            should_release=false
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+          echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
+
+  windows-installer:
+    name: Windows installer
+    needs: metadata
+    runs-on: windows-latest
+    env:
+      APP_VERSION: ${{ needs.metadata.outputs.version }}
+      PUBLISH_DIR: ${{ github.workspace }}\artifacts\publish\win-x64
+      INSTALLER_DIR: ${{ github.workspace }}\artifacts\installers\win-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish application
+        shell: pwsh
+        run: >
+          dotnet publish .\BrassLedger.Web\BrassLedger.Web.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:Version=$env:APP_VERSION
+          -o $env:PUBLISH_DIR
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:INSTALLER_DIR | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=$env:APP_VERSION" `
+            "/DPublishDir=$env:PUBLISH_DIR" `
+            "/DOutputDir=$env:INSTALLER_DIR" `
+            ".\packaging\windows\BrassLedger.iss"
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrassLedger-windows-installer
+          path: ${{ env.INSTALLER_DIR }}\BrassLedger-setup-win-x64.exe
+          if-no-files-found: error
+
+  macos-installer:
+    name: macOS installer (${{ matrix.runtime }})
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: osx-x64
+            runner: macos-13
+          - runtime: osx-arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    env:
+      APP_VERSION: ${{ needs.metadata.outputs.version }}
+      PUBLISH_DIR: ${{ github.workspace }}/artifacts/publish/${{ matrix.runtime }}
+      INSTALLER_DIR: ${{ github.workspace }}/artifacts/installers/${{ matrix.runtime }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish application
+        shell: bash
+        run: |
+          dotnet publish ./BrassLedger.Web/BrassLedger.Web.csproj \
+            -c Release \
+            -r "${{ matrix.runtime }}" \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:Version="$APP_VERSION" \
+            -o "$PUBLISH_DIR"
+
+      - name: Build pkg installer
+        shell: bash
+        run: |
+          chmod +x ./packaging/macos/package-pkg.sh
+          ./packaging/macos/package-pkg.sh "$PUBLISH_DIR" "$APP_VERSION" "${{ matrix.runtime }}" "$INSTALLER_DIR"
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrassLedger-${{ matrix.runtime }}-installer
+          path: ${{ env.INSTALLER_DIR }}/BrassLedger-${{ env.APP_VERSION }}-${{ matrix.runtime }}.pkg
+          if-no-files-found: error
+
+  linux-installer:
+    name: Linux installer
+    needs: metadata
+    runs-on: ubuntu-24.04
+    env:
+      APP_VERSION: ${{ needs.metadata.outputs.version }}
+      PUBLISH_DIR: ${{ github.workspace }}/artifacts/publish/linux-x64
+      INSTALLER_DIR: ${{ github.workspace }}/artifacts/installers/linux-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish application
+        shell: bash
+        run: |
+          dotnet publish ./BrassLedger.Web/BrassLedger.Web.csproj \
+            -c Release \
+            -r linux-x64 \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:Version="$APP_VERSION" \
+            -o "$PUBLISH_DIR"
+
+      - name: Build deb package
+        shell: bash
+        run: |
+          chmod +x ./packaging/linux/package-deb.sh
+          ./packaging/linux/package-deb.sh "$PUBLISH_DIR" "$APP_VERSION" "$INSTALLER_DIR"
+
+      - name: Upload Linux installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrassLedger-linux-installer
+          path: ${{ env.INSTALLER_DIR }}/brassledger_${{ env.APP_VERSION }}_amd64.deb
+          if-no-files-found: error
+
+  github-release:
+    name: Publish GitHub release
+    needs:
+      - metadata
+      - windows-installer
+      - macos-installer
+      - linux-installer
+    if: needs.metadata.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: BrassLedger-windows-installer
+          path: ./release-assets/windows
+
+      - name: Download macOS Intel installer
+        uses: actions/download-artifact@v4
+        with:
+          name: BrassLedger-osx-x64-installer
+          path: ./release-assets/macos-x64
+
+      - name: Download macOS Apple silicon installer
+        uses: actions/download-artifact@v4
+        with:
+          name: BrassLedger-osx-arm64-installer
+          path: ./release-assets/macos-arm64
+
+      - name: Download Linux installer
+        uses: actions/download-artifact@v4
+        with:
+          name: BrassLedger-linux-installer
+          path: ./release-assets/linux
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ needs.metadata.outputs.release_name }}
+          files: |
+            ./release-assets/windows/BrassLedger-setup-win-x64.exe
+            ./release-assets/macos-x64/BrassLedger-${{ needs.metadata.outputs.version }}-osx-x64.pkg
+            ./release-assets/macos-arm64/BrassLedger-${{ needs.metadata.outputs.version }}-osx-arm64.pkg
+            ./release-assets/linux/brassledger_${{ needs.metadata.outputs.version }}_amd64.deb
