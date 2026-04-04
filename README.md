@@ -12,11 +12,6 @@ Projects:
 
 The current user-facing application is `BrassLedger.Web`.
 
-Seeded demo access:
-
-- usernames: `controller`, `operations`, `payroll`, `sales`
-- initial password: `BrassLedger!2026`
-
 Why this shape:
 
 - it publishes as a Windows `.exe`
@@ -53,6 +48,13 @@ Current security baseline:
 - sensitive fields are protected at rest with ASP.NET Core Data Protection
 - Data Protection keys are persisted under `App_Data\keys`
 - security headers are applied to both the web app and API
+- a first non-development startup requires `Bootstrap:AdminPassword` so the system creates a real administrator account instead of demo users
+
+Bootstrap configuration:
+
+- development starts with sample data automatically
+- non-development first run requires `Bootstrap:AdminPassword`
+- optional bootstrap settings include `Bootstrap:CompanyName`, `Bootstrap:LegalName`, `Bootstrap:AdminUserName`, `Bootstrap:AdminDisplayName`, and `Bootstrap:AdminEmail`
 
 Help and operator guidance:
 

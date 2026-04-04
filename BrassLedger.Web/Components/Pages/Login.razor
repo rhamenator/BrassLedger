@@ -2,6 +2,7 @@
 @attribute [AllowAnonymous]
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject NavigationManager NavigationManager
+@inject Microsoft.Extensions.Options.IOptions<BrassLedger.Infrastructure.Persistence.BootstrapOptions> BootstrapOptions
 
 <PageTitle>Sign In</PageTitle>
 
@@ -47,14 +48,21 @@
         }
 
         <div class="auth-note">
-            <p>Seeded operators:</p>
-            <ul class="feature-list">
-                <li><code>controller</code> for accounting review</li>
-                <li><code>operations</code> for operations and inventory</li>
-                <li><code>payroll</code> for payroll and taxes</li>
-                <li><code>sales</code> for receivables and reporting</li>
-            </ul>
-            <p>The initial demo password is documented in the repository README while we build full user administration.</p>
+            @if (BootstrapOptions.Value.SeedSampleData)
+            {
+                <p>Development sample operators:</p>
+                <ul class="feature-list">
+                    <li><code>controller</code> for accounting review</li>
+                    <li><code>operations</code> for operations and inventory</li>
+                    <li><code>payroll</code> for payroll and taxes</li>
+                    <li><code>sales</code> for receivables and reporting</li>
+                </ul>
+                <p>The sample password is intended for development environments only.</p>
+            }
+            else
+            {
+                <p>Use the administrator account provisioned during setup, or contact the system administrator for access.</p>
+            }
         </div>
     </article>
 </section>

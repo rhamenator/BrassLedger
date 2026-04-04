@@ -96,6 +96,57 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializeBrassLedgerAsync_InNonDevelopmentMode_RequiresBootstrapPassword()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: false);
+
+        using var services = serviceCollection.BuildServiceProvider();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => services.InitializeBrassLedgerAsync());
+        Assert.Contains("Bootstrap:AdminPassword", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InitializeBrassLedgerAsync_InNonDevelopmentMode_CreatesBootstrapAdministrator()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Bootstrap:CompanyName"] = "Northwind Fabrication",
+                ["Bootstrap:LegalName"] = "Northwind Fabrication LLC",
+                ["Bootstrap:AdminUserName"] = "admin",
+                ["Bootstrap:AdminDisplayName"] = "Release Admin",
+                ["Bootstrap:AdminEmail"] = "admin@northwind.example",
+                ["Bootstrap:AdminPassword"] = "S3cure!Release!2026"
+            })
+            .Build();
+
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: false);
+
+        using var services = serviceCollection.BuildServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+
+        using var scope = services.CreateScope();
+        var authenticationService = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var authenticationResult = await authenticationService.AuthenticateAsync(
+            "admin",
+            "S3cure!Release!2026",
+            "127.0.0.1",
+            "xunit");
+
+        Assert.Equal(AuthenticationOutcome.Succeeded, authenticationResult.Outcome);
+        Assert.NotNull(authenticationResult.User);
+        Assert.Equal("Administrator", authenticationResult.User!.Role);
+
+        var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        Assert.Equal("Northwind Fabrication", workspace.Company.Name);
+        Assert.Equal(1, workspace.Company.ActiveUsers);
+    }
+
+    [Fact]
     public async Task AuthenticateAsync_LocksOperatorAfterRepeatedFailures_AndWritesAuditEntries()
     {
         using var services = CreateServiceProvider();
@@ -136,7 +187,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
     {
         var configuration = new ConfigurationBuilder().Build();
         var serviceCollection = new ServiceCollection();
-        serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath);
+        serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: true);
         return serviceCollection.BuildServiceProvider();
     }
 

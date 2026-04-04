@@ -12,11 +12,21 @@ internal static class BrassLedgerSeedData
     public static async Task SeedAsync(
         BrassLedgerDbContext dbContext,
         IPasswordHasher<AppUser> passwordHasher,
+        BootstrapOptions bootstrapOptions,
         CancellationToken cancellationToken = default)
     {
         if (await dbContext.Companies.AnyAsync(cancellationToken))
         {
-            await EnsureSeedUserCredentialsAsync(dbContext, passwordHasher, cancellationToken);
+            if (bootstrapOptions.SeedSampleData)
+            {
+                await EnsureSeedUserCredentialsAsync(dbContext, passwordHasher, cancellationToken);
+            }
+            return;
+        }
+
+        if (!bootstrapOptions.SeedSampleData)
+        {
+            await SeedBootstrapCompanyAsync(dbContext, passwordHasher, bootstrapOptions, cancellationToken);
             return;
         }
 
@@ -215,6 +225,49 @@ internal static class BrassLedgerSeedData
 
         user.PasswordHash = passwordHasher.HashPassword(user, BrassLedgerAuthenticationDefaults.SeededPassword);
         return user;
+    }
+
+    private static async Task SeedBootstrapCompanyAsync(
+        BrassLedgerDbContext dbContext,
+        IPasswordHasher<AppUser> passwordHasher,
+        BootstrapOptions bootstrapOptions,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(bootstrapOptions.AdminPassword))
+        {
+            throw new InvalidOperationException(
+                "Bootstrap configuration is required for a non-development first run. Set Bootstrap:AdminPassword before starting BrassLedger.");
+        }
+
+        var companyId = Guid.NewGuid();
+        var company = new Company
+        {
+            Id = companyId,
+            Name = bootstrapOptions.CompanyName,
+            LegalName = bootstrapOptions.LegalName,
+            TaxId = bootstrapOptions.TaxId,
+            BaseCurrency = bootstrapOptions.BaseCurrency,
+            FiscalYearStartMonth = bootstrapOptions.FiscalYearStartMonth
+        };
+
+        var adminUser = new AppUser
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            UserName = bootstrapOptions.AdminUserName,
+            DisplayName = bootstrapOptions.AdminDisplayName,
+            Email = bootstrapOptions.AdminEmail,
+            SecurityStamp = Guid.NewGuid().ToString("N"),
+            Role = "Administrator",
+            IsActive = true,
+            LastPasswordChangedUtc = DateTimeOffset.UtcNow
+        };
+
+        adminUser.PasswordHash = passwordHasher.HashPassword(adminUser, bootstrapOptions.AdminPassword);
+
+        await dbContext.Companies.AddAsync(company, cancellationToken);
+        await dbContext.Users.AddAsync(adminUser, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static async Task EnsureSeedUserCredentialsAsync(

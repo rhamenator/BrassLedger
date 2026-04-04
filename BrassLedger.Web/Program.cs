@@ -10,7 +10,7 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddBrassLedgerCookieAuthentication();
-builder.Services.AddBrassLedgerInfrastructure(builder.Configuration, builder.Environment.ContentRootPath);
+builder.Services.AddBrassLedgerInfrastructure(builder.Configuration, builder.Environment.ContentRootPath, builder.Environment.IsDevelopment());
 
 var app = builder.Build();
 await app.Services.InitializeBrassLedgerAsync();

@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace BrassLedger.Infrastructure.Persistence;
 
@@ -19,7 +20,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
         IConfiguration configuration,
-        string contentRootPath)
+        string contentRootPath,
+        bool seedSampleData = false)
     {
         var dataDirectory = BuildDataDirectory(contentRootPath);
         var keysDirectory = Path.Combine(dataDirectory, "keys");
@@ -52,6 +54,7 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddHttpContextAccessor();
+        services.AddSingleton(Options.Create(BuildBootstrapOptions(configuration, seedSampleData)));
         services.AddSingleton<ISensitiveDataProtector, SensitiveDataProtector>();
         services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
         services.AddScoped<IUserAuthenticationService, UserAuthenticationService>();
@@ -66,11 +69,19 @@ public static class ServiceCollectionExtensions
         using var scope = serviceProvider.CreateScope();
         var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<AppUser>>();
+        var bootstrapOptions = scope.ServiceProvider.GetRequiredService<IOptions<BootstrapOptions>>().Value;
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await dbContext.Database.EnsureCreatedAsync(cancellationToken);
         await EnsureLegacySchemaCompatibilityAsync(dbContext, cancellationToken);
-        await BrassLedgerSeedData.SeedAsync(dbContext, passwordHasher, cancellationToken);
+        await BrassLedgerSeedData.SeedAsync(dbContext, passwordHasher, bootstrapOptions, cancellationToken);
+    }
+
+    private static BootstrapOptions BuildBootstrapOptions(IConfiguration configuration, bool seedSampleData)
+    {
+        var options = configuration.GetSection("Bootstrap").Get<BootstrapOptions>() ?? new BootstrapOptions();
+        options.SeedSampleData = options.SeedSampleData || seedSampleData;
+        return options;
     }
 
     private static string BuildDataDirectory(string contentRootPath)
