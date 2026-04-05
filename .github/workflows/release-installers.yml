@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   metadata:
     name: Resolve release metadata
@@ -45,10 +48,10 @@ jobs:
       INSTALLER_DIR: ${{ github.workspace }}\artifacts\installers\win-x64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup .NET 8 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
@@ -78,7 +81,7 @@ jobs:
             ".\packaging\windows\BrassLedger.iss"
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BrassLedger-windows-installer
           path: ${{ env.INSTALLER_DIR }}\BrassLedger-setup-win-x64.exe
@@ -102,10 +105,10 @@ jobs:
       INSTALLER_DIR: ${{ github.workspace }}/artifacts/installers/${{ matrix.runtime }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup .NET 8 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
@@ -127,7 +130,7 @@ jobs:
           ./packaging/macos/package-pkg.sh "$PUBLISH_DIR" "$APP_VERSION" "${{ matrix.runtime }}" "$INSTALLER_DIR"
 
       - name: Upload macOS installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BrassLedger-${{ matrix.runtime }}-installer
           path: ${{ env.INSTALLER_DIR }}/BrassLedger-${{ env.APP_VERSION }}-${{ matrix.runtime }}.pkg
@@ -143,10 +146,10 @@ jobs:
       INSTALLER_DIR: ${{ github.workspace }}/artifacts/installers/linux-x64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup .NET 8 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
@@ -168,7 +171,7 @@ jobs:
           ./packaging/linux/package-deb.sh "$PUBLISH_DIR" "$APP_VERSION" "$INSTALLER_DIR"
 
       - name: Upload Linux installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BrassLedger-linux-installer
           path: ${{ env.INSTALLER_DIR }}/brassledger_${{ env.APP_VERSION }}_amd64.deb
@@ -185,25 +188,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download Windows installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: BrassLedger-windows-installer
           path: ./release-assets/windows
 
       - name: Download macOS Intel installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: BrassLedger-osx-x64-installer
           path: ./release-assets/macos-x64
 
       - name: Download macOS Apple silicon installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: BrassLedger-osx-arm64-installer
           path: ./release-assets/macos-arm64
 
       - name: Download Linux installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: BrassLedger-linux-installer
           path: ./release-assets/linux
