@@ -216,6 +216,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ needs.metadata.outputs.release_name }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             ./release-assets/windows/BrassLedger-setup-win-x64.exe
             ./release-assets/macos-x64/BrassLedger-${{ needs.metadata.outputs.version }}-osx-x64.pkg

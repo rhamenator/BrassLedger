@@ -1,22 +1,24 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
-using System.Net.Sockets;
+using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
 namespace BrassLedger.Web.E2E.Tests;
 
 public sealed class PlaywrightWebAppFixture : IAsyncLifetime
 {
+    private static readonly Regex ListeningUrlRegex = new(@"Now listening on:\s+(https?://\S+)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly ConcurrentQueue<string> _logs = new();
     private readonly string _solutionRoot;
     private readonly string _projectRoot;
     private readonly string _projectPath;
     private readonly string _dataRootPath;
     private readonly string _sqliteConnectionString;
-    private readonly string _baseUrl;
     private readonly List<Task> _logPumpTasks = new();
+    private readonly TaskCompletionSource<string> _listeningUrlSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Process? _appProcess;
+    private string? _baseUrl;
 
     public PlaywrightWebAppFixture()
     {
@@ -26,10 +28,9 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         _dataRootPath = Path.Combine(Path.GetTempPath(), "BrassLedger.Web.E2E.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dataRootPath);
         _sqliteConnectionString = $"Data Source={Path.Combine(_dataRootPath, "brassledger.e2e.db")}";
-        _baseUrl = $"http://127.0.0.1:{GetOpenPort()}";
     }
 
-    public string BaseUrl => _baseUrl;
+    public string BaseUrl => _baseUrl ?? throw new InvalidOperationException("The web app has not finished starting yet.");
     public IPlaywright Playwright { get; private set; } = default!;
 
     public async Task InitializeAsync()
@@ -104,7 +105,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         startInfo.ArgumentList.Add("--no-launch-profile");
         startInfo.ArgumentList.Add("--");
         startInfo.ArgumentList.Add("--urls");
-        startInfo.ArgumentList.Add(_baseUrl);
+        startInfo.ArgumentList.Add("http://127.0.0.1:0");
 
         startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         startInfo.Environment["ConnectionStrings__BrassLedgerSqlite"] = _sqliteConnectionString;
@@ -124,6 +125,17 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             if (_appProcess is { HasExited: true })
             {
                 throw new InvalidOperationException($"The web app exited before it started listening.{Environment.NewLine}{GetLogs()}");
+            }
+
+            if (_baseUrl is null && _listeningUrlSource.Task.IsCompletedSuccessfully)
+            {
+                _baseUrl = _listeningUrlSource.Task.Result.TrimEnd('/');
+            }
+
+            if (_baseUrl is null)
+            {
+                await Task.Delay(250);
+                continue;
             }
 
             try
@@ -151,17 +163,14 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             while (await reader.ReadLineAsync() is { } line)
             {
                 _logs.Enqueue($"[{source}] {line}");
+
+                var match = ListeningUrlRegex.Match(line);
+                if (match.Success)
+                {
+                    _listeningUrlSource.TrySetResult(match.Groups[1].Value);
+                }
             }
         }));
-    }
-
-    private static int GetOpenPort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 
     private static string ResolveSolutionRoot()
