@@ -2,6 +2,8 @@
 
 This folder now contains a compileable cross-platform .NET application shell for the new open-source accounting platform.
 
+License: `GPL-3.0-only`. See [LICENSE](LICENSE).
+
 Projects:
 
 - `BrassLedger.Domain`: core business concepts and legacy inventory records
@@ -53,11 +55,11 @@ UI visual baselines live in `BrassLedger.Web.E2E.Tests\Snapshots` so they can be
 The Playwright matrix auto-detects Microsoft Edge on Windows and will include it in browser-based test runs when available.
 Firefox is also supported in the local Playwright browser matrix when installed.
 
-Release automation:
+Current prerelease:
 
-- GitHub Actions workflow `.github/workflows/release-installers.yml` builds unsigned installers for Windows, macOS Intel, macOS Apple silicon, and Linux.
-- `workflow_dispatch` creates downloadable workflow artifacts for review.
-- Pushing a `v*` tag also creates a GitHub release and uploads the installer files there.
+- The current consumer-facing prerelease is `v0.1.0-pre.1`.
+- Release assets are published for Windows, macOS Intel, macOS Apple silicon, and Linux.
+- GitHub Actions workflow `.github/workflows/release-installers.yml` builds the unsigned installers and attaches them to tagged prereleases.
 - Installer signing is intentionally disabled for now and can be added later once certificate material is available.
 
 Current security baseline:
