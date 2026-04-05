@@ -2,9 +2,16 @@ using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.Security;
 using BrassLedger.Web.Components;
+using BrassLedger.Web.Hosting;
 using Microsoft.AspNetCore.StaticFiles;
 
 var builder = WebApplication.CreateBuilder(args);
+var desktopHostOptions = DesktopHostOptions.Resolve(builder.Configuration, builder.Environment, args);
+
+if (desktopHostOptions.UseDynamicLoopbackBinding)
+{
+    builder.WebHost.UseUrls("http://127.0.0.1:0");
+}
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -61,6 +68,18 @@ app.MapBrassLedgerAuthenticationEndpoints();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+if (desktopHostOptions.LaunchBrowserOnStartup)
+{
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        var launchUrl = DesktopHostOptions.ResolveLaunchUrl(app.Urls);
+        if (!string.IsNullOrWhiteSpace(launchUrl))
+        {
+            LocalBrowserLauncher.TryOpen(launchUrl);
+        }
+    });
+}
 
 app.Run();
 

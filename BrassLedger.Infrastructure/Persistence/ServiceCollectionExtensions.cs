@@ -37,9 +37,14 @@ public static class ServiceCollectionExtensions
             ?? configuration.GetConnectionString("BrassLedgerSqlite")
             ?? BuildDefaultSqliteConnectionString(dataDirectory);
 
-        services.AddDataProtection()
+        var dataProtectionBuilder = services.AddDataProtection()
             .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory))
             .SetApplicationName("BrassLedger");
+
+        if (OperatingSystem.IsWindows())
+        {
+            dataProtectionBuilder.ProtectKeysWithDpapi(protectToLocalMachine: true);
+        }
 
         services.AddDbContextFactory<BrassLedgerDbContext>(options =>
         {

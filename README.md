@@ -2,7 +2,7 @@
 
 BrassLedger is an open-source cross-platform accounting and business management system for organizations that need general ledger, receivables, payables, payroll, projects, reporting, tax workflows, and printable business forms in one application.
 
-The current public prerelease is `v0.1.0-pre.1`.
+The current public prerelease is `v0.1.0-pre.5`.
 
 License: `GPL-3.0-only`. See [LICENSE](LICENSE).
 
@@ -35,7 +35,7 @@ Current prerelease installers are available for:
 - macOS Apple silicon
 - Linux `amd64`
 
-On first launch of a brand-new installation, BrassLedger now opens a first-time setup flow so you can create the initial company and administrator account without editing configuration files by hand.
+On first launch of a brand-new installation, BrassLedger opens a first-time setup flow so you can create the initial company and administrator account without editing configuration files by hand. Installed desktop launches also choose an available local loopback port automatically, so they do not depend on `127.0.0.1:5000` being free.
 
 ## How to use BrassLedger
 
@@ -80,7 +80,7 @@ The current application includes:
 - protection of sensitive fields at rest with ASP.NET Core Data Protection
 - persisted application key material under `App_Data\keys`
 - security headers in the web application and API
-- bootstrap administrator requirements for first non-development startup
+- first-run administrator setup through the built-in setup flow for non-development installs
 
 Before live production use, administrators should still review operational backup, recovery, secrets management, access control, and deployment procedures.
 

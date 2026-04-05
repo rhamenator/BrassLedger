@@ -19,6 +19,7 @@ Get the installer that matches your operating system from the current prerelease
 2. Run the installer.
 3. Keep the default install directory unless you have a deployment reason to change it.
 4. Start BrassLedger from the Start menu or desktop shortcut.
+5. BrassLedger will open in your default browser after the local workspace starts.
 
 ### macOS
 
@@ -47,16 +48,20 @@ BrassLedger runs as a local web application. On first launch:
 3. Confirm the company, tax identifier, base currency, and fiscal settings are correct.
 4. Review the dashboard totals before entering live work.
 
+The installed application chooses an available local loopback port automatically. If another program is already using one local web port, BrassLedger will move to another free local port instead of failing to start.
+
 ## Initial setup notes
 
-For a brand-new non-development installation, the deployer must provide:
+For a typical new installation, no manual bootstrap configuration is required. Complete the built-in first-time setup page instead.
+
+Optional advanced deployments can still preconfigure these values through configuration:
 
 - `Bootstrap:AdminPassword`
-- optionally `Bootstrap:CompanyName`
-- optionally `Bootstrap:LegalName`
-- optionally `Bootstrap:AdminUserName`
-- optionally `Bootstrap:AdminDisplayName`
-- optionally `Bootstrap:AdminEmail`
+- `Bootstrap:CompanyName`
+- `Bootstrap:LegalName`
+- `Bootstrap:AdminUserName`
+- `Bootstrap:AdminDisplayName`
+- `Bootstrap:AdminEmail`
 
 ## First-day walkthrough
 
