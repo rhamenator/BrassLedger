@@ -1,6 +1,6 @@
 # BrassLedger
 
-This folder now contains a compileable cross-platform .NET application shell for the new open-source accounting platform.
+This repository contains a compileable cross-platform .NET application shell an open-source accounting platform.
 
 License: `GPL-3.0-only`. See [LICENSE](LICENSE).
 
