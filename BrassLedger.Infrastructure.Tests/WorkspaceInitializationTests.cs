@@ -117,16 +117,21 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
-    public async Task InitializeBrassLedgerAsync_InNonDevelopmentMode_RequiresBootstrapPassword()
+    public async Task InitializeBrassLedgerAsync_InNonDevelopmentMode_AllowsFirstRunWithoutBootstrapPassword()
     {
         var configuration = new ConfigurationBuilder().Build();
         var serviceCollection = new ServiceCollection();
         serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: false);
 
         using var services = serviceCollection.BuildServiceProvider();
+        await services.InitializeBrassLedgerAsync();
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => services.InitializeBrassLedgerAsync());
-        Assert.Contains("Bootstrap:AdminPassword", exception.Message, StringComparison.Ordinal);
+        await using var scope = services.CreateAsyncScope();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+
+        Assert.False(await dbContext.Companies.AnyAsync());
+        Assert.False(await dbContext.Users.AnyAsync());
     }
 
     [Fact]

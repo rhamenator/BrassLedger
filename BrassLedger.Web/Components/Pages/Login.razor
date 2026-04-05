@@ -3,6 +3,7 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject NavigationManager NavigationManager
 @inject Microsoft.Extensions.Options.IOptions<BrassLedger.Infrastructure.Persistence.BootstrapOptions> BootstrapOptions
+@inject BrassLedger.Infrastructure.Persistence.IBootstrapWorkspaceService BootstrapWorkspaceService
 
 <PageTitle>Sign In</PageTitle>
 
@@ -86,6 +87,12 @@
 
     protected override async Task OnInitializedAsync()
     {
+        if (await BootstrapWorkspaceService.RequiresSetupAsync())
+        {
+            NavigationManager.NavigateTo("/setup", forceLoad: true);
+            return;
+        }
+
         var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         IsAuthenticated = authenticationState.User.Identity?.IsAuthenticated == true;
     }

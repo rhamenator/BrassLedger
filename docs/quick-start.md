@@ -42,8 +42,8 @@ sudo dpkg -i brassledger_<version>_amd64.deb
 
 BrassLedger runs as a local web application. On first launch:
 
-1. Open the sign-in page.
-2. Sign in with the administrator account created during setup.
+1. If the workspace has not been configured yet, complete the first-time setup page to create your company and administrator account.
+2. If the workspace is already configured, open the sign-in page and sign in with the administrator account created during setup.
 3. Confirm the company, tax identifier, base currency, and fiscal settings are correct.
 4. Review the dashboard totals before entering live work.
 

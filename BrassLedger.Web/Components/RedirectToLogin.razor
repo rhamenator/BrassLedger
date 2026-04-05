@@ -1,4 +1,5 @@
 @inject NavigationManager NavigationManager
+@inject BrassLedger.Infrastructure.Persistence.IBootstrapWorkspaceService BootstrapWorkspaceService
 
 <section class="panel">
     <p class="eyebrow">Authentication Required</p>
@@ -9,7 +10,7 @@
 </section>
 
 @code {
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender)
         {
@@ -18,6 +19,10 @@
 
         var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
         var targetPath = string.IsNullOrWhiteSpace(relativePath) ? "/" : $"/{relativePath}";
-        NavigationManager.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(targetPath)}", forceLoad: true);
+        var destination = await BootstrapWorkspaceService.RequiresSetupAsync()
+            ? "/setup"
+            : $"/login?returnUrl={Uri.EscapeDataString(targetPath)}";
+
+        NavigationManager.NavigateTo(destination, forceLoad: true);
     }
 }

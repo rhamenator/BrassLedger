@@ -35,6 +35,8 @@ Current prerelease installers are available for:
 - macOS Apple silicon
 - Linux `amd64`
 
+On first launch of a brand-new installation, BrassLedger now opens a first-time setup flow so you can create the initial company and administrator account without editing configuration files by hand.
+
 ## How to use BrassLedger
 
 Start with these guides:

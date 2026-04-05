@@ -235,8 +235,7 @@ internal static class BrassLedgerSeedData
     {
         if (string.IsNullOrWhiteSpace(bootstrapOptions.AdminPassword))
         {
-            throw new InvalidOperationException(
-                "Bootstrap configuration is required for a non-development first run. Set Bootstrap:AdminPassword before starting BrassLedger.");
+            return;
         }
 
         var companyId = Guid.NewGuid();

@@ -58,6 +58,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISensitiveDataProtector, SensitiveDataProtector>();
         services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
         services.AddScoped<IUserAuthenticationService, UserAuthenticationService>();
+        services.AddScoped<IBootstrapWorkspaceService, BootstrapWorkspaceService>();
         services.AddScoped<IBusinessWorkspaceService, BusinessWorkspaceService>();
         services.AddSingleton<IProductCatalogService, StaticProductCatalogService>();
 

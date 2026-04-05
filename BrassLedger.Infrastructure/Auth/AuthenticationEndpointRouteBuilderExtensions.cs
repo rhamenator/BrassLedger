@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using BrassLedger.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -13,11 +14,13 @@ public static class AuthenticationEndpointRouteBuilderExtensions
     {
         Delegate formLoginHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleFormLoginAsync;
         Delegate formLogoutHandler = (Func<HttpContext, Task<IResult>>)HandleFormLogoutAsync;
+        Delegate bootstrapHandler = (Func<HttpContext, IBootstrapWorkspaceService, Task<IResult>>)HandleBootstrapAsync;
         Delegate apiLoginHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleApiLoginAsync;
         Delegate apiLogoutHandler = (Func<HttpContext, Task<IResult>>)HandleApiLogoutAsync;
 
         endpoints.MapPost("/account/login", formLoginHandler).AllowAnonymous();
         endpoints.MapPost("/account/logout", formLogoutHandler).RequireAuthorization();
+        endpoints.MapPost("/account/bootstrap", bootstrapHandler).AllowAnonymous();
 
         endpoints.MapPost("/api/auth/login", apiLoginHandler).AllowAnonymous();
         endpoints.MapPost("/api/auth/logout", apiLogoutHandler).RequireAuthorization();
@@ -90,6 +93,40 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             CreateAuthenticationProperties());
 
         return Results.Ok(ToResponse(authenticationResult.User));
+    }
+
+    private static async Task<IResult> HandleBootstrapAsync(HttpContext context, IBootstrapWorkspaceService bootstrapWorkspaceService)
+    {
+        var form = await context.Request.ReadFormAsync();
+        var request = new BootstrapWorkspaceRequest(
+            form["companyName"].ToString(),
+            form["legalName"].ToString(),
+            form["taxId"].ToString(),
+            form["baseCurrency"].ToString(),
+            int.TryParse(form["fiscalYearStartMonth"], out var fiscalMonth) ? fiscalMonth : 1,
+            form["adminUserName"].ToString(),
+            form["adminDisplayName"].ToString(),
+            form["adminEmail"].ToString(),
+            form["adminPassword"].ToString());
+
+        var result = await bootstrapWorkspaceService.CreateInitialWorkspaceAsync(request, context.RequestAborted);
+        if (result.Outcome == BootstrapWorkspaceOutcome.AlreadyConfigured)
+        {
+            return Results.LocalRedirect("/login");
+        }
+
+        if (result.Outcome == BootstrapWorkspaceOutcome.Invalid || result.User is null)
+        {
+            var message = Uri.EscapeDataString(result.ErrorMessage);
+            return Results.LocalRedirect($"/setup?error={message}");
+        }
+
+        await context.SignInAsync(
+            BrassLedgerAuthenticationDefaults.Scheme,
+            CreatePrincipal(result.User),
+            CreateAuthenticationProperties());
+
+        return Results.LocalRedirect("/");
     }
 
     private static async Task<IResult> HandleFormLogoutAsync(HttpContext context)

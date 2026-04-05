@@ -1,0 +1,110 @@
+@page "/setup"
+@attribute [AllowAnonymous]
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+@inject BrassLedger.Infrastructure.Persistence.IBootstrapWorkspaceService BootstrapWorkspaceService
+
+<PageTitle>First-Time Setup</PageTitle>
+
+@if (!RequiresSetup)
+{
+    <section class="auth-shell">
+        <article class="auth-card">
+            <p class="eyebrow">Setup Complete</p>
+            <h1>BrassLedger is already configured.</h1>
+            <p class="page-intro">
+                This workspace already has a company and administrator account. Continue to sign-in to access the application.
+            </p>
+            <a class="action-primary" href="/login">Go to sign-in</a>
+        </article>
+    </section>
+}
+else
+{
+    <section class="auth-shell">
+        <article class="auth-card">
+            <p class="eyebrow">First-Time Setup</p>
+            <h1>Set up your company and administrator account.</h1>
+            <p class="page-intro">
+                BrassLedger needs one company and one administrator account before the workspace can open for normal use.
+            </p>
+
+            @if (!string.IsNullOrWhiteSpace(Error))
+            {
+                <div class="auth-error" role="alert">@Error</div>
+            }
+
+            <form class="auth-form" method="post" action="/account/bootstrap">
+                <AntiforgeryToken />
+
+                <div class="field-group">
+                    <label class="field-label" for="companyName">Company name</label>
+                    <input id="companyName" class="field-input" name="companyName" autocomplete="organization" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="legalName">Legal name</label>
+                    <input id="legalName" class="field-input" name="legalName" autocomplete="organization" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="taxId">Tax ID</label>
+                    <input id="taxId" class="field-input" name="taxId" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="baseCurrency">Base currency</label>
+                    <input id="baseCurrency" class="field-input" name="baseCurrency" value="USD" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="fiscalYearStartMonth">Fiscal year start month</label>
+                    <input id="fiscalYearStartMonth" class="field-input" name="fiscalYearStartMonth" type="number" min="1" max="12" value="1" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="adminUserName">Administrator username</label>
+                    <input id="adminUserName" class="field-input" name="adminUserName" autocomplete="username" value="admin" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="adminDisplayName">Administrator display name</label>
+                    <input id="adminDisplayName" class="field-input" name="adminDisplayName" autocomplete="name" value="System Administrator" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="adminEmail">Administrator email</label>
+                    <input id="adminEmail" class="field-input" name="adminEmail" autocomplete="email" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="adminPassword">Administrator password</label>
+                    <input id="adminPassword" class="field-input" name="adminPassword" type="password" autocomplete="new-password" />
+                </div>
+
+                <button class="action-primary" type="submit">Create workspace</button>
+            </form>
+        </article>
+    </section>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private bool RequiresSetup { get; set; } = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        RequiresSetup = await BootstrapWorkspaceService.RequiresSetupAsync();
+
+        if (!RequiresSetup)
+        {
+            var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            if (authenticationState.User.Identity?.IsAuthenticated == true)
+            {
+                NavigationManager.NavigateTo("/", forceLoad: true);
+            }
+        }
+    }
+}
