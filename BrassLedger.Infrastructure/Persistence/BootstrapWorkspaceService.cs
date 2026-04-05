@@ -1,4 +1,5 @@
 using BrassLedger.Domain.Accounting;
+using BrassLedger.Infrastructure.SecurityAdministration;
 using BrassLedger.Infrastructure.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -46,6 +47,13 @@ public sealed class BootstrapWorkspaceService(
             FiscalYearStartMonth = request.FiscalYearStartMonth
         };
 
+        await dbContext.Companies.AddAsync(company, cancellationToken);
+        await SecurityAdministrationService.EnsureBuiltInRolesAsync(dbContext, companyId, cancellationToken);
+
+        var adminRole = await dbContext.AccessRoles
+            .AsNoTracking()
+            .SingleAsync(role => role.CompanyId == companyId && role.Name == "Administrator", cancellationToken);
+
         var adminUser = new AppUser
         {
             Id = Guid.NewGuid(),
@@ -54,14 +62,13 @@ public sealed class BootstrapWorkspaceService(
             DisplayName = request.AdminDisplayName.Trim(),
             Email = request.AdminEmail.Trim(),
             SecurityStamp = Guid.NewGuid().ToString("N"),
-            Role = "Administrator",
+            Role = adminRole.Name,
             IsActive = true,
             LastPasswordChangedUtc = DateTimeOffset.UtcNow
         };
 
         adminUser.PasswordHash = passwordHasher.HashPassword(adminUser, request.AdminPassword);
 
-        await dbContext.Companies.AddAsync(company, cancellationToken);
         await dbContext.Users.AddAsync(adminUser, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -72,7 +79,8 @@ public sealed class BootstrapWorkspaceService(
             adminUser.DisplayName,
             adminUser.Email,
             adminUser.Role,
-            adminUser.SecurityStamp));
+            adminUser.SecurityStamp,
+            adminRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
     }
 
     private static string Validate(BootstrapWorkspaceRequest request)
@@ -107,6 +115,11 @@ public sealed class BootstrapWorkspaceService(
             return "Choose an administrator password with at least 12 characters.";
         }
 
+        if (!string.Equals(request.AdminPassword, request.ConfirmAdminPassword, StringComparison.Ordinal))
+        {
+            return "The administrator password confirmation does not match.";
+        }
+
         if (request.FiscalYearStartMonth is < 1 or > 12)
         {
             return "Fiscal year start month must be between 1 and 12.";
@@ -125,7 +138,8 @@ public sealed record BootstrapWorkspaceRequest(
     string AdminUserName,
     string AdminDisplayName,
     string AdminEmail,
-    string AdminPassword);
+    string AdminPassword,
+    string ConfirmAdminPassword);
 
 public sealed record BootstrapWorkspaceResult(
     BootstrapWorkspaceOutcome Outcome,

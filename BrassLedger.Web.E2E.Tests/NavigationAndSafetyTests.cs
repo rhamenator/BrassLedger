@@ -21,7 +21,7 @@ public sealed class NavigationAndSafetyTests
 
         var routes = new (string Path, string Heading)[]
         {
-            ("/", "Brass Ledger Manufacturing is live as a real multi-module workspace."),
+            ("/", "Brass Ledger Manufacturing runs finance, operations, payroll, reporting, and tax work in one place."),
             ("/modules", "Every legacy module is open to every user."),
             ("/ledger", "Core accounting balances and posting history."),
             ("/receivables", "Customers, invoices, and open-balance follow-up."),

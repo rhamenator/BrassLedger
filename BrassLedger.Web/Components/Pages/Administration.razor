@@ -1,0 +1,249 @@
+@page "/administration"
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.AdministerSystem)]
+@inject ISecurityAdministrationService SecurityAdministrationService
+
+<PageTitle>Administration</PageTitle>
+
+@if (Snapshot is null)
+{
+    <section class="panel">
+        <h1>Loading administration workspace...</h1>
+        <p>Role templates, operators, and security settings are being prepared.</p>
+    </section>
+}
+else
+{
+    <section class="page-shell">
+        <section class="hero">
+            <div class="hero-copy">
+                <p class="eyebrow">Administration</p>
+                <h1>Define role templates, separate duties, and prepare replacement access before it becomes urgent.</h1>
+                <p class="hero-text">
+                    Administrator and Owner/CEO keep full access, while prepared templates split requisitioning,
+                    purchasing, check disbursement, payroll, and reporting into distinct duties.
+                </p>
+            </div>
+
+            <aside class="hero-panel">
+                <p class="panel-kicker">Security snapshot</p>
+                <ul class="metric-stack">
+                    <li><strong>@Snapshot.Roles.Count</strong><span>Active roles</span></li>
+                    <li><strong>@Snapshot.Operators.Count</strong><span>Operator accounts</span></li>
+                    <li><strong>@Snapshot.Permissions.Count</strong><span>Permission flags</span></li>
+                </ul>
+            </aside>
+        </section>
+
+        @if (!string.IsNullOrWhiteSpace(StatusMessage))
+        {
+            <section class="panel">
+                <p class="lead">@StatusMessage</p>
+            </section>
+        }
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Role templates</h2>
+                <div class="module-grid">
+                    @foreach (var role in Snapshot.Roles)
+                    {
+                        <article class="module-card">
+                            <span class="module-code">@(role.IsSystemRole ? "SYS" : "CUS")</span>
+                            <h3>@role.Name</h3>
+                            <p class="module-area">@role.Description</p>
+                            <p><strong>@role.AssignedUserCount</strong> assigned</p>
+                            <ul class="feature-list">
+                                @foreach (var permission in role.Permissions)
+                                {
+                                    <li>@PermissionLabels.GetValueOrDefault(permission, permission)</li>
+                                }
+                            </ul>
+                        </article>
+                    }
+                </div>
+            </article>
+
+            <article class="panel">
+                <h2>Create custom role</h2>
+                <EditForm Model="RoleForm" OnSubmit="CreateRoleAsync">
+                    <div class="auth-form">
+                        <div class="field-group">
+                            <label class="field-label" for="roleName">Role name</label>
+                            <InputText id="roleName" class="field-input" @bind-Value="RoleForm.Name" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="roleDescription">Description</label>
+                            <InputText id="roleDescription" class="field-input" @bind-Value="RoleForm.Description" />
+                        </div>
+
+                        <div class="field-group">
+                            <span class="field-label">Permissions</span>
+                            <div class="feature-list">
+                                @foreach (var permission in Snapshot.Permissions)
+                                {
+                                    <label>
+                                        <input
+                                            type="checkbox"
+                                            checked="@RoleForm.Permissions.Contains(permission.Code)"
+                                            @onchange="args => TogglePermission(permission.Code, args.Value)" />
+                                        @permission.Name
+                                    </label>
+                                }
+                            </div>
+                        </div>
+
+                        <button class="action-primary" type="submit">Save custom role</button>
+                    </div>
+                </EditForm>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Operators</h2>
+                <div class="detail-grid">
+                    @foreach (var user in Snapshot.Operators)
+                    {
+                        <div>
+                            <span class="detail-label">@user.Role</span>
+                            <strong>@user.DisplayName</strong>
+                            <p>@user.UserName · @user.Email</p>
+                        </div>
+                    }
+                </div>
+            </article>
+
+            <article class="panel">
+                <h2>Create operator</h2>
+                <EditForm Model="OperatorForm" OnSubmit="CreateOperatorAsync">
+                    <div class="auth-form">
+                        <div class="field-group">
+                            <label class="field-label" for="userName">Username</label>
+                            <InputText id="userName" class="field-input" @bind-Value="OperatorForm.UserName" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="displayName">Display name</label>
+                            <InputText id="displayName" class="field-input" @bind-Value="OperatorForm.DisplayName" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="email">Email</label>
+                            <InputText id="email" class="field-input" @bind-Value="OperatorForm.Email" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="role">Role</label>
+                            <InputSelect id="role" class="field-input" @bind-Value="OperatorForm.RoleName">
+                                <option value="">Select a role</option>
+                                @foreach (var role in Snapshot.Roles)
+                                {
+                                    <option value="@role.Name">@role.Name</option>
+                                }
+                            </InputSelect>
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="password">Password</label>
+                            <InputText id="password" class="field-input" type="password" @bind-Value="OperatorForm.Password" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="confirmPassword">Confirm password</label>
+                            <InputText id="confirmPassword" class="field-input" type="password" @bind-Value="OperatorForm.ConfirmPassword" />
+                        </div>
+
+                        <button class="action-primary" type="submit">Create operator</button>
+                    </div>
+                </EditForm>
+            </article>
+        </section>
+    </section>
+}
+
+@code {
+    private SecurityAdministrationSnapshot? Snapshot;
+    private string? StatusMessage;
+    private CreateRoleForm RoleForm { get; set; } = new();
+    private CreateOperatorForm OperatorForm { get; set; } = new();
+    private Dictionary<string, string> PermissionLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadSnapshotAsync();
+    }
+
+    private async Task CreateRoleAsync(EditContext _)
+    {
+        var result = await SecurityAdministrationService.CreateRoleAsync(
+            new CreateAccessRoleRequest(RoleForm.Name, RoleForm.Description, RoleForm.Permissions.ToArray()));
+
+        StatusMessage = result.Succeeded ? "Custom role saved." : result.ErrorMessage;
+        if (result.Succeeded)
+        {
+            RoleForm = new CreateRoleForm();
+            await ReloadSnapshotAsync();
+        }
+    }
+
+    private async Task CreateOperatorAsync(EditContext _)
+    {
+        var result = await SecurityAdministrationService.CreateOperatorAsync(
+            new CreateOperatorRequest(
+                OperatorForm.UserName,
+                OperatorForm.DisplayName,
+                OperatorForm.Email,
+                OperatorForm.Password,
+                OperatorForm.ConfirmPassword,
+                OperatorForm.RoleName));
+
+        StatusMessage = result.Succeeded ? "Operator account created." : result.ErrorMessage;
+        if (result.Succeeded)
+        {
+            OperatorForm = new CreateOperatorForm();
+            await ReloadSnapshotAsync();
+        }
+    }
+
+    private void TogglePermission(string permissionCode, object? value)
+    {
+        var selected = value switch
+        {
+            bool boolValue => boolValue,
+            string stringValue => string.Equals(stringValue, "true", StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
+        if (selected)
+        {
+            RoleForm.Permissions.Add(permissionCode);
+        }
+        else
+        {
+            RoleForm.Permissions.Remove(permissionCode);
+        }
+    }
+
+    private async Task ReloadSnapshotAsync()
+    {
+        Snapshot = await SecurityAdministrationService.GetSnapshotAsync();
+        PermissionLabels = Snapshot.Permissions.ToDictionary(permission => permission.Code, permission => permission.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class CreateRoleForm
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public HashSet<string> Permissions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class CreateOperatorForm
+    {
+        public string UserName { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string RoleName { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public string ConfirmPassword { get; set; } = string.Empty;
+    }
+}

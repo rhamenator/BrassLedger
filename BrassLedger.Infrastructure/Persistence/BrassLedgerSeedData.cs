@@ -1,5 +1,6 @@
 using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
+using BrassLedger.Infrastructure.SecurityAdministration;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,6 +18,11 @@ internal static class BrassLedgerSeedData
     {
         if (await dbContext.Companies.AnyAsync(cancellationToken))
         {
+            foreach (var companyId in await dbContext.Companies.Select(company => company.Id).ToListAsync(cancellationToken))
+            {
+                await SecurityAdministrationService.EnsureBuiltInRolesAsync(dbContext, companyId, cancellationToken);
+            }
+
             if (bootstrapOptions.SeedSampleData)
             {
                 await EnsureSeedUserCredentialsAsync(dbContext, passwordHasher, cancellationToken);
@@ -43,9 +49,9 @@ internal static class BrassLedgerSeedData
         var users = new[]
         {
             CreateSeedUser(passwordHasher, Guid.Parse("535e60cf-7572-4dca-8328-fda4a470cdb9"), "controller", "Erin Dorsey", "erin@brassledger.local", "Controller"),
-            CreateSeedUser(passwordHasher, Guid.Parse("a1d1c1de-af10-49f5-a2c4-e40bc060f9f6"), "operations", "Marco Patel", "marco@brassledger.local", "Operations"),
-            CreateSeedUser(passwordHasher, Guid.Parse("9fc1ab25-5f42-4230-b8a5-c4df814dcb7d"), "payroll", "June Ellis", "june@brassledger.local", "Payroll"),
-            CreateSeedUser(passwordHasher, Guid.Parse("c77634df-9bc0-4cac-b57d-bf7b8df7f604"), "sales", "Noah Bennett", "noah@brassledger.local", "Sales")
+            CreateSeedUser(passwordHasher, Guid.Parse("a1d1c1de-af10-49f5-a2c4-e40bc060f9f6"), "operations", "Marco Patel", "marco@brassledger.local", "Purchasing Manager"),
+            CreateSeedUser(passwordHasher, Guid.Parse("9fc1ab25-5f42-4230-b8a5-c4df814dcb7d"), "payroll", "June Ellis", "june@brassledger.local", "Payroll Manager"),
+            CreateSeedUser(passwordHasher, Guid.Parse("c77634df-9bc0-4cac-b57d-bf7b8df7f604"), "sales", "Noah Bennett", "noah@brassledger.local", "Requisitioning Clerk")
         };
 
         var accounts = new[]
@@ -181,6 +187,7 @@ internal static class BrassLedgerSeedData
         };
 
         await dbContext.Companies.AddAsync(company, cancellationToken);
+        await SecurityAdministrationService.EnsureBuiltInRolesAsync(dbContext, CompanyId, cancellationToken);
         await dbContext.Users.AddRangeAsync(users, cancellationToken);
         await dbContext.Accounts.AddRangeAsync(accounts, cancellationToken);
         await dbContext.Customers.AddRangeAsync(customers, cancellationToken);
@@ -249,6 +256,9 @@ internal static class BrassLedgerSeedData
             FiscalYearStartMonth = bootstrapOptions.FiscalYearStartMonth
         };
 
+        await dbContext.Companies.AddAsync(company, cancellationToken);
+        await SecurityAdministrationService.EnsureBuiltInRolesAsync(dbContext, companyId, cancellationToken);
+
         var adminUser = new AppUser
         {
             Id = Guid.NewGuid(),
@@ -264,7 +274,6 @@ internal static class BrassLedgerSeedData
 
         adminUser.PasswordHash = passwordHasher.HashPassword(adminUser, bootstrapOptions.AdminPassword);
 
-        await dbContext.Companies.AddAsync(company, cancellationToken);
         await dbContext.Users.AddAsync(adminUser, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -277,9 +286,9 @@ internal static class BrassLedgerSeedData
         var knownUsers = new Dictionary<string, (string UserName, string Role)>(StringComparer.OrdinalIgnoreCase)
         {
             ["erin@brassledger.local"] = ("controller", "Controller"),
-            ["marco@brassledger.local"] = ("operations", "Operations"),
-            ["june@brassledger.local"] = ("payroll", "Payroll"),
-            ["noah@brassledger.local"] = ("sales", "Sales")
+            ["marco@brassledger.local"] = ("operations", "Purchasing Manager"),
+            ["june@brassledger.local"] = ("payroll", "Payroll Manager"),
+            ["noah@brassledger.local"] = ("sales", "Requisitioning Clerk")
         };
 
         var users = await dbContext.Users.ToListAsync(cancellationToken);
@@ -298,7 +307,7 @@ internal static class BrassLedgerSeedData
                 hasChanges = true;
             }
 
-            if (string.IsNullOrWhiteSpace(user.Role))
+            if (!string.Equals(user.Role, definition.Role, StringComparison.Ordinal))
             {
                 user.Role = definition.Role;
                 hasChanges = true;

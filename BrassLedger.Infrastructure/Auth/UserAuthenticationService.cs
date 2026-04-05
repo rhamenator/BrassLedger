@@ -115,6 +115,8 @@ public sealed class UserAuthenticationService(
             "The operator signed in successfully.",
             cancellationToken);
 
+        var permissions = await ResolvePermissionsAsync(dbContext, user, cancellationToken);
+
         return new AuthenticationResult(AuthenticationOutcome.Succeeded, new AuthenticatedUser(
             user.Id,
             user.CompanyId,
@@ -122,7 +124,8 @@ public sealed class UserAuthenticationService(
             user.DisplayName,
             user.Email,
             user.Role,
-            user.SecurityStamp));
+            user.SecurityStamp,
+            permissions));
     }
 
     private static string EnsureSecurityStamp(string currentSecurityStamp)
@@ -130,6 +133,36 @@ public sealed class UserAuthenticationService(
         return string.IsNullOrWhiteSpace(currentSecurityStamp)
             ? Guid.NewGuid().ToString("N")
             : currentSecurityStamp;
+    }
+
+    private static async Task<IReadOnlyList<string>> ResolvePermissionsAsync(
+        BrassLedgerDbContext dbContext,
+        AppUser user,
+        CancellationToken cancellationToken)
+    {
+        var accessRole = await dbContext.AccessRoles
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                candidate => candidate.CompanyId == user.CompanyId
+                    && candidate.IsActive
+                    && candidate.Name == user.Role,
+                cancellationToken);
+
+        if (accessRole is not null)
+        {
+            return ParsePermissions(accessRole.Permissions);
+        }
+
+        return BrassLedgerRoleTemplates.GetPermissionsForRoleName(user.Role);
+    }
+
+    private static IReadOnlyList<string> ParsePermissions(string permissions)
+    {
+        return permissions
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(permission => permission, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static async Task WriteAuditEntryAsync(

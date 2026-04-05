@@ -20,11 +20,11 @@ else
 {
     <section class="hero">
         <div class="hero-copy">
-            <p class="eyebrow">Open-source Accounting Remake</p>
-            <h1>@Workspace.Company.Name is live as a real multi-module workspace.</h1>
+            <p class="eyebrow">Open-source accounting platform</p>
+            <h1>@Workspace.Company.Name runs finance, operations, payroll, reporting, and tax work in one place.</h1>
             <p class="hero-text">
-                The shell is now backed by a seeded ledger, receivables, payables, operations, payroll, projects,
-                reporting, and tax dataset so we can keep replacing the legacy estate with working code.
+                BrassLedger brings the daily accounting workspace, printable business output, and operational visibility
+                together without product gating, subscription walls, or proprietary infrastructure assumptions.
             </p>
 
             <div class="hero-actions">
@@ -82,7 +82,7 @@ else
             </article>
 
             <article class="panel">
-                <h2>Architecture stance</h2>
+                <h2>Platform stance</h2>
                 <p class="lead">@assessment.RecommendedArchitecture</p>
                 <p><strong>Primary database:</strong> @assessment.RecommendedDatabase</p>
                 <p><strong>Legacy data strategy:</strong> @assessment.LegacyDataStrategy</p>
@@ -101,7 +101,7 @@ else
             </article>
 
             <article class="panel">
-                <h2>Current principles</h2>
+                <h2>Operating principles</h2>
                 <ul class="feature-list">
                     @foreach (var item in assessment.ProductPrinciples)
                     {
@@ -112,7 +112,7 @@ else
         </section>
 
         <section class="panel">
-            <h2>Live module footing</h2>
+            <h2>Active module footprint</h2>
             <div class="module-grid">
                 @foreach (var module in Workspace.Modules.Take(6))
                 {

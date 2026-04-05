@@ -7,4 +7,5 @@ public sealed record AuthenticatedUser(
     string DisplayName,
     string Email,
     string Role,
-    string SecurityStamp);
+    string SecurityStamp,
+    IReadOnlyList<string> Permissions);

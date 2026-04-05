@@ -5,7 +5,9 @@ using BrassLedger.Application.Accounting;
 using BrassLedger.Application.Catalog;
 using BrassLedger.Infrastructure.Accounting;
 using BrassLedger.Infrastructure.Catalog;
+using BrassLedger.Infrastructure.SecurityAdministration;
 using BrassLedger.Infrastructure.Security;
+using BrassLedger.Application.Security;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -65,6 +67,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserAuthenticationService, UserAuthenticationService>();
         services.AddScoped<IBootstrapWorkspaceService, BootstrapWorkspaceService>();
         services.AddScoped<IBusinessWorkspaceService, BusinessWorkspaceService>();
+        services.AddScoped<ISecurityAdministrationService, SecurityAdministrationService>();
+        services.AddScoped<IFakeDataPopulationService, FakeDataPopulationService>();
         services.AddSingleton<IProductCatalogService, StaticProductCatalogService>();
 
         return services;
@@ -159,6 +163,21 @@ public static class ServiceCollectionExtensions
     {
         if (dbContext.Database.IsSqlite())
         {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                @"CREATE TABLE IF NOT EXISTS ""AccessRoles"" (
+                    ""Id"" TEXT NOT NULL CONSTRAINT ""PK_AccessRoles"" PRIMARY KEY,
+                    ""CompanyId"" TEXT NOT NULL,
+                    ""Name"" TEXT NOT NULL,
+                    ""Description"" TEXT NOT NULL,
+                    ""TemplateCode"" TEXT NOT NULL,
+                    ""Permissions"" TEXT NOT NULL,
+                    ""IsSystemRole"" INTEGER NOT NULL,
+                    ""IsActive"" INTEGER NOT NULL
+                );",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccessRoles_CompanyId_Name"" ON ""AccessRoles"" (""CompanyId"", ""Name"");",
+                cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Users", "UserName", @"ALTER TABLE ""Users"" ADD COLUMN ""UserName"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Users", "PasswordHash", @"ALTER TABLE ""Users"" ADD COLUMN ""PasswordHash"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Users", "SecurityStamp", @"ALTER TABLE ""Users"" ADD COLUMN ""SecurityStamp"" TEXT NOT NULL DEFAULT '';", cancellationToken);
@@ -186,6 +205,21 @@ public static class ServiceCollectionExtensions
 
         if (dbContext.Database.IsNpgsql())
         {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                @"CREATE TABLE IF NOT EXISTS ""AccessRoles"" (
+                    ""Id"" uuid NOT NULL PRIMARY KEY,
+                    ""CompanyId"" uuid NOT NULL,
+                    ""Name"" text NOT NULL,
+                    ""Description"" text NOT NULL,
+                    ""TemplateCode"" text NOT NULL,
+                    ""Permissions"" text NOT NULL,
+                    ""IsSystemRole"" boolean NOT NULL,
+                    ""IsActive"" boolean NOT NULL
+                );",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccessRoles_CompanyId_Name"" ON ""AccessRoles"" (""CompanyId"", ""Name"");",
+                cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "UserName" text NOT NULL DEFAULT '';""",
                 cancellationToken);

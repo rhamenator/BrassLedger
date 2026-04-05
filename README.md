@@ -2,7 +2,7 @@
 
 BrassLedger is an open-source cross-platform accounting and business management system for organizations that need general ledger, receivables, payables, payroll, projects, reporting, tax workflows, and printable business forms in one application.
 
-The current public prerelease is `v0.1.0-pre.5`.
+The current public prerelease is `v0.1.0-pre.6`.
 
 License: `GPL-3.0-only`. See [LICENSE](LICENSE).
 

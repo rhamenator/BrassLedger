@@ -27,6 +27,8 @@ else
             <h1>Set up your company and administrator account.</h1>
             <p class="page-intro">
                 BrassLedger needs one company and one administrator account before the workspace can open for normal use.
+                Built-in role templates for Administrator, Owner/CEO, requisitioning, purchasing, cash disbursement,
+                payroll, and other duties will be ready as soon as setup finishes.
             </p>
 
             @if (!string.IsNullOrWhiteSpace(Error))
@@ -80,6 +82,11 @@ else
                 <div class="field-group">
                     <label class="field-label" for="adminPassword">Administrator password</label>
                     <input id="adminPassword" class="field-input" name="adminPassword" type="password" autocomplete="new-password" />
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="confirmAdminPassword">Confirm administrator password</label>
+                    <input id="confirmAdminPassword" class="field-input" name="confirmAdminPassword" type="password" autocomplete="new-password" />
                 </div>
 
                 <button class="action-primary" type="submit">Create workspace</button>

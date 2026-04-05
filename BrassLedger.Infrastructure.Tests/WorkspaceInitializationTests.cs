@@ -92,6 +92,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.NotNull(authenticationResult.User);
         Assert.Equal("Controller", authenticationResult.User!.Role);
         Assert.Equal("controller", authenticationResult.User.UserName);
+        Assert.Contains(BrassLedgerPermissions.LedgerManage, authenticationResult.User.Permissions);
+        Assert.DoesNotContain(BrassLedgerPermissions.RoleManage, authenticationResult.User.Permissions);
     }
 
     [Fact]
@@ -166,10 +168,63 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(AuthenticationOutcome.Succeeded, authenticationResult.Outcome);
         Assert.NotNull(authenticationResult.User);
         Assert.Equal("Administrator", authenticationResult.User!.Role);
+        Assert.Contains(BrassLedgerPermissions.RoleManage, authenticationResult.User.Permissions);
+        Assert.Contains(BrassLedgerPermissions.UserManage, authenticationResult.User.Permissions);
 
         var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
         Assert.Equal("Northwind Fabrication", workspace.Company.Name);
         Assert.Equal(1, workspace.Company.ActiveUsers);
+    }
+
+    [Fact]
+    public async Task InitializeBrassLedgerAsync_SeedsBuiltInAccessRoles()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+
+        using var scope = services.CreateScope();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+
+        var roles = await dbContext.AccessRoles
+            .AsNoTracking()
+            .OrderBy(role => role.Name)
+            .ToListAsync();
+
+        Assert.Contains(roles, role => role.Name == "Administrator" && role.IsSystemRole);
+        Assert.Contains(roles, role => role.Name == "Owner/CEO" && role.IsSystemRole);
+        Assert.Contains(roles, role => role.Name == "Requisitioning Clerk");
+        Assert.Contains(roles, role => role.Name == "Purchasing Manager");
+        Assert.Contains(roles, role => role.Name == "Cash Disbursements");
+    }
+
+    [Fact]
+    public async Task CreateInitialWorkspaceAsync_RejectsMismatchedPasswordConfirmation()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: false);
+
+        using var services = serviceCollection.BuildServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+
+        using var scope = services.CreateScope();
+        var bootstrapService = scope.ServiceProvider.GetRequiredService<IBootstrapWorkspaceService>();
+
+        var result = await bootstrapService.CreateInitialWorkspaceAsync(new BootstrapWorkspaceRequest(
+            "Northwind Fabrication",
+            "Northwind Fabrication LLC",
+            "84-3182457",
+            "USD",
+            1,
+            "admin",
+            "Jordan Ellis",
+            "admin@northwind.example",
+            "BrassLedger!2026",
+            "BrassLedger!WRONG"));
+
+        Assert.Equal(BootstrapWorkspaceOutcome.Invalid, result.Outcome);
+        Assert.Equal("The administrator password confirmation does not match.", result.ErrorMessage);
     }
 
     [Fact]

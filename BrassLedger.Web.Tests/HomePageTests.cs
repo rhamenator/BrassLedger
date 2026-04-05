@@ -19,10 +19,10 @@ public sealed class HomePageTests : TestContext
     {
         var cut = RenderComponent<Home>();
 
-        Assert.Contains("Brass Ledger Manufacturing is live as a real multi-module workspace.", cut.Markup);
+        Assert.Contains("Brass Ledger Manufacturing runs finance, operations, payroll, reporting, and tax work in one place.", cut.Markup);
         Assert.Contains("Open ledger", cut.Markup);
         Assert.Contains("112,540", cut.Markup);
-        Assert.Contains("Reports ready", cut.Markup);
+        Assert.Contains("Operating principles", cut.Markup);
     }
 }
 

@@ -107,7 +107,8 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             form["adminUserName"].ToString(),
             form["adminDisplayName"].ToString(),
             form["adminEmail"].ToString(),
-            form["adminPassword"].ToString());
+            form["adminPassword"].ToString(),
+            form["confirmAdminPassword"].ToString());
 
         var result = await bootstrapWorkspaceService.CreateInitialWorkspaceAsync(request, context.RequestAborted);
         if (result.Outcome == BootstrapWorkspaceOutcome.AlreadyConfigured)
@@ -143,18 +144,20 @@ public static class AuthenticationEndpointRouteBuilderExtensions
 
     private static ClaimsPrincipal CreatePrincipal(AuthenticatedUser authenticatedUser)
     {
-        var identity = new ClaimsIdentity(
-            new[]
-            {
-                new Claim(ClaimTypes.NameIdentifier, authenticatedUser.UserId.ToString()),
-                new Claim(ClaimTypes.Name, authenticatedUser.UserName),
-                new Claim(ClaimTypes.Email, authenticatedUser.Email),
-                new Claim(ClaimTypes.Role, authenticatedUser.Role),
-                new Claim(BrassLedgerAuthenticationDefaults.DisplayNameClaimType, authenticatedUser.DisplayName),
-                new Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, authenticatedUser.CompanyId.ToString()),
-                new Claim(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, authenticatedUser.SecurityStamp)
-            },
-            BrassLedgerAuthenticationDefaults.Scheme);
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, authenticatedUser.UserId.ToString()),
+            new(ClaimTypes.Name, authenticatedUser.UserName),
+            new(ClaimTypes.Email, authenticatedUser.Email),
+            new(ClaimTypes.Role, authenticatedUser.Role),
+            new(BrassLedgerAuthenticationDefaults.DisplayNameClaimType, authenticatedUser.DisplayName),
+            new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, authenticatedUser.CompanyId.ToString()),
+            new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, authenticatedUser.SecurityStamp)
+        };
+
+        claims.AddRange(authenticatedUser.Permissions.Select(permission => new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+
+        var identity = new ClaimsIdentity(claims, BrassLedgerAuthenticationDefaults.Scheme);
 
         return new ClaimsPrincipal(identity);
     }

@@ -10,6 +10,7 @@ public sealed class BrassLedgerDbContext(
     ISensitiveDataProtector sensitiveDataProtector) : DbContext(options)
 {
     public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
     public DbSet<AuthenticationAuditEntry> AuthenticationAuditEntries => Set<AuthenticationAuditEntry>();
     public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
     public DbSet<Company> Companies => Set<Company>();
@@ -37,6 +38,7 @@ public sealed class BrassLedgerDbContext(
 
         modelBuilder.Entity<Company>().HasKey(x => x.Id);
         modelBuilder.Entity<AppUser>().HasKey(x => x.Id);
+        modelBuilder.Entity<AccessRole>().HasKey(x => x.Id);
         modelBuilder.Entity<AuthenticationAuditEntry>().HasKey(x => x.Id);
         modelBuilder.Entity<GeneralLedgerAccount>().HasKey(x => x.Id);
         modelBuilder.Entity<JournalEntry>().HasKey(x => x.Id);
@@ -62,6 +64,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<Company>().Property(x => x.TaxId).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<AppUser>().Property(x => x.DisplayName).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<AppUser>().Property(x => x.Email).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<AccessRole>().Property(x => x.Description).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Customer>().Property(x => x.Name).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Customer>().Property(x => x.Email).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Vendor>().Property(x => x.Name).HasConversion(encryptedStringConverter);
@@ -98,6 +101,7 @@ public sealed class BrassLedgerDbContext(
 
         modelBuilder.Entity<Company>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.UserName).IsUnique();
+        modelBuilder.Entity<AccessRole>().HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();
         modelBuilder.Entity<AuthenticationAuditEntry>().HasIndex(x => new { x.UserName, x.OccurredUtc });
         modelBuilder.Entity<GeneralLedgerAccount>().HasIndex(x => new { x.CompanyId, x.Number }).IsUnique();
         modelBuilder.Entity<Customer>().HasIndex(x => new { x.CompanyId, x.CustomerNumber }).IsUnique();

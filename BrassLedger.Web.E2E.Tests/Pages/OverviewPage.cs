@@ -12,7 +12,7 @@ public sealed class OverviewPage
     public async Task OpenAsync()
     {
         await _session.GotoAsync("/");
-        await _session.WaitForHeadingAsync("Brass Ledger Manufacturing is live as a real multi-module workspace.");
+        await _session.WaitForHeadingAsync("Brass Ledger Manufacturing runs finance, operations, payroll, reporting, and tax work in one place.");
     }
 
     public async Task OpenLedgerQuickActionAsync()
