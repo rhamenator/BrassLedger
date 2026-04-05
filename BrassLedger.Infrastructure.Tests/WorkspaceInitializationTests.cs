@@ -53,6 +53,27 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializeBrassLedgerAsync_UsesConfiguredDataRootWhenProvided()
+    {
+        var configuredDataRoot = Path.Combine(_contentRootPath, "CustomDataRoot");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Storage:DataRoot"] = configuredDataRoot
+            })
+            .Build();
+
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: true);
+
+        using var services = serviceCollection.BuildServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+
+        Assert.True(File.Exists(Path.Combine(configuredDataRoot, "brassledger.db")));
+        Assert.True(Directory.Exists(Path.Combine(configuredDataRoot, "keys")));
+    }
+
+    [Fact]
     public async Task InitializeBrassLedgerAsync_SeedsAuthenticationCredentials()
     {
         using var services = CreateServiceProvider();

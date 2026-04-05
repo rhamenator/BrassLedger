@@ -23,7 +23,7 @@ public static class ServiceCollectionExtensions
         string contentRootPath,
         bool seedSampleData = false)
     {
-        var dataDirectory = BuildDataDirectory(contentRootPath);
+        var dataDirectory = BuildDataDirectory(configuration, contentRootPath);
         var keysDirectory = Path.Combine(dataDirectory, "keys");
         Directory.CreateDirectory(keysDirectory);
 
@@ -84,11 +84,64 @@ public static class ServiceCollectionExtensions
         return options;
     }
 
-    private static string BuildDataDirectory(string contentRootPath)
+    private static string BuildDataDirectory(IConfiguration configuration, string contentRootPath)
     {
-        var dataDirectory = Path.Combine(contentRootPath, "App_Data");
-        Directory.CreateDirectory(dataDirectory);
-        return dataDirectory;
+        var configuredDataRoot =
+            configuration["Storage:DataRoot"]
+            ?? configuration["BrassLedger:DataRoot"];
+
+        if (!string.IsNullOrWhiteSpace(configuredDataRoot))
+        {
+            var explicitDataDirectory = Path.GetFullPath(Environment.ExpandEnvironmentVariables(configuredDataRoot));
+            Directory.CreateDirectory(explicitDataDirectory);
+            return explicitDataDirectory;
+        }
+
+        var contentRootDataDirectory = Path.Combine(contentRootPath, "App_Data");
+        if (TryEnsureWritableDirectory(contentRootDataDirectory))
+        {
+            return contentRootDataDirectory;
+        }
+
+        var localApplicationDataRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localApplicationDataRoot))
+        {
+            localApplicationDataRoot = Path.GetTempPath();
+        }
+
+        var fallbackDataDirectory = Path.Combine(localApplicationDataRoot, "BrassLedger", "App_Data");
+        Directory.CreateDirectory(fallbackDataDirectory);
+        return fallbackDataDirectory;
+    }
+
+    private static bool TryEnsureWritableDirectory(string directoryPath)
+    {
+        try
+        {
+            Directory.CreateDirectory(directoryPath);
+
+            var probeFilePath = Path.Combine(directoryPath, $".write-test-{Guid.NewGuid():N}.tmp");
+            using var probeStream = new FileStream(
+                probeFilePath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 1,
+                options: FileOptions.DeleteOnClose);
+
+            probeStream.WriteByte(0);
+            probeStream.Flush();
+
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 
     private static string BuildDefaultSqliteConnectionString(string dataDirectory)

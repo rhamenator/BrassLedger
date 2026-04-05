@@ -25,7 +25,8 @@ Before using live confidential books in production, plan for more:
 Use these rules consistently:
 
 - the database is the source of truth for accounting data
-- `App_Data` is local environment data and should stay out of Git
+- local SQLite data and key material belong in a writable application data directory and should stay out of Git
+- `Storage:DataRoot` can be set explicitly if you need to control where local application data is stored
 - `BrassLedger.Web/wwwroot` is the source location for committed static assets
 - `artifacts` is a publish output folder and should be disposable
 
@@ -55,7 +56,7 @@ Ignore:
 - `artifacts`
 - `bin`
 - `obj`
-- `App_Data`
+- local application data directories such as `App_Data`
 - local IDE state
 
 ## Support checklist

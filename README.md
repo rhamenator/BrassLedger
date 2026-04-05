@@ -1,29 +1,97 @@
 # BrassLedger
 
-This repository contains a compileable cross-platform .NET application shell an open-source accounting platform.
+BrassLedger is an open-source cross-platform accounting and business management system for organizations that need general ledger, receivables, payables, payroll, projects, reporting, tax workflows, and printable business forms in one application.
+
+The current public prerelease is `v0.1.0-pre.1`.
 
 License: `GPL-3.0-only`. See [LICENSE](LICENSE).
 
-Projects:
+## Why BrassLedger
 
-- `BrassLedger.Domain`: core business concepts and legacy inventory records
-- `BrassLedger.Application`: product catalog contracts and planning models
-- `BrassLedger.Infrastructure`: concrete catalog and platform service implementations
-- `BrassLedger.Api`: JSON endpoints for assessment and source inventories
-- `BrassLedger.Web`: primary end-user web application shell
+BrassLedger is intended for teams that want a modern, open-source financial operations platform without locking their business into a proprietary desktop stack. The application is built to support daily accounting work, period close, payroll review, operational documents, tax-facing output, labels, checks, and other fixed-layout business forms.
 
-The current user-facing application is `BrassLedger.Web`.
+The current end-user application is `BrassLedger.Web`, delivered as a cross-platform .NET application with installers for Windows, macOS, and Linux.
 
-Why this shape:
+## What the application includes
 
-- it publishes as a Windows `.exe`
-- it can also be published for Linux and macOS
-- it keeps the UI cross-platform without locking the product into Windows-only desktop technology
+- General ledger workspaces for journal activity, balances, and month-end review
+- Receivables support for customer invoices, statements, balances, and cash application
+- Payables support for vendor bills, approvals, due-date review, and disbursement preparation
+- Operations workspaces for inventory, order flow, purchasing, fulfillment, and operational forms
+- Payroll support for employee records, pay processing, liability review, and year-end forms
+- Project and job tracking for cost visibility and work-in-progress review
+- Reporting support for financial statements, checks, paychecks, labels, shipment forms, and management output
+- Tax workspaces for federal, state, and employer-specific tax profile review
 
-Helpful commands:
+## Download and quick start
+
+- Quick start and installation: [docs/quick-start.md](docs/quick-start.md)
+- Current prerelease downloads: [GitHub Releases](https://github.com/rhamenator/BrassLedger/releases)
+
+Current prerelease installers are available for:
+
+- Windows `x64`
+- macOS Intel
+- macOS Apple silicon
+- Linux `amd64`
+
+## How to use BrassLedger
+
+Start with these guides:
+
+- Main user guide: [docs/user-guide.md](docs/user-guide.md)
+- Reporting, checks, labels, forms, and print output: [docs/reporting-guide.md](docs/reporting-guide.md)
+- Administration, publishing, and support practices: [docs/administration-guide.md](docs/administration-guide.md)
+
+Module-by-module usage links:
+
+- Overview and daily review: [docs/user-guide.md#overview](docs/user-guide.md#overview)
+- General ledger: [docs/user-guide.md#ledger](docs/user-guide.md#ledger)
+- Receivables: [docs/user-guide.md#receivables](docs/user-guide.md#receivables)
+- Payables: [docs/user-guide.md#payables](docs/user-guide.md#payables)
+- Operations: [docs/user-guide.md#operations](docs/user-guide.md#operations)
+- Payroll: [docs/user-guide.md#payroll](docs/user-guide.md#payroll)
+- Projects: [docs/user-guide.md#projects](docs/user-guide.md#projects)
+- Reporting and forms: [docs/user-guide.md#reporting-and-forms](docs/user-guide.md#reporting-and-forms)
+- Taxes: [docs/user-guide.md#taxes](docs/user-guide.md#taxes)
+- Publish workspace: [docs/user-guide.md#publish](docs/user-guide.md#publish)
+- Month-end review: [docs/user-guide.md#month-end-review](docs/user-guide.md#month-end-review)
+- Security and data handling: [docs/user-guide.md#security-and-data-handling](docs/user-guide.md#security-and-data-handling)
+
+Specialized documentation:
+
+- Financial statements: [docs/reporting-guide.md#financial-statements](docs/reporting-guide.md#financial-statements)
+- Receivables output: [docs/reporting-guide.md#receivables-output](docs/reporting-guide.md#receivables-output)
+- Payables output: [docs/reporting-guide.md#payables-output](docs/reporting-guide.md#payables-output)
+- Payroll and year-end output: [docs/reporting-guide.md#payroll-and-year-end-output](docs/reporting-guide.md#payroll-and-year-end-output)
+- Tax-facing output: [docs/reporting-guide.md#tax-facing-output](docs/reporting-guide.md#tax-facing-output)
+- Operations documents and labels: [docs/reporting-guide.md#operations-documents-and-labels](docs/reporting-guide.md#operations-documents-and-labels)
+- Administrative data handling: [docs/administration-guide.md#data-handling](docs/administration-guide.md#data-handling)
+- Administrative publishing guidance: [docs/administration-guide.md#publishing](docs/administration-guide.md#publishing)
+
+## Security baseline
+
+The current application includes:
+
+- authenticated access before accounting data loads in the web app or API
+- password hashing through ASP.NET Core Identity primitives
+- protection of sensitive fields at rest with ASP.NET Core Data Protection
+- persisted application key material under `App_Data\keys`
+- security headers in the web application and API
+- bootstrap administrator requirements for first non-development startup
+
+Before live production use, administrators should still review operational backup, recovery, secrets management, access control, and deployment procedures.
+
+## Build, test, and publish
+
+Helpful maintainer commands:
 
 ```powershell
 dotnet build .\BrassLedger.slnx
+```
+
+```powershell
+dotnet test .\BrassLedger.slnx -nr:false
 ```
 
 ```powershell
@@ -50,36 +118,19 @@ dotnet build .\BrassLedger.slnx
 .\run-ui-tests.ps1 -UpdateBaselines
 ```
 
-See `docs/publish-guide.md` for platform-specific publish commands.
-UI visual baselines live in `BrassLedger.Web.E2E.Tests\Snapshots` so they can be reviewed and committed with the test suite.
-The Playwright matrix auto-detects Microsoft Edge on Windows and will include it in browser-based test runs when available.
-Firefox is also supported in the local Playwright browser matrix when installed.
+Additional maintainer documentation:
 
-Current prerelease:
+- Platform-specific publish notes: [docs/publish-guide.md](docs/publish-guide.md)
 
-- The current consumer-facing prerelease is `v0.1.0-pre.1`.
-- Release assets are published for Windows, macOS Intel, macOS Apple silicon, and Linux.
-- GitHub Actions workflow `.github/workflows/release-installers.yml` builds the unsigned installers and attaches them to tagged prereleases.
-- Installer signing is intentionally disabled for now and can be added later once certificate material is available.
+Release automation is handled by `.github/workflows/release-installers.yml`, which builds installer assets for Windows, macOS Intel, macOS Apple silicon, and Linux and attaches them to tagged prereleases and releases.
 
-Current security baseline:
+## Repository layout
 
-- authenticated access is required before accounting data loads in the web app or API
-- password hashes use ASP.NET Core Identity hashing
-- sensitive fields are protected at rest with ASP.NET Core Data Protection
-- Data Protection keys are persisted under `App_Data\keys`
-- security headers are applied to both the web app and API
-- a first non-development startup requires `Bootstrap:AdminPassword` so the system creates a real administrator account instead of demo users
+- `BrassLedger.Domain`: core business entities
+- `BrassLedger.Application`: application-facing contracts and models
+- `BrassLedger.Infrastructure`: authentication, persistence, security, and service implementations
+- `BrassLedger.Api`: API endpoints
+- `BrassLedger.Web`: end-user application
+- `docs`: installation, usage, reporting, administration, and publishing guides
 
-Bootstrap configuration:
-
-- development starts with sample data automatically
-- non-development first run requires `Bootstrap:AdminPassword`
-- optional bootstrap settings include `Bootstrap:CompanyName`, `Bootstrap:LegalName`, `Bootstrap:AdminUserName`, `Bootstrap:AdminDisplayName`, and `Bootstrap:AdminEmail`
-
-Help and operator guidance:
-
-- In-app help pages live under `BrassLedger.Web/Components/Pages/Help*.razor`.
-- Written guides live in `docs/user-guide.md`, `docs/reporting-guide.md`, and `docs/administration-guide.md`.
-- Source-controlled web assets belong under `BrassLedger.Web/wwwroot`; generated publish output stays under `artifacts` and remains ignored by Git.
-
+Source-controlled web assets belong under `BrassLedger.Web/wwwroot`. Generated publish output stays under `artifacts` and remains ignored by Git.

@@ -178,7 +178,7 @@ Current expectations:
 
 - authenticated access is required before users can load accounting data
 - confidential data should live in the database, not copied publish folders
-- local fallback data under `App_Data` should not be committed to Git
+- local fallback data directories should not be committed to Git
 - static site assets should come from `BrassLedger.Web/wwwroot`
 - published output under `artifacts` should be treated as disposable packaging
 
