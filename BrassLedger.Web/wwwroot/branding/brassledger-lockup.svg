@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 180" role="img" aria-labelledby="title desc">
+  <title id="title">BrassLedger lockup</title>
+  <desc id="desc">BrassLedger wordmark with ledger medallion.</desc>
+  <defs>
+    <linearGradient id="coin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f7d985" />
+      <stop offset="48%" stop-color="#d9a441" />
+      <stop offset="100%" stop-color="#885b20" />
+    </linearGradient>
+    <linearGradient id="panel" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f3f47" />
+      <stop offset="100%" stop-color="#1d6a60" />
+    </linearGradient>
+  </defs>
+  <rect width="720" height="180" rx="36" fill="#f8f2e7" />
+  <g transform="translate(24 18)">
+    <circle cx="72" cy="72" r="62" fill="url(#coin)" />
+    <circle cx="72" cy="72" r="54" fill="none" stroke="#fff6d5" stroke-width="4" opacity="0.55" />
+    <rect x="36" y="31" width="72" height="82" rx="12" fill="url(#panel)" />
+    <path d="M88 31h8c7 0 12 5 12 12v8z" fill="#f7d985" opacity="0.92" />
+    <rect x="50" y="47" width="6" height="50" rx="3" fill="#f4ede2" opacity="0.9" />
+    <rect x="63" y="51" width="30" height="5" rx="2.5" fill="#f4ede2" opacity="0.92" />
+    <rect x="63" y="65" width="26" height="5" rx="2.5" fill="#f4ede2" opacity="0.82" />
+    <rect x="63" y="79" width="34" height="5" rx="2.5" fill="#f4ede2" opacity="0.72" />
+    <rect x="63" y="93" width="20" height="5" rx="2.5" fill="#f4ede2" opacity="0.62" />
+  </g>
+  <g fill="#173c43">
+    <text x="170" y="88" font-family="Georgia, 'Palatino Linotype', serif" font-size="62" font-weight="700" letter-spacing="1">BrassLedger</text>
+    <text x="172" y="122" font-family="'Trebuchet MS', 'Segoe UI', sans-serif" font-size="18" letter-spacing="5" opacity="0.7">ACCOUNTING AND OPERATIONS</text>
+  </g>
+</svg>

@@ -27,6 +27,7 @@ WizardStyle=modern
 OutputDir={#OutputDir}
 OutputBaseFilename=BrassLedger-setup-win-x64
 UninstallDisplayIcon={app}\BrassLedger.Web.exe
+SetupIconFile=..\..\BrassLedger.Web\Assets\brassledger.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

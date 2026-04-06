@@ -39,6 +39,15 @@ public static class AuthenticationServiceCollectionExtensions
                     || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage)
                     || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage));
             });
+
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageTaxes, policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.RequireAssertion(context =>
+                    context.User.IsInRole("Administrator")
+                    || context.User.IsInRole("Owner/CEO")
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.TaxManage));
+            });
         });
 
         return services;

@@ -1,6 +1,7 @@
 using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.SecurityAdministration;
+using BrassLedger.Infrastructure.Taxation;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -207,6 +208,7 @@ internal static class BrassLedgerSeedData
         await dbContext.LabelTemplates.AddRangeAsync(labelTemplates, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await TaxAdministrationService.EnsureBaselineTaxRulesAsync(dbContext, CompanyId, cancellationToken);
     }
 
     private static AppUser CreateSeedUser(
@@ -276,6 +278,7 @@ internal static class BrassLedgerSeedData
 
         await dbContext.Users.AddAsync(adminUser, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await TaxAdministrationService.EnsureBaselineTaxRulesAsync(dbContext, companyId, cancellationToken);
     }
 
     private static async Task EnsureSeedUserCredentialsAsync(

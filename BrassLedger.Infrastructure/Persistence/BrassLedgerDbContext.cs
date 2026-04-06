@@ -27,6 +27,10 @@ public sealed class BrassLedgerDbContext(
     public DbSet<SalesInvoice> SalesInvoices => Set<SalesInvoice>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<TaxProfile> TaxProfiles => Set<TaxProfile>();
+    public DbSet<TaxRuleSet> TaxRuleSets => Set<TaxRuleSet>();
+    public DbSet<TaxRuleParameter> TaxRuleParameters => Set<TaxRuleParameter>();
+    public DbSet<TaxRuleBracket> TaxRuleBrackets => Set<TaxRuleBracket>();
+    public DbSet<TaxFormRequirement> TaxFormRequirements => Set<TaxFormRequirement>();
     public DbSet<Vendor> Vendors => Set<Vendor>();
     public DbSet<VendorBill> VendorBills => Set<VendorBill>();
 
@@ -54,6 +58,10 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<Employee>().HasKey(x => x.Id);
         modelBuilder.Entity<ProjectJob>().HasKey(x => x.Id);
         modelBuilder.Entity<TaxProfile>().HasKey(x => x.Id);
+        modelBuilder.Entity<TaxRuleSet>().HasKey(x => x.Id);
+        modelBuilder.Entity<TaxRuleParameter>().HasKey(x => x.Id);
+        modelBuilder.Entity<TaxRuleBracket>().HasKey(x => x.Id);
+        modelBuilder.Entity<TaxFormRequirement>().HasKey(x => x.Id);
         modelBuilder.Entity<ReportCatalogItem>().HasKey(x => x.Id);
         modelBuilder.Entity<LabelTemplate>().HasKey(x => x.Id);
 
@@ -98,6 +106,10 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<ProjectJob>().Property(x => x.BudgetAmount));
         ConfigureMoney(modelBuilder.Entity<ProjectJob>().Property(x => x.ActualCost));
         ConfigureMoney(modelBuilder.Entity<TaxProfile>().Property(x => x.Rate), 9, 5);
+        modelBuilder.Entity<TaxRuleParameter>().Property(x => x.NumericValue).HasPrecision(18, 4);
+        ConfigureMoney(modelBuilder.Entity<TaxRuleBracket>().Property(x => x.UpperBoundAmount), 18, 2);
+        ConfigureMoney(modelBuilder.Entity<TaxRuleBracket>().Property(x => x.FixedAmount), 18, 2);
+        ConfigureMoney(modelBuilder.Entity<TaxRuleBracket>().Property(x => x.Rate), 9, 5);
 
         modelBuilder.Entity<Company>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.UserName).IsUnique();
@@ -112,6 +124,10 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PurchaseOrder>().HasIndex(x => new { x.CompanyId, x.OrderNumber }).IsUnique();
         modelBuilder.Entity<Employee>().HasIndex(x => new { x.CompanyId, x.EmployeeNumber }).IsUnique();
         modelBuilder.Entity<ProjectJob>().HasIndex(x => new { x.CompanyId, x.JobNumber }).IsUnique();
+        modelBuilder.Entity<TaxRuleSet>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique();
+        modelBuilder.Entity<TaxRuleParameter>().HasIndex(x => new { x.TaxRuleSetId, x.ParameterCode }).IsUnique();
+        modelBuilder.Entity<TaxRuleBracket>().HasIndex(x => new { x.TaxRuleSetId, x.Sequence }).IsUnique();
+        modelBuilder.Entity<TaxFormRequirement>().HasIndex(x => new { x.TaxRuleSetId, x.FormCode }).IsUnique();
     }
 
     private static void ConfigureMoney(Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal> propertyBuilder, int precision = 18, int scale = 2)

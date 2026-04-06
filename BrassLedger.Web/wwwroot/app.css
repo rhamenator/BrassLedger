@@ -136,6 +136,12 @@ h1:focus {
     color: var(--ink-strong);
 }
 
+.hero-mark {
+    width: 100%;
+    max-width: 18rem;
+    margin-bottom: 1rem;
+}
+
 .panel-kicker,
 .eyebrow,
 .source-jurisdiction {
@@ -458,10 +464,36 @@ main {
 
 .navbar-brand {
     color: #fffbf4;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.85rem;
+    text-decoration: none;
+}
+
+.brand-mark {
+    width: 2.8rem;
+    height: 2.8rem;
+    flex: 0 0 auto;
+}
+
+.brand-copy {
+    display: grid;
+    gap: 0.05rem;
+    line-height: 1.1;
+}
+
+.brand-copy strong {
     font-family: Georgia, "Palatino Linotype", serif;
-    font-size: 1.65rem;
+    font-size: 1.4rem;
     font-weight: 700;
     letter-spacing: 0.03em;
+}
+
+.brand-copy small {
+    color: rgba(255, 250, 245, 0.7);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
 }
 
 .nav-icon {
@@ -549,6 +581,10 @@ main {
     .module-grid,
     .source-grid,
     .help-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .tax-checkbox-grid {
         grid-template-columns: 1fr;
     }
 }
@@ -711,6 +747,62 @@ button.action-secondary {
 
 .help-callout .action-primary {
     justify-self: start;
+}
+
+.section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.field-input-large {
+    min-height: 7rem;
+    resize: vertical;
+}
+
+.tax-checkbox-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.tax-rule-list {
+    display: grid;
+    gap: 0.8rem;
+    margin-top: 1rem;
+}
+
+.tax-rule-chip {
+    display: grid;
+    gap: 0.15rem;
+    padding: 0.9rem 1rem;
+    border-radius: 18px;
+    border: 1px solid rgba(23, 60, 67, 0.14);
+    background: rgba(255, 255, 255, 0.72);
+    text-align: left;
+    cursor: pointer;
+}
+
+.tax-rule-chip span {
+    color: var(--ink-strong);
+    font-weight: 700;
+}
+
+.tax-rule-chip small {
+    color: #5d6d71;
+}
+
+.tax-rule-chip-active {
+    border-color: rgba(20, 86, 77, 0.38);
+    background: linear-gradient(135deg, rgba(244, 196, 48, 0.18), rgba(125, 168, 183, 0.16));
+}
+
+.tax-grid-input {
+    min-height: 2.45rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 12px;
 }
 
 .step-list {

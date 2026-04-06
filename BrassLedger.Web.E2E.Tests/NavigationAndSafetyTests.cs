@@ -21,7 +21,7 @@ public sealed class NavigationAndSafetyTests
 
         var routes = new (string Path, string Heading)[]
         {
-            ("/", "Brass Ledger Manufacturing runs finance, operations, payroll, reporting, and tax work in one place."),
+            ("/", "Brass Ledger Manufacturing coordinates finance, payroll, operations, reporting, and tax work from one workspace."),
             ("/modules", "Every legacy module is open to every user."),
             ("/ledger", "Core accounting balances and posting history."),
             ("/receivables", "Customers, invoices, and open-balance follow-up."),
@@ -30,7 +30,7 @@ public sealed class NavigationAndSafetyTests
             ("/payroll", "Employees, labor cost, and tax-ready setup."),
             ("/projects", "Job tracking with room for industry-specific workflows."),
             ("/reporting", "Reports, labels, forms, and print fidelity stay in the product."),
-            ("/taxes", "Automated where possible, reviewable where necessary."),
+            ("/taxes", "Keep withholdings, filing rules, and odd state behavior in editable tables instead of buried code."),
             ("/publish", "One .NET web application, packaged per platform.")
         };
 

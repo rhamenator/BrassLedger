@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">BrassLedger mark</title>
+  <desc id="desc">A brass medallion with a stylized ledger panel.</desc>
+  <defs>
+    <linearGradient id="coin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f7d985" />
+      <stop offset="48%" stop-color="#d9a441" />
+      <stop offset="100%" stop-color="#885b20" />
+    </linearGradient>
+    <linearGradient id="panel" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f3f47" />
+      <stop offset="100%" stop-color="#1d6a60" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#f4ede2" />
+  <circle cx="128" cy="128" r="104" fill="url(#coin)" />
+  <circle cx="128" cy="128" r="91" fill="none" stroke="#fff6d5" stroke-width="6" opacity="0.55" />
+  <rect x="68" y="63" width="120" height="130" rx="18" fill="url(#panel)" />
+  <path d="M156 63h14c10 0 18 8 18 18v14z" fill="#f7d985" opacity="0.92" />
+  <rect x="92" y="88" width="9" height="82" rx="4.5" fill="#f4ede2" opacity="0.9" />
+  <rect x="112" y="94" width="50" height="8" rx="4" fill="#f4ede2" opacity="0.92" />
+  <rect x="112" y="118" width="42" height="8" rx="4" fill="#f4ede2" opacity="0.82" />
+  <rect x="112" y="142" width="56" height="8" rx="4" fill="#f4ede2" opacity="0.72" />
+  <rect x="112" y="166" width="34" height="8" rx="4" fill="#f4ede2" opacity="0.62" />
+</svg>

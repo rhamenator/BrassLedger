@@ -80,11 +80,33 @@ jobs:
             "/DOutputDir=$env:INSTALLER_DIR" `
             ".\packaging\windows\BrassLedger.iss"
 
+      - name: Build unsigned MSIX package
+        shell: pwsh
+        env:
+          MSIX_PUBLISHER: CN=Technolgy For All Development
+          MSIX_PUBLISHER_DISPLAY_NAME: Technolgy For All Development
+          MSIX_PACKAGE_NAME: TechnolgyForAllDevelopment.BrassLedger
+        run: |
+          & .\packaging\windows\msix\package-msix.ps1 `
+            -PublishDir $env:PUBLISH_DIR `
+            -Version $env:APP_VERSION `
+            -OutputDir $env:INSTALLER_DIR `
+            -Publisher $env:MSIX_PUBLISHER `
+            -PublisherDisplayName $env:MSIX_PUBLISHER_DISPLAY_NAME `
+            -PackageName $env:MSIX_PACKAGE_NAME
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
           name: BrassLedger-windows-installer
           path: ${{ env.INSTALLER_DIR }}\BrassLedger-setup-win-x64.exe
+          if-no-files-found: error
+
+      - name: Upload Windows MSIX package
+        uses: actions/upload-artifact@v7
+        with:
+          name: BrassLedger-windows-msix
+          path: ${{ env.INSTALLER_DIR }}\BrassLedger-${{ env.APP_VERSION }}-win-x64.msix
           if-no-files-found: error
 
   macos-installer:
@@ -196,6 +218,12 @@ jobs:
           name: BrassLedger-windows-installer
           path: ./release-assets/windows
 
+      - name: Download Windows MSIX package
+        uses: actions/download-artifact@v8
+        with:
+          name: BrassLedger-windows-msix
+          path: ./release-assets/windows-msix
+
       - name: Download macOS Intel installer
         uses: actions/download-artifact@v8
         with:
@@ -226,6 +254,7 @@ jobs:
 
           gh release create "${GITHUB_REF_NAME}" \
             "./release-assets/windows/BrassLedger-setup-win-x64.exe" \
+            "./release-assets/windows-msix/BrassLedger-${{ needs.metadata.outputs.version }}-win-x64.msix" \
             "./release-assets/macos-x64/BrassLedger-${{ needs.metadata.outputs.version }}-osx-x64.pkg" \
             "./release-assets/macos-arm64/BrassLedger-${{ needs.metadata.outputs.version }}-osx-arm64.pkg" \
             "./release-assets/linux/brassledger_${{ needs.metadata.outputs.version }}_amd64.deb" \

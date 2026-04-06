@@ -13,6 +13,7 @@
 
   <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' Or '$(RuntimeIdentifier)' == 'win-x86' Or '$(RuntimeIdentifier)' == 'win-arm64'">
     <OutputType>WinExe</OutputType>
+    <ApplicationIcon>Assets\brassledger.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

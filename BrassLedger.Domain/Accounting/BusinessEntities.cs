@@ -233,6 +233,63 @@ public sealed class TaxProfile
     public bool IsEmployerSpecific { get; set; }
 }
 
+public sealed class TaxRuleSet
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string JurisdictionCode { get; set; } = string.Empty;
+    public string JurisdictionName { get; set; } = string.Empty;
+    public string JurisdictionType { get; set; } = string.Empty;
+    public string TaxType { get; set; } = string.Empty;
+    public string CalculationMethod { get; set; } = string.Empty;
+    public string WithholdingFrequency { get; set; } = string.Empty;
+    public DateOnly EffectiveOn { get; set; }
+    public string Source { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public bool IsEmployerSpecific { get; set; }
+    public bool SupportsBracketTable { get; set; }
+    public bool SupportsParameterEditing { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public sealed class TaxRuleParameter
+{
+    public Guid Id { get; set; }
+    public Guid TaxRuleSetId { get; set; }
+    public string ParameterCode { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string ValueType { get; set; } = string.Empty;
+    public decimal? NumericValue { get; set; }
+    public string TextValue { get; set; } = string.Empty;
+    public bool? BooleanValue { get; set; }
+    public string Notes { get; set; } = string.Empty;
+    public int DisplayOrder { get; set; }
+}
+
+public sealed class TaxRuleBracket
+{
+    public Guid Id { get; set; }
+    public Guid TaxRuleSetId { get; set; }
+    public int Sequence { get; set; }
+    public decimal UpperBoundAmount { get; set; }
+    public decimal FixedAmount { get; set; }
+    public decimal Rate { get; set; }
+    public string Notes { get; set; } = string.Empty;
+}
+
+public sealed class TaxFormRequirement
+{
+    public Guid Id { get; set; }
+    public Guid TaxRuleSetId { get; set; }
+    public string FormCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string FilingFrequency { get; set; } = string.Empty;
+    public string DeliveryChannel { get; set; } = string.Empty;
+    public string DueRule { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+}
+
 public sealed class ReportCatalogItem
 {
     public Guid Id { get; set; }

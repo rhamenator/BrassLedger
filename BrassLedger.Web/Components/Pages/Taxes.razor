@@ -1,18 +1,23 @@
 @page "/taxes"
 @attribute [Authorize]
+@using BrassLedger.Application.Taxation
+@using BrassLedger.Infrastructure.Auth
 @inject IBusinessWorkspaceService WorkspaceService
 @inject IProductCatalogService AssessmentService
+@inject ITaxAdministrationService TaxAdministrationService
 
 <PageTitle>Taxes</PageTitle>
 
 @{
     var assessment = AssessmentService.GetCatalog();
+    var selectedRule = GetSelectedRule();
 }
 
-@if (Workspace is null)
+@if (Workspace is null || TaxSnapshot is null)
 {
     <section class="panel">
         <h1>Loading tax workspace...</h1>
+        <p>Tax profiles, editable rule sets, and filing requirements are being prepared.</p>
     </section>
 }
 else
@@ -20,14 +25,21 @@ else
     <section class="page-shell">
         <header class="page-header">
             <div>
-                <p class="eyebrow">Payroll Tax Strategy</p>
-                <h1>Automated where possible, reviewable where necessary.</h1>
+                <p class="eyebrow">Tax Administration</p>
+                <h1>Keep withholdings, filing rules, and odd state behavior in editable tables instead of buried code.</h1>
             </div>
             <p class="page-intro">
-                The old tax update flow relied on opaque legacy tables and manual utilities. The new workspace now carries
-                explicit tax profiles and keeps room for official-source import adapters.
+                The archived tax engine exposed SUTA, SDIF, FUTA, yearly limits, bracket rows, and special state logic as data.
+                BrassLedger keeps that spirit, but moves it into a cleaner rule library with editable parameters, brackets, and reporting requirements.
             </p>
         </header>
+
+        @if (!string.IsNullOrWhiteSpace(StatusMessage))
+        {
+            <section class="panel">
+                <p class="lead">@StatusMessage</p>
+            </section>
+        }
 
         <section class="stats-grid">
             <article class="stat-card accent-sand">
@@ -35,36 +47,36 @@ else
                 <span class="stat-label">Active tax profiles</span>
             </article>
             <article class="stat-card accent-sky">
-                <span class="stat-value">@Workspace.Taxes.EmployerSpecificCount</span>
-                <span class="stat-label">Employer-specific rates</span>
+                <span class="stat-value">@TaxSnapshot.RuleSets.Count</span>
+                <span class="stat-label">Editable rule sets</span>
             </article>
             <article class="stat-card accent-sage">
-                <span class="stat-value">@assessment.TaxSources.Count</span>
-                <span class="stat-label">Official source anchors</span>
+                <span class="stat-value">@TaxSnapshot.RuleSets.Sum(rule => rule.Brackets.Count)</span>
+                <span class="stat-label">Bracket rows</span>
             </article>
             <article class="stat-card accent-coral">
-                <span class="stat-value">@assessment.FeaturesToRemove.Count</span>
-                <span class="stat-label">Legacy behaviors removed</span>
+                <span class="stat-value">@TaxSnapshot.RuleSets.Sum(rule => rule.FormRequirements.Count)</span>
+                <span class="stat-label">Filing requirements</span>
             </article>
         </section>
 
         <section class="content-grid">
             <article class="panel">
-                <h2>What we remove</h2>
-                <ul class="feature-list warning-list">
-                    @foreach (var item in assessment.FeaturesToRemove)
+                <h2>Archived source map</h2>
+                <ul class="feature-list">
+                    @foreach (var artifact in TaxSnapshot.LegacyArtifacts)
                     {
-                        <li>@item</li>
+                        <li><strong>@artifact.Name:</strong> `@artifact.SourcePath` <br /> @artifact.Notes</li>
                     }
                 </ul>
             </article>
 
             <article class="panel">
-                <h2>Current strategy</h2>
+                <h2>Calculation methods</h2>
                 <ul class="feature-list">
-                    @foreach (var item in assessment.TaxAutomationStrategy)
+                    @foreach (var method in TaxSnapshot.Methods)
                     {
-                        <li>@item</li>
+                        <li><strong>@method.Name:</strong> @method.Description</li>
                     }
                 </ul>
             </article>
@@ -99,29 +111,564 @@ else
             </article>
 
             <article class="panel">
-                <h2>Official sources to seed adapters</h2>
-                <div class="source-grid">
-                    @foreach (var source in assessment.TaxSources)
+                <h2>Rule library</h2>
+                <div class="tax-rule-list">
+                    @foreach (var rule in TaxSnapshot.RuleSets)
                     {
-                        <article class="source-card">
-                            <p class="source-jurisdiction">@source.Jurisdiction</p>
-                            <h3>@source.SourceName</h3>
-                            <p>@source.Notes</p>
-                            <a href="@source.Url" target="_blank" rel="noreferrer">Open source</a>
-                        </article>
+                        <button
+                            class="tax-rule-chip @(rule.Id == SelectedRuleId ? "tax-rule-chip-active" : string.Empty)"
+                            type="button"
+                            @onclick="() => SelectRule(rule.Id)">
+                            <span>@rule.Code</span>
+                            <small>@rule.JurisdictionName · @rule.TaxType</small>
+                        </button>
                     }
                 </div>
             </article>
         </section>
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageTaxes">
+            <Authorized>
+                <section class="content-grid">
+                    <article class="panel">
+                        <div class="section-heading">
+                            <h2>Rule set details</h2>
+                            <button class="action-secondary" type="button" @onclick="CreateNewRule">New rule set</button>
+                        </div>
+
+                        <div class="auth-form">
+                            <div class="field-group">
+                                <label class="field-label" for="taxRuleCode">Rule code</label>
+                                <InputText id="taxRuleCode" class="field-input" @bind-Value="RuleForm.Code" />
+                            </div>
+
+                            <div class="field-group">
+                                <label class="field-label" for="taxJurisdictionCode">Jurisdiction code</label>
+                                <InputText id="taxJurisdictionCode" class="field-input" @bind-Value="RuleForm.JurisdictionCode" />
+                            </div>
+
+                            <div class="field-group">
+                                <label class="field-label" for="taxJurisdictionName">Jurisdiction name</label>
+                                <InputText id="taxJurisdictionName" class="field-input" @bind-Value="RuleForm.JurisdictionName" />
+                            </div>
+
+                            <div class="field-group">
+                                <label class="field-label" for="taxJurisdictionType">Jurisdiction type</label>
+                                <InputSelect id="taxJurisdictionType" class="field-input" @bind-Value="RuleForm.JurisdictionType">
+                                    <option value="Federal">Federal</option>
+                                    <option value="State">State</option>
+                                    <option value="Local">Local</option>
+                                    <option value="Employer">Employer</option>
+                                </InputSelect>
+                            </div>
+
+                            <div class="field-group">
+                                <label class="field-label" for="taxType">Tax type</label>
+                                <InputText id="taxType" class="field-input" @bind-Value="RuleForm.TaxType" />
+                            </div>
+
+                            <div class="field-group">
+                                <label class="field-label" for="calculationMethod">Calculation method</label>
+                                <InputSelect id="calculationMethod" class="field-input" @bind-Value="RuleForm.CalculationMethod">
+                                    @foreach (var method in TaxSnapshot.Methods)
+                                    {
+                                        <option value="@method.Code">@method.Name</option>
+                                    }
+                                </InputSelect>
+                            </div>
+
+                            <div class="field-group">
+                                <label class="field-label" for="withholdingFrequency">Withholding frequency</label>
+                                <InputText id="withholdingFrequency" class="field-input" @bind-Value="RuleForm.WithholdingFrequency" />
+                            </div>
+
+                            <div class="field-group">
+                                <label class="field-label" for="effectiveOn">Effective on</label>
+                                <InputDate id="effectiveOn" class="field-input" @bind-Value="RuleForm.EffectiveOn" />
+                            </div>
+
+                            <div class="field-group">
+                                <label class="field-label" for="taxSource">Source</label>
+                                <InputText id="taxSource" class="field-input" @bind-Value="RuleForm.Source" />
+                            </div>
+
+                            <div class="field-group">
+                                <label class="field-label" for="taxNotes">Notes</label>
+                                <InputTextArea id="taxNotes" class="field-input field-input-large" @bind-Value="RuleForm.Notes" />
+                            </div>
+
+                            <div class="tax-checkbox-grid">
+                                <label><InputCheckbox @bind-Value="RuleForm.IsEmployerSpecific" /> Employer-specific</label>
+                                <label><InputCheckbox @bind-Value="RuleForm.SupportsBracketTable" /> Supports bracket rows</label>
+                                <label><InputCheckbox @bind-Value="RuleForm.SupportsParameterEditing" /> Supports parameters</label>
+                                <label><InputCheckbox @bind-Value="RuleForm.IsActive" /> Active</label>
+                            </div>
+
+                            <button class="action-primary" type="button" @onclick="SaveRuleAsync">Save rule set</button>
+                        </div>
+                    </article>
+
+                    <article class="panel">
+                        <h2>What we remove</h2>
+                        <ul class="feature-list warning-list">
+                            @foreach (var item in assessment.FeaturesToRemove)
+                            {
+                                <li>@item</li>
+                            }
+                        </ul>
+                    </article>
+                </section>
+
+                <section class="panel">
+                    <div class="section-heading">
+                        <h2>Editable parameters</h2>
+                        <button class="action-secondary" type="button" @onclick="AddParameterRow">Add parameter</button>
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Code</th>
+                                <th>Label</th>
+                                <th>Type</th>
+                                <th>Value</th>
+                                <th>Notes</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var parameter in ParameterEditors)
+                            {
+                                <tr>
+                                    <td><InputText class="field-input tax-grid-input" @bind-Value="parameter.ParameterCode" /></td>
+                                    <td><InputText class="field-input tax-grid-input" @bind-Value="parameter.Label" /></td>
+                                    <td>
+                                        <InputSelect class="field-input tax-grid-input" @bind-Value="parameter.ValueType">
+                                            <option value="number">Number</option>
+                                            <option value="text">Text</option>
+                                            <option value="bool">Boolean</option>
+                                        </InputSelect>
+                                    </td>
+                                    <td>
+                                        @if (parameter.ValueType == "text")
+                                        {
+                                            <InputText class="field-input tax-grid-input" @bind-Value="parameter.TextValue" />
+                                        }
+                                        else if (parameter.ValueType == "bool")
+                                        {
+                                            <label><InputCheckbox @bind-Value="parameter.BooleanValue" /> Enabled</label>
+                                        }
+                                        else
+                                        {
+                                            <InputNumber class="field-input tax-grid-input" @bind-Value="parameter.NumericValue" />
+                                        }
+                                    </td>
+                                    <td><InputText class="field-input tax-grid-input" @bind-Value="parameter.Notes" /></td>
+                                    <td><button class="action-secondary" type="button" @onclick="() => SaveParameterAsync(parameter)">Save</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </section>
+
+                <section class="panel">
+                    <div class="section-heading">
+                        <h2>Bracket table</h2>
+                        <button class="action-secondary" type="button" @onclick="AddBracketRow">Add bracket</button>
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Seq</th>
+                                <th>Upper bound</th>
+                                <th>Fixed amount</th>
+                                <th>Rate</th>
+                                <th>Notes</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var bracket in BracketEditors)
+                            {
+                                <tr>
+                                    <td><InputNumber class="field-input tax-grid-input" @bind-Value="bracket.Sequence" /></td>
+                                    <td><InputNumber class="field-input tax-grid-input" @bind-Value="bracket.UpperBoundAmount" /></td>
+                                    <td><InputNumber class="field-input tax-grid-input" @bind-Value="bracket.FixedAmount" /></td>
+                                    <td><InputNumber class="field-input tax-grid-input" @bind-Value="bracket.Rate" /></td>
+                                    <td><InputText class="field-input tax-grid-input" @bind-Value="bracket.Notes" /></td>
+                                    <td><button class="action-secondary" type="button" @onclick="() => SaveBracketAsync(bracket)">Save</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </section>
+
+                <section class="panel">
+                    <div class="section-heading">
+                        <h2>Reporting and filing requirements</h2>
+                        <button class="action-secondary" type="button" @onclick="AddFormRequirementRow">Add filing requirement</button>
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Form</th>
+                                <th>Name</th>
+                                <th>Frequency</th>
+                                <th>Delivery</th>
+                                <th>Due rule</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var filing in FormRequirementEditors)
+                            {
+                                <tr>
+                                    <td><InputText class="field-input tax-grid-input" @bind-Value="filing.FormCode" /></td>
+                                    <td><InputText class="field-input tax-grid-input" @bind-Value="filing.Name" /></td>
+                                    <td><InputText class="field-input tax-grid-input" @bind-Value="filing.FilingFrequency" /></td>
+                                    <td><InputText class="field-input tax-grid-input" @bind-Value="filing.DeliveryChannel" /></td>
+                                    <td><InputText class="field-input tax-grid-input" @bind-Value="filing.DueRule" /></td>
+                                    <td><button class="action-secondary" type="button" @onclick="() => SaveFormRequirementAsync(filing)">Save</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </section>
+            </Authorized>
+            <NotAuthorized>
+                <section class="panel">
+                    <h2>Editing restricted</h2>
+                    <p>Signed-in users without tax-administration permissions can review active profiles and rule coverage, but only tax managers, administrators, or the owner can edit rules.</p>
+                </section>
+            </NotAuthorized>
+        </AuthorizeView>
+
+        @if (selectedRule is not null)
+        {
+            <section class="panel">
+                <h2>Selected rule summary</h2>
+                <div class="detail-grid">
+                    <div><span class="detail-label">Rule code</span><strong>@selectedRule.Code</strong></div>
+                    <div><span class="detail-label">Jurisdiction</span><strong>@selectedRule.JurisdictionName</strong></div>
+                    <div><span class="detail-label">Type</span><strong>@selectedRule.TaxType</strong></div>
+                    <div><span class="detail-label">Method</span><strong>@selectedRule.CalculationMethod</strong></div>
+                    <div><span class="detail-label">Parameters</span><strong>@selectedRule.Parameters.Count</strong></div>
+                    <div><span class="detail-label">Filings</span><strong>@selectedRule.FormRequirements.Count</strong></div>
+                </div>
+            </section>
+        }
     </section>
 }
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private TaxAdministrationSnapshot? TaxSnapshot;
+    private Guid? SelectedRuleId;
+    private string? StatusMessage;
+    private TaxRuleEditor RuleForm { get; set; } = new();
+    private List<TaxParameterEditor> ParameterEditors { get; set; } = [];
+    private List<TaxBracketEditor> BracketEditors { get; set; } = [];
+    private List<TaxFormRequirementEditor> FormRequirementEditors { get; set; } = [];
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        await ReloadTaxSnapshotAsync();
+    }
+
+    private TaxRuleSetSnapshot? GetSelectedRule()
+    {
+        if (TaxSnapshot is null)
+        {
+            return null;
+        }
+
+        return SelectedRuleId.HasValue
+            ? TaxSnapshot.RuleSets.FirstOrDefault(rule => rule.Id == SelectedRuleId.Value)
+            : TaxSnapshot.RuleSets.FirstOrDefault();
+    }
+
+    private void SelectRule(Guid ruleId)
+    {
+        SelectedRuleId = ruleId;
+        LoadSelectedRuleEditors();
+    }
+
+    private void CreateNewRule()
+    {
+        SelectedRuleId = null;
+        RuleForm = new TaxRuleEditor
+        {
+            EffectiveOn = DateOnly.FromDateTime(DateTime.Today),
+            JurisdictionType = "State",
+            WithholdingFrequency = "Per payroll",
+            CalculationMethod = TaxSnapshot?.Methods.FirstOrDefault()?.Code ?? "custom-manual",
+            SupportsParameterEditing = true,
+            IsActive = true
+        };
+        ParameterEditors = [];
+        BracketEditors = [];
+        FormRequirementEditors = [];
+    }
+
+    private async Task SaveRuleAsync()
+    {
+        var result = await TaxAdministrationService.SaveRuleSetAsync(new SaveTaxRuleSetRequest(
+            RuleForm.Id,
+            RuleForm.Code,
+            RuleForm.JurisdictionCode,
+            RuleForm.JurisdictionName,
+            RuleForm.JurisdictionType,
+            RuleForm.TaxType,
+            RuleForm.CalculationMethod,
+            RuleForm.WithholdingFrequency,
+            RuleForm.EffectiveOn,
+            RuleForm.Source,
+            RuleForm.Notes,
+            RuleForm.IsEmployerSpecific,
+            RuleForm.SupportsBracketTable,
+            RuleForm.SupportsParameterEditing,
+            RuleForm.IsActive));
+
+        StatusMessage = result.Succeeded ? "Tax rule set saved." : result.ErrorMessage;
+        if (result.Succeeded)
+        {
+            SelectedRuleId = result.SavedId;
+            await ReloadTaxSnapshotAsync();
+        }
+    }
+
+    private async Task SaveParameterAsync(TaxParameterEditor editor)
+    {
+        var selectedRule = GetSelectedRule();
+        if (selectedRule is null)
+        {
+            StatusMessage = "Save the rule set before adding parameters.";
+            return;
+        }
+
+        var result = await TaxAdministrationService.SaveParameterAsync(new SaveTaxRuleParameterRequest(
+            selectedRule.Id,
+            editor.Id,
+            editor.ParameterCode,
+            editor.Label,
+            editor.ValueType,
+            editor.NumericValue,
+            editor.TextValue,
+            editor.BooleanValue,
+            editor.Notes,
+            editor.DisplayOrder));
+
+        StatusMessage = result.Succeeded ? "Tax parameter saved." : result.ErrorMessage;
+        if (result.Succeeded)
+        {
+            await ReloadTaxSnapshotAsync();
+        }
+    }
+
+    private async Task SaveBracketAsync(TaxBracketEditor editor)
+    {
+        var selectedRule = GetSelectedRule();
+        if (selectedRule is null)
+        {
+            StatusMessage = "Save the rule set before adding brackets.";
+            return;
+        }
+
+        var result = await TaxAdministrationService.SaveBracketAsync(new SaveTaxRuleBracketRequest(
+            selectedRule.Id,
+            editor.Id,
+            editor.Sequence,
+            editor.UpperBoundAmount,
+            editor.FixedAmount,
+            editor.Rate,
+            editor.Notes));
+
+        StatusMessage = result.Succeeded ? "Bracket row saved." : result.ErrorMessage;
+        if (result.Succeeded)
+        {
+            await ReloadTaxSnapshotAsync();
+        }
+    }
+
+    private async Task SaveFormRequirementAsync(TaxFormRequirementEditor editor)
+    {
+        var selectedRule = GetSelectedRule();
+        if (selectedRule is null)
+        {
+            StatusMessage = "Save the rule set before adding filing requirements.";
+            return;
+        }
+
+        var result = await TaxAdministrationService.SaveFormRequirementAsync(new SaveTaxFormRequirementRequest(
+            selectedRule.Id,
+            editor.Id,
+            editor.FormCode,
+            editor.Name,
+            editor.FilingFrequency,
+            editor.DeliveryChannel,
+            editor.DueRule,
+            editor.Notes));
+
+        StatusMessage = result.Succeeded ? "Filing requirement saved." : result.ErrorMessage;
+        if (result.Succeeded)
+        {
+            await ReloadTaxSnapshotAsync();
+        }
+    }
+
+    private void AddParameterRow()
+    {
+        ParameterEditors.Add(new TaxParameterEditor
+        {
+            ValueType = "number",
+            DisplayOrder = ParameterEditors.Count == 0 ? 10 : ParameterEditors.Max(parameter => parameter.DisplayOrder) + 10
+        });
+    }
+
+    private void AddBracketRow()
+    {
+        BracketEditors.Add(new TaxBracketEditor
+        {
+            Sequence = BracketEditors.Count == 0 ? 1 : BracketEditors.Max(bracket => bracket.Sequence) + 1,
+            UpperBoundAmount = 9999999.99m
+        });
+    }
+
+    private void AddFormRequirementRow()
+    {
+        FormRequirementEditors.Add(new TaxFormRequirementEditor
+        {
+            FilingFrequency = "Quarterly"
+        });
+    }
+
+    private async Task ReloadTaxSnapshotAsync()
+    {
+        TaxSnapshot = await TaxAdministrationService.GetSnapshotAsync();
+        if (!SelectedRuleId.HasValue || TaxSnapshot.RuleSets.All(rule => rule.Id != SelectedRuleId.Value))
+        {
+            SelectedRuleId = TaxSnapshot.RuleSets.FirstOrDefault()?.Id;
+        }
+
+        LoadSelectedRuleEditors();
+    }
+
+    private void LoadSelectedRuleEditors()
+    {
+        var selectedRule = GetSelectedRule();
+        if (selectedRule is null)
+        {
+            CreateNewRule();
+            return;
+        }
+
+        RuleForm = new TaxRuleEditor
+        {
+            Id = selectedRule.Id,
+            Code = selectedRule.Code,
+            JurisdictionCode = selectedRule.JurisdictionCode,
+            JurisdictionName = selectedRule.JurisdictionName,
+            JurisdictionType = selectedRule.JurisdictionType,
+            TaxType = selectedRule.TaxType,
+            CalculationMethod = selectedRule.CalculationMethod,
+            WithholdingFrequency = selectedRule.WithholdingFrequency,
+            EffectiveOn = selectedRule.EffectiveOn,
+            Source = selectedRule.Source,
+            Notes = selectedRule.Notes,
+            IsEmployerSpecific = selectedRule.IsEmployerSpecific,
+            SupportsBracketTable = selectedRule.SupportsBracketTable,
+            SupportsParameterEditing = selectedRule.SupportsParameterEditing,
+            IsActive = selectedRule.IsActive
+        };
+        ParameterEditors = selectedRule.Parameters
+            .Select(parameter => new TaxParameterEditor
+            {
+                Id = parameter.Id,
+                ParameterCode = parameter.ParameterCode,
+                Label = parameter.Label,
+                ValueType = parameter.ValueType,
+                NumericValue = parameter.NumericValue,
+                TextValue = parameter.TextValue,
+                BooleanValue = parameter.BooleanValue ?? false,
+                Notes = parameter.Notes,
+                DisplayOrder = parameter.DisplayOrder
+            })
+            .ToList();
+        BracketEditors = selectedRule.Brackets
+            .Select(bracket => new TaxBracketEditor
+            {
+                Id = bracket.Id,
+                Sequence = bracket.Sequence,
+                UpperBoundAmount = bracket.UpperBoundAmount,
+                FixedAmount = bracket.FixedAmount,
+                Rate = bracket.Rate,
+                Notes = bracket.Notes
+            })
+            .ToList();
+        FormRequirementEditors = selectedRule.FormRequirements
+            .Select(form => new TaxFormRequirementEditor
+            {
+                Id = form.Id,
+                FormCode = form.FormCode,
+                Name = form.Name,
+                FilingFrequency = form.FilingFrequency,
+                DeliveryChannel = form.DeliveryChannel,
+                DueRule = form.DueRule,
+                Notes = form.Notes
+            })
+            .ToList();
+    }
+
+    private sealed class TaxRuleEditor
+    {
+        public Guid? Id { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string JurisdictionCode { get; set; } = string.Empty;
+        public string JurisdictionName { get; set; } = string.Empty;
+        public string JurisdictionType { get; set; } = "State";
+        public string TaxType { get; set; } = string.Empty;
+        public string CalculationMethod { get; set; } = "custom-manual";
+        public string WithholdingFrequency { get; set; } = "Per payroll";
+        public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public string Source { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+        public bool IsEmployerSpecific { get; set; }
+        public bool SupportsBracketTable { get; set; }
+        public bool SupportsParameterEditing { get; set; } = true;
+        public bool IsActive { get; set; } = true;
+    }
+
+    private sealed class TaxParameterEditor
+    {
+        public Guid? Id { get; set; }
+        public string ParameterCode { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string ValueType { get; set; } = "number";
+        public decimal? NumericValue { get; set; }
+        public string TextValue { get; set; } = string.Empty;
+        public bool BooleanValue { get; set; }
+        public string Notes { get; set; } = string.Empty;
+        public int DisplayOrder { get; set; }
+    }
+
+    private sealed class TaxBracketEditor
+    {
+        public Guid? Id { get; set; }
+        public int Sequence { get; set; }
+        public decimal UpperBoundAmount { get; set; }
+        public decimal FixedAmount { get; set; }
+        public decimal Rate { get; set; }
+        public string Notes { get; set; } = string.Empty;
+    }
+
+    private sealed class TaxFormRequirementEditor
+    {
+        public Guid? Id { get; set; }
+        public string FormCode { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string FilingFrequency { get; set; } = string.Empty;
+        public string DeliveryChannel { get; set; } = string.Empty;
+        public string DueRule { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
     }
 }
-
