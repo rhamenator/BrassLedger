@@ -70,6 +70,7 @@ Specialized documentation:
 - Operations documents and labels: [docs/reporting-guide.md#operations-documents-and-labels](docs/reporting-guide.md#operations-documents-and-labels)
 - Administrative data handling: [docs/administration-guide.md#data-handling](docs/administration-guide.md#data-handling)
 - Administrative publishing guidance: [docs/administration-guide.md#publishing](docs/administration-guide.md#publishing)
+- Updated WinBiz/newproj parity boundary: [docs/legacy-parity-audit.md](docs/legacy-parity-audit.md)
 
 ## Security baseline
 
