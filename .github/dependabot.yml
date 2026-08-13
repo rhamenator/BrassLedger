@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Detroit"
+    open-pull-requests-limit: 10
+    groups:
+      routine-updates:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: "nuget"
+    directories:
+      - "/BrassLedger.Api"
+      - "/BrassLedger.Api.Tests"
+      - "/BrassLedger.Application"
+      - "/BrassLedger.Domain"
+      - "/BrassLedger.Infrastructure"
+      - "/BrassLedger.Infrastructure.Tests"
+      - "/BrassLedger.Tools"
+      - "/BrassLedger.Web"
+      - "/BrassLedger.Web.E2E.Tests"
+      - "/BrassLedger.Web.Tests"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+      timezone: "America/Detroit"
+    open-pull-requests-limit: 10
+    groups:
+      routine-updates:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+

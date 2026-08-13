@@ -1,0 +1,29 @@
+name: .NET Quality
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore BrassLedger.slnx
+      - run: dotnet build BrassLedger.slnx --configuration Release --no-restore --nologo
+      - name: Test API and infrastructure
+        shell: pwsh
+        run: |
+          dotnet test BrassLedger.Api.Tests/BrassLedger.Api.Tests.csproj --configuration Release --no-build --nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test BrassLedger.Infrastructure.Tests/BrassLedger.Infrastructure.Tests.csproj --configuration Release --no-build --nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test UI and browser journeys sequentially
+        shell: pwsh
+        run: ./run-ui-tests.ps1 -InstallBrowsers -Configuration Release
