@@ -30,9 +30,9 @@ if ($InstallBrowsers -or $InstallAllBrowsers)
     $browserList = if ($InstallAllBrowsers) { @("chromium", "firefox", "webkit") } else { @("chromium") }
     Write-Host "Installing Playwright browsers: $($browserList -join ', ')"
     $installArgs = @("install")
-    $isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    $runningOnWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
         [System.Runtime.InteropServices.OSPlatform]::Windows)
-    if (-not $isWindows)
+    if (-not $runningOnWindows)
     {
         $installArgs += "--with-deps"
     }
