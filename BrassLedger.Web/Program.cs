@@ -1,9 +1,13 @@
+using System.Globalization;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.Security;
 using BrassLedger.Web.Components;
 using BrassLedger.Web.Hosting;
 using Microsoft.AspNetCore.StaticFiles;
+
+CultureInfo.DefaultThreadCurrentCulture = CultureInfo.GetCultureInfo("en-US");
+CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo("en-US");
 
 var builder = WebApplication.CreateBuilder(args);
 var desktopHostOptions = DesktopHostOptions.Resolve(builder.Configuration, builder.Environment, args);

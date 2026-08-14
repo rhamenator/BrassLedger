@@ -188,7 +188,7 @@ public sealed class UiSession : IAsyncDisposable
             "..",
             "..",
             "Snapshots",
-            BrowserKind.ToString().ToLowerInvariant()));
+            SnapshotDirectoryName()));
         Directory.CreateDirectory(snapshotRoot);
 
         var baselinePath = Path.Combine(snapshotRoot, $"{snapshotName}.png");
@@ -221,6 +221,19 @@ public sealed class UiSession : IAsyncDisposable
         {
             File.Delete(actualPath);
         }
+    }
+
+    private string SnapshotDirectoryName()
+    {
+        var browser = BrowserKind.ToString().ToLowerInvariant();
+        if (OperatingSystem.IsWindows())
+        {
+            return browser;
+        }
+
+        return OperatingSystem.IsMacOS()
+            ? $"{browser}-macos"
+            : $"{browser}-linux";
     }
 
     private void HookDiagnostics()
