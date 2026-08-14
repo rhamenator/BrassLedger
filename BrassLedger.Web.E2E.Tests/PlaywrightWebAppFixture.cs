@@ -187,9 +187,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
 
     public static IReadOnlyList<BrowserKind> GetInstalledBrowsers()
     {
-        var browserRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ms-playwright");
+        var browserRoot = ResolveBrowserRoot();
 
         if (!Directory.Exists(browserRoot))
         {
@@ -198,9 +196,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
 
         var installedBrowsers = new List<BrowserKind>();
 
-        if (Directory.EnumerateDirectories(browserRoot, "chromium-*", SearchOption.TopDirectoryOnly)
-            .Select(path => Path.Combine(path, "chrome-win", "chrome.exe"))
-            .Any(File.Exists))
+        if (Directory.EnumerateDirectories(browserRoot, "chromium-*", SearchOption.TopDirectoryOnly).Any())
         {
             installedBrowsers.Add(BrowserKind.Chromium);
         }
@@ -229,8 +225,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         {
             BrowserKind.Chromium => await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
-                Headless = true,
-                ExecutablePath = ResolveChromiumExecutablePath()
+                Headless = true
             }),
             BrowserKind.Edge => await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
@@ -249,18 +244,25 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         };
     }
 
-    private static string ResolveChromiumExecutablePath()
+    private static string ResolveBrowserRoot()
     {
-        var browserRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ms-playwright");
+        var configuredPath = Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH");
+        if (!string.IsNullOrWhiteSpace(configuredPath) && configuredPath != "0")
+        {
+            return Path.GetFullPath(configuredPath);
+        }
 
-        var executable = Directory
-            .EnumerateDirectories(browserRoot, "chromium-*", SearchOption.TopDirectoryOnly)
-            .Select(path => Path.Combine(path, "chrome-win", "chrome.exe"))
-            .FirstOrDefault(File.Exists);
+        if (OperatingSystem.IsWindows())
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ms-playwright");
+        }
 
-        return executable ?? throw new FileNotFoundException("Chromium was not found in the local Playwright cache. Run playwright.ps1 install chromium.");
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return OperatingSystem.IsMacOS()
+            ? Path.Combine(home, "Library", "Caches", "ms-playwright")
+            : Path.Combine(home, ".cache", "ms-playwright");
     }
 
     private static string ResolveEdgeExecutablePath()
