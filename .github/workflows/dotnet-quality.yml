@@ -27,3 +27,10 @@ jobs:
       - name: Test UI and browser journeys sequentially
         shell: pwsh
         run: ./run-ui-tests.ps1 -InstallBrowsers -Configuration Release
+      - name: Upload Linux Chromium baselines
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: chromium-linux-snapshots
+          path: BrassLedger.Web.E2E.Tests/Snapshots/chromium-linux
+          if-no-files-found: warn

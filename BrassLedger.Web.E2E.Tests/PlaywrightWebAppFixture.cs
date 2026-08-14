@@ -196,7 +196,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
 
         var installedBrowsers = new List<BrowserKind>();
 
-        if (Directory.EnumerateDirectories(browserRoot, "chromium-*", SearchOption.TopDirectoryOnly).Any())
+        if (TryResolveChromiumExecutablePath(out _))
         {
             installedBrowsers.Add(BrowserKind.Chromium);
         }
@@ -225,7 +225,8 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         {
             BrowserKind.Chromium => await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
-                Headless = true
+                Headless = true,
+                ExecutablePath = ResolveChromiumExecutablePath()
             }),
             BrowserKind.Edge => await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
@@ -263,6 +264,30 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         return OperatingSystem.IsMacOS()
             ? Path.Combine(home, "Library", "Caches", "ms-playwright")
             : Path.Combine(home, ".cache", "ms-playwright");
+    }
+
+    private static string ResolveChromiumExecutablePath()
+    {
+        return TryResolveChromiumExecutablePath(out var executable)
+            ? executable
+            : throw new FileNotFoundException("Chromium was not found in the Playwright cache. Run playwright.ps1 install chromium.");
+    }
+
+    private static bool TryResolveChromiumExecutablePath(out string executablePath)
+    {
+        var relativeExecutablePath = OperatingSystem.IsWindows()
+            ? Path.Combine("chrome-win", "chrome.exe")
+            : OperatingSystem.IsMacOS()
+                ? Path.Combine("chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium")
+                : Path.Combine("chrome-linux", "chrome");
+
+        executablePath = Directory.Exists(ResolveBrowserRoot())
+            ? Directory
+                .EnumerateDirectories(ResolveBrowserRoot(), "chromium-*", SearchOption.TopDirectoryOnly)
+                .Select(path => Path.Combine(path, relativeExecutablePath))
+                .FirstOrDefault(File.Exists) ?? string.Empty
+            : string.Empty;
+        return !string.IsNullOrWhiteSpace(executablePath);
     }
 
     private static string ResolveEdgeExecutablePath()
