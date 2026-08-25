@@ -402,6 +402,8 @@ public static class ServiceCollectionExtensions
             await EnsureSqliteColumnAsync(dbContext, "Employees", "WorkSchoolDistrict", @"ALTER TABLE ""Employees"" ADD COLUMN ""WorkSchoolDistrict"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Employees", "AddressLine1", @"ALTER TABLE ""Employees"" ADD COLUMN ""AddressLine1"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Employees", "AddressLine2", @"ALTER TABLE ""Employees"" ADD COLUMN ""AddressLine2"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "AddressCity", @"ALTER TABLE ""Employees"" ADD COLUMN ""AddressCity"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "AddressState", @"ALTER TABLE ""Employees"" ADD COLUMN ""AddressState"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Employees", "PostalCode", @"ALTER TABLE ""Employees"" ADD COLUMN ""PostalCode"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Employees", "SocialSecurityNumber", @"ALTER TABLE ""Employees"" ADD COLUMN ""SocialSecurityNumber"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Employees", "BankRoutingNumber", @"ALTER TABLE ""Employees"" ADD COLUMN ""BankRoutingNumber"" TEXT NOT NULL DEFAULT '';", cancellationToken);
@@ -762,6 +764,8 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "WorkSchoolDistrict" text NOT NULL DEFAULT '';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "AddressLine1" text NOT NULL DEFAULT '';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "AddressLine2" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "AddressCity" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "AddressState" text NOT NULL DEFAULT '';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "PostalCode" text NOT NULL DEFAULT '';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "SocialSecurityNumber" text NOT NULL DEFAULT '';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "BankRoutingNumber" text NOT NULL DEFAULT '';""", cancellationToken);

@@ -524,6 +524,8 @@ public sealed class Employee
     public string WorkSchoolDistrict { get; set; } = string.Empty;
     public string AddressLine1 { get; set; } = string.Empty;
     public string AddressLine2 { get; set; } = string.Empty;
+    public string AddressCity { get; set; } = string.Empty;
+    public string AddressState { get; set; } = string.Empty;
     public string PostalCode { get; set; } = string.Empty;
     public string SocialSecurityNumber { get; set; } = string.Empty;
     public string BankRoutingNumber { get; set; } = string.Empty;

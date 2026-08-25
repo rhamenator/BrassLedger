@@ -261,7 +261,9 @@ public sealed record EmployeeSnapshot(
     decimal FederalStep4Deductions = 0m,
     bool FederalWithholdingExempt = false,
     DateOnly? DirectDepositAuthorizationOn = null,
-    bool HasDirectDepositAuthorization = false);
+    bool HasDirectDepositAuthorization = false,
+    string AddressCity = "",
+    string AddressState = "");
 
 public sealed record ProjectsWorkspace(
     int OpenJobs,

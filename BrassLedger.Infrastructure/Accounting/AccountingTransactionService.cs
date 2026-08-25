@@ -1429,6 +1429,7 @@ public sealed class AccountingTransactionService(
         if (!HasPermission(BrassLedgerPermissions.PayrollSensitiveData)) return TransactionResult.Failure("You are not authorized to maintain protected employee details.");
         if (request.EmployeeId == Guid.Empty || request.HourlyRate < 0 || request.OvertimeRate < 0) return TransactionResult.Failure("Select an employee and provide non-negative pay rates.");
         if (request.EmploymentStartedOn is { } startDate && request.EmploymentEndedOn is { } endDate && endDate < startDate) return TransactionResult.Failure("Employment end date cannot precede the start date.");
+        if (!string.IsNullOrWhiteSpace(request.AddressState) && request.AddressState.Trim().Length != 2) return TransactionResult.Failure("Mailing state must be a two-letter postal abbreviation.");
         var socialSecurityNumber = NormalizeDigits(request.SocialSecurityNumber);
         var routingNumber = NormalizeDigits(request.BankRoutingNumber);
         var accountNumber = NormalizeDigits(request.BankAccountNumber);
@@ -1467,6 +1468,8 @@ public sealed class AccountingTransactionService(
         if (request.DirectDepositEnabled && (!employee.DirectDepositAuthorizationOn.HasValue || string.IsNullOrWhiteSpace(employee.DirectDepositAuthorizationReference)))
             return TransactionResult.Failure("Direct deposit requires a signed authorization date and a reference to the retained authorization evidence.");
         employee.AddressLine1 = request.AddressLine1.Trim(); employee.AddressLine2 = request.AddressLine2.Trim(); employee.PostalCode = request.PostalCode.Trim();
+        if (!string.IsNullOrWhiteSpace(request.AddressCity)) employee.AddressCity = request.AddressCity.Trim();
+        if (!string.IsNullOrWhiteSpace(request.AddressState)) employee.AddressState = request.AddressState.Trim().ToUpperInvariant();
         employee.ResidenceCounty = request.ResidenceCounty.Trim(); employee.ResidenceSchoolDistrict = request.ResidenceSchoolDistrict.Trim(); employee.WorkCounty = request.WorkCounty.Trim(); employee.WorkSchoolDistrict = request.WorkSchoolDistrict.Trim();
         employee.EmploymentStartedOn = request.EmploymentStartedOn; employee.EmploymentEndedOn = request.EmploymentEndedOn; employee.HourlyRate = request.HourlyRate; employee.OvertimeRate = request.OvertimeRate; employee.DirectDepositEnabled = request.DirectDepositEnabled;
         employee.ConcurrencyToken = Guid.NewGuid().ToString("N");

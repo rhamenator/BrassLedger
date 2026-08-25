@@ -2,6 +2,7 @@ using BrassLedger.Application.Accounting;
 using BrassLedger.Application.Taxation;
 using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
+using BrassLedger.Infrastructure.Accounting;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
 using Microsoft.Data.Sqlite;
@@ -1236,7 +1237,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
         var employee = workspace.Payroll.Employees.First();
         var bankId = workspace.Treasury.BankAccounts.Single(account => account.LedgerAccountNumber == "1010").Id;
-        var protectedDetails = await transactions.SaveEmployeeEmploymentDetailsAsync(new SaveEmployeeEmploymentDetailsRequest(employee.Id, "1 Main St", "", "85001", "Maricopa", "", "Maricopa", "", new DateOnly(2024, 1, 1), null, 25m, 37.5m, false, "", "123-45-6789", "", "", ConcurrencyToken: employee.ConcurrencyToken));
+        var protectedDetails = await transactions.SaveEmployeeEmploymentDetailsAsync(new SaveEmployeeEmploymentDetailsRequest(employee.Id, "1 Main St", "", "85001", "Maricopa", "", "Maricopa", "", new DateOnly(2024, 1, 1), null, 25m, 37.5m, false, "", "123-45-6789", "", "", ConcurrencyToken: employee.ConcurrencyToken, AddressCity: "Phoenix", AddressState: "AZ"));
         Assert.True(protectedDetails.Succeeded, protectedDetails.ErrorMessage);
 
         var firstRun = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 4, 10), "FILING-Q2-1", [new EmployeePayrollInput(employee.Id, 1_000m)], new DateOnly(2026, 3, 29), new DateOnly(2026, 4, 4)));
@@ -1388,7 +1389,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.False(invalid.Succeeded);
         Assert.Contains("ABA routing", invalid.ErrorMessage);
 
-        var saved = await transactions.SaveEmployeeEmploymentDetailsAsync(new SaveEmployeeEmploymentDetailsRequest(employee.Id, "1 Main St", "Unit 2", "48201", "Wayne", "Detroit", "Oakland", "Royal Oak", new DateOnly(2024, 1, 1), null, 30m, 45m, true, "Checking", "123-45-6789", "021000021", "12345678", ConcurrencyToken: employee.ConcurrencyToken, DirectDepositAuthorizationOn: new DateOnly(2026, 1, 15), DirectDepositAuthorizationReference: "Signed authorization EMP-001"));
+        var saved = await transactions.SaveEmployeeEmploymentDetailsAsync(new SaveEmployeeEmploymentDetailsRequest(employee.Id, "1 Main St", "Unit 2", "48201", "Wayne", "Detroit", "Oakland", "Royal Oak", new DateOnly(2024, 1, 1), null, 30m, 45m, true, "Checking", "123-45-6789", "021000021", "12345678", ConcurrencyToken: employee.ConcurrencyToken, DirectDepositAuthorizationOn: new DateOnly(2026, 1, 15), DirectDepositAuthorizationReference: "Signed authorization EMP-001", AddressCity: "Detroit", AddressState: "MI"));
         Assert.True(saved.Succeeded, saved.ErrorMessage);
 
         var refreshed = (await workspaceService.GetWorkspaceAsync()).Payroll.Employees.Single(candidate => candidate.Id == employee.Id);
@@ -1405,11 +1406,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var db = await factory.CreateDbContextAsync();
         await db.Database.OpenConnectionAsync();
         await using var command = db.Database.GetDbConnection().CreateCommand();
-        command.CommandText = "SELECT SocialSecurityNumber || '|' || BankRoutingNumber || '|' || BankAccountNumber FROM Employees WHERE EmployeeNumber = $employeeNumber";
+        command.CommandText = "SELECT SocialSecurityNumber || '|' || BankRoutingNumber || '|' || BankAccountNumber || '|' || AddressLine1 || '|' || AddressLine2 || '|' || AddressCity || '|' || AddressState || '|' || PostalCode FROM Employees WHERE EmployeeNumber = $employeeNumber";
         var parameter = command.CreateParameter(); parameter.ParameterName = "$employeeNumber"; parameter.Value = employee.EmployeeNumber; command.Parameters.Add(parameter);
         var stored = (await command.ExecuteScalarAsync())?.ToString() ?? string.Empty;
         Assert.DoesNotContain("123-45-6789", stored);
         Assert.DoesNotContain("021000021", stored);
+        Assert.DoesNotContain("1 Main St", stored);
+        Assert.DoesNotContain("Detroit", stored);
         Assert.All(stored.Split('|'), value => Assert.StartsWith("enc::", value));
         var audit = await db.BusinessAuditEntries.SingleAsync(entry => entry.EntityType == "Employee" && entry.EntityId == employee.Id && entry.Action == "employee.protected-details.updated");
         Assert.DoesNotContain("123456789", audit.DetailJson);
@@ -1427,8 +1430,29 @@ public sealed class WorkspaceInitializationTests : IDisposable
         accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.PayrollSensitiveData);
         var authorized = (await workspaceService.GetWorkspaceAsync()).Payroll.Employees.Single(candidate => candidate.Id == employee.Id);
         Assert.Equal("1 Main St", authorized.AddressLine1);
+        Assert.Equal("Detroit", authorized.AddressCity);
+        Assert.Equal("MI", authorized.AddressState);
         Assert.True(authorized.HasSocialSecurityNumber);
         Assert.True(authorized.HasBankAccount);
+    }
+
+    [Fact]
+    public void SsaEfw2cBuilder_UsesExactRecordPositionsTotalsAndTaxYearGate()
+    {
+        var previous = new W2EmployeeData(Guid.NewGuid(), "E-001", "Jane Old", "123-45-6789", "1 Main St", "", "48201", 1000m, 100m, 1000m, 62m, 1000m, 14.50m, [], "Jane", "", "Old", "Detroit", "MI");
+        var corrected = previous with { EmployeeName = "Jane Corrected", LastName = "Corrected", Box1WagesTipsOtherCompensation = 1100m, Box2FederalIncomeTaxWithheld = 110m };
+        var package = new W2cPackageData(TaxYear: 2025, EmployerLegalName: "Brass Ledger Test Company", EmployerEin: "12-3456789", Employees: [new W2cEmployeeData(previous, corrected, true, "Federal wage and identity correction")]);
+        var submitter = new SsaEfw2cSubmitter(2025, "EFW2C TY2025 v2.3 (2026-01-20)", "https://www.ssa.gov/employer/efw/25efw2c.pdf", "12-3456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com");
+        var result = SsaEfw2cFileBuilder.Build(package, submitter);
+        Assert.True(result.Succeeded, string.Join("; ", result.Errors)); Assert.Equal(5, result.RecordCount); Assert.Equal(1, result.EmployeeRecordCount);
+        var records = System.Text.Encoding.ASCII.GetString(result.Content).Split("\r\n"); Assert.All(records, record => Assert.Equal(1024, record.Length));
+        Assert.Equal("RCA", records[0][..3]); Assert.Equal("RCE", records[1][..3]); Assert.Equal("2025", records[1][3..7]);
+        Assert.Equal("RCW", records[2][..3]); Assert.Equal("123456789", records[2][12..21]); Assert.Equal("CORRECTED", records[2][101..121].Trim());
+        Assert.Equal("00000100000", records[2][243..254]); Assert.Equal("00000110000", records[2][254..265]);
+        Assert.Equal("RCT", records[3][..3]); Assert.Equal("0000001", records[3][3..10]); Assert.Equal("000000000100000", records[3][10..25]); Assert.Equal("000000000110000", records[3][25..40]);
+        Assert.Equal("RCF", records[4][..3]); Assert.Equal("000000001", records[4][3..12]);
+        Assert.False(SsaEfw2cFileBuilder.Build(package with { TaxYear = 2026 }, submitter).Succeeded);
+        Assert.False(SsaEfw2cFileBuilder.Build(package with { Employees = [new W2cEmployeeData(previous, corrected, false, "Address only")] }, submitter).Succeeded);
     }
 
     [Fact]

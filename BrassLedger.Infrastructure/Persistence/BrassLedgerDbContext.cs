@@ -209,6 +209,11 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<Employee>().Property(x => x.BankRoutingNumber).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Employee>().Property(x => x.BankAccountNumber).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Employee>().Property(x => x.DirectDepositAuthorizationReference).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<Employee>().Property(x => x.AddressLine1).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<Employee>().Property(x => x.AddressLine2).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<Employee>().Property(x => x.AddressCity).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<Employee>().Property(x => x.AddressState).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<Employee>().Property(x => x.PostalCode).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<PayrollEmployeePayment>().Property(x => x.EmployeeName).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<PayrollEmployeePayment>().Property(x => x.BankRoutingNumber).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<PayrollEmployeePayment>().Property(x => x.BankAccountNumber).HasConversion(encryptedStringConverter);

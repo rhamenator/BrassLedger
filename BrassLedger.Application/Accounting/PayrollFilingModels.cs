@@ -77,7 +77,9 @@ public sealed record W2EmployeeData(
     string AddressLine1, string AddressLine2, string PostalCode, decimal Box1WagesTipsOtherCompensation,
     decimal Box2FederalIncomeTaxWithheld, decimal Box3SocialSecurityWages,
     decimal Box4SocialSecurityTaxWithheld, decimal Box5MedicareWagesAndTips,
-    decimal Box6MedicareTaxWithheld, IReadOnlyList<W2JurisdictionAmount> StateAndLocalAmounts);
+    decimal Box6MedicareTaxWithheld, IReadOnlyList<W2JurisdictionAmount> StateAndLocalAmounts,
+    string FirstName = "", string MiddleName = "", string LastName = "",
+    string City = "", string State = "");
 public sealed record W2PackageData(
     string Form = "W-2/W-3", string Revision = "2026", int TaxYear = 0,
     string EmployerLegalName = "", string EmployerEin = "", IReadOnlyList<W2EmployeeData>? Employees = null,

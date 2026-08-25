@@ -275,8 +275,8 @@ public sealed class PayrollFilingService(
         var source = await LoadSourceAsync(db, companyId, periodStart, periodEnd, cancellationToken);
         if (source.Runs.Count == 0) return TransactionResult.Failure("No posted, unreversed payroll runs exist in the requested filing period.");
         if (Digits(source.Company.TaxId).Length != 9) return TransactionResult.Failure("A valid nine-digit employer EIN is required before generating federal payroll filing data.");
-        if (formCode == "W2" && source.Employees.Values.Any(employee => Digits(employee.SocialSecurityNumber).Length != 9 || string.IsNullOrWhiteSpace(employee.FirstName) || string.IsNullOrWhiteSpace(employee.LastName) || string.IsNullOrWhiteSpace(employee.AddressLine1) || string.IsNullOrWhiteSpace(employee.PostalCode)))
-            return TransactionResult.Failure("Every employee in W-2 source payroll requires a valid SSN, name, street address, and postal code.");
+        if (formCode == "W2" && source.Employees.Values.Any(employee => Digits(employee.SocialSecurityNumber).Length != 9 || string.IsNullOrWhiteSpace(employee.FirstName) || string.IsNullOrWhiteSpace(employee.LastName) || string.IsNullOrWhiteSpace(employee.AddressLine1) || string.IsNullOrWhiteSpace(employee.AddressCity) || employee.AddressState.Trim().Length != 2 || string.IsNullOrWhiteSpace(employee.PostalCode)))
+            return TransactionResult.Failure("Every employee in W-2 source payroll requires a valid SSN, separate first and last name, street address, city, two-letter state, and postal code.");
         var payload = formCode switch
         {
             "941" => JsonSerializer.Serialize(Build941(source, request.TaxYear, request.Quarter!.Value)),
@@ -447,7 +447,8 @@ public sealed class PayrollFilingService(
                 Round(taxes.Where(line => line.ObligationCode == "US-OASDI-EMPLOYEE").Sum(line => line.TaxableWages)),
                 Round(taxes.Where(line => line.ObligationCode == "US-OASDI-EMPLOYEE").Sum(line => line.EmployeeAmount)),
                 Round(taxes.Where(line => line.ObligationCode == "US-MEDICARE-EMPLOYEE").Sum(line => line.TaxableWages)),
-                Round(taxes.Where(line => line.ObligationCode is "US-MEDICARE-EMPLOYEE" or "US-ADDITIONAL-MEDICARE").Sum(line => line.EmployeeAmount)), jurisdictions));
+                Round(taxes.Where(line => line.ObligationCode is "US-MEDICARE-EMPLOYEE" or "US-ADDITIONAL-MEDICARE").Sum(line => line.EmployeeAmount)), jurisdictions,
+                employee.FirstName, "", employee.LastName, employee.AddressCity, employee.AddressState));
         }
         return new W2PackageData(TaxYear: year, EmployerLegalName: source.Company.LegalName, EmployerEin: source.Company.TaxId, Employees: employees,
             W3Box1Total: Round(employees.Sum(item => item.Box1WagesTipsOtherCompensation)), W3Box2Total: Round(employees.Sum(item => item.Box2FederalIncomeTaxWithheld)),
@@ -535,7 +536,7 @@ public sealed class PayrollFilingService(
         {
             company = new { source.Company.Id, source.Company.LegalName, source.Company.TaxId },
             runs = source.Runs.OrderBy(run => run.Id).Select(run => new { run.Id, run.Status, run.PayDate, run.ConcurrencyToken }),
-            employees = source.Employees.Values.OrderBy(employee => employee.Id).Select(employee => new { employee.Id, employee.EmployeeNumber, employee.FirstName, employee.LastName, employee.SocialSecurityNumber, employee.AddressLine1, employee.AddressLine2, employee.PostalCode, employee.ConcurrencyToken }),
+            employees = source.Employees.Values.OrderBy(employee => employee.Id).Select(employee => new { employee.Id, employee.EmployeeNumber, employee.FirstName, employee.LastName, employee.SocialSecurityNumber, employee.AddressLine1, employee.AddressLine2, employee.AddressCity, employee.AddressState, employee.PostalCode, employee.ConcurrencyToken }),
             employeeLines = source.EmployeeLines.OrderBy(line => line.Id).Select(line => new { line.Id, line.PayrollRunId, line.EmployeeId, line.GrossPay, line.TaxableWages, line.PreTaxDeductions, line.EmployeeWithholdings, line.PostTaxDeductions, line.EmployerPayrollTaxes, line.EmployerBenefitContributions, line.NetPay }),
             taxLines = source.TaxLines.OrderBy(line => line.Id).Select(line => new { line.Id, line.PayrollRunEmployeeLineId, line.ObligationCode, line.JurisdictionCode, line.TaxableWages, line.EmployeeAmount, line.EmployerAmount, line.ContentVersion }),
             deposits = source.Deposits.OrderBy(item => item.ApplicationId).Select(item => new { item.ApplicationId, item.ObligationCode, item.Amount })
