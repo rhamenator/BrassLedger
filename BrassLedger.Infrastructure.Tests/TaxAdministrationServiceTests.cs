@@ -495,6 +495,62 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task AlabamaSourceCapture_PreservesIncomeSensitiveDeductionsAndSafeHarbor()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/al/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(4, calculation.GetProperty("standardDeductionSchedules").EnumerateObject().Count());
+        Assert.Equal(8500, calculation.GetProperty("standardDeductionSchedules").GetProperty("MarriedFilingJointly").GetProperty("lowAmount").GetInt32());
+        Assert.Equal(300, calculation.GetProperty("dependentDeductionPerDependent")[2].GetProperty("amount").GetInt32());
+        Assert.Equal(29.59m, calculation.GetProperty("officialExample").GetProperty("periodicWithholding").GetDecimal());
+        Assert.Equal(0.05m, calculation.GetProperty("supplementalFlatRate").GetDecimal());
+        Assert.Equal(30, root.GetProperty("residencyAndWorkRules").GetProperty("nonresidentSafeHarborDays").GetInt32());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ArkansasSourceCapture_PreservesMidpointFormulaHighIncomePhaseInAndTexarkana()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ar/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+        var brackets = calculation.GetProperty("annualGrossTaxBrackets").EnumerateArray().ToArray();
+
+        Assert.Equal(2470, calculation.GetProperty("annualStandardDeduction").GetInt32());
+        Assert.Equal(37, brackets.Length);
+        Assert.Equal(29, calculation.GetProperty("annualPersonalCreditPerExemption").GetInt32());
+        Assert.Equal(23050, calculation.GetProperty("officialExample").GetProperty("normalizedIncome").GetInt32());
+        Assert.Equal(36.50m, calculation.GetProperty("officialExample").GetProperty("periodicWithholding").GetDecimal());
+        Assert.True(root.GetProperty("residencyAndWorkRules").GetProperty("estimateTrueUpRequired").GetBoolean());
+        Assert.True(root.GetProperty("texarkanaBorderCityExemption").GetProperty("addressBoundaryRequired").GetBoolean());
+        Assert.All(root.GetProperty("sources").EnumerateArray(), source => Assert.Matches("^[a-f0-9]{64}$", source.GetProperty("sha256").GetString()));
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task DelawareSourceCapture_PreservesBracketsExamplesAndEighthMonthlyFiling()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/de/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(7, calculation.GetProperty("annualTaxBrackets").GetArrayLength());
+        Assert.Equal(0.066m, calculation.GetProperty("annualTaxBrackets")[6].GetProperty("rate").GetDecimal());
+        Assert.Equal(110, calculation.GetProperty("annualExemptionCreditPerAllowance").GetInt32());
+        Assert.Equal(3, calculation.GetProperty("officialExamples").GetArrayLength());
+        Assert.Equal(3, root.GetProperty("filing").GetProperty("frequencies").GetArrayLength());
+        Assert.Equal(8, root.GetProperty("filing").GetProperty("frequencies")[2].GetProperty("periodEndDays").GetArrayLength());
+        Assert.Empty(root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates").EnumerateArray());
+        Assert.All(root.GetProperty("sources").EnumerateArray(), source => Assert.Matches("^[a-f0-9]{64}$", source.GetProperty("sha256").GetString()));
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();

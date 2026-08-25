@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-al",
+  "capturedAtUtc": "2026-08-25T05:04:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.revenue.alabama.gov/wp-content/uploads/2026/01/whbooklet_0126.pdf", "title": "2026 Alabama Withholding Tax Tables and Instructions", "revision": "January 2026", "retrievedAtUtc": "2026-08-25T05:04:00Z", "mediaType": "application/pdf", "sha256": "11aa9a42eb1ba920918bcb7ed9356d6b2aad5b446079ac14c170b46c7313f628", "bytes": 694535 }
+  ],
+  "employeeInputs": [
+    { "code": "exemptionClass", "source": "Form A-4", "dataType": "enum", "values": ["Zero", "Single", "MarriedFilingSeparately", "MarriedFilingJointly", "HeadOfFamily"] },
+    { "code": "dependents", "source": "Form A-4", "dataType": "integer", "minimum": 0 },
+    { "code": "periodicFederalWithholding", "dataType": "money", "minimum": 0 },
+    { "code": "alabamaWorkDays", "dataType": "integer", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["WageBracket", "AnnualizedFormula"],
+    "payPeriodsPerYear": { "Weekly": 52, "Biweekly": 26, "Semimonthly": 24, "Monthly": 12, "Quarterly": 4 },
+    "formulaSteps": [
+      "annualGrossIncome = periodicGrossWages * payPeriodsPerYear",
+      "annualDeductions = standardDeduction(annualGrossIncome, exemptionClass) + (periodicFederalWithholding * payPeriodsPerYear) + personalExemption(exemptionClass) + dependentDeduction(annualGrossIncome, dependents)",
+      "annualTaxableAmount = max(0, annualGrossIncome - annualDeductions)",
+      "annualTax = progressiveTax(annualTaxableAmount, exemptionClass)",
+      "periodicWithholding = annualTax / payPeriodsPerYear"
+    ],
+    "standardDeductionSchedules": {
+      "ZeroOrSingle": { "lowIncomeThrough": 25999, "lowAmount": 3000, "phaseoutFrom": 26000, "phaseoutThrough": 35499, "phaseoutIncrement": 500, "decreasePerIncrement": 25, "highIncomeFrom": 35500, "highAmount": 2500 },
+      "MarriedFilingSeparately": { "lowIncomeThrough": 12999, "lowAmount": 4250, "phaseoutFrom": 13000, "phaseoutThrough": 17749, "phaseoutIncrement": 250, "decreasePerIncrement": 88, "highIncomeFrom": 17750, "highAmount": 2500 },
+      "MarriedFilingJointly": { "lowIncomeThrough": 25999, "lowAmount": 8500, "phaseoutFrom": 26000, "phaseoutThrough": 35499, "phaseoutIncrement": 500, "decreasePerIncrement": 175, "highIncomeFrom": 35500, "highAmount": 5000 },
+      "HeadOfFamily": { "lowIncomeThrough": 25999, "lowAmount": 5200, "phaseoutFrom": 26000, "phaseoutThrough": 35499, "phaseoutIncrement": 500, "decreasePerIncrement": 135, "highIncomeFrom": 35500, "highAmount": 2500 }
+    },
+    "personalExemptions": { "Zero": 0, "Single": 1500, "MarriedFilingSeparately": 1500, "MarriedFilingJointly": 3000, "HeadOfFamily": 3000 },
+    "dependentDeductionPerDependent": [
+      { "annualGrossIncomeThrough": 50000, "amount": 1000 },
+      { "annualGrossIncomeFrom": 50000.01, "annualGrossIncomeThrough": 100000, "amount": 500 },
+      { "annualGrossIncomeFrom": 100000.01, "amount": 300 }
+    ],
+    "annualTaxBrackets": {
+      "ZeroSingleHeadOrMarriedSeparate": [
+        { "through": 500, "rate": 0.02 },
+        { "over": 500, "through": 3000, "rate": 0.04 },
+        { "over": 3000, "rate": 0.05 }
+      ],
+      "MarriedFilingJointly": [
+        { "through": 1000, "rate": 0.02 },
+        { "over": 1000, "through": 6000, "rate": 0.04 },
+        { "over": 6000, "rate": 0.05 }
+      ]
+    },
+    "formulaRounding": "May round to nearest dollar",
+    "officialExample": { "exemptionClass": "MarriedFilingJointly", "dependents": 2, "frequency": "Weekly", "wages": 850, "periodicFederalWithholding": 35.19, "annualGrossIncome": 44200, "standardDeduction": 5000, "annualFederalWithholding": 1830, "personalExemption": 3000, "dependentDeduction": 2000, "annualTaxableAmount": 32370, "annualTax": 1538.50, "periodicWithholding": 29.59 },
+    "supplementalFlatRate": 0.05,
+    "missingCertificate": { "exemptionClass": "Zero", "dependents": 0 }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "An Alabama-resident employer withholds for an Alabama-resident employee wherever services are performed, except when withholding the work state's income tax.",
+    "nonresidentRule": "Withhold only on wages earned for services in Alabama.",
+    "nonresidentSafeHarborDays": 30,
+    "safeHarborEffect": "For 30 or fewer Alabama service days in the calendar year, continue withholding to the employee's residence state if it has an income tax; at 31 or more days, Alabama income and withholding become taxable and reportable.",
+    "multiStateAllocationRequired": true
+  },
+  "specialRules": {
+    "approvedSeveranceExemptionMaximum": 50000,
+    "militarySpouseAndInterstateTransportationBranchesPresent": true
+  },
+  "filing": {
+    "quarterlyReturn": "A-1",
+    "quarterlyReturnDue": "Last day of month following quarter",
+    "monthlyReturn": "A-6",
+    "monthlyTrigger": "More than $1,000 withheld in either the first or second month of a quarter",
+    "monthlyDue": "15th day of following month",
+    "annualReconciliation": "A-3",
+    "electronicInformationReturnThreshold": 10
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The source says formula tax may be rounded to the nearest dollar but does not mandate whether annual tax is rounded before division; the official example divides unrounded annual tax.",
+    "The complete wage-bracket tables remain in the checksummed official PDF rather than being duplicated here.",
+    "The 30-day safe harbor needs executable year-to-date day tracking and a policy for the 31st-day transition before activation."
+  ],
+  "review": { "formulaTranscribed": true, "officialExamplesTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": true, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Verify rounding against table boundaries, implement the safe-harbor transition and special-worker branches, transcribe or import the wage tables, and add executable engine cases." }
+}
