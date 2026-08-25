@@ -21,6 +21,7 @@ else
             </div>
             <p class="page-intro">Build a dated payroll draft, review employee and jurisdiction calculations, approve it, and post it through a controlled ledger workflow.</p>
         </header>
+        @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
 
         <section class="stats-grid">
             <article class="stat-card accent-sand">
@@ -41,11 +42,58 @@ else
             </article>
         </section>
 
+        <section class="panel">
+            <h2>Timecards and variable earnings</h2>
+            <p class="page-intro">Capture dated earnings at their actual work location. Draft timecards must be submitted and approved before they can feed a payroll run.</p>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PreparePayroll"><Authorized Context="timecardPrepareContext">
+                <div class="content-grid">
+                    <div class="field-group"><label class="field-label">Employee</label><InputSelect aria-label="Timecard employee" class="field-input" @bind-Value="TimecardForm.EmployeeId" @bind-Value:after="ApplyTimecardEmployeeDefaults">@foreach (var employee in Workspace.Payroll.Employees.Where(employee => employee.IsActive)) { <option value="@employee.Id">@employee.EmployeeNumber — @employee.FullName</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Period start</label><InputDate aria-label="Timecard period start" class="field-input" @bind-Value="TimecardForm.PeriodStart" /></div>
+                    <div class="field-group"><label class="field-label">Period end</label><InputDate aria-label="Timecard period end" class="field-input" @bind-Value="TimecardForm.PeriodEnd" /></div>
+                    <div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Timecard notes" class="field-input" @bind-Value="TimecardForm.Notes" /></div>
+                </div>
+                @foreach (var entry in TimecardForm.Entries)
+                {
+                    <fieldset class="time-entry-card"><legend>Earning entry @(TimecardForm.Entries.IndexOf(entry) + 1)</legend><div class="time-entry-grid">
+                        <div class="field-group"><label class="field-label">Work date</label><InputDate aria-label="Time entry work date" class="field-input" @bind-Value="entry.WorkDate" /></div>
+                        <div class="field-group"><label class="field-label">Earning type</label><InputSelect aria-label="Time entry earning type" class="field-input" @bind-Value="entry.EarningType"><option>Regular</option><option>Overtime</option><option>Double time</option><option>PTO</option><option>Sick</option><option>Holiday</option><option>Bonus</option><option>Commission</option><option>Tips</option><option>Piecework</option><option>Shift differential</option><option>On-call</option><option>Severance</option><option>Taxable fringe</option><option>Reimbursement</option></InputSelect></div>
+                        <div class="field-group"><label class="field-label">Code</label><InputText aria-label="Time entry earning code" class="field-input" @bind-Value="entry.EarningCode" /></div>
+                        <div class="field-group"><label class="field-label">Hours</label><InputNumber aria-label="Time entry hours" class="field-input" @bind-Value="entry.Hours" /></div>
+                        <div class="field-group"><label class="field-label">Rate</label><InputNumber aria-label="Time entry rate" class="field-input" @bind-Value="entry.Rate" /></div>
+                        <div class="field-group"><label class="field-label">Amount override</label><InputNumber aria-label="Time entry amount" class="field-input" @bind-Value="entry.Amount" /></div>
+                        <div class="field-group"><label class="field-label">Work state</label><InputText aria-label="Time entry work state" class="field-input" @bind-Value="entry.WorkState" /></div>
+                        <div class="field-group"><label class="field-label">Work county</label><InputText aria-label="Time entry work county" class="field-input" @bind-Value="entry.WorkCounty" /></div>
+                        <div class="field-group"><label class="field-label">Work city</label><InputText aria-label="Time entry work city" class="field-input" @bind-Value="entry.WorkCity" /></div>
+                        <div class="field-group"><label class="field-label">School district</label><InputText aria-label="Time entry work school district" class="field-input" @bind-Value="entry.WorkSchoolDistrict" /></div>
+                        <div class="field-group"><label class="field-label">Project / job</label><InputSelect aria-label="Time entry project" class="field-input" @bind-Value="entry.ProjectJobId"><option value="">None</option>@foreach (var project in Workspace.Projects.Jobs) { <option value="@project.Id">@project.JobNumber — @project.Name</option> }</InputSelect></div>
+                        <div class="field-group"><label class="field-label">Entry notes</label><InputText aria-label="Time entry notes" class="field-input" @bind-Value="entry.Notes" /></div>
+                        <label class="check-field"><InputCheckbox @bind-Value="entry.IsTaxable" /> Taxable earning</label>
+                    </div><button class="action-secondary" type="button" @onclick="() => RemoveTimeEntry(entry)" disabled="@(TimecardForm.Entries.Count == 1)">Remove entry</button></fieldset>
+                }
+                <button class="action-secondary" type="button" @onclick="AddTimeEntry">Add earning entry</button>
+                <button class="action-primary" type="button" @onclick="SaveTimecardAsync">@(TimecardForm.Id.HasValue ? "Update timecard draft" : "Save timecard draft")</button>
+            </Authorized></AuthorizeView>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="timecardVoidReasonContext"><div class="field-group timecard-void-reason"><label class="field-label">Void reason</label><InputText aria-label="Timecard void reason" class="field-input" @bind-Value="TimecardVoidReason" /></div></Authorized></AuthorizeView>
+            @if (Workspace.Payroll.Timecards?.Count > 0)
+            {
+                <div class="table-scroll"><table class="data-table"><thead><tr><th>Include</th><th>Employee</th><th>Period</th><th>Status</th><th>Hours</th><th>Amount</th><th>Entries</th><th>Actions</th></tr></thead><tbody>
+                @foreach (var timecard in Workspace.Payroll.Timecards)
+                {
+                    <tr><td>@if (timecard.Status == "Approved") { <input type="checkbox" aria-label="@($"Include approved timecard for {timecard.EmployeeName}")" checked="@SelectedApprovedTimecardIds.Contains(timecard.Id)" @onchange="args => ToggleApprovedTimecard(timecard.Id, args.Value)" /> } else { <span aria-label="Not available">—</span> }</td><td>@timecard.EmployeeNumber — @timecard.EmployeeName</td><td>@timecard.PeriodStart to @timecard.PeriodEnd</td><td>@timecard.Status</td><td>@timecard.TotalHours.ToString("N2")</td><td>@timecard.TotalAmount.ToString("C")</td><td>@timecard.Entries.Count</td><td>
+                        @if (timecard.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PreparePayroll"><Authorized Context="timecardDraftActionContext"><button class="action-secondary" type="button" @onclick="() => LoadTimecard(timecard)">Edit</button><button class="action-primary" type="button" @onclick="() => SubmitTimecardAsync(timecard)">Submit</button></Authorized></AuthorizeView> }
+                        @if (timecard.Status == "Submitted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="timecardApproveActionContext"><button class="action-primary" type="button" @onclick="() => ApproveTimecardAsync(timecard)">Approve</button></Authorized></AuthorizeView> }
+                        @if (timecard.Status is "Draft" or "Submitted" or "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="timecardVoidActionContext"><button class="action-secondary" type="button" @onclick="() => VoidTimecardAsync(timecard)">Void</button></Authorized></AuthorizeView> }
+                    </td></tr>
+                }
+                </tbody></table></div>
+            }
+            else { <p>No timecards have been prepared.</p> }
+        </section>
+
         <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PreparePayroll"><Authorized Context="payrollPrepareContext">
         <section class="panel">
             <h2>Prepare payroll draft</h2>
-            <p class="page-intro">Enter the pay period and employee earnings. Previewing does not change the books; saving creates a durable draft that must be approved before posting.</p>
-            @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
+            <p class="page-intro">Enter the pay period and employee base earnings, then select approved timecards above. Stored time entries replace entered gross pay for hourly employees and are added to base pay for salaried employees. Previewing does not change the books; saving atomically assigns the selected timecards to the new draft.</p>
             <EditForm Model="RunForm" OnValidSubmit="PreviewPayrollAsync"><div class="content-grid">
                 <div class="field-group"><label class="field-label">Pay date</label><InputDate aria-label="Payroll pay date" class="field-input" @bind-Value="RunForm.PayDate" /></div>
                 <div class="field-group"><label class="field-label">Period start</label><InputDate aria-label="Payroll period start" class="field-input" @bind-Value="RunForm.PeriodStart" /></div>
@@ -246,11 +294,14 @@ else
     private PayrollRunEditor RunForm { get; } = new();
     private readonly Dictionary<Guid, decimal> RunLines = [];
     private readonly Dictionary<Guid, EmployeePayrollEditor> EmployeeSetups = [];
+    private PayrollTimecardEditor TimecardForm = new();
+    private string TimecardVoidReason = string.Empty;
     private PayrollRunEstimate? Preview;
     private string ReversalReason = string.Empty;
     private JurisdictionRuleEditor JurisdictionRuleForm { get; } = new();
     private Guid SelectedPayrollSetupEmployeeId;
     private Guid SelectedEmployeeId;
+    private HashSet<Guid> SelectedApprovedTimecardIds { get; } = [];
     private EmployeeEmploymentEditor EmploymentForm = new();
     private EmployeeSnapshot? SelectedPayrollSetupEmployee => Workspace?.Payroll.Employees.FirstOrDefault(employee => employee.Id == SelectedPayrollSetupEmployeeId);
     private EmployeePayrollEditor? SelectedPayrollSetup => EmployeeSetups.GetValueOrDefault(SelectedPayrollSetupEmployeeId);
@@ -267,9 +318,93 @@ else
         SelectedPayrollSetupEmployeeId = Workspace.Payroll.Employees.FirstOrDefault()?.Id ?? Guid.Empty;
         SelectedEmployeeId = SelectedPayrollSetupEmployeeId;
         LoadEmploymentEditor();
+        ResetTimecardEditor();
     }
 
-    private PostEmployeePayrollRunRequest BuildRequest() => new(RunForm.BankAccountId, RunForm.PayDate, RunForm.Reference, RunLines.Where(line => line.Value > 0).Select(line => new EmployeePayrollInput(line.Key, line.Value)).ToArray(), RunForm.PeriodStart, RunForm.PeriodEnd, RunForm.RunType);
+    private void ResetTimecardEditor()
+    {
+        var employeeId = Workspace?.Payroll.Employees.FirstOrDefault(employee => employee.IsActive)?.Id ?? Guid.Empty;
+        TimecardForm = new PayrollTimecardEditor { EmployeeId = employeeId, PeriodStart = RunForm.PeriodStart, PeriodEnd = RunForm.PeriodEnd };
+        AddTimeEntry();
+    }
+
+    private void ApplyTimecardEmployeeDefaults()
+    {
+        var employee = Workspace?.Payroll.Employees.FirstOrDefault(candidate => candidate.Id == TimecardForm.EmployeeId);
+        if (employee is null) return;
+        foreach (var entry in TimecardForm.Entries)
+        {
+            entry.WorkState = employee.State; entry.WorkCounty = employee.WorkCounty; entry.WorkCity = employee.WorkCity; entry.WorkSchoolDistrict = employee.WorkSchoolDistrict;
+            if (entry.Rate == 0) entry.Rate = DefaultTimecardRate(employee, entry.EarningType);
+        }
+    }
+
+    private void AddTimeEntry()
+    {
+        var employee = Workspace?.Payroll.Employees.FirstOrDefault(candidate => candidate.Id == TimecardForm.EmployeeId);
+        var entry = new PayrollTimeEntryEditor { WorkDate = TimecardForm.PeriodStart, EarningCode = "REG", EarningType = "Regular", IsTaxable = true };
+        if (employee is not null)
+        {
+            entry.Rate = DefaultTimecardRate(employee, entry.EarningType); entry.WorkState = employee.State; entry.WorkCounty = employee.WorkCounty; entry.WorkCity = employee.WorkCity; entry.WorkSchoolDistrict = employee.WorkSchoolDistrict;
+        }
+        TimecardForm.Entries.Add(entry);
+    }
+
+    private static decimal DefaultTimecardRate(EmployeeSnapshot employee, string earningType) => earningType == "Overtime" && employee.OvertimeRate > 0 ? employee.OvertimeRate : employee.HourlyRate > 0 ? employee.HourlyRate : decimal.Round(employee.MonthlyBasePay * 12m / 2080m, 4);
+    private void RemoveTimeEntry(PayrollTimeEntryEditor entry) { if (TimecardForm.Entries.Count > 1) TimecardForm.Entries.Remove(entry); }
+
+    private async Task SaveTimecardAsync()
+    {
+        var request = new SavePayrollTimecardDraftRequest(TimecardForm.Id, TimecardForm.EmployeeId, TimecardForm.PeriodStart, TimecardForm.PeriodEnd,
+            TimecardForm.Entries.Select(entry => new PayrollTimeEntryInput(entry.WorkDate, entry.EarningCode, entry.EarningType, entry.Hours, entry.Rate, entry.Amount, entry.IsTaxable, entry.WorkState, entry.WorkCounty, entry.WorkCity, entry.WorkSchoolDistrict, entry.ProjectJobId, entry.Notes)).ToArray(), TimecardForm.Notes, TimecardForm.ConcurrencyToken);
+        var result = await TransactionService.SavePayrollTimecardDraftAsync(request);
+        StatusMessage = result.Succeeded ? "Timecard draft saved without changing payroll or the ledger." : result.ErrorMessage;
+        if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); ResetTimecardEditor(); }
+    }
+
+    private void LoadTimecard(PayrollTimecardSnapshot timecard)
+    {
+        TimecardForm = new PayrollTimecardEditor { Id = timecard.Id, EmployeeId = timecard.EmployeeId, PeriodStart = timecard.PeriodStart, PeriodEnd = timecard.PeriodEnd, Notes = timecard.Notes, ConcurrencyToken = timecard.ConcurrencyToken,
+            Entries = timecard.Entries.Select(entry => new PayrollTimeEntryEditor { WorkDate = entry.WorkDate, EarningCode = entry.EarningCode, EarningType = entry.EarningType, Hours = entry.Hours, Rate = entry.Rate, Amount = entry.Amount, IsTaxable = entry.IsTaxable, WorkState = entry.WorkState, WorkCounty = entry.WorkCounty, WorkCity = entry.WorkCity, WorkSchoolDistrict = entry.WorkSchoolDistrict, ProjectJobId = entry.ProjectJobId, Notes = entry.Notes }).ToList() };
+        StatusMessage = $"Editing draft timecard for {timecard.EmployeeName}.";
+    }
+
+    private async Task SubmitTimecardAsync(PayrollTimecardSnapshot timecard)
+    {
+        var result = await TransactionService.SubmitPayrollTimecardAsync(new SubmitPayrollTimecardRequest(timecard.Id, timecard.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Timecard submitted for approval." : result.ErrorMessage;
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private async Task ApproveTimecardAsync(PayrollTimecardSnapshot timecard)
+    {
+        var result = await TransactionService.ApprovePayrollTimecardAsync(new ApprovePayrollTimecardRequest(timecard.Id, timecard.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Timecard approved for payroll." : result.ErrorMessage;
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private async Task VoidTimecardAsync(PayrollTimecardSnapshot timecard)
+    {
+        if (string.IsNullOrWhiteSpace(TimecardVoidReason)) { StatusMessage = "Enter a void reason before voiding a timecard."; return; }
+        var result = await TransactionService.VoidPayrollTimecardAsync(new VoidPayrollTimecardRequest(timecard.Id, TimecardVoidReason, timecard.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Timecard voided with its audit history preserved." : result.ErrorMessage;
+        if (result.Succeeded) TimecardVoidReason = string.Empty;
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private void ToggleApprovedTimecard(Guid timecardId, object? value)
+    {
+        var selected = value is bool boolean ? boolean : bool.TryParse(value?.ToString(), out var parsed) && parsed;
+        if (selected) SelectedApprovedTimecardIds.Add(timecardId); else SelectedApprovedTimecardIds.Remove(timecardId);
+        Preview = null;
+    }
+
+    private PostEmployeePayrollRunRequest BuildRequest()
+    {
+        var selectedEmployeeIds = (Workspace?.Payroll.Timecards ?? []).Where(card => SelectedApprovedTimecardIds.Contains(card.Id)).Select(card => card.EmployeeId).ToHashSet();
+        var employees = RunLines.Where(line => line.Value > 0 || selectedEmployeeIds.Contains(line.Key)).Select(line => new EmployeePayrollInput(line.Key, line.Value)).ToArray();
+        return new PostEmployeePayrollRunRequest(RunForm.BankAccountId, RunForm.PayDate, RunForm.Reference, employees, RunForm.PeriodStart, RunForm.PeriodEnd, RunForm.RunType, SelectedApprovedTimecardIds.ToArray());
+    }
     private void SetRunLine(Guid employeeId, object? value)
     {
         if (decimal.TryParse(value?.ToString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var amount))
@@ -286,7 +421,7 @@ else
     {
         var result = await TransactionService.SaveEmployeePayrollRunDraftAsync(BuildRequest());
         StatusMessage = result.Succeeded ? "Payroll draft saved. It has not changed the ledger or funding account." : result.ErrorMessage;
-        if (result.Succeeded) { Preview = null; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+        if (result.Succeeded) { Preview = null; SelectedApprovedTimecardIds.Clear(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     }
     private async Task ApprovePayrollAsync(PayrollRunSnapshot run)
     {
@@ -334,6 +469,8 @@ else
     }
 
     private sealed class PayrollRunEditor { public Guid BankAccountId { get; set; } public DateOnly PayDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly PeriodStart { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(-13)); public DateOnly PeriodEnd { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string RunType { get; set; } = "Regular"; public string Reference { get; set; } = $"PR-{DateTime.Today:yyyyMMdd}"; }
+    private sealed class PayrollTimecardEditor { public Guid? Id { get; set; } public Guid EmployeeId { get; set; } public DateOnly PeriodStart { get; set; } public DateOnly PeriodEnd { get; set; } public string Notes { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; public List<PayrollTimeEntryEditor> Entries { get; set; } = []; }
+    private sealed class PayrollTimeEntryEditor { public DateOnly WorkDate { get; set; } public string EarningCode { get; set; } = "REG"; public string EarningType { get; set; } = "Regular"; public decimal Hours { get; set; } public decimal Rate { get; set; } public decimal Amount { get; set; } public bool IsTaxable { get; set; } = true; public string WorkState { get; set; } = string.Empty; public string WorkCounty { get; set; } = string.Empty; public string WorkCity { get; set; } = string.Empty; public string WorkSchoolDistrict { get; set; } = string.Empty; public Guid? ProjectJobId { get; set; } public string Notes { get; set; } = string.Empty; }
     private sealed class EmployeePayrollEditor(string filingStatus, string payrollFrequency, int allowances, decimal additionalWithholding, decimal preTaxBenefitDeductions, decimal postTaxBenefitDeductions, string residenceState, string residenceCity, string workState, string workCity, int federalFormW4Year, bool federalStep2MultipleJobs, decimal federalStep3Credits, decimal federalStep4OtherIncome, decimal federalStep4Deductions, bool federalWithholdingExempt) { public string FilingStatus { get; set; } = filingStatus; public string PayrollFrequency { get; set; } = payrollFrequency; public int Allowances { get; set; } = allowances; public decimal AdditionalWithholding { get; set; } = additionalWithholding; public decimal PreTaxBenefitDeductions { get; set; } = preTaxBenefitDeductions; public decimal PostTaxBenefitDeductions { get; set; } = postTaxBenefitDeductions; public string ResidenceState { get; set; } = residenceState; public string ResidenceCity { get; set; } = residenceCity; public string WorkState { get; set; } = workState; public string WorkCity { get; set; } = workCity; public int FederalFormW4Year { get; set; } = federalFormW4Year; public bool FederalStep2MultipleJobs { get; set; } = federalStep2MultipleJobs; public decimal FederalStep3Credits { get; set; } = federalStep3Credits; public decimal FederalStep4OtherIncome { get; set; } = federalStep4OtherIncome; public decimal FederalStep4Deductions { get; set; } = federalStep4Deductions; public bool FederalWithholdingExempt { get; set; } = federalWithholdingExempt; }
     private sealed class JurisdictionRuleEditor { public string ResidenceJurisdiction { get; set; } = string.Empty; public string WorkJurisdiction { get; set; } = string.Empty; public bool ExemptWorkWithholding { get; set; } public decimal ResidentCreditRate { get; set; } public string Notes { get; set; } = string.Empty; }
     private sealed class EmployeeEmploymentEditor { public string AddressLine1 { get; set; } = string.Empty; public string AddressLine2 { get; set; } = string.Empty; public string PostalCode { get; set; } = string.Empty; public string ResidenceCounty { get; set; } = string.Empty; public string ResidenceSchoolDistrict { get; set; } = string.Empty; public string WorkCounty { get; set; } = string.Empty; public string WorkSchoolDistrict { get; set; } = string.Empty; public DateOnly? EmploymentStartedOn { get; set; } public DateOnly? EmploymentEndedOn { get; set; } public decimal HourlyRate { get; set; } public decimal OvertimeRate { get; set; } public bool DirectDepositEnabled { get; set; } public string BankAccountType { get; set; } = string.Empty; public string SocialSecurityNumber { get; set; } = string.Empty; public string BankRoutingNumber { get; set; } = string.Empty; public string BankAccountNumber { get; set; } = string.Empty; public bool ClearSocialSecurityNumber { get; set; } public bool ClearBankDetails { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; }

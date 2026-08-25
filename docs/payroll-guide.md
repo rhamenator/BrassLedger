@@ -21,7 +21,9 @@ SSNs, routing numbers, and bank account numbers are encrypted before database pe
 
 The payroll contract supports multiple earning lines for one employee in one run. Each line preserves its earning code/type, hours, rate, amount, work date, and state/county/city/school-district allocation. A non-taxable earning is excluded from taxable earnings. Deduction lines separately record employee/employer amounts and whether the deduction is exempt from federal income tax, FICA, or FUTA; do not assume every “pre-tax” benefit has the same tax treatment.
 
-The current operator screen provides gross-pay entry while the API/domain support detailed earning and deduction lines. Timecard entry and a full line editor remain required before live hourly payroll use.
+Timecards are durable records with draft, submission, approval, consumption, and void controls. Only an approved, unconsumed timecard for an employee and period in the payroll request can feed a run. Previewing leaves it approved. Saving a reviewed payroll draft copies the server-stored entries and assigns the card to the run in one database transaction. Each resulting earning line links to its exact source time entry, and a unique database constraint prevents reuse. For hourly employees, selected timecards replace the screen's gross-pay placeholder; for salaried employees, their entries are added to entered base salary. A failed draft leaves the cards available for correction and retry.
+
+The operator screen supports regular, overtime, double-time, leave, holiday, bonus, commission, tips, piecework, shift-differential, on-call, severance, fringe-benefit, and reimbursement entries, plus optional project/job and work-jurisdiction detail. Detailed deduction/benefit setup remains required before live payroll use.
 
 ## 2026 federal calculation
 
@@ -62,4 +64,4 @@ After posting, reconcile the payroll journal, funding account, and payroll liabi
 
 ## Current release boundary
 
-The lifecycle, protected fields, multi-location earning storage, 2026 FIT/FICA engine, ledger posting, and reversal controls are implemented and tested. BrassLedger is not yet ready for live payroll until the remaining payroll goal is completed: timecards, detailed line-entry UI, deduction/benefit setup and limits, direct-deposit/check output, liability deposits, quarter/year close, federal/state/local forms and e-file-ready exports, all required state/local executable content, and independent accounting/tax review.
+The lifecycle, protected fields, auditable timecards, detailed earning entry, multi-location earning storage, 2026 FIT/FICA engine, ledger posting, and reversal controls are implemented and tested. BrassLedger is not yet ready for live payroll until the remaining payroll goal is completed: deduction/benefit setup and limits, draft cancellation and correction workflows, direct-deposit/check output, pay statements, liability deposits, quarter/year close, federal/state/local forms and e-file-ready exports, work-location earnings allocation in tax calculation, all required state/local executable content, and independent accounting/tax review.

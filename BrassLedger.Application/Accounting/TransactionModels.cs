@@ -43,10 +43,15 @@ public sealed record PostPayrollRunRequest(
     decimal? EmployeeWithholdings = null,
     decimal? EmployerPayrollTaxes = null,
     string TaxJurisdiction = "Federal");
-public sealed record PayrollEarningInput(string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable = true, DateOnly? WorkedOn = null, string WorkState = "", string WorkCounty = "", string WorkCity = "", string WorkSchoolDistrict = "");
+public sealed record PayrollEarningInput(string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable = true, DateOnly? WorkedOn = null, string WorkState = "", string WorkCounty = "", string WorkCity = "", string WorkSchoolDistrict = "", Guid? SourceTimeEntryId = null);
 public sealed record PayrollDeductionInput(string DeductionCode, string DeductionType, decimal EmployeeAmount, decimal EmployerAmount = 0, bool IsPreTax = false, string LiabilityAccountNumber = "2200", bool ExemptFromFederalIncomeTax = false, bool ExemptFromFica = false, bool ExemptFromFuta = false);
+public sealed record PayrollTimeEntryInput(DateOnly WorkDate, string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable = true, string WorkState = "", string WorkCounty = "", string WorkCity = "", string WorkSchoolDistrict = "", Guid? ProjectJobId = null, string Notes = "");
+public sealed record SavePayrollTimecardDraftRequest(Guid? TimecardId, Guid EmployeeId, DateOnly PeriodStart, DateOnly PeriodEnd, IReadOnlyList<PayrollTimeEntryInput> Entries, string Notes = "", string ConcurrencyToken = "");
+public sealed record SubmitPayrollTimecardRequest(Guid TimecardId, string ConcurrencyToken);
+public sealed record ApprovePayrollTimecardRequest(Guid TimecardId, string ConcurrencyToken);
+public sealed record VoidPayrollTimecardRequest(Guid TimecardId, string Reason, string ConcurrencyToken);
 public sealed record EmployeePayrollInput(Guid EmployeeId, decimal GrossPay, IReadOnlyList<PayrollEarningInput>? Earnings = null, IReadOnlyList<PayrollDeductionInput>? Deductions = null);
-public sealed record PostEmployeePayrollRunRequest(Guid BankAccountId, DateOnly PayDate, string Reference, IReadOnlyList<EmployeePayrollInput> Employees, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null, string RunType = "Regular");
+public sealed record PostEmployeePayrollRunRequest(Guid BankAccountId, DateOnly PayDate, string Reference, IReadOnlyList<EmployeePayrollInput> Employees, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null, string RunType = "Regular", IReadOnlyList<Guid>? ApprovedTimecardIds = null);
 public sealed record PayrollTaxEstimate(string ObligationCode, string JurisdictionCode, string JurisdictionName, string TaxType, decimal TaxableWages, decimal YearToDateTaxableWagesBefore, decimal EmployeeAmount, decimal EmployerAmount, Guid? TaxRuleSetId, Guid? TaxContentPackageId, string ContentVersion, string Source, string CalculationTraceJson);
 public sealed record EmployeePayrollEstimate(Guid EmployeeId, string EmployeeName, string WorkState, string FilingStatus, decimal GrossPay, decimal PreTaxDeductions, decimal EmployeeWithholdings, decimal PostTaxDeductions, decimal EmployerPayrollTaxes, decimal NetPay, decimal YearToDateGrossBefore = 0, IReadOnlyList<PayrollTaxEstimate>? Taxes = null);
 public sealed record PayrollRunEstimate(decimal GrossPayroll, decimal PreTaxDeductions, decimal EmployeeWithholdings, decimal PostTaxDeductions, decimal EmployerPayrollTaxes, decimal NetPay, IReadOnlyList<EmployeePayrollEstimate> Employees);
@@ -117,6 +122,10 @@ public interface IAccountingTransactionService
     Task<TransactionResult> PostEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveEmployeePayrollSetupAsync(SaveEmployeePayrollSetupRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveEmployeeEmploymentDetailsAsync(SaveEmployeeEmploymentDetailsRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SavePayrollTimecardDraftAsync(SavePayrollTimecardDraftRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SubmitPayrollTimecardAsync(SubmitPayrollTimecardRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ApprovePayrollTimecardAsync(ApprovePayrollTimecardRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> VoidPayrollTimecardAsync(VoidPayrollTimecardRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default);
 }

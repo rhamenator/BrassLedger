@@ -1229,6 +1229,113 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task PayrollTimecards_RequireValidAuditableWorkflowAndPreventOverlappingHours()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var workspace = await workspaceService.GetWorkspaceAsync();
+        var employee = workspace.Payroll.Employees.First();
+        var project = workspace.Projects.Jobs.First();
+        var request = new SavePayrollTimecardDraftRequest(null, employee.Id, new DateOnly(2026, 8, 10), new DateOnly(2026, 8, 16),
+        [
+            new PayrollTimeEntryInput(new DateOnly(2026, 8, 10), "REG", "Regular", 8m, 30m, 240m, true, employee.State, "Maricopa", "Phoenix", "", project.Id, "Production shift"),
+            new PayrollTimeEntryInput(new DateOnly(2026, 8, 10), "OT", "Overtime", 2m, 45m, 90m, true, employee.State, "Maricopa", "Phoenix")
+        ], "Approved source schedule");
+
+        var saved = await transactions.SavePayrollTimecardDraftAsync(request);
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        var overlap = await transactions.SavePayrollTimecardDraftAsync(request with { Entries = [new PayrollTimeEntryInput(new DateOnly(2026, 8, 11), "REG", "Regular", 8m, 30m, 240m)] });
+        Assert.False(overlap.Succeeded);
+        Assert.Contains("overlapping", overlap.ErrorMessage);
+        var excessiveHours = await transactions.SavePayrollTimecardDraftAsync(new SavePayrollTimecardDraftRequest(null, workspace.Payroll.Employees.Skip(1).First().Id, new DateOnly(2026, 8, 10), new DateOnly(2026, 8, 16), [new PayrollTimeEntryInput(new DateOnly(2026, 8, 10), "REG", "Regular", 25m, 20m, 500m)]));
+        Assert.False(excessiveHours.Succeeded);
+        Assert.Contains("24 hours", excessiveHours.ErrorMessage);
+
+        var timecard = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(card => card.Id == saved.Id);
+        Assert.Equal("Draft", timecard.Status);
+        Assert.Equal(10m, timecard.TotalHours);
+        Assert.Equal(330m, timecard.TotalAmount);
+        Assert.Equal(2, timecard.Entries.Count);
+        Assert.False((await transactions.SubmitPayrollTimecardAsync(new SubmitPayrollTimecardRequest(timecard.Id, "stale"))).Succeeded);
+        Assert.True((await transactions.SubmitPayrollTimecardAsync(new SubmitPayrollTimecardRequest(timecard.Id, timecard.ConcurrencyToken))).Succeeded);
+        timecard = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(card => card.Id == saved.Id);
+        Assert.Equal("Submitted", timecard.Status);
+        Assert.False((await transactions.SavePayrollTimecardDraftAsync(request with { TimecardId = timecard.Id, ConcurrencyToken = timecard.ConcurrencyToken })).Succeeded);
+        Assert.True((await transactions.ApprovePayrollTimecardAsync(new ApprovePayrollTimecardRequest(timecard.Id, timecard.ConcurrencyToken))).Succeeded);
+        timecard = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(card => card.Id == saved.Id);
+        Assert.Equal("Approved", timecard.Status);
+        Assert.False((await transactions.VoidPayrollTimecardAsync(new VoidPayrollTimecardRequest(timecard.Id, "", timecard.ConcurrencyToken))).Succeeded);
+        Assert.True((await transactions.VoidPayrollTimecardAsync(new VoidPayrollTimecardRequest(timecard.Id, "Duplicate source schedule", timecard.ConcurrencyToken))).Succeeded);
+
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var stored = await db.PayrollTimecards.SingleAsync(card => card.Id == saved.Id);
+        Assert.Equal("Voided", stored.Status);
+        Assert.Equal(4, await db.BusinessAuditEntries.CountAsync(entry => entry.EntityType == "PayrollTimecard" && entry.EntityId == stored.Id));
+        Assert.Equal(2, await db.PayrollTimeEntries.CountAsync(entry => entry.PayrollTimecardId == stored.Id));
+    }
+
+    [Fact]
+    public async Task ApprovedTimecards_AreServerCalculatedConsumedAtomicallyAndRetainEntryProvenance()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var workspace = await workspaceService.GetWorkspaceAsync();
+        var employee = workspace.Payroll.Employees.First(candidate => candidate.PayType == "Hourly");
+        var periodStart = new DateOnly(2026, 8, 10);
+        var periodEnd = new DateOnly(2026, 8, 16);
+        var cardResult = await transactions.SavePayrollTimecardDraftAsync(new SavePayrollTimecardDraftRequest(null, employee.Id, periodStart, periodEnd,
+        [
+            new PayrollTimeEntryInput(periodStart, "REG", "Regular", 8m, 30m, 240m, true, "AZ", "Maricopa", "Phoenix"),
+            new PayrollTimeEntryInput(periodStart.AddDays(1), "OT", "Overtime", 2m, 45m, 90m, true, "NV", "Clark", "Las Vegas")
+        ]));
+        Assert.True(cardResult.Succeeded, cardResult.ErrorMessage);
+        var card = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(candidate => candidate.Id == cardResult.Id);
+        Assert.True((await transactions.SubmitPayrollTimecardAsync(new SubmitPayrollTimecardRequest(card.Id, card.ConcurrencyToken))).Succeeded);
+        card = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(candidate => candidate.Id == card.Id);
+        Assert.True((await transactions.ApprovePayrollTimecardAsync(new ApprovePayrollTimecardRequest(card.Id, card.ConcurrencyToken))).Succeeded);
+        card = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(candidate => candidate.Id == card.Id);
+
+        var bankId = workspace.Treasury.BankAccounts.First().Id;
+        var request = new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 8, 21), "TIMECARD-PAYROLL-1", [new EmployeePayrollInput(employee.Id, 9_999m)], periodStart, periodEnd, ApprovedTimecardIds: [card.Id]);
+        var preview = await transactions.PreviewEmployeePayrollRunAsync(request);
+        Assert.NotNull(preview);
+        Assert.Equal(330m, preview.GrossPayroll);
+        Assert.Equal("Approved", (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(candidate => candidate.Id == card.Id).Status);
+
+        var failed = await transactions.SaveEmployeePayrollRunDraftAsync(request with { BankAccountId = Guid.NewGuid(), Reference = "TIMECARD-FAILED" });
+        Assert.False(failed.Succeeded);
+        Assert.Equal("Approved", (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(candidate => candidate.Id == card.Id).Status);
+
+        var saved = await transactions.SaveEmployeePayrollRunDraftAsync(request);
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        var consumed = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(candidate => candidate.Id == card.Id);
+        Assert.Equal("Consumed", consumed.Status);
+        Assert.Equal(saved.Id, consumed.PayrollRunId);
+        var reused = await transactions.SaveEmployeePayrollRunDraftAsync(request with { Reference = "TIMECARD-PAYROLL-REUSE" });
+        Assert.False(reused.Succeeded);
+        Assert.Contains("approved", reused.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var correctionCard = await transactions.SavePayrollTimecardDraftAsync(new SavePayrollTimecardDraftRequest(null, employee.Id, periodStart, periodEnd,
+            [new PayrollTimeEntryInput(periodStart, "CORR", "Correction", 1m, 30m, 30m, true, "AZ", "Maricopa", "Phoenix")], "Correction after the original card was consumed"));
+        Assert.True(correctionCard.Succeeded, correctionCard.ErrorMessage);
+
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var runLineId = await db.PayrollRunEmployeeLines.Where(line => line.PayrollRunId == saved.Id).Select(line => line.Id).SingleAsync();
+        var earningLines = await db.PayrollEarningLines.Where(line => line.PayrollRunEmployeeLineId == runLineId).OrderBy(line => line.Sequence).ToListAsync();
+        var sourceEntries = await db.PayrollTimeEntries.Where(entry => entry.PayrollTimecardId == card.Id).OrderBy(entry => entry.WorkDate).ThenBy(entry => entry.Sequence).ToListAsync();
+        Assert.Equal(sourceEntries.Select(entry => entry.Id), earningLines.Select(line => line.PayrollTimeEntryId!.Value));
+        Assert.Equal(sourceEntries.Select(entry => entry.Amount), earningLines.Select(line => line.Amount));
+        Assert.Single(await db.BusinessAuditEntries.Where(entry => entry.EntityType == "PayrollTimecard" && entry.EntityId == card.Id && entry.Action == "payroll-timecard.consumed").ToListAsync());
+    }
+
+    [Fact]
     public async Task FederalPayroll2026_UsesPublication15TSelectionsAndFicaYearToDateBoundaries()
     {
         using var services = CreateServiceProvider();

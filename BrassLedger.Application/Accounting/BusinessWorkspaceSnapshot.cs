@@ -208,10 +208,13 @@ public sealed record PayrollWorkspace(
     decimal MonthlyGross,
     IReadOnlyList<EmployeeSnapshot> Employees,
     IReadOnlyList<PayrollJurisdictionRuleSnapshot>? JurisdictionRules = null,
-    IReadOnlyList<PayrollRunSnapshot>? Runs = null);
+    IReadOnlyList<PayrollRunSnapshot>? Runs = null,
+    IReadOnlyList<PayrollTimecardSnapshot>? Timecards = null);
 
 public sealed record PayrollJurisdictionRuleSnapshot(Guid Id, string ResidenceJurisdiction, string WorkJurisdiction, bool ExemptWorkWithholding, decimal ResidentCreditRate, bool IsActive, string Notes);
 public sealed record PayrollRunSnapshot(Guid Id, string Reference, DateOnly PeriodStart, DateOnly PeriodEnd, DateOnly PayDate, string RunType, string Status, decimal GrossPayroll, decimal EmployeeWithholdings, decimal EmployerPayrollTaxes, decimal NetPay, string ConcurrencyToken, Guid? JournalEntryId, Guid? ReversalJournalEntryId, DateTimeOffset PreparedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? PostedAtUtc, DateTimeOffset? ReversedAtUtc, string ReversalReason);
+public sealed record PayrollTimecardSnapshot(Guid Id, Guid EmployeeId, string EmployeeNumber, string EmployeeName, DateOnly PeriodStart, DateOnly PeriodEnd, string Status, decimal TotalHours, decimal TotalAmount, string Notes, string ConcurrencyToken, Guid? PayrollRunId, DateTimeOffset PreparedAtUtc, DateTimeOffset? SubmittedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? VoidedAtUtc, string VoidReason, IReadOnlyList<PayrollTimeEntrySnapshot> Entries);
+public sealed record PayrollTimeEntrySnapshot(Guid Id, int Sequence, DateOnly WorkDate, string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable, string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict, Guid? ProjectJobId, string Notes);
 
 public sealed record EmployeeSnapshot(
     string EmployeeNumber,
@@ -265,7 +268,8 @@ public sealed record ProjectJobSnapshot(
     string CustomerName,
     string Status,
     decimal BudgetAmount,
-    decimal ActualCost);
+    decimal ActualCost,
+    Guid Id = default);
 
 public sealed record ReportingWorkspace(
     int ReportCount,

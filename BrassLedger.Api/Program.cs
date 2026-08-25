@@ -405,6 +405,30 @@ api.MapPost("/payroll-runs/reverse", async (ReversePayrollRunRequest request, IA
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payroll"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll);
 
+api.MapPost("/payroll-timecards/drafts", async (SavePayrollTimecardDraftRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SavePayrollTimecardDraftAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/payroll-timecards/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["timecard"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll);
+
+api.MapPost("/payroll-timecards/submit", async (SubmitPayrollTimecardRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SubmitPayrollTimecardAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["timecard"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll);
+
+api.MapPost("/payroll-timecards/approve", async (ApprovePayrollTimecardRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ApprovePayrollTimecardAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["timecard"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApprovePayroll);
+
+api.MapPost("/payroll-timecards/void", async (VoidPayrollTimecardRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.VoidPayrollTimecardAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["timecard"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll);
+
 api.MapPut("/employees/payroll-setup", async (SaveEmployeePayrollSetupRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveEmployeePayrollSetupAsync(request, cancellationToken);

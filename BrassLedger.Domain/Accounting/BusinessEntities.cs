@@ -552,6 +552,48 @@ public sealed class Employee
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
+public sealed class PayrollTimecard
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    public string Status { get; set; } = "Draft";
+    public string Notes { get; set; } = string.Empty;
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? SubmittedByUserId { get; set; }
+    public DateTimeOffset? SubmittedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? VoidedByUserId { get; set; }
+    public DateTimeOffset? VoidedAtUtc { get; set; }
+    public string VoidReason { get; set; } = string.Empty;
+    public Guid? PayrollRunId { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollTimeEntry
+{
+    public Guid Id { get; set; }
+    public Guid PayrollTimecardId { get; set; }
+    public int Sequence { get; set; }
+    public DateOnly WorkDate { get; set; }
+    public string EarningCode { get; set; } = "REGULAR";
+    public string EarningType { get; set; } = "Regular";
+    public decimal Hours { get; set; }
+    public decimal Rate { get; set; }
+    public decimal Amount { get; set; }
+    public bool IsTaxable { get; set; } = true;
+    public string WorkState { get; set; } = string.Empty;
+    public string WorkCounty { get; set; } = string.Empty;
+    public string WorkCity { get; set; } = string.Empty;
+    public string WorkSchoolDistrict { get; set; } = string.Empty;
+    public Guid? ProjectJobId { get; set; }
+    public string Notes { get; set; } = string.Empty;
+}
+
 public sealed class ProjectJob
 {
     public Guid Id { get; set; }
@@ -653,6 +695,7 @@ public sealed class PayrollEarningLine
 {
     public Guid Id { get; set; }
     public Guid PayrollRunEmployeeLineId { get; set; }
+    public Guid? PayrollTimeEntryId { get; set; }
     public int Sequence { get; set; }
     public string EarningCode { get; set; } = "REGULAR";
     public string EarningType { get; set; } = "Regular";

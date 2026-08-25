@@ -290,10 +290,28 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.NotNull(before);
         var employee = before!.Payroll.Employees.First();
         var bank = before.Treasury.BankAccounts.Single(account => account.LedgerAccountNumber == "1010");
-        var request = new PostEmployeePayrollRunRequest(bank.Id, new DateOnly(2026, 6, 12), "PR-API-LIFECYCLE-1", [new EmployeePayrollInput(employee.Id, 500m)], new DateOnly(2026, 5, 31), new DateOnly(2026, 6, 6));
+        var timecardRequest = new SavePayrollTimecardDraftRequest(null, employee.Id, new DateOnly(2026, 5, 31), new DateOnly(2026, 6, 6),
+            [new PayrollTimeEntryInput(new DateOnly(2026, 6, 1), "REG", "Regular", 8m, 25m, 200m, WorkState: employee.State)], "API timecard");
+        var timecardResponse = await client.PostAsJsonAsync("/api/payroll-timecards/drafts", timecardRequest);
+        Assert.Equal(HttpStatusCode.Created, timecardResponse.StatusCode);
+        var timecardResult = await timecardResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var timecardWorkspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var timecard = timecardWorkspace!.Payroll.Timecards!.Single(candidate => candidate.Id == timecardResult!.Id);
+        Assert.Equal("Draft", timecard.Status);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-timecards/submit", new SubmitPayrollTimecardRequest(timecard.Id, timecard.ConcurrencyToken))).StatusCode);
+        timecardWorkspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        timecard = timecardWorkspace!.Payroll.Timecards!.Single(candidate => candidate.Id == timecard.Id);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-timecards/approve", new ApprovePayrollTimecardRequest(timecard.Id, timecard.ConcurrencyToken))).StatusCode);
+        timecardWorkspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        timecard = timecardWorkspace!.Payroll.Timecards!.Single(candidate => candidate.Id == timecard.Id);
+        Assert.Equal("Approved", timecard.Status);
+
+        var request = new PostEmployeePayrollRunRequest(bank.Id, new DateOnly(2026, 6, 12), "PR-API-LIFECYCLE-1", [new EmployeePayrollInput(employee.Id, 500m)], new DateOnly(2026, 5, 31), new DateOnly(2026, 6, 6), ApprovedTimecardIds: [timecard.Id]);
 
         var preview = await client.PostAsJsonAsync("/api/payroll-runs/employee-preview", request);
         Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var previewResult = await preview.Content.ReadFromJsonAsync<PayrollRunEstimate>();
+        Assert.Equal(200m, previewResult!.GrossPayroll);
         var draftResponse = await client.PostAsJsonAsync("/api/payroll-runs/drafts", request);
         Assert.Equal(HttpStatusCode.Created, draftResponse.StatusCode);
         var draftResult = await draftResponse.Content.ReadFromJsonAsync<TransactionResult>();
@@ -302,6 +320,12 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         var run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == draftResult!.Id);
         Assert.Equal("Draft", run.Status);
+        Assert.Equal(200m, run.GrossPayroll);
+        timecard = workspace.Payroll.Timecards!.Single(candidate => candidate.Id == timecard.Id);
+        Assert.Equal("Consumed", timecard.Status);
+        Assert.Equal(run.Id, timecard.PayrollRunId);
+        var reused = request with { Reference = "PR-API-LIFECYCLE-REUSE" };
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/payroll-runs/drafts", reused)).StatusCode);
         Assert.Equal(bank.CurrentBalance, workspace.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/payroll-runs/post", new PostApprovedPayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
 

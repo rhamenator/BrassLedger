@@ -1029,11 +1029,13 @@ public sealed class AccountingTransactionService(
     public async Task<PayrollRunEstimate?> PreviewEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.PayrollPrepare)) return null;
-        if (request.Employees.Count == 0 || request.Employees.Any(line => line.EmployeeId == Guid.Empty || line.GrossPay <= 0) || request.Employees.Select(line => line.EmployeeId).Distinct().Count() != request.Employees.Count)
+        if (request.Employees.Count == 0 || request.Employees.Any(line => line.EmployeeId == Guid.Empty) || request.Employees.Select(line => line.EmployeeId).Distinct().Count() != request.Employees.Count)
             return null;
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        return await CalculateEmployeePayrollAsync(db, companyId, request, cancellationToken);
+        var expansion = await ExpandApprovedTimecardsAsync(db, companyId, request, cancellationToken);
+        if (expansion.Request is null || expansion.Request.Employees.Any(line => ResolveGrossPay(line) <= 0)) return null;
+        return await CalculateEmployeePayrollAsync(db, companyId, expansion.Request, cancellationToken);
     }
 
     public async Task<TransactionResult> PostEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default)
@@ -1053,8 +1055,8 @@ public sealed class AccountingTransactionService(
     {
         if (!HasPermission(BrassLedgerPermissions.PayrollPrepare)) return TransactionResult.Failure("You are not authorized to prepare payroll runs.");
         if (string.IsNullOrWhiteSpace(request.Reference)) return TransactionResult.Failure("A payroll run reference is required.");
-        if (request.Employees.Count == 0 || request.Employees.Any(line => line.EmployeeId == Guid.Empty || ResolveGrossPay(line) <= 0) || request.Employees.Select(line => line.EmployeeId).Distinct().Count() != request.Employees.Count)
-            return TransactionResult.Failure("Provide one employee with positive earnings for each payroll line.");
+        if (request.Employees.Count == 0 || request.Employees.Any(line => line.EmployeeId == Guid.Empty) || request.Employees.Select(line => line.EmployeeId).Distinct().Count() != request.Employees.Count)
+            return TransactionResult.Failure("Provide one unique employee for each payroll line.");
         if (request.Employees.Any(line => line.Earnings?.Any(earning => earning.Amount < 0 || earning.Hours < 0 || earning.Rate < 0) == true))
             return TransactionResult.Failure("Payroll earning amounts, hours, and rates cannot be negative.");
         if (request.Employees.Any(line => line.Deductions?.Any(deduction => deduction.EmployeeAmount < 0 || deduction.EmployerAmount < 0) == true))
@@ -1066,9 +1068,13 @@ public sealed class AccountingTransactionService(
         if (runType is not ("Regular" or "OffCycle" or "Correction" or "Adjustment")) return TransactionResult.Failure("Payroll run type must be Regular, OffCycle, Correction, or Adjustment.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var expansion = await ExpandApprovedTimecardsAsync(db, companyId, request, cancellationToken);
+        if (expansion.Request is null) return TransactionResult.Failure(expansion.ErrorMessage);
+        var expandedRequest = expansion.Request;
+        if (expandedRequest.Employees.Any(line => ResolveGrossPay(line) <= 0)) return TransactionResult.Failure("Provide positive earnings for each payroll employee, either directly or through an approved timecard.");
         if (await db.PayrollRuns.AnyAsync(run => run.CompanyId == companyId && run.Reference == request.Reference.Trim(), cancellationToken))
             return TransactionResult.Failure("Payroll run reference already exists.");
-        var estimate = await CalculateEmployeePayrollAsync(db, companyId, request, cancellationToken);
+        var estimate = await CalculateEmployeePayrollAsync(db, companyId, expandedRequest, cancellationToken);
         if (estimate is null) return TransactionResult.Failure("Each payroll employee must be active and have applicable effective Federal or work-state tax profiles.");
         var bank = await db.BankAccounts.SingleOrDefaultAsync(account => account.Id == request.BankAccountId && account.CompanyId == companyId, cancellationToken);
         if (bank is null) return TransactionResult.Failure("Payroll funding account not found.");
@@ -1081,18 +1087,26 @@ public sealed class AccountingTransactionService(
         foreach (var estimateLine in estimate.Employees)
         {
             var employee = runEmployees[estimateLine.EmployeeId];
-            var input = request.Employees.Single(candidate => candidate.EmployeeId == estimateLine.EmployeeId);
+            var input = expandedRequest.Employees.Single(candidate => candidate.EmployeeId == estimateLine.EmployeeId);
             var line = new PayrollRunEmployeeLine { Id = Guid.NewGuid(), PayrollRunId = run.Id, EmployeeId = estimateLine.EmployeeId, WorkState = estimateLine.WorkState, WorkCity = employee.WorkCity, ResidenceState = string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState, ResidenceCity = employee.ResidenceCity, FilingStatus = estimateLine.FilingStatus, PayrollFrequency = employee.PayrollFrequency, GrossPay = estimateLine.GrossPay, TaxableWages = estimateLine.GrossPay - estimateLine.PreTaxDeductions, YearToDateGrossBefore = estimateLine.YearToDateGrossBefore, YearToDateGrossAfter = estimateLine.YearToDateGrossBefore + estimateLine.GrossPay, PreTaxDeductions = estimateLine.PreTaxDeductions, EmployeeWithholdings = estimateLine.EmployeeWithholdings, PostTaxDeductions = estimateLine.PostTaxDeductions, EmployerPayrollTaxes = estimateLine.EmployerPayrollTaxes, NetPay = estimateLine.NetPay };
             db.PayrollRunEmployeeLines.Add(line);
             var earnings = input.Earnings is { Count: > 0 } ? input.Earnings : [new PayrollEarningInput("REGULAR", "Regular", 0, 0, estimateLine.GrossPay, true, null, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict)];
-            db.PayrollEarningLines.AddRange(earnings.Select((earning, index) => new PayrollEarningLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, EarningCode = earning.EarningCode.Trim(), EarningType = earning.EarningType.Trim(), Hours = earning.Hours, Rate = earning.Rate, Amount = RoundCurrency(earning.Amount), IsTaxable = earning.IsTaxable, WorkedOn = earning.WorkedOn, WorkState = string.IsNullOrWhiteSpace(earning.WorkState) ? employee.State : earning.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(earning.WorkCounty) ? employee.WorkCounty : earning.WorkCounty.Trim(), WorkCity = string.IsNullOrWhiteSpace(earning.WorkCity) ? employee.WorkCity : earning.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(earning.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : earning.WorkSchoolDistrict.Trim() }));
+            db.PayrollEarningLines.AddRange(earnings.Select((earning, index) => new PayrollEarningLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, PayrollTimeEntryId = earning.SourceTimeEntryId, Sequence = index + 1, EarningCode = earning.EarningCode.Trim(), EarningType = earning.EarningType.Trim(), Hours = earning.Hours, Rate = earning.Rate, Amount = RoundCurrency(earning.Amount), IsTaxable = earning.IsTaxable, WorkedOn = earning.WorkedOn, WorkState = string.IsNullOrWhiteSpace(earning.WorkState) ? employee.State : earning.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(earning.WorkCounty) ? employee.WorkCounty : earning.WorkCounty.Trim(), WorkCity = string.IsNullOrWhiteSpace(earning.WorkCity) ? employee.WorkCity : earning.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(earning.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : earning.WorkSchoolDistrict.Trim() }));
             var deductions = input.Deductions ?? [];
             db.PayrollDeductionLines.AddRange(deductions.Select((deduction, index) => new PayrollDeductionLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, DeductionCode = deduction.DeductionCode.Trim(), DeductionType = deduction.DeductionType.Trim(), EmployeeAmount = RoundCurrency(deduction.EmployeeAmount), EmployerAmount = RoundCurrency(deduction.EmployerAmount), IsPreTax = deduction.IsPreTax, ExemptFromFederalIncomeTax = deduction.ExemptFromFederalIncomeTax, ExemptFromFica = deduction.ExemptFromFica, ExemptFromFuta = deduction.ExemptFromFuta, LiabilityAccountNumber = deduction.LiabilityAccountNumber.Trim() }));
             db.PayrollTaxLines.AddRange((estimateLine.Taxes ?? []).Select((tax, index) => new PayrollTaxLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, ObligationCode = tax.ObligationCode, JurisdictionCode = tax.JurisdictionCode, JurisdictionName = tax.JurisdictionName, TaxType = tax.TaxType, TaxableWages = tax.TaxableWages, YearToDateTaxableWagesBefore = tax.YearToDateTaxableWagesBefore, EmployeeAmount = tax.EmployeeAmount, EmployerAmount = tax.EmployerAmount, TaxRuleSetId = tax.TaxRuleSetId, TaxContentPackageId = tax.TaxContentPackageId, ContentVersion = tax.ContentVersion, Source = tax.Source, CalculationTraceJson = tax.CalculationTraceJson }));
         }
+        foreach (var timecard in expansion.Timecards)
+        {
+            timecard.Status = "Consumed";
+            timecard.PayrollRunId = run.Id;
+            timecard.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            AddTimecardAudit(db, companyId, "payroll-timecard.consumed", timecard, new { payrollRunId = run.Id, run.Reference });
+        }
         AddPayrollAudit(db, companyId, "payroll-run.prepared", run, new { run.PeriodStart, run.PeriodEnd, run.RunType, employeeCount = estimate.Employees.Count, run.GrossPayroll, run.NetPay });
         try { await db.SaveChangesAsync(cancellationToken); }
-        catch (DbUpdateException) { return TransactionResult.Failure("Payroll draft could not be saved because the reference was already used or its data changed. Refresh and try again."); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("An approved timecard or payroll record changed while the draft was being prepared. Refresh and review the payroll again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("Payroll draft could not be saved because the reference was already used, a time entry was already consumed, or its data changed. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);
         return TransactionResult.Success(run.Id);
     }
@@ -1251,6 +1265,96 @@ public sealed class AccountingTransactionService(
         return TransactionResult.Success(employee.Id);
     }
 
+    public async Task<TransactionResult> SavePayrollTimecardDraftAsync(SavePayrollTimecardDraftRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollPrepare)) return TransactionResult.Failure("You are not authorized to prepare payroll timecards.");
+        if (request.EmployeeId == Guid.Empty || request.PeriodEnd < request.PeriodStart || request.PeriodEnd.DayNumber - request.PeriodStart.DayNumber > 30)
+            return TransactionResult.Failure("Select an employee and use a timecard period of no more than 31 days.");
+        if (request.Entries.Count == 0 || request.Entries.Count > 200) return TransactionResult.Failure("A timecard must contain between 1 and 200 earning entries.");
+        if (request.Entries.Any(entry => entry.WorkDate < request.PeriodStart || entry.WorkDate > request.PeriodEnd)) return TransactionResult.Failure("Every time entry must fall within the timecard period.");
+        if (request.Entries.Any(entry => string.IsNullOrWhiteSpace(entry.EarningCode) || string.IsNullOrWhiteSpace(entry.EarningType) || entry.Hours < 0 || entry.Rate < 0 || entry.Amount < 0))
+            return TransactionResult.Failure("Each time entry requires an earning code and type with non-negative hours, rate, and amount.");
+        if (request.Entries.GroupBy(entry => entry.WorkDate).Any(group => group.Sum(entry => entry.Hours) > 24m)) return TransactionResult.Failure("Timecard hours cannot exceed 24 hours on one work date.");
+        foreach (var entry in request.Entries)
+        {
+            var calculated = RoundCurrency(entry.Hours * entry.Rate);
+            if (entry.Amount <= 0 && calculated <= 0) return TransactionResult.Failure("Each time entry must have a positive amount or positive hours and rate.");
+            if (entry.Amount > 0 && entry.Hours > 0 && entry.Rate > 0 && Math.Abs(entry.Amount - calculated) > 0.01m)
+                return TransactionResult.Failure("A time entry amount must equal hours multiplied by rate when all three values are supplied.");
+        }
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var employee = await db.Employees.SingleOrDefaultAsync(candidate => candidate.Id == request.EmployeeId && candidate.CompanyId == companyId && candidate.IsActive, cancellationToken);
+        if (employee is null) return TransactionResult.Failure("Active employee not found.");
+        if (employee.EmploymentStartedOn is { } employmentStart && request.PeriodEnd < employmentStart) return TransactionResult.Failure("The timecard period precedes the employee's start date.");
+        if (employee.EmploymentEndedOn is { } employmentEnd && request.PeriodStart > employmentEnd) return TransactionResult.Failure("The timecard period follows the employee's end date.");
+        if (await db.PayrollTimecards.AnyAsync(card => card.CompanyId == companyId && card.EmployeeId == employee.Id && (card.Status == "Draft" || card.Status == "Submitted" || card.Status == "Approved") && card.Id != request.TimecardId && card.PeriodStart <= request.PeriodEnd && card.PeriodEnd >= request.PeriodStart, cancellationToken))
+            return TransactionResult.Failure("This employee already has an overlapping active timecard.");
+        var projectIds = request.Entries.Where(entry => entry.ProjectJobId.HasValue).Select(entry => entry.ProjectJobId!.Value).Distinct().ToArray();
+        if (projectIds.Length > 0 && await db.ProjectJobs.CountAsync(project => projectIds.Contains(project.Id) && project.CompanyId == companyId, cancellationToken) != projectIds.Length)
+            return TransactionResult.Failure("One or more selected projects do not belong to the active company.");
+
+        PayrollTimecard timecard;
+        if (request.TimecardId is { } timecardId && timecardId != Guid.Empty)
+        {
+            timecard = await db.PayrollTimecards.SingleOrDefaultAsync(card => card.Id == timecardId && card.CompanyId == companyId, cancellationToken) ?? null!;
+            if (timecard is null) return TransactionResult.Failure("Payroll timecard not found.");
+            if (timecard.Status != "Draft") return TransactionResult.Failure("Only a draft timecard can be edited.");
+            if (!string.Equals(timecard.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The timecard changed after it was opened. Refresh and review it again.");
+            db.PayrollTimeEntries.RemoveRange(await db.PayrollTimeEntries.Where(entry => entry.PayrollTimecardId == timecard.Id).ToListAsync(cancellationToken));
+        }
+        else
+        {
+            timecard = new PayrollTimecard { Id = Guid.NewGuid(), CompanyId = companyId, Status = "Draft", PreparedByUserId = ResolveUserId(), PreparedAtUtc = DateTimeOffset.UtcNow };
+            db.PayrollTimecards.Add(timecard);
+        }
+        timecard.EmployeeId = employee.Id; timecard.PeriodStart = request.PeriodStart; timecard.PeriodEnd = request.PeriodEnd; timecard.Notes = request.Notes.Trim(); timecard.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        db.PayrollTimeEntries.AddRange(request.Entries.Select((entry, index) => new PayrollTimeEntry
+        {
+            Id = Guid.NewGuid(), PayrollTimecardId = timecard.Id, Sequence = index + 1, WorkDate = entry.WorkDate,
+            EarningCode = entry.EarningCode.Trim().ToUpperInvariant(), EarningType = entry.EarningType.Trim(), Hours = entry.Hours, Rate = entry.Rate,
+            Amount = RoundCurrency(entry.Amount > 0 ? entry.Amount : entry.Hours * entry.Rate), IsTaxable = entry.IsTaxable,
+            WorkState = string.IsNullOrWhiteSpace(entry.WorkState) ? employee.State : entry.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(entry.WorkCounty) ? employee.WorkCounty : entry.WorkCounty.Trim(),
+            WorkCity = string.IsNullOrWhiteSpace(entry.WorkCity) ? employee.WorkCity : entry.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(entry.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : entry.WorkSchoolDistrict.Trim(),
+            ProjectJobId = entry.ProjectJobId, Notes = entry.Notes.Trim()
+        }));
+        AddTimecardAudit(db, companyId, "payroll-timecard.saved", timecard, new { employee.EmployeeNumber, timecard.PeriodStart, timecard.PeriodEnd, entryCount = request.Entries.Count, totalHours = request.Entries.Sum(entry => entry.Hours), totalAmount = request.Entries.Sum(entry => entry.Amount > 0 ? entry.Amount : RoundCurrency(entry.Hours * entry.Rate)) });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The timecard changed while it was being saved. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The timecard could not be saved because it overlaps or conflicts with existing data."); }
+        return TransactionResult.Success(timecard.Id);
+    }
+
+    public async Task<TransactionResult> SubmitPayrollTimecardAsync(SubmitPayrollTimecardRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollPrepare)) return TransactionResult.Failure("You are not authorized to submit payroll timecards.");
+        return await TransitionTimecardAsync(request.TimecardId, request.ConcurrencyToken, "Draft", "Submitted", "payroll-timecard.submitted", cancellationToken);
+    }
+
+    public async Task<TransactionResult> ApprovePayrollTimecardAsync(ApprovePayrollTimecardRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollApprove)) return TransactionResult.Failure("You are not authorized to approve payroll timecards.");
+        return await TransitionTimecardAsync(request.TimecardId, request.ConcurrencyToken, "Submitted", "Approved", "payroll-timecard.approved", cancellationToken);
+    }
+
+    public async Task<TransactionResult> VoidPayrollTimecardAsync(VoidPayrollTimecardRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollReverse)) return TransactionResult.Failure("You are not authorized to void payroll timecards.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A timecard void reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var timecard = await db.PayrollTimecards.SingleOrDefaultAsync(card => card.Id == request.TimecardId && card.CompanyId == companyId, cancellationToken);
+        if (timecard is null) return TransactionResult.Failure("Payroll timecard not found.");
+        if (timecard.Status is "Voided" or "Consumed" || timecard.PayrollRunId.HasValue) return TransactionResult.Failure("A voided or payroll-consumed timecard cannot be voided again.");
+        if (!string.Equals(timecard.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The timecard changed after it was opened. Refresh and review it again.");
+        timecard.Status = "Voided"; timecard.VoidedByUserId = ResolveUserId(); timecard.VoidedAtUtc = DateTimeOffset.UtcNow; timecard.VoidReason = request.Reason.Trim(); timecard.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddTimecardAudit(db, companyId, "payroll-timecard.voided", timecard, new { timecard.VoidReason });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The timecard changed while it was being voided. Refresh and try again."); }
+        return TransactionResult.Success(timecard.Id);
+    }
+
     public async Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.PayrollManage)) return TransactionResult.Failure("You are not authorized to maintain payroll jurisdiction rules.");
@@ -1284,6 +1388,66 @@ public sealed class AccountingTransactionService(
         item.QuantityOnHand += request.QuantityChange; item.UnitPrice = request.UnitCost;
         db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, OccurredOn = request.OccurredOn, TransactionType = request.QuantityChange > 0 ? "Adjustment increase" : "Adjustment decrease", QuantityChange = request.QuantityChange, UnitCost = request.UnitCost, TotalCost = totalCost, Reference = request.Reference.Trim(), JournalEntryId = posting.Id!.Value });
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return TransactionResult.Success(posting.Id!.Value);
+    }
+
+    private sealed record PayrollTimecardExpansion(PostEmployeePayrollRunRequest? Request, IReadOnlyList<PayrollTimecard> Timecards, string ErrorMessage)
+    {
+        public static PayrollTimecardExpansion Failure(string errorMessage) => new(null, [], errorMessage);
+    }
+
+    private static async Task<PayrollTimecardExpansion> ExpandApprovedTimecardsAsync(BrassLedgerDbContext db, Guid companyId, PostEmployeePayrollRunRequest request, CancellationToken cancellationToken)
+    {
+        if (request.Employees.Any(employee => employee.Earnings?.Any(earning => earning.SourceTimeEntryId is not null) == true))
+            return PayrollTimecardExpansion.Failure("Payroll time-entry provenance is assigned by the server and cannot be supplied by a payroll request.");
+
+        var selectedIds = request.ApprovedTimecardIds?.ToArray() ?? [];
+        if (selectedIds.Length == 0) return new PayrollTimecardExpansion(request, [], string.Empty);
+        if (selectedIds.Any(id => id == Guid.Empty) || selectedIds.Distinct().Count() != selectedIds.Length)
+            return PayrollTimecardExpansion.Failure("Approved timecards must be selected once each.");
+        if (request.PeriodStart is null || request.PeriodEnd is null)
+            return PayrollTimecardExpansion.Failure("A pay-period start and end are required when approved timecards are included.");
+        if (request.PeriodEnd < request.PeriodStart || request.PayDate < request.PeriodEnd)
+            return PayrollTimecardExpansion.Failure("The payroll period must end on or before the pay date and cannot end before it starts.");
+
+        var timecards = await db.PayrollTimecards.Where(card => card.CompanyId == companyId && selectedIds.Contains(card.Id)).ToListAsync(cancellationToken);
+        if (timecards.Count != selectedIds.Length)
+            return PayrollTimecardExpansion.Failure("One or more selected timecards do not exist in this company.");
+        if (timecards.Any(card => card.Status != "Approved" || card.PayrollRunId is not null))
+            return PayrollTimecardExpansion.Failure("Every selected timecard must be approved and not already assigned to a payroll run.");
+
+        var requestedEmployeeIds = request.Employees.Select(employee => employee.EmployeeId).ToHashSet();
+        if (timecards.Any(card => !requestedEmployeeIds.Contains(card.EmployeeId)))
+            return PayrollTimecardExpansion.Failure("Every selected timecard employee must be included in this payroll request.");
+        if (timecards.Any(card => card.PeriodStart < request.PeriodStart.Value || card.PeriodEnd > request.PeriodEnd.Value))
+            return PayrollTimecardExpansion.Failure("Every selected timecard must fall entirely within the payroll period.");
+
+        var timecardIds = timecards.Select(card => card.Id).ToArray();
+        var entries = await db.PayrollTimeEntries.Where(entry => timecardIds.Contains(entry.PayrollTimecardId)).OrderBy(entry => entry.WorkDate).ThenBy(entry => entry.Sequence).ToListAsync(cancellationToken);
+        if (timecards.Any(card => !entries.Any(entry => entry.PayrollTimecardId == card.Id)))
+            return PayrollTimecardExpansion.Failure("Every selected timecard must contain at least one earning entry.");
+        var entryIds = entries.Select(entry => entry.Id).ToArray();
+        if (await db.PayrollEarningLines.AnyAsync(line => line.PayrollTimeEntryId != null && entryIds.Contains(line.PayrollTimeEntryId.Value), cancellationToken))
+            return PayrollTimecardExpansion.Failure("One or more selected time entries have already been used by another payroll run.");
+
+        var employees = await db.Employees.Where(employee => employee.CompanyId == companyId && requestedEmployeeIds.Contains(employee.Id)).ToDictionaryAsync(employee => employee.Id, cancellationToken);
+        var expandedEmployees = new List<EmployeePayrollInput>(request.Employees.Count);
+        foreach (var input in request.Employees)
+        {
+            var employeeEntries = entries.Where(entry => timecards.Any(card => card.Id == entry.PayrollTimecardId && card.EmployeeId == input.EmployeeId)).ToArray();
+            if (employeeEntries.Length == 0)
+            {
+                expandedEmployees.Add(input);
+                continue;
+            }
+
+            var earnings = input.Earnings?.ToList() ?? [];
+            if (earnings.Count == 0 && employees.TryGetValue(input.EmployeeId, out var employee) && employee.PayType.Contains("Salary", StringComparison.OrdinalIgnoreCase) && input.GrossPay > 0)
+                earnings.Add(new PayrollEarningInput("SALARY", "Salary", 0, 0, input.GrossPay, true, null, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict));
+            earnings.AddRange(employeeEntries.Select(entry => new PayrollEarningInput(entry.EarningCode, entry.EarningType, entry.Hours, entry.Rate, entry.Amount, entry.IsTaxable, entry.WorkDate, entry.WorkState, entry.WorkCounty, entry.WorkCity, entry.WorkSchoolDistrict, entry.Id)));
+            expandedEmployees.Add(input with { GrossPay = RoundCurrency(earnings.Sum(earning => earning.Amount)), Earnings = earnings });
+        }
+
+        return new PayrollTimecardExpansion(request with { Employees = expandedEmployees }, timecards, string.Empty);
     }
 
     private static async Task<PayrollRunEstimate?> CalculateEmployeePayrollAsync(BrassLedgerDbContext db, Guid companyId, PostEmployeePayrollRunRequest request, CancellationToken cancellationToken)
@@ -1547,6 +1711,34 @@ public sealed class AccountingTransactionService(
         {
             Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action,
             EntityType = "PayrollRun", EntityId = run.Id,
+            DetailJson = System.Text.Json.JsonSerializer.Serialize(details), OccurredAtUtc = DateTimeOffset.UtcNow
+        });
+
+    private async Task<TransactionResult> TransitionTimecardAsync(Guid timecardId, string concurrencyToken, string expectedStatus, string newStatus, string auditAction, CancellationToken cancellationToken)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var timecard = await db.PayrollTimecards.SingleOrDefaultAsync(card => card.Id == timecardId && card.CompanyId == companyId, cancellationToken);
+        if (timecard is null) return TransactionResult.Failure("Payroll timecard not found.");
+        if (timecard.Status != expectedStatus) return TransactionResult.Failure($"Only a {expectedStatus.ToLowerInvariant()} timecard can be moved to {newStatus.ToLowerInvariant()}.");
+        if (!string.Equals(timecard.ConcurrencyToken, concurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The timecard changed after it was opened. Refresh and review it again.");
+        if (newStatus == "Submitted" && !await db.PayrollTimeEntries.AnyAsync(entry => entry.PayrollTimecardId == timecard.Id, cancellationToken)) return TransactionResult.Failure("A timecard must contain at least one entry before submission.");
+        var now = DateTimeOffset.UtcNow;
+        timecard.Status = newStatus;
+        if (newStatus == "Submitted") { timecard.SubmittedByUserId = ResolveUserId(); timecard.SubmittedAtUtc = now; }
+        if (newStatus == "Approved") { timecard.ApprovedByUserId = ResolveUserId(); timecard.ApprovedAtUtc = now; }
+        timecard.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddTimecardAudit(db, companyId, auditAction, timecard, new { from = expectedStatus, to = newStatus });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The timecard changed during the workflow transition. Refresh and try again."); }
+        return TransactionResult.Success(timecard.Id);
+    }
+
+    private void AddTimecardAudit(BrassLedgerDbContext db, Guid companyId, string action, PayrollTimecard timecard, object details) =>
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry
+        {
+            Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action,
+            EntityType = "PayrollTimecard", EntityId = timecard.Id,
             DetailJson = System.Text.Json.JsonSerializer.Serialize(details), OccurredAtUtc = DateTimeOffset.UtcNow
         });
 

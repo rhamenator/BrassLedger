@@ -80,7 +80,11 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> ReversePayrollRunAsync(ReversePayrollRunRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.PayrollRunId));
     public Task<TransactionResult> PostEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> SaveEmployeePayrollSetupAsync(SaveEmployeePayrollSetupRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.EmployeeId));
-    public Task<TransactionResult> SaveEmployeeEmploymentDetailsAsync(SaveEmployeeEmploymentDetailsRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.EmployeeId));
+        public Task<TransactionResult> SaveEmployeeEmploymentDetailsAsync(SaveEmployeeEmploymentDetailsRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.EmployeeId));
+        public Task<TransactionResult> SavePayrollTimecardDraftAsync(SavePayrollTimecardDraftRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.TimecardId ?? Guid.NewGuid()));
+        public Task<TransactionResult> SubmitPayrollTimecardAsync(SubmitPayrollTimecardRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.TimecardId));
+        public Task<TransactionResult> ApprovePayrollTimecardAsync(ApprovePayrollTimecardRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.TimecardId));
+        public Task<TransactionResult> VoidPayrollTimecardAsync(VoidPayrollTimecardRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.TimecardId));
     public Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
 }

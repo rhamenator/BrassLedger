@@ -426,6 +426,33 @@ h1:focus {
     color: var(--ink-strong);
 }
 
+.time-entry-card {
+    min-width: 0;
+    margin: 1rem 0;
+    padding: 1rem;
+    border: 1px solid rgba(23, 60, 67, 0.14);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.5);
+}
+
+.time-entry-card legend {
+    padding: 0 0.35rem;
+    color: var(--ink-strong);
+    font-weight: 700;
+}
+
+.time-entry-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.timecard-void-reason {
+    max-width: 32rem;
+    margin-top: 1rem;
+}
+
 pre {
     margin: 1rem 0 0;
     padding: 1rem;
@@ -656,7 +683,8 @@ main {
     }
 
     .payroll-setup-grid,
-    .payroll-w4-group {
+    .payroll-w4-group,
+    .time-entry-grid {
         grid-template-columns: 1fr;
     }
 
