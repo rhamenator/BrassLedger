@@ -25,6 +25,7 @@ if (app.Environment.IsDevelopment())
 app.UseBrassLedgerSecurityHeaders();
 app.UseHttpsRedirection();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAntiforgery();
 app.UseAuthorization();
 app.MapBrassLedgerAuthenticationEndpoints();

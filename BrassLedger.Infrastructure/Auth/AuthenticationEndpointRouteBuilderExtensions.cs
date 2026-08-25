@@ -17,21 +17,76 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         Delegate formLogoutHandler = (Func<HttpContext, IAntiforgery, Task<IResult>>)HandleFormLogoutAsync;
         Delegate formSwitchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleFormSwitchCompanyAsync;
         Delegate bootstrapHandler = (Func<HttpContext, IBootstrapWorkspaceService, IAntiforgery, Task<IResult>>)HandleBootstrapAsync;
+        Delegate changePasswordHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleChangePasswordAsync;
+        Delegate revokeOtherSessionsHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleRevokeOtherSessionsAsync;
         Delegate apiLoginHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleApiLoginAsync;
         Delegate apiLogoutHandler = (Func<HttpContext, Task<IResult>>)HandleApiLogoutAsync;
         Delegate switchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleSwitchCompanyAsync;
 
-        endpoints.MapPost("/account/login", formLoginHandler).AllowAnonymous();
+        endpoints.MapPost("/account/login", formLoginHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/account/logout", formLogoutHandler).RequireAuthorization();
         endpoints.MapPost("/account/active-company", formSwitchCompanyHandler).RequireAuthorization();
+        endpoints.MapPost("/account/change-password", changePasswordHandler).RequireAuthorization();
+        endpoints.MapPost("/account/revoke-other-sessions", revokeOtherSessionsHandler).RequireAuthorization();
         endpoints.MapPost("/account/bootstrap", bootstrapHandler).AllowAnonymous();
 
-        endpoints.MapPost("/api/auth/login", apiLoginHandler).AllowAnonymous();
+        endpoints.MapPost("/api/auth/login", apiLoginHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/api/auth/logout", apiLogoutHandler).RequireAuthorization();
         endpoints.MapGet("/api/auth/me", (ClaimsPrincipal principal) => Results.Ok(ToResponse(principal))).RequireAuthorization();
         endpoints.MapPost("/api/auth/active-company", switchCompanyHandler).RequireAuthorization();
 
         return endpoints;
+    }
+
+    private static async Task<IResult> HandleChangePasswordAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        if (!TryGetSessionIdentity(context.User, out var userId, out var companyId)) return Results.Unauthorized();
+        var form = await context.Request.ReadFormAsync();
+        var result = await authenticationService.ChangePasswordAsync(
+            userId,
+            companyId,
+            form["currentPassword"].ToString(),
+            form["newPassword"].ToString(),
+            form["confirmPassword"].ToString(),
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        if (result.Outcome == AccountSecurityOutcome.Unauthorized) return Results.Unauthorized();
+        if (result.Outcome != AccountSecurityOutcome.Succeeded || result.User is null)
+        {
+            var error = result.Outcome switch
+            {
+                AccountSecurityOutcome.InvalidCurrentPassword => "current-password",
+                AccountSecurityOutcome.PasswordReused => "password-reused",
+                _ => "invalid-password"
+            };
+            return Results.LocalRedirect($"/account/security?error={error}");
+        }
+
+        await context.SignInAsync(
+            BrassLedgerAuthenticationDefaults.Scheme,
+            CreatePrincipal(result.User),
+            CreateAuthenticationProperties());
+        return Results.LocalRedirect("/account/security?status=password-changed");
+    }
+
+    private static async Task<IResult> HandleRevokeOtherSessionsAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        if (!TryGetSessionIdentity(context.User, out var userId, out var companyId)) return Results.Unauthorized();
+        var result = await authenticationService.RevokeOtherSessionsAsync(
+            userId,
+            companyId,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        if (result.Outcome != AccountSecurityOutcome.Succeeded || result.User is null) return Results.Unauthorized();
+        await context.SignInAsync(
+            BrassLedgerAuthenticationDefaults.Scheme,
+            CreatePrincipal(result.User),
+            CreateAuthenticationProperties());
+        return Results.LocalRedirect("/account/security?status=sessions-revoked");
     }
 
     private static async Task<IResult> HandleFormLoginAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
@@ -253,6 +308,13 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         }
 
         return returnUrl;
+    }
+
+    private static bool TryGetSessionIdentity(ClaimsPrincipal principal, out Guid userId, out Guid companyId)
+    {
+        var hasUserId = Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
+        var hasCompanyId = Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out companyId);
+        return hasUserId && hasCompanyId;
     }
 
     private sealed record LoginRequest(string UserName, string Password);

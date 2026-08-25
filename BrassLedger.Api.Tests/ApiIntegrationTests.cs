@@ -4,6 +4,7 @@ using BrassLedger.Application.Accounting;
 using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
+using BrassLedger.Infrastructure.SecurityAdministration;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
@@ -108,6 +109,175 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var response = await client.GetAsync("/api/dashboard");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChangePassword_ReissuesCurrentSession_RevokesOtherSessions_AndAuditsTheChange()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var currentClient = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var otherClient = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var token = await GetAntiforgeryTokenAsync(currentClient);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/account/change-password")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["currentPassword"] = BrassLedgerAuthenticationDefaults.SeededPassword,
+                ["newPassword"] = "Changed password! 2026",
+                ["confirmPassword"] = "Changed password! 2026"
+            })
+        };
+        request.Headers.Add("X-CSRF-TOKEN", token);
+
+        var response = await currentClient.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/account/security?status=password-changed", response.Headers.Location?.OriginalString);
+        Assert.Equal(HttpStatusCode.OK, (await currentClient.GetAsync("/api/dashboard")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await otherClient.GetAsync("/api/dashboard")).StatusCode);
+
+        using var oldPasswordClient = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var oldPasswordResponse = await oldPasswordClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = BrassLedgerAuthenticationDefaults.SeededPassword
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, oldPasswordResponse.StatusCode);
+
+        using var newPasswordClient = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var newPasswordResponse = await newPasswordClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = "Changed password! 2026"
+        });
+        Assert.Equal(HttpStatusCode.OK, newPasswordResponse.StatusCode);
+
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+        Assert.True(await dbContext.AuthenticationAuditEntries.AnyAsync(entry =>
+            entry.UserName == "controller" && entry.EventType == "password_changed" && entry.Succeeded));
+    }
+
+    [Fact]
+    public async Task ChangePassword_RejectsInvalidCurrentPassword_AndMissingAntiforgeryToken()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var missingTokenContent = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["currentPassword"] = BrassLedgerAuthenticationDefaults.SeededPassword,
+            ["newPassword"] = "Changed password! 2026",
+            ["confirmPassword"] = "Changed password! 2026"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/account/change-password", missingTokenContent)).StatusCode);
+
+        var token = await GetAntiforgeryTokenAsync(client);
+        using var invalidRequest = new HttpRequestMessage(HttpMethod.Post, "/account/change-password")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["currentPassword"] = "not-the-current-password",
+                ["newPassword"] = "Changed password! 2026",
+                ["confirmPassword"] = "Changed password! 2026"
+            })
+        };
+        invalidRequest.Headers.Add("X-CSRF-TOKEN", token);
+        var invalidResponse = await client.SendAsync(invalidRequest);
+        Assert.Equal(HttpStatusCode.Redirect, invalidResponse.StatusCode);
+        Assert.Equal("/account/security?error=current-password", invalidResponse.Headers.Location?.OriginalString);
+
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+        Assert.True(await dbContext.AuthenticationAuditEntries.AnyAsync(entry =>
+            entry.UserName == "controller" && entry.EventType == "password_change_failed" && !entry.Succeeded));
+    }
+
+    [Fact]
+    public async Task RevokeOtherSessions_KeepsCurrentBrowserSignedIn()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var currentClient = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var otherClient = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var token = await GetAntiforgeryTokenAsync(currentClient);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/account/revoke-other-sessions");
+        request.Headers.Add("X-CSRF-TOKEN", token);
+
+        var response = await currentClient.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await currentClient.GetAsync("/api/dashboard")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await otherClient.GetAsync("/api/dashboard")).StatusCode);
+    }
+
+    [Fact]
+    public async Task ActiveCompanySession_RemainsValidForASecondaryCompanyMembership()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var companyId = Guid.NewGuid();
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+            var user = await dbContext.Users.SingleAsync(candidate => candidate.UserName == "controller");
+            dbContext.Companies.Add(new Company
+            {
+                Id = companyId,
+                Name = "Secondary company",
+                LegalName = "Secondary Company LLC",
+                TaxId = "12-3456789",
+                BaseCurrency = "CAD",
+                FiscalYearStartMonth = 1
+            });
+            await SecurityAdministrationService.EnsureBuiltInRolesAsync(dbContext, companyId);
+            dbContext.CompanyMemberships.Add(new CompanyMembership
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                CompanyId = companyId,
+                Role = "Administrator",
+                IsOwner = true,
+                IsActive = true,
+                GrantedAtUtc = DateTimeOffset.UtcNow
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        var switchResponse = await client.PostAsJsonAsync("/api/auth/active-company", new { CompanyId = companyId });
+
+        Assert.Equal(HttpStatusCode.OK, switchResponse.StatusCode);
+        var me = await client.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/auth/me");
+        Assert.Equal(companyId.ToString(), me.GetProperty("companyId").GetString());
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/dashboard")).StatusCode);
+    }
+
+    [Fact]
+    public async Task LoginEndpoint_ThrottlesExcessiveRequestsFromOneNetworkAddress()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        for (var attempt = 0; attempt < BrassLedgerAuthenticationDefaults.LoginRequestsPerMinute; attempt++)
+        {
+            var response = await client.PostAsJsonAsync("/api/auth/login", new
+            {
+                UserName = $"missing-user-{attempt}",
+                Password = "invalid-password"
+            });
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        var throttled = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "one-request-too-many",
+            Password = "invalid-password"
+        });
+        Assert.Equal(HttpStatusCode.TooManyRequests, throttled.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(60), throttled.Headers.RetryAfter?.Delta);
+        var problem = await throttled.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("too_many_login_attempts", problem.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -554,6 +724,12 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return client;
+    }
+
+    private static async Task<string> GetAntiforgeryTokenAsync(HttpClient client)
+    {
+        var token = await client.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/antiforgery/token");
+        return token.GetProperty("requestToken").GetString()!;
     }
 }
 

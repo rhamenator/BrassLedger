@@ -1,0 +1,136 @@
+@page "/account/security"
+@attribute [Authorize]
+@inject IUserAuthenticationService AuthenticationService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Account Security</PageTitle>
+
+<section class="page-shell">
+    <section class="hero">
+        <div class="hero-copy">
+            <p class="eyebrow">Account security</p>
+            <h1>Protect your operator account and review recent access.</h1>
+            <p class="page-intro">Changing your password or revoking other sessions invalidates every previously issued session cookie. This browser receives a fresh session so you can continue working.</p>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(Message))
+    {
+        <div class="@(IsError ? "auth-error" : "status-banner")" role="@(IsError ? "alert" : "status")">@Message</div>
+    }
+
+    @if (Snapshot is null)
+    {
+        <section class="panel"><p>Loading account security details…</p></section>
+    }
+    else
+    {
+        <section class="panel">
+            <h2>@Snapshot.DisplayName</h2>
+            <div class="content-grid">
+                <div><span class="field-label">Username</span><strong>@Snapshot.UserName</strong></div>
+                <div><span class="field-label">Email</span><strong>@Snapshot.Email</strong></div>
+                <div><span class="field-label">Last successful sign-in</span><strong>@FormatTimestamp(Snapshot.LastSuccessfulSignInUtc)</strong></div>
+                <div><span class="field-label">Password last changed</span><strong>@FormatTimestamp(Snapshot.LastPasswordChangedUtc)</strong></div>
+            </div>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Change password</h2>
+                <p class="page-intro">Use at least 12 characters. Your new password must differ from the current password.</p>
+                <form class="auth-form" method="post" action="/account/change-password">
+                    <AntiforgeryToken />
+                    <div class="field-group">
+                        <label class="field-label" for="currentPassword">Current password</label>
+                        <input id="currentPassword" class="field-input" name="currentPassword" type="password" autocomplete="current-password" required />
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label" for="newPassword">New password</label>
+                        <input id="newPassword" class="field-input" name="newPassword" type="password" autocomplete="new-password" minlength="12" required />
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label" for="confirmPassword">Confirm new password</label>
+                        <input id="confirmPassword" class="field-input" name="confirmPassword" type="password" autocomplete="new-password" minlength="12" required />
+                    </div>
+                    <button class="action-primary" type="submit">Change password</button>
+                </form>
+            </article>
+
+            <article class="panel">
+                <h2>Other signed-in browsers</h2>
+                <p class="page-intro">Use this after losing a device, using a shared computer, or noticing activity you do not recognize. All other sessions are signed out immediately.</p>
+                <form method="post" action="/account/revoke-other-sessions">
+                    <AntiforgeryToken />
+                    <button class="action-secondary" type="submit">Sign out other sessions</button>
+                </form>
+            </article>
+        </section>
+
+        <section class="panel">
+            <h2>Recent account activity</h2>
+            @if (Snapshot.RecentEvents.Count == 0)
+            {
+                <p class="page-intro">No account events have been recorded yet.</p>
+            }
+            else
+            {
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>When</th><th>Event</th><th>Result</th><th>Network</th><th>Details</th></tr></thead>
+                        <tbody>
+                        @foreach (var securityEvent in Snapshot.RecentEvents)
+                        {
+                            <tr>
+                                <td>@securityEvent.OccurredUtc.LocalDateTime</td>
+                                <td>@FormatEvent(securityEvent.EventType)</td>
+                                <td>@(securityEvent.Succeeded ? "Succeeded" : "Rejected")</td>
+                                <td>@(string.IsNullOrWhiteSpace(securityEvent.IpAddress) ? "Not recorded" : securityEvent.IpAddress)</td>
+                                <td>@securityEvent.Detail</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private AccountSecuritySnapshot? Snapshot { get; set; }
+    private bool IsError => !string.IsNullOrWhiteSpace(Error);
+
+    private string? Message => Error switch
+    {
+        "current-password" => "The current password was not correct. Your password was not changed.",
+        "password-reused" => "Choose a password that differs from your current password.",
+        "invalid-password" => "Enter matching new passwords containing at least 12 characters.",
+        _ => Status switch
+        {
+            "password-changed" => "Your password was changed and all other sessions were signed out.",
+            "sessions-revoked" => "All other sessions were signed out. This browser remains signed in.",
+            _ => null
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var principal = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+        if (Guid.TryParse(principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var userId))
+        {
+            Snapshot = await AuthenticationService.GetAccountSecurityAsync(userId);
+        }
+    }
+
+    private static string FormatTimestamp(DateTimeOffset? timestamp) =>
+        timestamp is null ? "Not recorded" : timestamp.Value.LocalDateTime.ToString("g");
+
+    private static string FormatEvent(string eventType) => eventType.Replace('_', ' ');
+}

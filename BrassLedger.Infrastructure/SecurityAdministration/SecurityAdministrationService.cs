@@ -27,13 +27,19 @@ public sealed class SecurityAdministrationService(
             .OrderByDescending(role => role.IsSystemRole)
             .ThenBy(role => role.Name)
             .ToListAsync(cancellationToken);
-        var operators = await dbContext.Users
+        var operators = await dbContext.CompanyMemberships
             .AsNoTracking()
-            .Where(user => user.CompanyId == companyId)
-            .OrderBy(user => user.UserName)
+            .Where(membership => membership.CompanyId == companyId)
+            .Join(
+                dbContext.Users,
+                membership => membership.UserId,
+                user => user.Id,
+                (membership, user) => new { membership, user })
+            .OrderBy(item => item.user.UserName)
             .ToListAsync(cancellationToken);
         var operatorCounts = operators
-            .GroupBy(user => user.Role, StringComparer.OrdinalIgnoreCase)
+            .Where(item => item.membership.IsActive && item.user.IsActive)
+            .GroupBy(item => item.membership.Role, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
 
         return new SecurityAdministrationSnapshot(
@@ -50,13 +56,13 @@ public sealed class SecurityAdministrationService(
                     ParsePermissions(role.Permissions)))
                 .ToArray(),
             Operators: operators
-                .Select(user => new OperatorAccountSnapshot(
-                    user.UserName,
-                    user.DisplayName,
-                    user.Email,
-                    user.Role,
-                    user.IsActive,
-                    user.LastSuccessfulSignInUtc))
+                .Select(item => new OperatorAccountSnapshot(
+                    item.user.UserName,
+                    item.user.DisplayName,
+                    item.user.Email,
+                    item.membership.Role,
+                    item.user.IsActive && item.membership.IsActive,
+                    item.user.LastSuccessfulSignInUtc))
                 .ToArray());
     }
 
@@ -175,6 +181,16 @@ public sealed class SecurityAdministrationService(
         user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
 
         dbContext.Users.Add(user);
+        dbContext.CompanyMemberships.Add(new CompanyMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            CompanyId = companyId,
+            Role = role.Name,
+            IsOwner = false,
+            IsActive = true,
+            GrantedAtUtc = DateTimeOffset.UtcNow
+        });
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return SecurityOperationResult.Success();

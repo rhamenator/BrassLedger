@@ -1,8 +1,11 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
+using System.Threading.RateLimiting;
 
 namespace BrassLedger.Infrastructure.Auth;
 
@@ -11,6 +14,34 @@ public static class AuthenticationServiceCollectionExtensions
     public static IServiceCollection AddBrassLedgerCookieAuthentication(this IServiceCollection services)
     {
         services.AddScoped<BrassLedgerCookieEvents>();
+
+        services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.OnRejected = async (context, cancellationToken) =>
+            {
+                context.HttpContext.Response.Headers.RetryAfter = "60";
+                if (context.HttpContext.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+                {
+                    await context.HttpContext.Response.WriteAsJsonAsync(
+                        new { Error = "too_many_login_attempts", RetryAfterSeconds = 60 },
+                        cancellationToken);
+                    return;
+                }
+
+                context.HttpContext.Response.Redirect("/login?error=too-many-requests");
+            };
+            options.AddPolicy(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy, httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = BrassLedgerAuthenticationDefaults.LoginRequestsPerMinute,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
+        });
 
         services
             .AddAuthentication(BrassLedgerAuthenticationDefaults.Scheme)

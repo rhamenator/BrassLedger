@@ -2076,6 +2076,35 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SecurityAdministration_CreatesAnExplicitCompanyMembershipForANewOperator()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.UserManage);
+
+        var result = await administration.CreateOperatorAsync(new BrassLedger.Application.Security.CreateOperatorRequest(
+            "new-operator",
+            "New Operator",
+            "new-operator@example.test",
+            "A secure password 123",
+            "A secure password 123",
+            "Controller"));
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+        var user = await dbContext.Users.SingleAsync(candidate => candidate.UserName == "new-operator");
+        var membership = await dbContext.CompanyMemberships.SingleAsync(candidate => candidate.UserId == user.Id);
+        Assert.Equal(user.CompanyId, membership.CompanyId);
+        Assert.Equal("Controller", membership.Role);
+        Assert.False(membership.IsOwner);
+        Assert.True(membership.IsActive);
+    }
+
+    [Fact]
     public async Task PayrollLifecycle_EnforcesSeparatePreparationApprovalPostingAndReversalPermissions()
     {
         using var services = CreateServiceProvider();

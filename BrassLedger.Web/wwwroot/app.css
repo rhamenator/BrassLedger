@@ -841,6 +841,15 @@ main {
     border: 1px solid rgba(204, 107, 73, 0.24);
 }
 
+.status-banner {
+    margin-top: 1rem;
+    padding: 0.8rem 0.95rem;
+    border-radius: 18px;
+    background: rgba(20, 134, 91, 0.1);
+    color: #145b42;
+    border: 1px solid rgba(20, 134, 91, 0.24);
+}
+
 .auth-note {
     margin-top: 1.35rem;
     color: #5d6d71;

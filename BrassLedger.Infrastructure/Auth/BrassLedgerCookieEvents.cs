@@ -38,21 +38,28 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
         var user = await dbContext.Users
             .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == userId, context.HttpContext.RequestAborted);
-        var currentRole = user is null
+        var hasCompanyId = Guid.TryParse(companyIdValue, out var companyId);
+        var membership = user is null || !hasCompanyId
             ? null
-            : await dbContext.AccessRoles.AsNoTracking().SingleOrDefaultAsync(role => role.CompanyId == user.CompanyId && role.IsActive && role.Name == user.Role, context.HttpContext.RequestAborted);
+            : await dbContext.CompanyMemberships.AsNoTracking().SingleOrDefaultAsync(
+                item => item.UserId == user.Id && item.CompanyId == companyId && item.IsActive,
+                context.HttpContext.RequestAborted);
+        var currentRole = membership is null
+            ? null
+            : await dbContext.AccessRoles.AsNoTracking().SingleOrDefaultAsync(
+                role => role.CompanyId == membership.CompanyId && role.IsActive && role.Name == membership.Role,
+                context.HttpContext.RequestAborted);
         var claimedPermissions = context.Principal?.FindAll(BrassLedgerAuthenticationDefaults.PermissionClaimType).Select(claim => claim.Value).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
         var currentPermissions = currentRole is null
-            ? BrassLedgerRoleTemplates.GetPermissionsForRoleName(user?.Role ?? string.Empty).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ? BrassLedgerRoleTemplates.GetPermissionsForRoleName(membership?.Role ?? string.Empty).ToHashSet(StringComparer.OrdinalIgnoreCase)
             : currentRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var isValid = user is not null
             && user.IsActive
             && (user.LockoutEndUtc is null || user.LockoutEndUtc <= DateTimeOffset.UtcNow)
             && string.Equals(user.SecurityStamp, securityStamp, StringComparison.Ordinal)
-            && string.Equals(user.Role, roleValue, StringComparison.Ordinal)
-            && Guid.TryParse(companyIdValue, out var companyId)
-            && companyId == user.CompanyId
+            && membership is not null
+            && string.Equals(membership.Role, roleValue, StringComparison.Ordinal)
             && claimedPermissions.SetEquals(currentPermissions);
 
         if (isValid)

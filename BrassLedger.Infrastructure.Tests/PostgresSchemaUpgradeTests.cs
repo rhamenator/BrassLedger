@@ -1,3 +1,4 @@
+using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +35,20 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
         collection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: true);
         using var services = collection.BuildServiceProvider();
         await services.InitializeBrassLedgerAsync();
+
+        using (var scope = services.CreateScope())
+        {
+            var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+            var signedIn = await authentication.AuthenticateAsync(
+                "controller",
+                BrassLedgerAuthenticationDefaults.SeededPassword,
+                "127.0.0.1",
+                "postgres-test");
+            Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+            var security = await authentication.GetAccountSecurityAsync(signedIn.User!.UserId);
+            Assert.NotNull(security);
+            Assert.Contains(security.RecentEvents, entry => entry.EventType == "login_succeeded" && entry.Succeeded);
+        }
 
         await using (var connection = new NpgsqlConnection(connectionString))
         {

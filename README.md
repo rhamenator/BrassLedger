@@ -81,12 +81,15 @@ The current application includes:
 
 - authenticated access before accounting data loads in the web app or API
 - password hashing through ASP.NET Core Identity primitives
+- self-service password changes and all-other-session revocation with immutable authentication audit events
+- temporary lockout plus per-network login throttling for browser and API sign-in
+- membership-aware session validation for company-specific roles and permissions
 - protection of sensitive fields at rest with ASP.NET Core Data Protection
 - persisted application key material under `App_Data\keys`
 - security headers in the web application and API
 - first-run administrator setup through the built-in setup flow for non-development installs
 
-Before live production use, administrators should still review operational backup, recovery, secrets management, access control, and deployment procedures.
+Before live production use, authenticator-based MFA or passkeys, secure password-reset delivery, and named device/session inventory remain required security work. Administrators must also review operational backup, recovery, secrets management, access control, and deployment procedures.
 
 ## Build, test, and publish
 

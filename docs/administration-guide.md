@@ -8,14 +8,25 @@ The current application baseline already assumes:
 
 - authenticated access before accounting data is loaded
 - hashed passwords for operator credentials
+- a 12-character minimum for administrator-created and self-service password changes
+- temporary account lockout after repeated invalid credentials
+- per-network login throttling in both the web application and API
+- self-service password changes that invalidate previously issued sessions
+- a self-service control to sign out every other browser session
+- a recent account-activity view for successful, rejected, and revoked access events
 - protected sensitive fields at rest
 - data-protection key storage for application cryptography
 - security headers in the web application and API
 
-Before using live confidential books in production, plan for more:
+Every operator can open **Account security** from the signed-in header. Changing a password requires the current password, matching new-password confirmation, and at least 12 characters. A successful change rotates the account security stamp, signs out other browsers, records an audit event, and reissues the current browser's short-lived cookie. **Sign out other sessions** performs the same rotation without changing the password. Use it after a lost device or suspicious activity.
 
-- stronger role enforcement
-- audit logging
+Company access is validated against the operator's active, company-specific membership on every cookie validation. A role in one company does not grant that role in another company, and disabling a membership invalidates a cookie issued for that company.
+
+Before using live confidential books in production, the remaining security work includes:
+
+- authenticator-based MFA or passkeys and recovery codes
+- verified password-reset and account-invitation delivery
+- named device/session inventory instead of stamp-based all-other-session revocation
 - externalized key management where appropriate
 - operational backup and restore procedures
 - release approval discipline

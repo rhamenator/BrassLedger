@@ -141,6 +141,175 @@ public sealed class UserAuthenticationService(
         return new AuthenticatedUser(user.Id, membership.CompanyId, user.UserName, user.DisplayName, user.Email, membership.Role, user.SecurityStamp, permissions);
     }
 
+    public async Task<AccountSecuritySnapshot?> GetAccountSecurityAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var user = await dbContext.Users.AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == userId && candidate.IsActive, cancellationToken);
+        if (user is null) return null;
+
+        var recentEntries = dbContext.Database.IsSqlite()
+            ? await dbContext.AuthenticationAuditEntries
+                .FromSqlInterpolated($"""SELECT * FROM "AuthenticationAuditEntries" WHERE "UserId" = {userId} ORDER BY "OccurredUtc" DESC LIMIT 20""")
+                .AsNoTracking()
+                .ToListAsync(cancellationToken)
+            : await dbContext.AuthenticationAuditEntries.AsNoTracking()
+                .Where(entry => entry.UserId == userId)
+                .OrderByDescending(entry => entry.OccurredUtc)
+                .Take(20)
+                .ToListAsync(cancellationToken);
+        var events = recentEntries
+            .Select(entry => new AccountSecurityEventSnapshot(
+                entry.EventType,
+                entry.Succeeded,
+                entry.OccurredUtc,
+                entry.IpAddress,
+                entry.UserAgent,
+                entry.Detail))
+            .ToArray();
+
+        return new AccountSecuritySnapshot(
+            user.UserName,
+            user.DisplayName,
+            user.Email,
+            user.LastPasswordChangedUtc,
+            user.LastSuccessfulSignInUtc,
+            events);
+    }
+
+    public async Task<AccountSecurityResult> ChangePasswordAsync(
+        Guid userId,
+        Guid companyId,
+        string currentPassword,
+        string newPassword,
+        string confirmPassword,
+        string ipAddress,
+        string userAgent,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var user = await dbContext.Users.SingleOrDefaultAsync(
+            candidate => candidate.Id == userId && candidate.IsActive,
+            cancellationToken);
+        if (user is null)
+        {
+            return new AccountSecurityResult(AccountSecurityOutcome.Unauthorized);
+        }
+
+        var membership = await ResolveMembershipAsync(dbContext, user, companyId, cancellationToken);
+        if (membership is null)
+        {
+            return new AccountSecurityResult(AccountSecurityOutcome.Unauthorized);
+        }
+
+        if (string.IsNullOrWhiteSpace(currentPassword)
+            || string.IsNullOrWhiteSpace(newPassword)
+            || newPassword.Length < 12
+            || !string.Equals(newPassword, confirmPassword, StringComparison.Ordinal))
+        {
+            dbContext.AuthenticationAuditEntries.Add(CreateAuditEntry(
+                user,
+                "password_change_failed",
+                false,
+                ipAddress,
+                userAgent,
+                "The new password did not satisfy the password-change requirements.",
+                companyId: membership.CompanyId));
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return new AccountSecurityResult(AccountSecurityOutcome.InvalidRequest);
+        }
+
+        if (passwordHasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword) == PasswordVerificationResult.Failed)
+        {
+            dbContext.AuthenticationAuditEntries.Add(CreateAuditEntry(
+                user,
+                "password_change_failed",
+                false,
+                ipAddress,
+                userAgent,
+                "The current password was not valid.",
+                companyId: membership.CompanyId));
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return new AccountSecurityResult(AccountSecurityOutcome.InvalidCurrentPassword);
+        }
+
+        if (passwordHasher.VerifyHashedPassword(user, user.PasswordHash, newPassword) != PasswordVerificationResult.Failed)
+        {
+            dbContext.AuthenticationAuditEntries.Add(CreateAuditEntry(
+                user,
+                "password_change_failed",
+                false,
+                ipAddress,
+                userAgent,
+                "The proposed password matched the current password.",
+                companyId: membership.CompanyId));
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return new AccountSecurityResult(AccountSecurityOutcome.PasswordReused);
+        }
+
+        user.PasswordHash = passwordHasher.HashPassword(user, newPassword);
+        user.SecurityStamp = Guid.NewGuid().ToString("N");
+        user.LastPasswordChangedUtc = DateTimeOffset.UtcNow;
+        dbContext.AuthenticationAuditEntries.Add(CreateAuditEntry(
+            user,
+            "password_changed",
+            true,
+            ipAddress,
+            userAgent,
+            "The operator changed the account password and invalidated other sessions.",
+            companyId: membership.CompanyId));
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        return new AccountSecurityResult(AccountSecurityOutcome.Succeeded, new AuthenticatedUser(
+            user.Id,
+            membership.CompanyId,
+            user.UserName,
+            user.DisplayName,
+            user.Email,
+            membership.Role,
+            user.SecurityStamp,
+            permissions));
+    }
+
+    public async Task<AccountSecurityResult> RevokeOtherSessionsAsync(
+        Guid userId,
+        Guid companyId,
+        string ipAddress,
+        string userAgent,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var user = await dbContext.Users.SingleOrDefaultAsync(
+            candidate => candidate.Id == userId && candidate.IsActive,
+            cancellationToken);
+        if (user is null) return new AccountSecurityResult(AccountSecurityOutcome.Unauthorized);
+        var membership = await ResolveMembershipAsync(dbContext, user, companyId, cancellationToken);
+        if (membership is null) return new AccountSecurityResult(AccountSecurityOutcome.Unauthorized);
+
+        user.SecurityStamp = Guid.NewGuid().ToString("N");
+        dbContext.AuthenticationAuditEntries.Add(CreateAuditEntry(
+            user,
+            "other_sessions_revoked",
+            true,
+            ipAddress,
+            userAgent,
+            "All previously issued sessions were invalidated; this session was reissued.",
+            companyId: membership.CompanyId));
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        return new AccountSecurityResult(AccountSecurityOutcome.Succeeded, new AuthenticatedUser(
+            user.Id,
+            membership.CompanyId,
+            user.UserName,
+            user.DisplayName,
+            user.Email,
+            membership.Role,
+            user.SecurityStamp,
+            permissions));
+    }
+
     private static string EnsureSecurityStamp(string currentSecurityStamp)
     {
         return string.IsNullOrWhiteSpace(currentSecurityStamp)
@@ -201,20 +370,30 @@ public sealed class UserAuthenticationService(
         string detail,
         CancellationToken cancellationToken)
     {
-        dbContext.AuthenticationAuditEntries.Add(new AuthenticationAuditEntry
+        dbContext.AuthenticationAuditEntries.Add(CreateAuditEntry(user, eventType, succeeded, ipAddress, userAgent, detail, userName));
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static AuthenticationAuditEntry CreateAuditEntry(
+        AppUser? user,
+        string eventType,
+        bool succeeded,
+        string ipAddress,
+        string userAgent,
+        string detail,
+        string? userName = null,
+        Guid? companyId = null) => new()
         {
             Id = Guid.NewGuid(),
             UserId = user?.Id,
-            CompanyId = user?.CompanyId,
-            UserName = userName,
+            CompanyId = companyId ?? user?.CompanyId,
+            UserName = userName ?? user?.UserName ?? string.Empty,
             EventType = eventType,
             Succeeded = succeeded,
             OccurredUtc = DateTimeOffset.UtcNow,
             IpAddress = ipAddress,
             UserAgent = userAgent,
             Detail = detail
-        });
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-    }
+        };
 }

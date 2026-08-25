@@ -29,7 +29,8 @@ public sealed class NavigationAndSafetyTests
             ("/projects", "Job tracking with room for industry-specific workflows."),
             ("/reporting", "Reports, labels, forms, and print fidelity stay in the product."),
             ("/taxes", "Keep withholdings, filing rules, and odd state behavior in editable tables instead of buried code."),
-            ("/publish", "One .NET web application, packaged per platform.")
+            ("/publish", "One .NET web application, packaged per platform."),
+            ("/account/security", "Protect your operator account and review recent access.")
         };
 
         foreach (var route in routes)
