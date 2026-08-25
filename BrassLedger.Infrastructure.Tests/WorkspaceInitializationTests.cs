@@ -1452,6 +1452,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("RCT", records[3][..3]); Assert.Equal("0000001", records[3][3..10]); Assert.Equal("000000000100000", records[3][10..25]); Assert.Equal("000000000110000", records[3][25..40]);
         Assert.Equal("RCF", records[4][..3]); Assert.Equal("000000001", records[4][3..12]);
         Assert.False(SsaEfw2cFileBuilder.Build(package with { TaxYear = 2026 }, submitter).Succeeded);
+        var currentSubmitter = submitter with { SpecificationTaxYear = 2026, SpecificationVersion = "EFW2C TY2026 initial publication (2026-07-10)", OfficialSpecificationUrl = "https://www.ssa.gov/employer/efw/26efw2c.pdf" };
+        var current = SsaEfw2cFileBuilder.Build(package with { TaxYear = 2026 }, currentSubmitter);
+        Assert.True(current.Succeeded, string.Join("; ", current.Errors));
+        var currentRecords = System.Text.Encoding.ASCII.GetString(current.Content).Split("\r\n");
+        Assert.Equal("2026", currentRecords[1][3..7]);
+        Assert.Equal(new string(' ', 10), currentRecords[1][324..334]);
+        Assert.Equal(new string(' ', 12), currentRecords[2][1008..1020]);
         Assert.False(SsaEfw2cFileBuilder.Build(package with { Employees = [new W2cEmployeeData(previous, corrected, false, "Address only")] }, submitter).Succeeded);
     }
 
@@ -1469,7 +1476,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
             db.PayrollFilingCorrections.Add(new PayrollFilingCorrection { Id = correctionId, CompanyId = companyId, OriginalPayrollFilingId = filingId, Sequence = 1, FormCode = "W-2c/W-3c", TaxYear = 2025, Quarter = 0, Process = "Correction", DiscoveredOn = new DateOnly(2026, 1, 20), Explanation = "Correct wage statement test values.", WageStatementsCorrected = true, WageStatementEvidenceReference = "EVIDENCE", Status = "Approved", DataJson = System.Text.Json.JsonSerializer.Serialize(package), CorrectedSourceDigestSha256 = new string('b', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/iw2w3", ContentVersion = "2025-W2C", PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }); await db.SaveChangesAsync();
         }
         var workflow = scope.ServiceProvider.GetRequiredService<ISsaWageFileService>();
-        var future = SsaConfigurationRequest(2026, true); Assert.False((await workflow.SaveConfigurationAsync(future)).Succeeded);
+        var future = SsaConfigurationRequest(2027, true); Assert.False((await workflow.SaveConfigurationAsync(future)).Succeeded);
+        var predatesPublication = SsaConfigurationRequest(2026, true) with { SourceRetrievedOn = new DateOnly(2026, 7, 9) }; Assert.False((await workflow.SaveConfigurationAsync(predatesPublication)).Succeeded);
+        var current = await workflow.SaveConfigurationAsync(SsaConfigurationRequest(2026, true)); Assert.True(current.Succeeded, current.ErrorMessage);
         Assert.False((await workflow.GenerateAsync(new(correctionId))).Succeeded);
         var configured = await workflow.SaveConfigurationAsync(SsaConfigurationRequest(2025, true)); Assert.True(configured.Succeeded, configured.ErrorMessage);
         var generated = await workflow.GenerateAsync(new(correctionId)); Assert.True(generated.Succeeded, generated.ErrorMessage);
@@ -1480,7 +1489,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verify = await factory.CreateDbContextAsync(); await verify.Database.OpenConnectionAsync(); await using var command = verify.Database.GetDbConnection().CreateCommand(); command.CommandText = "SELECT ContentBase64 || '|' || SubmitterEin || '|' || BsoUserId FROM PayrollSsaWageFiles f JOIN PayrollSsaWageFileConfigurations c ON c.Id = f.PayrollSsaWageFileConfigurationId WHERE f.Id = $id"; var parameter = command.CreateParameter(); parameter.ParameterName = "$id"; parameter.Value = file.Id; command.Parameters.Add(parameter); Assert.All(((await command.ExecuteScalarAsync())?.ToString() ?? "").Split('|'), item => Assert.StartsWith("enc::", item));
     }
 
-    private static SaveSsaWageFileConfigurationRequest SsaConfigurationRequest(int year, bool approved) => new(null, year, $"EFW2C TY{year} reviewed", SsaWageFileService.SupportedLayoutCode, $"https://www.ssa.gov/employer/efw/{year % 100:00}efw2c.pdf", new string('c', 64), new DateOnly(2026, 1, 20), "Reviewer compared every implemented record and field position with the official SSA publication.", "123456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", approved, approved);
+    private static SaveSsaWageFileConfigurationRequest SsaConfigurationRequest(int year, bool approved) => new(null, year, $"EFW2C TY{year} reviewed", SsaWageFileService.SupportedLayoutCode, $"https://www.ssa.gov/employer/efw/{year % 100:00}efw2c.pdf", new string('c', 64), year >= 2026 ? new DateOnly(2026, 7, 10) : new DateOnly(2026, 1, 20), "Reviewer compared every implemented record and field position with the official SSA publication.", "123456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", approved, approved);
 
     [Fact]
     public async Task PayrollTimecards_RequireValidAuditableWorkflowAndPreventOverlappingHours()

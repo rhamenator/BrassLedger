@@ -14,7 +14,11 @@ namespace BrassLedger.Infrastructure.Accounting;
 public sealed class SsaWageFileService(IDbContextFactory<BrassLedgerDbContext> dbContextFactory, IHttpContextAccessor httpContextAccessor) : ISsaWageFileService
 {
     public const string SupportedLayoutCode = "EFW2C-1024-RCA-RCE-RCW-RCT-RCF";
-    public const int SupportedSpecificationTaxYear = 2025;
+    private static readonly IReadOnlyDictionary<int, DateOnly> SupportedSpecificationPublicationDates = new Dictionary<int, DateOnly>
+    {
+        [2025] = new(2026, 1, 20),
+        [2026] = new(2026, 7, 10)
+    };
 
     public async Task<SsaWageFileWorkspace> GetAsync(CancellationToken cancellationToken = default)
     {
@@ -34,7 +38,11 @@ public sealed class SsaWageFileService(IDbContextFactory<BrassLedgerDbContext> d
         if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https" || !(uri.Host.Equals("ssa.gov", StringComparison.OrdinalIgnoreCase) || uri.Host.EndsWith(".ssa.gov", StringComparison.OrdinalIgnoreCase)) || !uri.AbsolutePath.EndsWith(expectedFile, StringComparison.OrdinalIgnoreCase)) return TransactionResult.Failure($"Use the exact official SSA {request.SpecificationTaxYear} EFW2C PDF URL ending in {expectedFile}.");
         if (request.SourceRetrievedOn == default || request.SourceRetrievedOn > DateOnly.FromDateTime(DateTime.Today)) return TransactionResult.Failure("Enter the actual specification retrieval date; it cannot be in the future.");
         if (request.IsActive && !request.IsApproved) return TransactionResult.Failure("Only an approved SSA specification can be active.");
-        if (request.IsApproved && request.SpecificationTaxYear != SupportedSpecificationTaxYear) return TransactionResult.Failure($"The encoder is approved only for SSA tax year {SupportedSpecificationTaxYear}; retain later specifications as inactive drafts until their layouts are implemented and verified.");
+        if (request.IsApproved)
+        {
+            if (!SupportedSpecificationPublicationDates.TryGetValue(request.SpecificationTaxYear, out var publicationDate)) return TransactionResult.Failure($"The encoder has no reviewed layout for SSA tax year {request.SpecificationTaxYear}; retain that specification as an inactive draft until its layout is implemented and verified.");
+            if (request.SourceRetrievedOn < publicationDate) return TransactionResult.Failure($"The reviewed SSA tax year {request.SpecificationTaxYear} publication was issued on {publicationDate:yyyy-MM-dd}; the retrieval date cannot precede it.");
+        }
         if (request.IsApproved && (request.LayoutCompatibilityCode != SupportedLayoutCode || digest.Length != 64 || digest.Any(character => !Uri.IsHexDigit(character)) || notes.Length < 30)) return TransactionResult.Failure("Approval requires the supported reviewed layout code, the official PDF SHA-256, and substantive review notes.");
         var submitter = ToSubmitter(request);
         var validation = SsaEfw2cFileBuilder.Build(new W2cPackageData(TaxYear: request.SpecificationTaxYear, EmployerLegalName: "VALIDATION EMPLOYER", EmployerEin: "123456789", Employees: [ValidationEmployee()]), submitter);
