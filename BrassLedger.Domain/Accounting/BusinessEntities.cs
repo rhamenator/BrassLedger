@@ -333,6 +333,32 @@ public sealed class SubledgerPaymentApplication
     public decimal Amount { get; set; }
 }
 
+public sealed class SubledgerAdjustment
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string Subledger { get; set; } = string.Empty;
+    public string Kind { get; set; } = string.Empty;
+    public Guid CounterpartyId { get; set; }
+    public Guid? DocumentId { get; set; }
+    public Guid? PaymentId { get; set; }
+    public Guid? BankAccountId { get; set; }
+    public DateOnly AdjustmentDate { get; set; }
+    public decimal Amount { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string OffsetAccountNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = "Posted";
+    public Guid JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
 public sealed class InventoryItem
 {
     public Guid Id { get; set; }

@@ -71,4 +71,21 @@ public sealed class ReceivablesPage
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer payment marked returned.");
         await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference })).ToContainTextAsync("Returned");
     }
+
+    public async Task RecordAndReverseCreditMemoAsync(string adjustmentReference)
+    {
+        await _session.Page.GetByLabel("Adjustment invoice").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Customer adjustment amount").FillAsync("5");
+        await _session.Page.GetByLabel("Customer adjustment reference").FillAsync(adjustmentReference);
+        await _session.Page.GetByLabel("Customer adjustment reason").FillAsync("E2E price allowance");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post customer adjustment" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer adjustment posted.");
+        var row = _session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference });
+        await Assertions.Expect(row).ToContainTextAsync("CreditMemo");
+        await Assertions.Expect(row).ToContainTextAsync("$5.00");
+        await _session.Page.GetByLabel("Customer adjustment reversal reason").FillAsync("E2E allowance withdrawn");
+        await row.GetByRole(AriaRole.Button, new() { Name = "Reverse" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer adjustment reversed.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference })).ToContainTextAsync("Reversed");
+    }
 }

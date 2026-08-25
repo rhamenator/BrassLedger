@@ -70,4 +70,21 @@ public sealed class PayablesPage
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor payment marked voided.");
         await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference })).ToContainTextAsync("Voided");
     }
+
+    public async Task RecordAndReverseVendorCreditAsync(string adjustmentReference)
+    {
+        await _session.Page.GetByLabel("Vendor credit bill").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Vendor credit amount").FillAsync("5");
+        await _session.Page.GetByLabel("Vendor credit reference").FillAsync(adjustmentReference);
+        await _session.Page.GetByLabel("Vendor credit reason").FillAsync("E2E vendor allowance");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post vendor credit" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor credit posted.");
+        var row = _session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference });
+        await Assertions.Expect(row).ToContainTextAsync("VendorCredit");
+        await Assertions.Expect(row).ToContainTextAsync("$5.00");
+        await _session.Page.GetByLabel("Vendor adjustment reversal reason").FillAsync("E2E allowance withdrawn");
+        await row.GetByRole(AriaRole.Button, new() { Name = "Reverse" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor adjustment reversed.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference })).ToContainTextAsync("Reversed");
+    }
 }

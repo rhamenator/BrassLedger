@@ -14,6 +14,11 @@ public sealed record PaymentDocumentApplicationRequest(Guid DocumentId, decimal 
 public sealed record RecordCustomerPaymentRequest(Guid CustomerId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference, string Method, IReadOnlyList<PaymentDocumentApplicationRequest> Applications);
 public sealed record RecordVendorPaymentRequest(Guid VendorId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference, string Method, IReadOnlyList<PaymentDocumentApplicationRequest> Applications);
 public sealed record ReverseSubledgerPaymentRequest(Guid PaymentId, DateOnly ReversalDate, string Reason, string ReversalKind = "Reversed");
+public sealed record RecordCustomerAdjustmentRequest(Guid InvoiceId, DateOnly AdjustmentDate, decimal Amount, string Reference, string OffsetAccountNumber, string Reason, string Kind = "CreditMemo");
+public sealed record RecordVendorCreditRequest(Guid VendorBillId, DateOnly AdjustmentDate, decimal Amount, string Reference, string OffsetAccountNumber, string Reason);
+public sealed record RefundUnappliedPaymentRequest(Guid PaymentId, Guid BankAccountId, DateOnly RefundDate, decimal Amount, string Reference, string Reason);
+public sealed record VoidSubledgerDocumentRequest(Guid DocumentId, DateOnly VoidDate, string Reason);
+public sealed record ReverseSubledgerAdjustmentRequest(Guid AdjustmentId, DateOnly ReversalDate, string Reason);
 public sealed record ReconcileBankAccountRequest(Guid BankAccountId, DateOnly StatementDate, decimal StatementClosingBalance, IReadOnlyList<Guid>? ClearedJournalEntryIds = null);
 public sealed record UpdateBankLedgerMappingRequest(Guid BankAccountId, string LedgerAccountNumber);
 public sealed record PostPayrollRunRequest(
@@ -60,6 +65,12 @@ public interface IAccountingTransactionService
     Task<TransactionResult> RecordCustomerPaymentAsync(RecordCustomerPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordVendorPaymentAsync(RecordVendorPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReverseSubledgerPaymentAsync(ReverseSubledgerPaymentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RecordCustomerAdjustmentAsync(RecordCustomerAdjustmentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RecordVendorCreditAsync(RecordVendorCreditRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RefundUnappliedPaymentAsync(RefundUnappliedPaymentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> VoidInvoiceAsync(VoidSubledgerDocumentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> VoidVendorBillAsync(VoidSubledgerDocumentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseSubledgerAdjustmentAsync(ReverseSubledgerAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReconcileBankAccountAsync(ReconcileBankAccountRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> UpdateBankLedgerMappingAsync(UpdateBankLedgerMappingRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> PostPayrollRunAsync(PostPayrollRunRequest request, CancellationToken cancellationToken = default);

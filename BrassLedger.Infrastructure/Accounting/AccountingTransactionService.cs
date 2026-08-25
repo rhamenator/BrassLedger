@@ -333,6 +333,7 @@ public sealed class AccountingTransactionService(
         var payment = await db.SubledgerPayments.SingleOrDefaultAsync(item => item.Id == request.PaymentId && item.CompanyId == companyId, cancellationToken);
         if (payment is null) return TransactionResult.Failure("Payment not found.");
         if (payment.Status != "Posted") return TransactionResult.Failure("Only a posted payment can be reversed, returned, or voided.");
+        if (await db.SubledgerAdjustments.AnyAsync(adjustment => adjustment.PaymentId == payment.Id && adjustment.Status == "Posted", cancellationToken)) return TransactionResult.Failure("Reverse active refunds or other payment adjustments before reversing the original payment.");
         if (request.ReversalDate < payment.PaymentDate) return TransactionResult.Failure("A payment reversal cannot precede the payment date.");
         if (await db.BankReconciliationItems.AnyAsync(item => item.JournalEntryId == payment.JournalEntryId, cancellationToken)) return TransactionResult.Failure("A reconciled payment cannot be reversed until its bank reconciliation is reopened.");
         var bank = await db.BankAccounts.SingleAsync(account => account.Id == payment.BankAccountId && account.CompanyId == companyId, cancellationToken);
@@ -382,6 +383,10 @@ public sealed class AccountingTransactionService(
 
         var posting = await PostAsync(db, companyId, request.ReversalDate, payment.Direction == "CustomerReceipt" ? "Accounts Receivable" : "Accounts Payable", $"REV-{payment.Reference}", $"{reversalKind} payment: {request.Reason.Trim()}", lines, cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: payment.Id, sourceDocumentType: "SubledgerPaymentReversal");
         if (!posting.Succeeded) return posting;
+        var originalJournal = await db.JournalEntries.SingleAsync(entry => entry.Id == payment.JournalEntryId && entry.CompanyId == companyId, cancellationToken);
+        var reversalJournal = await db.JournalEntries.SingleAsync(entry => entry.Id == posting.Id && entry.CompanyId == companyId, cancellationToken);
+        originalJournal.Status = "Reversed"; originalJournal.ReversedByJournalEntryId = reversalJournal.Id; originalJournal.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        reversalJournal.ReversalOfJournalEntryId = originalJournal.Id; reversalJournal.ConcurrencyToken = Guid.NewGuid().ToString("N");
         payment.Status = reversalKind;
         payment.ReversalJournalEntryId = posting.Id;
         payment.ReversedByUserId = ResolveUserId();
@@ -395,6 +400,221 @@ public sealed class AccountingTransactionService(
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The payment changed during reversal. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);
         return TransactionResult.Success(payment.Id);
+    }
+
+    public async Task<TransactionResult> RecordCustomerAdjustmentAsync(RecordCustomerAdjustmentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.ReceivablesManage)) return TransactionResult.Failure("You are not authorized to adjust customer balances.");
+        var kind = (request.Kind ?? string.Empty).Trim();
+        if (kind is not ("CreditMemo" or "WriteOff")) return TransactionResult.Failure("Customer adjustment kind must be CreditMemo or WriteOff.");
+        if (request.Amount <= 0 || string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A positive amount, reference, and reason are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var amount = RoundCurrency(request.Amount);
+        var invoice = await db.SalesInvoices.SingleOrDefaultAsync(item => item.Id == request.InvoiceId && item.CompanyId == companyId, cancellationToken);
+        if (invoice is null) return TransactionResult.Failure("Invoice not found.");
+        if (invoice.Status == "Voided" || amount > invoice.BalanceDue) return TransactionResult.Failure("The adjustment cannot exceed the open invoice balance or target a voided invoice.");
+        if (request.AdjustmentDate < invoice.InvoiceDate) return TransactionResult.Failure("The adjustment date cannot precede the invoice date.");
+        var offset = await db.Accounts.SingleOrDefaultAsync(account => account.CompanyId == companyId && account.Number == request.OffsetAccountNumber.Trim() && account.IsActive && !account.IsControlAccount, cancellationToken);
+        if (offset is null || (kind == "WriteOff" ? offset.Type != AccountType.Expense : offset.Type is not (AccountType.Revenue or AccountType.Expense))) return TransactionResult.Failure(kind == "WriteOff" ? "A write-off requires an active expense account." : "A credit memo requires an active revenue or expense account.");
+        if (await db.SubledgerAdjustments.AnyAsync(item => item.CompanyId == companyId && item.Subledger == "Receivables" && item.Reference == request.Reference.Trim(), cancellationToken)) return TransactionResult.Failure("That receivables adjustment reference already exists.");
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var adjustmentId = Guid.NewGuid();
+        var posting = await PostAsync(db, companyId, request.AdjustmentDate, "Accounts Receivable", request.Reference, request.Reason,
+            [new(offset.Number, amount, 0, kind == "WriteOff" ? "Bad debt write-off" : "Customer credit"), new("1100", 0, amount, "Reduce receivable")], cancellationToken,
+            allowControlAccounts: true, sourceDocumentId: adjustmentId, sourceDocumentType: "SubledgerAdjustment");
+        if (!posting.Succeeded) return posting;
+        invoice.BalanceDue -= amount;
+        invoice.Status = invoice.BalanceDue == 0 ? "Paid" : "Partial";
+        invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var customer = await db.Customers.SingleAsync(item => item.Id == invoice.CustomerId && item.CompanyId == companyId, cancellationToken);
+        customer.OpenBalance -= amount;
+        var adjustment = CreateAdjustment(adjustmentId, companyId, "Receivables", kind, invoice.CustomerId, request.InvoiceId, null, null, request.AdjustmentDate, amount, request.Reference, request.Reason, offset.Number, posting.Id!.Value);
+        db.SubledgerAdjustments.Add(adjustment);
+        AddAdjustmentAudit(db, adjustment, "subledger-adjustment.posted");
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return TransactionResult.Failure("The adjustment changed concurrently or its reference already exists. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(adjustment.Id);
+    }
+
+    public async Task<TransactionResult> RecordVendorCreditAsync(RecordVendorCreditRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayablesManage)) return TransactionResult.Failure("You are not authorized to adjust vendor balances.");
+        if (request.Amount <= 0 || string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A positive amount, reference, and reason are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var amount = RoundCurrency(request.Amount);
+        var bill = await db.VendorBills.SingleOrDefaultAsync(item => item.Id == request.VendorBillId && item.CompanyId == companyId, cancellationToken);
+        if (bill is null) return TransactionResult.Failure("Vendor bill not found.");
+        if (bill.Status == "Voided" || amount > bill.BalanceDue) return TransactionResult.Failure("The credit cannot exceed the open bill balance or target a voided bill.");
+        if (request.AdjustmentDate < bill.BillDate) return TransactionResult.Failure("The credit date cannot precede the bill date.");
+        var offset = await db.Accounts.SingleOrDefaultAsync(account => account.CompanyId == companyId && account.Number == request.OffsetAccountNumber.Trim() && account.IsActive && !account.IsControlAccount && (account.Type == AccountType.Expense || account.Type == AccountType.Asset), cancellationToken);
+        if (offset is null) return TransactionResult.Failure("A vendor credit requires an active non-control expense or asset account.");
+        if (await db.SubledgerAdjustments.AnyAsync(item => item.CompanyId == companyId && item.Subledger == "Payables" && item.Reference == request.Reference.Trim(), cancellationToken)) return TransactionResult.Failure("That payables adjustment reference already exists.");
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var adjustmentId = Guid.NewGuid();
+        var posting = await PostAsync(db, companyId, request.AdjustmentDate, "Accounts Payable", request.Reference, request.Reason,
+            [new("2000", amount, 0, "Reduce payable"), new(offset.Number, 0, amount, "Vendor credit")], cancellationToken,
+            allowControlAccounts: true, sourceDocumentId: adjustmentId, sourceDocumentType: "SubledgerAdjustment");
+        if (!posting.Succeeded) return posting;
+        bill.BalanceDue -= amount;
+        bill.Status = bill.BalanceDue == 0 ? "Paid" : "Partial";
+        bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var vendor = await db.Vendors.SingleAsync(item => item.Id == bill.VendorId && item.CompanyId == companyId, cancellationToken);
+        vendor.OpenBalance -= amount;
+        var adjustment = CreateAdjustment(adjustmentId, companyId, "Payables", "VendorCredit", bill.VendorId, request.VendorBillId, null, null, request.AdjustmentDate, amount, request.Reference, request.Reason, offset.Number, posting.Id!.Value);
+        db.SubledgerAdjustments.Add(adjustment);
+        AddAdjustmentAudit(db, adjustment, "subledger-adjustment.posted");
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return TransactionResult.Failure("The credit changed concurrently or its reference already exists. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(adjustment.Id);
+    }
+
+    public async Task<TransactionResult> RefundUnappliedPaymentAsync(RefundUnappliedPaymentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PaymentReverse)) return TransactionResult.Failure("You are not authorized to refund unapplied payments.");
+        if (request.Amount <= 0 || string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A positive refund amount, reference, and reason are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var payment = await db.SubledgerPayments.SingleOrDefaultAsync(item => item.Id == request.PaymentId && item.CompanyId == companyId, cancellationToken);
+        var amount = RoundCurrency(request.Amount);
+        if (payment is null || payment.Status != "Posted" || amount > payment.UnappliedAmount) return TransactionResult.Failure("The refund cannot exceed the unapplied balance of a posted payment.");
+        if (request.RefundDate < payment.PaymentDate) return TransactionResult.Failure("The refund date cannot precede the payment date.");
+        var bank = await db.BankAccounts.SingleOrDefaultAsync(item => item.Id == request.BankAccountId && item.CompanyId == companyId, cancellationToken);
+        if (bank is null) return TransactionResult.Failure("Bank account not found.");
+        var cashAccount = await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken);
+        if (string.IsNullOrWhiteSpace(cashAccount)) return TransactionResult.Failure("The refund bank account is not mapped to an active ledger account.");
+        if (payment.Direction == "CustomerReceipt" && bank.CurrentBalance < amount) return TransactionResult.Failure("The bank account does not have sufficient book balance for this refund.");
+        var subledger = payment.Direction == "CustomerReceipt" ? "Receivables" : "Payables";
+        if (await db.SubledgerAdjustments.AnyAsync(item => item.CompanyId == companyId && item.Subledger == subledger && item.Reference == request.Reference.Trim(), cancellationToken)) return TransactionResult.Failure("That refund reference already exists.");
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var adjustmentId = Guid.NewGuid();
+        var customerRefund = payment.Direction == "CustomerReceipt";
+        var lines = customerRefund
+            ? new JournalLineRequest[] { new("2150", amount, 0, "Release customer deposit"), new(cashAccount, 0, amount, "Customer refund") }
+            : [new(cashAccount, amount, 0, "Vendor refund received"), new("1300", 0, amount, "Release vendor advance")];
+        var posting = await PostAsync(db, companyId, request.RefundDate, customerRefund ? "Accounts Receivable" : "Accounts Payable", request.Reference, request.Reason, lines, cancellationToken, bank.Id, true, adjustmentId, "SubledgerAdjustment");
+        if (!posting.Succeeded) return posting;
+        payment.UnappliedAmount -= amount;
+        payment.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        bank.CurrentBalance += customerRefund ? -amount : amount;
+        bank.UnreconciledAmount += amount;
+        bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var adjustment = CreateAdjustment(adjustmentId, companyId, subledger, customerRefund ? "CustomerDepositRefund" : "VendorAdvanceRefund", payment.CounterpartyId, null, payment.Id, bank.Id, request.RefundDate, amount, request.Reference, request.Reason, customerRefund ? "2150" : "1300", posting.Id!.Value);
+        db.SubledgerAdjustments.Add(adjustment);
+        AddAdjustmentAudit(db, adjustment, "subledger-adjustment.posted");
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return TransactionResult.Failure("The refund changed concurrently or its reference already exists. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(adjustment.Id);
+    }
+
+    public Task<TransactionResult> VoidInvoiceAsync(VoidSubledgerDocumentRequest request, CancellationToken cancellationToken = default) =>
+        VoidSubledgerDocumentAsync(request, true, cancellationToken);
+
+    public Task<TransactionResult> VoidVendorBillAsync(VoidSubledgerDocumentRequest request, CancellationToken cancellationToken = default) =>
+        VoidSubledgerDocumentAsync(request, false, cancellationToken);
+
+    public async Task<TransactionResult> ReverseSubledgerAdjustmentAsync(ReverseSubledgerAdjustmentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PaymentReverse)) return TransactionResult.Failure("You are not authorized to reverse subledger adjustments.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("An adjustment reversal reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var adjustment = await db.SubledgerAdjustments.SingleOrDefaultAsync(item => item.Id == request.AdjustmentId && item.CompanyId == companyId, cancellationToken);
+        if (adjustment is null || adjustment.Status != "Posted") return TransactionResult.Failure("Only a posted adjustment can be reversed.");
+        if (request.ReversalDate < adjustment.AdjustmentDate) return TransactionResult.Failure("The reversal date cannot precede the adjustment date.");
+        if (await db.BankReconciliationItems.AnyAsync(item => item.JournalEntryId == adjustment.JournalEntryId, cancellationToken)) return TransactionResult.Failure("A reconciled adjustment cannot be reversed until its bank reconciliation is reopened.");
+        var reversal = await PostInverseAsync(db, companyId, adjustment.JournalEntryId, request.ReversalDate, $"REV-{adjustment.Reference}", request.Reason, adjustment.Id, "SubledgerAdjustmentReversal", adjustment.BankAccountId, cancellationToken);
+        if (!reversal.Succeeded) return reversal;
+
+        if (adjustment.Kind is "CreditMemo" or "WriteOff")
+        {
+            var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
+            invoice.BalanceDue += adjustment.Amount; invoice.Status = invoice.BalanceDue == invoice.TotalAmount ? "Open" : "Partial"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            (await db.Customers.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
+        }
+        else if (adjustment.Kind == "VendorCredit")
+        {
+            var bill = await db.VendorBills.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
+            bill.BalanceDue += adjustment.Amount; bill.Status = bill.BalanceDue == bill.TotalAmount ? "Open" : "Partial"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            (await db.Vendors.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
+        }
+        else if (adjustment.Kind is "CustomerDepositRefund" or "VendorAdvanceRefund")
+        {
+            var payment = await db.SubledgerPayments.SingleAsync(item => item.Id == adjustment.PaymentId && item.CompanyId == companyId, cancellationToken);
+            payment.UnappliedAmount += adjustment.Amount; payment.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            var bank = await db.BankAccounts.SingleAsync(item => item.Id == adjustment.BankAccountId && item.CompanyId == companyId, cancellationToken);
+            bank.CurrentBalance += adjustment.Kind == "CustomerDepositRefund" ? adjustment.Amount : -adjustment.Amount;
+            bank.UnreconciledAmount += adjustment.Amount; bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        }
+        else if (adjustment.Kind == "InvoiceVoid")
+        {
+            var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
+            invoice.BalanceDue = invoice.TotalAmount; invoice.Status = "Open"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            (await db.Customers.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
+        }
+        else if (adjustment.Kind == "VendorBillVoid")
+        {
+            var bill = await db.VendorBills.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
+            bill.BalanceDue = bill.TotalAmount; bill.Status = "Open"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            (await db.Vendors.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
+        }
+        else return TransactionResult.Failure("The adjustment kind is not reversible.");
+
+        adjustment.Status = "Reversed"; adjustment.ReversalJournalEntryId = reversal.Id; adjustment.ReversedByUserId = ResolveUserId(); adjustment.ReversedAtUtc = DateTimeOffset.UtcNow; adjustment.ReversalReason = request.Reason.Trim(); adjustment.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAdjustmentAudit(db, adjustment, "subledger-adjustment.reversed");
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The adjustment changed while it was being reversed. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(adjustment.Id);
+    }
+
+    private async Task<TransactionResult> VoidSubledgerDocumentAsync(VoidSubledgerDocumentRequest request, bool receivable, CancellationToken cancellationToken)
+    {
+        var modulePermission = receivable ? BrassLedgerPermissions.ReceivablesManage : BrassLedgerPermissions.PayablesManage;
+        if (!HasPermission(modulePermission) || !HasPermission(BrassLedgerPermissions.PaymentReverse)) return TransactionResult.Failure("You are not authorized to void this document.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A void reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var reference = string.Empty; var documentDate = default(DateOnly); var amount = 0m; var counterpartyId = Guid.Empty;
+        if (receivable)
+        {
+            var invoice = await db.SalesInvoices.SingleOrDefaultAsync(item => item.Id == request.DocumentId && item.CompanyId == companyId, cancellationToken);
+            if (invoice is null) return TransactionResult.Failure("Invoice not found.");
+            if (invoice.Status == "Voided" || invoice.BalanceDue != invoice.TotalAmount) return TransactionResult.Failure("Only a fully open, unadjusted invoice can be voided.");
+            reference = invoice.InvoiceNumber; documentDate = invoice.InvoiceDate; amount = invoice.TotalAmount; counterpartyId = invoice.CustomerId;
+        }
+        else
+        {
+            var bill = await db.VendorBills.SingleOrDefaultAsync(item => item.Id == request.DocumentId && item.CompanyId == companyId, cancellationToken);
+            if (bill is null) return TransactionResult.Failure("Vendor bill not found.");
+            if (bill.Status == "Voided" || bill.BalanceDue != bill.TotalAmount) return TransactionResult.Failure("Only a fully open, unadjusted bill can be voided.");
+            reference = bill.BillNumber; documentDate = bill.BillDate; amount = bill.TotalAmount; counterpartyId = bill.VendorId;
+        }
+        if (request.VoidDate < documentDate) return TransactionResult.Failure("The void date cannot precede the document date.");
+        if (await db.SubledgerPaymentApplications.AnyAsync(application => application.DocumentId == request.DocumentId, cancellationToken) || await db.SubledgerAdjustments.AnyAsync(item => item.CompanyId == companyId && item.DocumentId == request.DocumentId, cancellationToken)) return TransactionResult.Failure("A document with payment or adjustment history cannot be voided; use a credit or reversal workflow.");
+        var sourceType = receivable ? "SalesInvoice" : "VendorBill";
+        var originalJournalId = await db.JournalEntries.Where(entry => entry.CompanyId == companyId && entry.SourceDocumentType == sourceType && entry.SourceDocumentId == request.DocumentId && entry.IsPosted).Select(entry => (Guid?)entry.Id).SingleOrDefaultAsync(cancellationToken);
+        if (!originalJournalId.HasValue) return TransactionResult.Failure("The document's original posting could not be found.");
+        var adjustmentId = Guid.NewGuid();
+        var reversal = await PostInverseAsync(db, companyId, originalJournalId.Value, request.VoidDate, $"VOID-{reference}", request.Reason, adjustmentId, "SubledgerAdjustment", null, cancellationToken);
+        if (!reversal.Succeeded) return reversal;
+        if (receivable)
+        {
+            var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == request.DocumentId, cancellationToken); invoice.BalanceDue = 0; invoice.Status = "Voided"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            (await db.Customers.SingleAsync(item => item.Id == counterpartyId, cancellationToken)).OpenBalance -= amount;
+        }
+        else
+        {
+            var bill = await db.VendorBills.SingleAsync(item => item.Id == request.DocumentId, cancellationToken); bill.BalanceDue = 0; bill.Status = "Voided"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            (await db.Vendors.SingleAsync(item => item.Id == counterpartyId, cancellationToken)).OpenBalance -= amount;
+        }
+        var adjustment = CreateAdjustment(adjustmentId, companyId, receivable ? "Receivables" : "Payables", receivable ? "InvoiceVoid" : "VendorBillVoid", counterpartyId, request.DocumentId, null, null, request.VoidDate, amount, $"VOID-{reference}", request.Reason, string.Empty, reversal.Id!.Value);
+        db.SubledgerAdjustments.Add(adjustment); AddAdjustmentAudit(db, adjustment, "subledger-adjustment.posted");
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return TransactionResult.Failure("The document changed while it was being voided. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(adjustment.Id);
     }
 
     public async Task<TransactionResult> ReconcileBankAccountAsync(ReconcileBankAccountRequest request, CancellationToken cancellationToken = default)
@@ -818,6 +1038,54 @@ public sealed class AccountingTransactionService(
             DetailJson = System.Text.Json.JsonSerializer.Serialize(new { payment.Direction, payment.CounterpartyId, payment.BankAccountId, payment.PaymentDate, payment.Amount, payment.AppliedAmount, payment.UnappliedAmount, payment.Reference, payment.Method, payment.Status, details }),
             OccurredAtUtc = DateTimeOffset.UtcNow
         });
+    }
+
+    private static SubledgerAdjustment CreateAdjustment(Guid id, Guid companyId, string subledger, string kind, Guid counterpartyId, Guid? documentId, Guid? paymentId, Guid? bankAccountId, DateOnly date, decimal amount, string reference, string reason, string offsetAccountNumber, Guid journalEntryId) => new()
+    {
+        Id = id, CompanyId = companyId, Subledger = subledger, Kind = kind, CounterpartyId = counterpartyId, DocumentId = documentId, PaymentId = paymentId, BankAccountId = bankAccountId,
+        AdjustmentDate = date, Amount = amount, Reference = reference.Trim(), Reason = reason.Trim(), OffsetAccountNumber = offsetAccountNumber, Status = "Posted", JournalEntryId = journalEntryId,
+        CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N")
+    };
+
+    private void AddAdjustmentAudit(BrassLedgerDbContext db, SubledgerAdjustment adjustment, string action)
+    {
+        adjustment.CreatedByUserId ??= ResolveUserId();
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry
+        {
+            Id = Guid.NewGuid(), CompanyId = adjustment.CompanyId, UserId = ResolveUserId(), Action = action, EntityType = "SubledgerAdjustment", EntityId = adjustment.Id,
+            DetailJson = System.Text.Json.JsonSerializer.Serialize(new { adjustment.Subledger, adjustment.Kind, adjustment.CounterpartyId, adjustment.DocumentId, adjustment.PaymentId, adjustment.BankAccountId, adjustment.AdjustmentDate, adjustment.Amount, adjustment.Reference, adjustment.Reason, adjustment.OffsetAccountNumber, adjustment.Status, adjustment.JournalEntryId, adjustment.ReversalJournalEntryId }),
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        });
+    }
+
+    private async Task<TransactionResult> PostInverseAsync(BrassLedgerDbContext db, Guid companyId, Guid originalJournalEntryId, DateOnly date, string reference, string description, Guid sourceDocumentId, string sourceDocumentType, Guid? bankAccountId, CancellationToken cancellationToken)
+    {
+        var original = await db.JournalEntries.SingleOrDefaultAsync(entry => entry.Id == originalJournalEntryId && entry.CompanyId == companyId && entry.IsPosted, cancellationToken);
+        if (original is null || original.ReversedByJournalEntryId.HasValue) return TransactionResult.Failure("The original journal is unavailable or has already been reversed.");
+        var originalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == originalJournalEntryId).ToListAsync(cancellationToken);
+        var accountIds = originalLines.Select(line => line.AccountId).Distinct().ToArray();
+        var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
+        if (originalLines.Count < 2 || accounts.Count != accountIds.Length) return TransactionResult.Failure("The original journal distribution is unavailable.");
+        var lines = originalLines.Select(line => new JournalLineRequest(accounts[line.AccountId].Number, line.Credit, line.Debit, $"Reversal: {line.Description}")).ToArray();
+        if (await IsClosedPeriodAsync(db, companyId, date, cancellationToken)) return TransactionResult.Failure("This posting date is in a closed accounting period.");
+        var debits = lines.Sum(line => line.Debit); var credits = lines.Sum(line => line.Credit);
+        if (debits != credits) return TransactionResult.Failure("The original journal is not balanced.");
+        var now = DateTimeOffset.UtcNow;
+        var userId = ResolveUserId();
+        var entry = new JournalEntry { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bankAccountId, SourceDocumentId = sourceDocumentId, SourceDocumentType = sourceDocumentType, EntryNumber = $"JE-{date:yyyyMMdd}-{Guid.NewGuid():N}"[..20], PostedOn = date, SourceModule = "Subledger Adjustment", Reference = reference.Trim(), Description = description.Trim(), TotalAmount = debits, Status = "Posted", IsPosted = true, CreatedByUserId = userId, CreatedAtUtc = now, ApprovedByUserId = userId, ApprovedAtUtc = now, PostedByUserId = userId, PostedAtUtc = now, ReversalOfJournalEntryId = original.Id, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        db.JournalEntries.Add(entry);
+        original.Status = "Reversed";
+        original.ReversedByJournalEntryId = entry.Id;
+        original.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        foreach (var line in lines)
+        {
+            var account = accounts.Values.Single(item => item.Number.Equals(line.AccountNumber, StringComparison.OrdinalIgnoreCase));
+            account.CurrentBalance += account.Type is AccountType.Asset or AccountType.Expense ? line.Debit - line.Credit : line.Credit - line.Debit;
+            db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, Description = line.Description, Debit = line.Debit, Credit = line.Credit });
+        }
+        AddJournalAudit(db, companyId, userId, "journal.posted", entry, new { entry.SourceDocumentType, entry.SourceDocumentId });
+        await db.SaveChangesAsync(cancellationToken);
+        return TransactionResult.Success(entry.Id);
     }
 
     private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken ct)

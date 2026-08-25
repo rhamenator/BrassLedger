@@ -561,6 +561,77 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task CustomerAdjustments_PostCreditWriteOffRefundAndReversalsAuditably()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var customer = before.Receivables.Customers.First();
+        var bank = before.Treasury.BankAccounts.First();
+        var invoice = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-ADJ-1", new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 30), 100m, 0m, "4000", "Adjustment test"));
+        Assert.True(invoice.Succeeded, invoice.ErrorMessage);
+
+        var credit = await transactions.RecordCustomerAdjustmentAsync(new RecordCustomerAdjustmentRequest(invoice.Id!.Value, new DateOnly(2026, 6, 2), 20m, "CM-ADJ-1", "4000", "Price concession"));
+        var writeOff = await transactions.RecordCustomerAdjustmentAsync(new RecordCustomerAdjustmentRequest(invoice.Id.Value, new DateOnly(2026, 6, 3), 30m, "WO-ADJ-1", "5100", "Uncollectible balance", "WriteOff"));
+        Assert.True(credit.Succeeded, credit.ErrorMessage);
+        Assert.True(writeOff.Succeeded, writeOff.ErrorMessage);
+        var adjusted = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(50m, adjusted.Receivables.Invoices.Single(item => item.Id == invoice.Id).BalanceDue);
+        Assert.Contains(adjusted.Receivables.Adjustments!, item => item.Id == credit.Id && item.Kind == "CreditMemo");
+        Assert.Contains(adjusted.Receivables.Adjustments!, item => item.Id == writeOff.Id && item.Kind == "WriteOff");
+
+        var deposit = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customer.Id, bank.Id, new DateOnly(2026, 6, 4), 25m, "DEP-ADJ-1", "ACH", []));
+        Assert.True(deposit.Succeeded, deposit.ErrorMessage);
+        var refund = await transactions.RefundUnappliedPaymentAsync(new RefundUnappliedPaymentRequest(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 5), 10m, "RF-ADJ-1", "Return excess deposit"));
+        Assert.True(refund.Succeeded, refund.ErrorMessage);
+        var refunded = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(15m, refunded.Receivables.Payments!.Single(item => item.Id == deposit.Id).UnappliedAmount);
+        Assert.Contains(refunded.Receivables.Adjustments!, item => item.Id == refund.Id && item.Kind == "CustomerDepositRefund");
+        Assert.False((await transactions.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(deposit.Id.Value, new DateOnly(2026, 6, 6), "Cannot bypass refund", "Reversed"))).Succeeded);
+
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new ReverseSubledgerAdjustmentRequest(refund.Id!.Value, new DateOnly(2026, 6, 6), "Refund entered twice"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new ReverseSubledgerAdjustmentRequest(writeOff.Id!.Value, new DateOnly(2026, 6, 6), "Collection resumed"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new ReverseSubledgerAdjustmentRequest(credit.Id!.Value, new DateOnly(2026, 6, 6), "Credit withdrawn"))).Succeeded);
+        var restored = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(100m, restored.Receivables.Invoices.Single(item => item.Id == invoice.Id).BalanceDue);
+        Assert.Equal(25m, restored.Receivables.Payments!.Single(item => item.Id == deposit.Id).UnappliedAmount);
+    }
+
+    [Fact]
+    public async Task DocumentVoidsAndVendorCredits_PreserveExactReversibleLedgerHistory()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var customer = before.Receivables.Customers.First();
+        var vendor = before.Payables.Vendors.First();
+        var invoice = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-VOID-1", new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), 80m, 4m, "4000", "Void invoice"));
+        var bill = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(vendor.Id, "B-VOID-1", new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), 60m, "5100", "Void bill"));
+        Assert.True(invoice.Succeeded, invoice.ErrorMessage); Assert.True(bill.Succeeded, bill.ErrorMessage);
+        var vendorCredit = await transactions.RecordVendorCreditAsync(new RecordVendorCreditRequest(bill.Id!.Value, new DateOnly(2026, 7, 2), 10m, "VC-VOID-1", "5100", "Vendor allowance"));
+        Assert.True(vendorCredit.Succeeded, vendorCredit.ErrorMessage);
+        Assert.False((await transactions.VoidVendorBillAsync(new VoidSubledgerDocumentRequest(bill.Id.Value, new DateOnly(2026, 7, 3), "Cannot void adjusted bill"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new ReverseSubledgerAdjustmentRequest(vendorCredit.Id!.Value, new DateOnly(2026, 7, 3), "Allowance withdrawn"))).Succeeded);
+        Assert.False((await transactions.VoidVendorBillAsync(new VoidSubledgerDocumentRequest(bill.Id.Value, new DateOnly(2026, 7, 4), "Historical adjustment still prevents void"))).Succeeded);
+
+        var invoiceVoid = await transactions.VoidInvoiceAsync(new VoidSubledgerDocumentRequest(invoice.Id!.Value, new DateOnly(2026, 7, 2), "Invoice issued in error"));
+        Assert.True(invoiceVoid.Succeeded, invoiceVoid.ErrorMessage);
+        var voided = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal("Voided", voided.Receivables.Invoices.Single(item => item.Id == invoice.Id).Status);
+        Assert.Equal(0m, voided.Receivables.Invoices.Single(item => item.Id == invoice.Id).BalanceDue);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new ReverseSubledgerAdjustmentRequest(invoiceVoid.Id!.Value, new DateOnly(2026, 7, 3), "Invoice reinstated"))).Succeeded);
+        var restored = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal("Open", restored.Receivables.Invoices.Single(item => item.Id == invoice.Id).Status);
+        Assert.Equal(84m, restored.Receivables.Invoices.Single(item => item.Id == invoice.Id).BalanceDue);
+    }
+
+    [Fact]
     public async Task TransactionService_PostsInvoiceTaxToSalesTaxPayable_NotRevenue()
     {
         using var services = CreateServiceProvider();

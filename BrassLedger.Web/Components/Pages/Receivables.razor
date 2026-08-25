@@ -113,6 +113,28 @@ else
             </tbody></table></div>
         </section>
 
+        <section class="panel">
+            <h2>Credits and write-offs</h2>
+            <EditForm Model="AdjustmentForm" OnValidSubmit="RecordAdjustmentAsync"><div class="content-grid">
+                <div class="field-group"><label class="field-label">Invoice</label><InputSelect aria-label="Adjustment invoice" class="field-input" @bind-Value="AdjustmentForm.InvoiceId"><option value="@Guid.Empty">Select invoice</option>@foreach (var invoice in Workspace.Receivables.Invoices.Where(item => item.BalanceDue > 0)) { <option value="@invoice.Id">@invoice.InvoiceNumber — @invoice.BalanceDue.ToString("C")</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Kind</label><InputSelect aria-label="Customer adjustment kind" class="field-input" @bind-Value="AdjustmentForm.Kind"><option>CreditMemo</option><option>WriteOff</option></InputSelect></div>
+                <div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Customer adjustment date" class="field-input" @bind-Value="AdjustmentForm.Date" /></div>
+                <div class="field-group"><label class="field-label">Amount</label><InputNumber aria-label="Customer adjustment amount" class="field-input" @bind-Value="AdjustmentForm.Amount" /></div>
+                <div class="field-group"><label class="field-label">Offset account</label><InputSelect aria-label="Customer adjustment offset account" class="field-input" @bind-Value="AdjustmentForm.OffsetAccount"><option value="">Select account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(item => !item.IsControlAccount && item.Type is "Revenue" or "Expense")) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Customer adjustment reference" class="field-input" @bind-Value="AdjustmentForm.Reference" /></div>
+                <div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Customer adjustment reason" class="field-input" @bind-Value="AdjustmentForm.Reason" /></div>
+            </div><button class="action-primary" type="submit">Post customer adjustment</button></EditForm>
+        </section>
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayments" Context="refundAuthorization">
+            <section class="panel"><h2>Refund deposit or void invoice</h2><div class="content-grid">
+                <EditForm Model="RefundForm" OnValidSubmit="RefundDepositAsync"><div class="field-group"><label class="field-label">Deposit</label><InputSelect aria-label="Refund customer deposit" class="field-input" @bind-Value="RefundForm.PaymentId"><option value="@Guid.Empty">Select deposit</option>@foreach (var payment in (Workspace.Receivables.Payments ?? []).Where(item => item.Status == "Posted" && item.UnappliedAmount > 0)) { <option value="@payment.Id">@payment.Reference — @payment.UnappliedAmount.ToString("C")</option> }</InputSelect></div><div class="field-group"><label class="field-label">Bank</label><InputSelect aria-label="Customer refund bank" class="field-input" @bind-Value="RefundForm.BankId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Customer refund date" class="field-input" @bind-Value="RefundForm.Date" /></div><div class="field-group"><label class="field-label">Amount</label><InputNumber aria-label="Customer refund amount" class="field-input" @bind-Value="RefundForm.Amount" /></div><div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Customer refund reference" class="field-input" @bind-Value="RefundForm.Reference" /></div><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Customer refund reason" class="field-input" @bind-Value="RefundForm.Reason" /></div><button class="action-primary" type="submit">Refund customer deposit</button></EditForm>
+                <EditForm Model="VoidForm" OnValidSubmit="VoidInvoiceAsync"><div class="field-group"><label class="field-label">Invoice</label><InputSelect aria-label="Void invoice" class="field-input" @bind-Value="VoidForm.DocumentId"><option value="@Guid.Empty">Select invoice</option>@foreach (var invoice in Workspace.Receivables.Invoices.Where(item => item.Status != "Voided" && item.BalanceDue == item.TotalAmount)) { <option value="@invoice.Id">@invoice.InvoiceNumber</option> }</InputSelect></div><div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Invoice void date" class="field-input" @bind-Value="VoidForm.Date" /></div><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Invoice void reason" class="field-input" @bind-Value="VoidForm.Reason" /></div><button class="action-primary" type="submit">Void invoice</button></EditForm>
+            </div></section>
+        </AuthorizeView>
+
+        <section class="panel"><h2>Customer adjustment history</h2><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayments"><div class="content-grid"><div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Customer adjustment reversal date" class="field-input" @bind-Value="AdjustmentReversalForm.Date" /></div><div class="field-group"><label class="field-label">Reversal reason</label><InputText aria-label="Customer adjustment reversal reason" class="field-input" @bind-Value="AdjustmentReversalForm.Reason" /></div></div></AuthorizeView><div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Kind</th><th>Customer</th><th>Document</th><th>Reference</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>@foreach (var adjustment in Workspace.Receivables.Adjustments ?? []) { <tr><td>@adjustment.AdjustmentDate</td><td>@adjustment.Kind</td><td>@adjustment.CounterpartyName</td><td>@adjustment.DocumentNumber</td><td>@adjustment.Reference</td><td>@adjustment.Amount.ToString("C")</td><td>@adjustment.Status</td><td>@if (adjustment.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayments"><button class="action-secondary" type="button" @onclick="() => ReverseAdjustmentAsync(adjustment.Id)">Reverse</button></AuthorizeView> }</td></tr> }</tbody></table></div></section>
+
         <section class="content-grid">
             <article class="panel">
                 <h2>Customers</h2>
@@ -177,6 +199,10 @@ else
     private InvoiceEditor InvoiceForm { get; } = new();
     private PaymentEditor PaymentForm { get; } = new();
     private PaymentReversalEditor ReversalForm { get; } = new();
+    private CustomerAdjustmentEditor AdjustmentForm { get; } = new();
+    private RefundEditor RefundForm { get; } = new();
+    private VoidEditor VoidForm { get; } = new();
+    private AdjustmentReversalEditor AdjustmentReversalForm { get; } = new();
     private static readonly string[] PaymentMethods = ["Check", "ACH", "Card", "Wire", "Cash", "Other"];
     private IEnumerable<PaymentApplicationEditor> AvailableInvoiceApplications => PaymentForm.Applications.Where(application => application.CounterpartyId == PaymentForm.CustomerId);
 
@@ -216,6 +242,11 @@ else
         StatusMessage = result.Succeeded ? $"Customer payment marked {ReversalForm.Kind.ToLowerInvariant()}." : result.ErrorMessage;
         if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); PaymentForm.Reset(); SyncPaymentApplications(); ReversalForm.Reason = string.Empty; }
     }
+
+    private async Task RecordAdjustmentAsync() { var result = await TransactionService.RecordCustomerAdjustmentAsync(new RecordCustomerAdjustmentRequest(AdjustmentForm.InvoiceId, AdjustmentForm.Date, AdjustmentForm.Amount, AdjustmentForm.Reference, AdjustmentForm.OffsetAccount, AdjustmentForm.Reason, AdjustmentForm.Kind)); StatusMessage = result.Succeeded ? "Customer adjustment posted." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); AdjustmentForm.Reset(); SyncPaymentApplications(); } }
+    private async Task RefundDepositAsync() { var result = await TransactionService.RefundUnappliedPaymentAsync(new RefundUnappliedPaymentRequest(RefundForm.PaymentId, RefundForm.BankId, RefundForm.Date, RefundForm.Amount, RefundForm.Reference, RefundForm.Reason)); StatusMessage = result.Succeeded ? "Customer deposit refunded." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); RefundForm.Reset(); } }
+    private async Task VoidInvoiceAsync() { var result = await TransactionService.VoidInvoiceAsync(new VoidSubledgerDocumentRequest(VoidForm.DocumentId, VoidForm.Date, VoidForm.Reason)); StatusMessage = result.Succeeded ? "Invoice voided." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); VoidForm.Reset(); SyncPaymentApplications(); } }
+    private async Task ReverseAdjustmentAsync(Guid id) { var result = await TransactionService.ReverseSubledgerAdjustmentAsync(new ReverseSubledgerAdjustmentRequest(id, AdjustmentReversalForm.Date, AdjustmentReversalForm.Reason)); StatusMessage = result.Succeeded ? "Customer adjustment reversed." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); AdjustmentReversalForm.Reason = string.Empty; SyncPaymentApplications(); } }
 
     private void SyncPaymentApplications()
     {
@@ -262,4 +293,8 @@ else
         public Guid DocumentId { get; } = documentId; public Guid CounterpartyId { get; } = counterpartyId; public string DocumentNumber { get; } = documentNumber; public DateOnly DueDate { get; } = dueDate; public decimal OpenBalance { get; } = openBalance; public bool Selected { get; set; } public decimal Amount { get; set; } = openBalance;
     }
     private sealed class PaymentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Kind { get; set; } = "Returned"; public string Reason { get; set; } = string.Empty; }
+    private sealed class CustomerAdjustmentEditor { public Guid InvoiceId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; public string OffsetAccount { get; set; } = "4000"; public string Reason { get; set; } = string.Empty; public string Kind { get; set; } = "CreditMemo"; public void Reset() { InvoiceId = Guid.Empty; Amount = 0; Reference = string.Empty; Reason = string.Empty; } }
+    private sealed class RefundEditor { public Guid PaymentId { get; set; } public Guid BankId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; public string Reason { get; set; } = string.Empty; public void Reset() { PaymentId = Guid.Empty; Amount = 0; Reference = string.Empty; Reason = string.Empty; } }
+    private sealed class VoidEditor { public Guid DocumentId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; public void Reset() { DocumentId = Guid.Empty; Reason = string.Empty; } }
+    private sealed class AdjustmentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; }
 }

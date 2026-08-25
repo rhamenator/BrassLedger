@@ -210,6 +210,42 @@ api.MapPost("/subledger-payments/reverse", async (ReverseSubledgerPaymentRequest
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payment"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
 
+api.MapPost("/customer-adjustments", async (RecordCustomerAdjustmentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.RecordCustomerAdjustmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/subledger-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReceivables);
+
+api.MapPost("/vendor-credits", async (RecordVendorCreditRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.RecordVendorCreditAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/subledger-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/subledger-payments/refund-unapplied", async (RefundUnappliedPaymentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.RefundUnappliedPaymentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/subledger-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["refund"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
+api.MapPost("/invoices/void", async (VoidSubledgerDocumentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.VoidInvoiceAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/subledger-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["void"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
+api.MapPost("/vendor-bills/void", async (VoidSubledgerDocumentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.VoidVendorBillAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/subledger-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["void"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
+api.MapPost("/subledger-adjustments/reverse", async (ReverseSubledgerAdjustmentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ReverseSubledgerAdjustmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
 api.MapPost("/bank-reconciliations", async (ReconcileBankAccountRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.ReconcileBankAccountAsync(request, cancellationToken);
