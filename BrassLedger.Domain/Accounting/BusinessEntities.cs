@@ -674,6 +674,31 @@ public sealed class PayrollJurisdictionRule
     public string Notes { get; set; } = string.Empty;
 }
 
+public sealed class PayrollDepositScheduleConfiguration
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string JurisdictionCode { get; set; } = "US";
+    public string ReturnFormCode { get; set; } = "941";
+    public int TaxYear { get; set; }
+    public string ScheduleType { get; set; } = "Monthly";
+    public decimal LookbackLiability { get; set; }
+    public DateOnly LookbackPeriodStart { get; set; }
+    public DateOnly LookbackPeriodEnd { get; set; }
+    public decimal MonthlyThreshold { get; set; } = 50000m;
+    public decimal NextDayThreshold { get; set; } = 100000m;
+    public string LegalHolidaysJson { get; set; } = "[]";
+    public string OfficialRulesUrl { get; set; } = string.Empty;
+    public string OfficialCalendarUrl { get; set; } = string.Empty;
+    public DateOnly SourceRetrievedOn { get; set; }
+    public string ReviewNotes { get; set; } = string.Empty;
+    public bool IsApproved { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
 public sealed class PayrollDeductionPlan
 {
     public Guid Id { get; set; }

@@ -33,6 +33,7 @@ public sealed class BrassLedgerDbContext(
     public DbSet<PayrollTimeEntry> PayrollTimeEntries => Set<PayrollTimeEntry>();
     public DbSet<PayrollRun> PayrollRuns => Set<PayrollRun>();
     public DbSet<PayrollJurisdictionRule> PayrollJurisdictionRules => Set<PayrollJurisdictionRule>();
+    public DbSet<PayrollDepositScheduleConfiguration> PayrollDepositScheduleConfigurations => Set<PayrollDepositScheduleConfiguration>();
     public DbSet<PayrollDeductionPlan> PayrollDeductionPlans => Set<PayrollDeductionPlan>();
     public DbSet<EmployeePayrollDeductionElection> EmployeePayrollDeductionElections => Set<EmployeePayrollDeductionElection>();
     public DbSet<PayrollRunEmployeeLine> PayrollRunEmployeeLines => Set<PayrollRunEmployeeLine>();
@@ -120,6 +121,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollTimeEntry>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollRun>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollJurisdictionRule>().HasKey(x => x.Id);
+        modelBuilder.Entity<PayrollDepositScheduleConfiguration>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollDeductionPlan>().HasKey(x => x.Id);
         modelBuilder.Entity<EmployeePayrollDeductionElection>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollRunEmployeeLine>().HasKey(x => x.Id);
@@ -214,6 +216,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollPaymentFile>().Property(x => x.Content).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<PayrollFiling>().Property(x => x.DataJson).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Employee>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollDeductionPlan>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<EmployeePayrollDeductionElection>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollTimecard>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
@@ -355,6 +358,9 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<PayrollEmployeePayment>().Property(x => x.YearToDateEmployeeDeductions));
         ConfigureMoney(modelBuilder.Entity<PayrollEmployeePayment>().Property(x => x.YearToDateNetPay));
         ConfigureMoney(modelBuilder.Entity<PayrollPaymentFile>().Property(x => x.CreditTotal));
+        ConfigureMoney(modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.LookbackLiability));
+        ConfigureMoney(modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.MonthlyThreshold));
+        ConfigureMoney(modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.NextDayThreshold));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.HourlyRate), 18, 4);
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.OvertimeRate), 18, 4);
         ConfigureMoney(modelBuilder.Entity<PayrollTimeEntry>().Property(x => x.Hours), 18, 4);
@@ -407,6 +413,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollTimecard>().HasIndex(x => new { x.CompanyId, x.EmployeeId, x.PeriodStart, x.PeriodEnd, x.Status });
         modelBuilder.Entity<PayrollTimeEntry>().HasIndex(x => new { x.PayrollTimecardId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PayrollJurisdictionRule>().HasIndex(x => new { x.CompanyId, x.ResidenceJurisdiction, x.WorkJurisdiction }).IsUnique();
+        modelBuilder.Entity<PayrollDepositScheduleConfiguration>().HasIndex(x => new { x.CompanyId, x.JurisdictionCode, x.ReturnFormCode, x.TaxYear }).IsUnique();
         modelBuilder.Entity<PayrollRunEmployeeLine>().HasIndex(x => new { x.PayrollRunId, x.EmployeeId }).IsUnique();
         modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => x.PayrollTimeEntryId);

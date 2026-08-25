@@ -21,6 +21,14 @@ public sealed class PayrollWorkflowTests
         await session.GotoAsync("/payroll");
         await session.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
 
+        await session.Page.GetByText("Configure a Form 941 deposit schedule", new() { Exact = true }).ClickAsync();
+        var depositScheduleSection = session.Page.GetByRole(AriaRole.Heading, new() { Name = "Federal payroll deposit schedule", Exact = true }).Locator("..");
+        await depositScheduleSection.GetByRole(AriaRole.Button, new() { Name = "Load official 2026 defaults", Exact = true }).ClickAsync();
+        await depositScheduleSection.GetByLabel("Approved against the official sources").CheckAsync();
+        await depositScheduleSection.GetByLabel("Federal deposit schedule review notes").FillAsync("E2E verified lookback and official 2026 sources.");
+        await depositScheduleSection.GetByRole(AriaRole.Button, new() { Name = "Save deposit schedule", Exact = true }).ClickAsync();
+        await session.Page.GetByText("Federal Form 941 deposit schedule saved; open liabilities were recalculated from their pay dates.", new() { Exact = true }).WaitForAsync();
+
         var reference = $"PR-E2E-OUTPUT-{browserKind}";
         await session.Page.GetByLabel("Run reference").FillAsync(reference);
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "Preview payroll", Exact = true }).ClickAsync();
@@ -34,6 +42,10 @@ public sealed class PayrollWorkflowTests
         runRow = session.Page.Locator("table.data-table tbody tr").Filter(new() { HasTextString = reference });
         await runRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
         await session.Page.GetByText("Approved payroll posted to the ledger.", new() { Exact = true }).WaitForAsync();
+        var liabilitySection = session.Page.GetByRole(AriaRole.Heading, new() { Name = "Payroll liabilities", Exact = true }).Locator("..");
+        var federalLiabilityRows = liabilitySection.Locator("table.data-table tbody tr").Filter(new() { HasTextString = "Federal" });
+        Assert.True(await federalLiabilityRows.CountAsync() > 0);
+        foreach (var federalLiabilityRow in await federalLiabilityRows.AllAsync()) Assert.DoesNotContain("Schedule required", await federalLiabilityRow.InnerTextAsync());
 
         var paymentFileSection = session.Page.GetByRole(AriaRole.Heading, new() { Name = "Employee payment files", Exact = true }).Locator("..");
         var paymentRunSelect = paymentFileSection.GetByLabel("Payment file payroll run");

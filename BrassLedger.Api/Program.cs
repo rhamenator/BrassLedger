@@ -523,6 +523,15 @@ api.MapPut("/payroll-jurisdiction-rules", async (SavePayrollJurisdictionRuleRequ
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["jurisdictionRule"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayroll);
 
+api.MapGet("/payroll-deposit-schedules", async (IPayrollDepositScheduleService service, CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(cancellationToken)))
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayroll);
+
+api.MapPut("/payroll-deposit-schedules", async (SavePayrollDepositScheduleRequest request, IPayrollDepositScheduleService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["depositSchedule"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayroll, BrassLedgerAuthorizationPolicies.ApprovePayroll);
+
 api.MapGet("/payroll-deduction-configuration", async (IPayrollDeductionConfigurationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(cancellationToken)))
     .RequireAuthorization(BrassLedgerAuthorizationPolicies.MaintainEmployeePayrollSetup);

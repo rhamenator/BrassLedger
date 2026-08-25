@@ -350,6 +350,10 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var registerCsv = await client.GetAsync($"/api/payroll-runs/{run.Id}/register.csv");
         Assert.Equal("text/csv", registerCsv.Content.Headers.ContentType?.MediaType);
         Assert.Contains("\"TOTAL\"", await registerCsv.Content.ReadAsStringAsync());
+        var depositScheduleResponse = await client.PutAsJsonAsync("/api/payroll-deposit-schedules", new SavePayrollDepositScheduleRequest(null, 2026, "Monthly", 40000m, new DateOnly(2024, 7, 1), new DateOnly(2025, 6, 30), 50000m, 100000m, "[\"2026-01-01\",\"2026-01-19\",\"2026-02-16\",\"2026-04-16\",\"2026-05-25\",\"2026-06-19\",\"2026-07-03\",\"2026-09-07\",\"2026-10-12\",\"2026-11-11\",\"2026-11-26\",\"2026-12-25\"]", "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2026, 8, 25), "API approval test", true, true));
+        Assert.Equal(HttpStatusCode.OK, depositScheduleResponse.StatusCode);
+        var depositWorkspace = await client.GetFromJsonAsync<PayrollDepositScheduleWorkspace>("/api/payroll-deposit-schedules");
+        Assert.Contains(depositWorkspace!.Configurations, item => item.TaxYear == 2026 && item.IsApproved);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/payroll-deduction-configuration")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/payroll-payment-files")).StatusCode);
         var paymentFileResponse = await client.PostAsJsonAsync("/api/payroll-payment-files", new GeneratePayrollPaymentFileRequest(run.Id, "CheckRegisterCsv"));
@@ -363,6 +367,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/register")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/employees/{employee.Id}/pay-statement")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-filings")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-deposit-schedules")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-deduction-configuration")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-payment-files")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-payment-files/{paymentFileResult.Id}/download")).StatusCode);

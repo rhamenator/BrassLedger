@@ -1208,6 +1208,8 @@ public sealed class AccountingTransactionService(
         }
         if (RoundCurrency(employeeLines.Sum(line => line.NetPay)) != run.NetPay) return TransactionResult.Failure("Employee payments do not reconcile to payroll net pay.");
         run.Status = "Posted"; run.JournalEntryId = posting.Id; run.PostedByUserId = ResolveUserId(); run.PostedAtUtc = DateTimeOffset.UtcNow; run.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var depositSchedule = await db.PayrollDepositScheduleConfigurations.SingleOrDefaultAsync(configuration => configuration.CompanyId == companyId && configuration.JurisdictionCode == "US" && configuration.ReturnFormCode == "941" && configuration.TaxYear == run.PayDate.Year && configuration.IsActive && configuration.IsApproved, cancellationToken);
+        if (depositSchedule is not null) await PayrollDepositDueDateCalculator.RecalculateYearAsync(db, companyId, depositSchedule, cancellationToken);
         bank.CurrentBalance -= run.NetPay; bank.UnreconciledAmount += run.NetPay; bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddPayrollAudit(db, companyId, "payroll-run.posted", run, new { run.JournalEntryId, run.GrossPayroll, run.NetPay, liabilityCount = liabilityAmounts.Length, liabilityTotal = expectedLiabilities, employeePaymentCount = employeeLines.Count });
         try { await db.SaveChangesAsync(cancellationToken); }

@@ -6,6 +6,7 @@
 @inject IPayrollFilingService PayrollFilingService
 @inject IPayrollDeductionConfigurationService PayrollDeductionConfigurationService
 @inject IPayrollPaymentFileService PayrollPaymentFileService
+@inject IPayrollDepositScheduleService PayrollDepositScheduleService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Payroll</PageTitle>
@@ -275,6 +276,37 @@ else
             }
         </section>
 
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManagePayroll"><Authorized Context="depositScheduleContext">
+        <section class="panel">
+            <h2>Federal payroll deposit schedule</h2>
+            <p class="page-intro">Configure the annual Form 941 deposit schedule from the official lookback calculation. Approved schedules assign business-day-adjusted due dates to federal income-tax, Social Security, and Medicare liabilities. BrassLedger automatically applies the $100,000 next-day rule and the resulting semiweekly transition.</p>
+            @foreach (var summary in DepositScheduleWorkspace.Summaries)
+            {
+                <div class="stats-grid"><article class="stat-card"><span class="stat-value">@summary.EffectiveScheduleType</span><span class="stat-label">@summary.TaxYear effective schedule</span></article><article class="stat-card"><span class="stat-value">@summary.OpenAmount.ToString("C")</span><span class="stat-label">Open Form 941 liabilities</span></article><article class="stat-card"><span class="stat-value">@(summary.NextDueDate?.ToString("MMM d, yyyy") ?? "Not scheduled")</span><span class="stat-label">Next due date</span></article><article class="stat-card accent-coral"><span class="stat-value">@summary.OverdueAmount.ToString("C")</span><span class="stat-label">Past due as of today</span></article></div>
+            }
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="depositScheduleApprovalContext">
+            <details open="@DepositScheduleForm.Id.HasValue"><summary>@(DepositScheduleForm.Id.HasValue ? $"Edit {DepositScheduleForm.TaxYear} Form 941 schedule" : "Configure a Form 941 deposit schedule")</summary>
+                <EditForm Model="DepositScheduleForm" OnValidSubmit="SaveDepositScheduleAsync"><div class="content-grid">
+                    <div class="field-group"><label class="field-label">Tax year</label><InputNumber aria-label="Deposit schedule tax year" class="field-input" @bind-Value="DepositScheduleForm.TaxYear" /></div>
+                    <div class="field-group"><label class="field-label">Schedule</label><InputSelect aria-label="Federal deposit schedule type" class="field-input" @bind-Value="DepositScheduleForm.ScheduleType"><option>Monthly</option><option>Semiweekly</option></InputSelect></div>
+                    <div class="field-group"><label class="field-label">Lookback liability</label><InputNumber aria-label="Federal deposit lookback liability" class="field-input" @bind-Value="DepositScheduleForm.LookbackLiability" /></div>
+                    <div class="field-group"><label class="field-label">Lookback begins</label><InputDate aria-label="Federal deposit lookback start" class="field-input" @bind-Value="DepositScheduleForm.LookbackPeriodStart" /></div>
+                    <div class="field-group"><label class="field-label">Lookback ends</label><InputDate aria-label="Federal deposit lookback end" class="field-input" @bind-Value="DepositScheduleForm.LookbackPeriodEnd" /></div>
+                    <div class="field-group"><label class="field-label">Monthly threshold</label><InputNumber aria-label="Federal monthly schedule threshold" class="field-input" @bind-Value="DepositScheduleForm.MonthlyThreshold" /></div>
+                    <div class="field-group"><label class="field-label">Next-day threshold</label><InputNumber aria-label="Federal next-day deposit threshold" class="field-input" @bind-Value="DepositScheduleForm.NextDayThreshold" /></div>
+                    <div class="field-group"><label class="field-label">IRS rules URL</label><InputText aria-label="Federal deposit rules URL" class="field-input" @bind-Value="DepositScheduleForm.OfficialRulesUrl" /></div>
+                    <div class="field-group"><label class="field-label">IRS calendar URL</label><InputText aria-label="Federal deposit calendar URL" class="field-input" @bind-Value="DepositScheduleForm.OfficialCalendarUrl" /></div>
+                    <div class="field-group"><label class="field-label">Source retrieved</label><InputDate aria-label="Federal deposit source retrieval date" class="field-input" @bind-Value="DepositScheduleForm.SourceRetrievedOn" /></div>
+                    <div class="field-group"><label class="field-label">Legal holidays (JSON dates)</label><InputTextArea aria-label="Federal deposit legal holidays JSON" class="field-input" @bind-Value="DepositScheduleForm.LegalHolidaysJson" /></div>
+                    <div class="field-group"><label class="field-label">Review / override notes</label><InputTextArea aria-label="Federal deposit schedule review notes" class="field-input" @bind-Value="DepositScheduleForm.ReviewNotes" /></div>
+                    <label class="check-field"><InputCheckbox @bind-Value="DepositScheduleForm.IsApproved" /> Approved against the official sources</label><label class="check-field"><InputCheckbox @bind-Value="DepositScheduleForm.IsActive" /> Active</label>
+                </div><button class="action-secondary" type="button" @onclick="Load2026FederalDepositDefaults">Load official 2026 defaults</button> <button class="action-primary" type="submit">@(DepositScheduleForm.Id.HasValue ? "Update deposit schedule" : "Save deposit schedule")</button>@if (DepositScheduleForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetDepositScheduleEditor">Cancel edit</button> }</EditForm>
+            </details>
+            </Authorized></AuthorizeView>
+            @if (DepositScheduleWorkspace.Configurations.Count > 0) { <div class="table-scroll"><table class="data-table"><thead><tr><th>Year</th><th>Configured</th><th>Recommended</th><th>Lookback</th><th>Sources</th><th>Status</th><th></th></tr></thead><tbody>@foreach (var schedule in DepositScheduleWorkspace.Configurations) { <tr><td>@schedule.TaxYear</td><td>@schedule.ScheduleType</td><td>@schedule.RecommendedScheduleType</td><td>@schedule.LookbackLiability.ToString("C")<br /><small>@schedule.LookbackPeriodStart–@schedule.LookbackPeriodEnd</small></td><td><a href="@schedule.OfficialRulesUrl" target="_blank" rel="noopener">Pub. 15</a> · <a href="@schedule.OfficialCalendarUrl" target="_blank" rel="noopener">Pub. 509</a></td><td>@(schedule.IsApproved ? "Approved" : "Draft") / @(schedule.IsActive ? "Active" : "Inactive")</td><td><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="depositScheduleEditContext"><button class="action-secondary" type="button" @onclick="() => EditDepositSchedule(schedule)">Edit</button></Authorized></AuthorizeView></td></tr> }</tbody></table></div> }
+        </section>
+        </Authorized></AuthorizeView>
+
         <section class="panel">
             <h2>Payroll liabilities</h2>
             <p class="page-intro">Posting creates one traceable payable for every tax and deduction line. A blank due date means the filing or deposit schedule still requires configuration; it is not permission to defer payment.</p>
@@ -498,6 +530,9 @@ else
     private PayrollPaymentFileWorkspace PaymentFileWorkspace { get; set; } = new([], []);
     private PayrollBankOriginEditor BankOriginForm { get; set; } = new();
     private PayrollPaymentFileEditor PaymentFileForm { get; set; } = new();
+    private PayrollDepositScheduleWorkspace DepositScheduleWorkspace { get; set; } = new([], []);
+    private PayrollDepositScheduleEditor DepositScheduleForm { get; set; } = new();
+    private bool CanManagePayroll;
     private static readonly string[] DeductionCategories = ["Medical", "Dental", "Vision", "HSA", "HealthFSA", "DependentCareFSA", "Retirement401k", "Retirement403b", "Retirement457", "RetirementSimpleIra", "RetirementSepIra", "RetirementRoth", "LifeInsurance", "DisabilityInsurance", "Transit", "Parking", "UnionDues", "CharitableContribution", "EmployeeLoan", "ChildSupport", "Alimony", "OrdinaryGarnishment", "TaxLevy", "BankruptcyOrder", "FederalAgencyDebt", "PtoPurchase", "Other"];
     private string FilingReopenReason = string.Empty;
     private string ReversalReason = string.Empty;
@@ -531,9 +566,11 @@ else
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
         var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        CanManagePayroll = authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage);
         if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)) PayrollFilings = (await PayrollFilingService.GetFilingsAsync()).ToList();
         if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)) PaymentFileWorkspace = await PayrollPaymentFileService.GetAsync();
         if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData) && authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage)) DeductionConfiguration = await PayrollDeductionConfigurationService.GetAsync();
+        if (CanManagePayroll) DepositScheduleWorkspace = await PayrollDepositScheduleService.GetAsync();
         PayrollClosePeriods = (await PayrollFilingService.GetClosePeriodsAsync()).ToList();
         foreach (var employee in Workspace.Payroll.Employees)
         {
@@ -591,6 +628,24 @@ else
     private void ResetDeductionElectionEditor() => DeductionElectionForm = new PayrollDeductionElectionEditor { EmployeeId = Workspace?.Payroll.Employees.FirstOrDefault()?.Id ?? Guid.Empty, PayrollDeductionPlanId = DeductionConfiguration.Plans.FirstOrDefault()?.Id ?? Guid.Empty };
 
     private async Task RefreshPaymentFilesAsync() => PaymentFileWorkspace = await PayrollPaymentFileService.GetAsync();
+    private async Task RefreshDepositSchedulesAsync() => DepositScheduleWorkspace = await PayrollDepositScheduleService.GetAsync();
+    private async Task SaveDepositScheduleAsync()
+    {
+        var form = DepositScheduleForm;
+        var result = await PayrollDepositScheduleService.SaveAsync(new SavePayrollDepositScheduleRequest(form.Id, form.TaxYear, form.ScheduleType, form.LookbackLiability, form.LookbackPeriodStart, form.LookbackPeriodEnd, form.MonthlyThreshold, form.NextDayThreshold, form.LegalHolidaysJson, form.OfficialRulesUrl, form.OfficialCalendarUrl, form.SourceRetrievedOn, form.ReviewNotes, form.IsApproved, form.IsActive, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Federal Form 941 deposit schedule saved; open liabilities were recalculated from their pay dates." : result.ErrorMessage;
+        if (result.Succeeded) { ResetDepositScheduleEditor(); await RefreshDepositSchedulesAsync(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    }
+    private void EditDepositSchedule(PayrollDepositScheduleSnapshot item) => DepositScheduleForm = new PayrollDepositScheduleEditor { Id = item.Id, TaxYear = item.TaxYear, ScheduleType = item.ScheduleType, LookbackLiability = item.LookbackLiability, LookbackPeriodStart = item.LookbackPeriodStart, LookbackPeriodEnd = item.LookbackPeriodEnd, MonthlyThreshold = item.MonthlyThreshold, NextDayThreshold = item.NextDayThreshold, LegalHolidaysJson = System.Text.Json.JsonSerializer.Serialize(item.LegalHolidays.Select(date => date.ToString("yyyy-MM-dd"))), OfficialRulesUrl = item.OfficialRulesUrl, OfficialCalendarUrl = item.OfficialCalendarUrl, SourceRetrievedOn = item.SourceRetrievedOn, ReviewNotes = item.ReviewNotes, IsApproved = item.IsApproved, IsActive = item.IsActive, ConcurrencyToken = item.ConcurrencyToken };
+    private void ResetDepositScheduleEditor() => DepositScheduleForm = new();
+    private void Load2026FederalDepositDefaults()
+    {
+        DepositScheduleForm.TaxYear = 2026; DepositScheduleForm.MonthlyThreshold = 50000m; DepositScheduleForm.NextDayThreshold = 100000m;
+        DepositScheduleForm.LookbackPeriodStart = new DateOnly(2024, 7, 1); DepositScheduleForm.LookbackPeriodEnd = new DateOnly(2025, 6, 30);
+        DepositScheduleForm.ScheduleType = DepositScheduleForm.LookbackLiability <= DepositScheduleForm.MonthlyThreshold ? "Monthly" : "Semiweekly";
+        DepositScheduleForm.LegalHolidaysJson = "[\"2026-01-01\",\"2026-01-19\",\"2026-02-16\",\"2026-04-16\",\"2026-05-25\",\"2026-06-19\",\"2026-07-03\",\"2026-09-07\",\"2026-10-12\",\"2026-11-11\",\"2026-11-26\",\"2026-12-25\"]";
+        DepositScheduleForm.OfficialRulesUrl = "https://www.irs.gov/publications/p15"; DepositScheduleForm.OfficialCalendarUrl = "https://www.irs.gov/publications/p509"; DepositScheduleForm.SourceRetrievedOn = new DateOnly(2026, 8, 25);
+    }
     private async Task SaveBankOriginAsync()
     {
         var form = BankOriginForm;
@@ -738,6 +793,7 @@ else
             PaymentFileForm.PayrollRunId = run.Id;
             PaymentFileForm.EffectiveEntryDate = run.PayDate;
             await RefreshPaymentFilesAsync();
+            if (CanManagePayroll) await RefreshDepositSchedulesAsync();
         }
     }
     private async Task CancelPayrollAsync(PayrollRunSnapshot run)
@@ -815,6 +871,7 @@ else
     private sealed class PayrollDeductionElectionEditor { public Guid? Id { get; set; } public Guid EmployeeId { get; set; } public Guid PayrollDeductionPlanId { get; set; } public decimal? EmployeeValueOverride { get; set; } public decimal? EmployerValueOverride { get; set; } public decimal? EmployeeAnnualLimitOverride { get; set; } public string OrderDetailsJson { get; set; } = "{}"; public DateOnly EffectiveOn { get; set; } = new(2026, 1, 1); public DateOnly? ExpiresOn { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; }
     private sealed class PayrollBankOriginEditor { public Guid? Id { get; set; } public Guid BankAccountId { get; set; } public string ImmediateDestinationRoutingNumber { get; set; } = string.Empty; public string ImmediateOrigin { get; set; } = string.Empty; public string DestinationBankName { get; set; } = string.Empty; public string OriginName { get; set; } = string.Empty; public string CompanyIdentification { get; set; } = string.Empty; public string CompanyEntryDescription { get; set; } = "PAYROLL"; public string OriginatingDfiIdentification { get; set; } = string.Empty; public DateOnly EffectiveOn { get; set; } = new(2026, 1, 1); public DateOnly? ExpiresOn { get; set; } public bool IsActive { get; set; } = true; public bool IsBankValidated { get; set; } public string BankValidationNotes { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; }
     private sealed class PayrollPaymentFileEditor { public Guid PayrollRunId { get; set; } public string Format { get; set; } = "AchInstructionsCsv"; public DateOnly? EffectiveEntryDate { get; set; } }
+    private sealed class PayrollDepositScheduleEditor { public Guid? Id { get; set; } public int TaxYear { get; set; } = 2026; public string ScheduleType { get; set; } = "Monthly"; public decimal LookbackLiability { get; set; } public DateOnly LookbackPeriodStart { get; set; } = new(2024, 7, 1); public DateOnly LookbackPeriodEnd { get; set; } = new(2025, 6, 30); public decimal MonthlyThreshold { get; set; } = 50000m; public decimal NextDayThreshold { get; set; } = 100000m; public string LegalHolidaysJson { get; set; } = "[]"; public string OfficialRulesUrl { get; set; } = "https://www.irs.gov/publications/p15"; public string OfficialCalendarUrl { get; set; } = "https://www.irs.gov/publications/p509"; public DateOnly SourceRetrievedOn { get; set; } = new(2026, 8, 25); public string ReviewNotes { get; set; } = string.Empty; public bool IsApproved { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; }
     private sealed class PayrollTimecardEditor { public Guid? Id { get; set; } public Guid EmployeeId { get; set; } public DateOnly PeriodStart { get; set; } public DateOnly PeriodEnd { get; set; } public string Notes { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; public List<PayrollTimeEntryEditor> Entries { get; set; } = []; }
     private sealed class PayrollTimeEntryEditor { public DateOnly WorkDate { get; set; } public string EarningCode { get; set; } = "REG"; public string EarningType { get; set; } = "Regular"; public decimal Hours { get; set; } public decimal Rate { get; set; } public decimal Amount { get; set; } public bool IsTaxable { get; set; } = true; public string WorkState { get; set; } = string.Empty; public string WorkCounty { get; set; } = string.Empty; public string WorkCity { get; set; } = string.Empty; public string WorkSchoolDistrict { get; set; } = string.Empty; public Guid? ProjectJobId { get; set; } public string Notes { get; set; } = string.Empty; }
     private sealed class PayrollLiabilityPaymentEditor { public Guid BankAccountId { get; set; } public DateOnly PaymentDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = $"TAX-{DateTime.Today:yyyyMMdd}"; public string Payee { get; set; } = string.Empty; public string Method { get; set; } = "EFT"; public void Reset() { Reference = $"TAX-{DateTime.Today:yyyyMMdd}"; Payee = string.Empty; } }
