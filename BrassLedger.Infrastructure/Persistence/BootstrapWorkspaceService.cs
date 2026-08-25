@@ -90,7 +90,8 @@ public sealed class BootstrapWorkspaceService(
             adminUser.Email,
             adminUser.Role,
             adminUser.SecurityStamp,
-            adminRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+            adminRole.RequiresMfa ? [] : adminRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            MfaEnrollmentRequired: adminRole.RequiresMfa));
     }
 
 

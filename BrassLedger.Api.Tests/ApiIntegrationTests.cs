@@ -212,7 +212,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
-    public async Task ActiveCompanySession_RemainsValidForASecondaryCompanyMembership()
+    public async Task ActiveCompanySwitch_ToPrivilegedMembershipRequiresMfaEnrollment()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
@@ -250,7 +250,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.OK, switchResponse.StatusCode);
         var me = await client.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/auth/me");
         Assert.Equal(companyId.ToString(), me.GetProperty("companyId").GetString());
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/dashboard")).StatusCode);
+        Assert.True(me.GetProperty("mfaEnrollmentRequired").GetBoolean());
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/dashboard")).StatusCode);
     }
 
     [Fact]
@@ -329,6 +330,50 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             VerificationCode = recoveryCodes[0]
         });
         Assert.Equal(HttpStatusCode.Unauthorized, reusedRecoveryResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task PrivilegedRoleWithoutMfa_IsRestrictedToAccountSecurityUntilEnrollment()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<BrassLedgerDbContext>();
+            var controllerRole = await db.AccessRoles.SingleAsync(role => role.Name == "Controller");
+            controllerRole.RequiresMfa = true;
+            await db.SaveChangesAsync();
+        }
+
+        using var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var restrictedLogin = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = BrassLedgerAuthenticationDefaults.SeededPassword
+        });
+        Assert.Equal(HttpStatusCode.OK, restrictedLogin.StatusCode);
+        var restrictedIdentity = await restrictedLogin.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.True(restrictedIdentity.GetProperty("mfaEnrollmentRequired").GetBoolean());
+        Assert.False(restrictedIdentity.GetProperty("mfaAuthenticated").GetBoolean());
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/dashboard")).StatusCode);
+        var securityIdentity = await client.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/auth/me");
+        Assert.True(securityIdentity.GetProperty("mfaEnrollmentRequired").GetBoolean());
+
+        var recoveryCodes = await EnrollMfaAsync(isolatedFactory, "controller");
+        using var verifiedClient = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var passwordStage = await verifiedClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = BrassLedgerAuthenticationDefaults.SeededPassword
+        });
+        Assert.Equal(HttpStatusCode.Accepted, passwordStage.StatusCode);
+        var challenge = await passwordStage.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var verification = await verifiedClient.PostAsJsonAsync("/api/auth/mfa", new
+        {
+            ChallengeToken = challenge.GetProperty("challengeToken").GetString(),
+            VerificationCode = recoveryCodes[0]
+        });
+        Assert.Equal(HttpStatusCode.OK, verification.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await verifiedClient.GetAsync("/api/dashboard")).StatusCode);
     }
 
     [Fact]

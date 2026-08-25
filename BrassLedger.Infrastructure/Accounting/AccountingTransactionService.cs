@@ -2279,9 +2279,10 @@ public sealed class AccountingTransactionService(
         if (principal is null) return true;
         if (!Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out _))
             throw new UnauthorizedAccessException("An authenticated company context is required.");
-        return principal.IsInRole("Administrator")
-            || principal.IsInRole("Owner/CEO")
-            || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission);
+        return !principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+            && (principal.IsInRole("Administrator")
+                || principal.IsInRole("Owner/CEO")
+                || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission));
     }
 
     private static void AddJournalAudit(BrassLedgerDbContext db, Guid companyId, Guid? userId, string action, JournalEntry entry, object details)

@@ -161,7 +161,8 @@ public sealed class UserAuthenticationService(
             user, "login_succeeded", true, ipAddress, userAgent,
             "The operator signed in successfully with a password.", companyId: membership.CompanyId));
         await dbContext.SaveChangesAsync(cancellationToken);
-        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        var access = await ResolveRoleAccessAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        var enrollmentRequired = access.RequiresMfa && !user.MfaEnabled;
 
         return new AuthenticationResult(AuthenticationOutcome.Succeeded, new AuthenticatedUser(
             user.Id,
@@ -171,8 +172,9 @@ public sealed class UserAuthenticationService(
             user.Email,
             membership.Role,
             user.SecurityStamp,
-            permissions,
-            false));
+            enrollmentRequired ? [] : access.Permissions,
+            false,
+            enrollmentRequired));
     }
 
     public async Task<AuthenticatedUser?> SwitchCompanyAsync(Guid userId, Guid companyId, CancellationToken cancellationToken = default)
@@ -182,8 +184,9 @@ public sealed class UserAuthenticationService(
         if (user is null) return null;
         var membership = await ResolveMembershipAsync(dbContext, user, companyId, cancellationToken);
         if (membership is null) return null;
-        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
-        return new AuthenticatedUser(user.Id, membership.CompanyId, user.UserName, user.DisplayName, user.Email, membership.Role, user.SecurityStamp, permissions);
+        var access = await ResolveRoleAccessAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        var enrollmentRequired = access.RequiresMfa && !user.MfaEnabled;
+        return new AuthenticatedUser(user.Id, membership.CompanyId, user.UserName, user.DisplayName, user.Email, membership.Role, user.SecurityStamp, enrollmentRequired ? [] : access.Permissions, MfaEnrollmentRequired: enrollmentRequired);
     }
 
     public async Task<AccountSecuritySnapshot?> GetAccountSecurityAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -215,6 +218,7 @@ public sealed class UserAuthenticationService(
         var recoveryCodesRemaining = user.MfaEnabled
             ? await dbContext.MfaRecoveryCodes.CountAsync(code => code.UserId == userId && code.UsedAtUtc == null, cancellationToken)
             : 0;
+        var mfaRequiredByRole = await HasRequiredMfaRoleAsync(dbContext, userId, cancellationToken);
 
         return new AccountSecuritySnapshot(
             user.UserName,
@@ -225,6 +229,7 @@ public sealed class UserAuthenticationService(
             user.MfaEnabled,
             user.MfaEnrolledAtUtc,
             recoveryCodesRemaining,
+            mfaRequiredByRole,
             events);
     }
 
@@ -311,7 +316,8 @@ public sealed class UserAuthenticationService(
             companyId: membership.CompanyId));
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        var access = await ResolveRoleAccessAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        var enrollmentRequired = access.RequiresMfa && !user.MfaEnabled;
         return new AccountSecurityResult(AccountSecurityOutcome.Succeeded, new AuthenticatedUser(
             user.Id,
             membership.CompanyId,
@@ -320,7 +326,8 @@ public sealed class UserAuthenticationService(
             user.Email,
             membership.Role,
             user.SecurityStamp,
-            permissions));
+            enrollmentRequired ? [] : access.Permissions,
+            MfaEnrollmentRequired: enrollmentRequired));
     }
 
     public async Task<AccountSecurityResult> RevokeOtherSessionsAsync(
@@ -349,7 +356,8 @@ public sealed class UserAuthenticationService(
             companyId: membership.CompanyId));
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        var access = await ResolveRoleAccessAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        var enrollmentRequired = access.RequiresMfa && !user.MfaEnabled;
         return new AccountSecurityResult(AccountSecurityOutcome.Succeeded, new AuthenticatedUser(
             user.Id,
             membership.CompanyId,
@@ -358,7 +366,8 @@ public sealed class UserAuthenticationService(
             user.Email,
             membership.Role,
             user.SecurityStamp,
-            permissions));
+            enrollmentRequired ? [] : access.Permissions,
+            MfaEnrollmentRequired: enrollmentRequired));
     }
 
     public async Task<MfaEnrollmentResult> BeginMfaEnrollmentAsync(
@@ -472,6 +481,15 @@ public sealed class UserAuthenticationService(
         if (user is null) return new AccountSecurityResult(AccountSecurityOutcome.Unauthorized);
         var membership = await ResolveMembershipAsync(dbContext, user, companyId, cancellationToken);
         if (membership is null || !user.MfaEnabled) return new AccountSecurityResult(AccountSecurityOutcome.Unauthorized);
+        var access = await ResolveRoleAccessAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        if (await HasRequiredMfaRoleAsync(dbContext, user.Id, cancellationToken))
+        {
+            dbContext.AuthenticationAuditEntries.Add(CreateAuditEntry(
+                user, "mfa_disable_rejected", false, ipAddress, userAgent,
+                "MFA disablement was rejected because an active access role requires MFA.", companyId: membership.CompanyId));
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return new AccountSecurityResult(AccountSecurityOutcome.InvalidRequest);
+        }
         if (string.IsNullOrWhiteSpace(currentPassword)
             || passwordHasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword) == PasswordVerificationResult.Failed)
         {
@@ -514,10 +532,9 @@ public sealed class UserAuthenticationService(
             "Authenticator MFA and all remaining recovery codes were disabled after two-factor reauthentication.", companyId: membership.CompanyId));
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
         return new AccountSecurityResult(AccountSecurityOutcome.Succeeded, new AuthenticatedUser(
             user.Id, membership.CompanyId, user.UserName, user.DisplayName, user.Email,
-            membership.Role, user.SecurityStamp, permissions, false));
+            membership.Role, user.SecurityStamp, access.Permissions, false));
     }
 
     public async Task<MfaEnrollmentResult> RegenerateMfaRecoveryCodesAsync(
@@ -693,10 +710,10 @@ public sealed class UserAuthenticationService(
         await dbContext.SaveChangesAsync(cancellationToken);
         await completionTransaction.CommitAsync(cancellationToken);
 
-        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        var access = await ResolveRoleAccessAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
         return new MfaChallengeResult(MfaOperationOutcome.Succeeded, new AuthenticatedUser(
             user.Id, membership.CompanyId, user.UserName, user.DisplayName, user.Email,
-            membership.Role, user.SecurityStamp, permissions, true), UsedRecoveryCode: credential.RecoveryCode is not null);
+            membership.Role, user.SecurityStamp, access.Permissions, true), UsedRecoveryCode: credential.RecoveryCode is not null);
     }
 
     private async Task<MfaCredentialVerification> VerifyMfaCredentialAsync(
@@ -797,7 +814,7 @@ public sealed class UserAuthenticationService(
             : currentSecurityStamp;
     }
 
-    private static async Task<IReadOnlyList<string>> ResolvePermissionsAsync(
+    private static async Task<RoleAccess> ResolveRoleAccessAsync(
         BrassLedgerDbContext dbContext,
         Guid companyId,
         string role,
@@ -813,11 +830,27 @@ public sealed class UserAuthenticationService(
 
         if (accessRole is not null)
         {
-            return ParsePermissions(accessRole.Permissions);
+            return new RoleAccess(ParsePermissions(accessRole.Permissions), accessRole.RequiresMfa);
         }
 
-        return BrassLedgerRoleTemplates.GetPermissionsForRoleName(role);
+        var template = BrassLedgerRoleTemplates.BuiltIn.FirstOrDefault(candidate => string.Equals(candidate.Name, role, StringComparison.OrdinalIgnoreCase));
+        return new RoleAccess(template?.Permissions ?? [], template?.RequiresMfa ?? false);
     }
+
+    private sealed record RoleAccess(IReadOnlyList<string> Permissions, bool RequiresMfa);
+
+    private static Task<bool> HasRequiredMfaRoleAsync(
+        BrassLedgerDbContext dbContext,
+        Guid userId,
+        CancellationToken cancellationToken) =>
+        dbContext.CompanyMemberships
+            .Where(membership => membership.UserId == userId && membership.IsActive)
+            .Join(
+                dbContext.AccessRoles.Where(role => role.IsActive && role.RequiresMfa),
+                membership => new { membership.CompanyId, Name = membership.Role },
+                role => new { role.CompanyId, role.Name },
+                (_, _) => true)
+            .AnyAsync(cancellationToken);
 
     private static async Task<CompanyMembership?> ResolveMembershipAsync(BrassLedgerDbContext dbContext, AppUser user, Guid companyId, CancellationToken cancellationToken)
     {

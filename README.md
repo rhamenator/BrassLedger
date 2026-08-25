@@ -84,13 +84,13 @@ The current application includes:
 - self-service password changes and all-other-session revocation with immutable authentication audit events
 - temporary lockout plus per-network login throttling for browser and API sign-in
 - membership-aware session validation for company-specific roles and permissions
-- RFC 6238 authenticator MFA, hashed one-use recovery codes, bounded login challenges, replay prevention, and MFA lockout
+- RFC 6238 authenticator MFA, hashed one-use recovery codes, bounded login challenges, replay prevention, MFA lockout, and configurable privileged-role enforcement
 - protection of sensitive fields at rest with ASP.NET Core Data Protection
 - persisted application key material under `App_Data\keys`
 - security headers in the web application and API
 - first-run administrator setup through the built-in setup flow for non-development installs
 
-Before live production use, secure password-reset and invitation delivery, administrator-controlled MFA recovery, privileged-role MFA enforcement, and named device/session inventory remain required security work. Passkeys are a desirable future phishing-resistant factor. Administrators must also review operational backup, recovery, secrets management, access control, and deployment procedures.
+Before live production use, secure password-reset and invitation delivery, administrator-controlled MFA recovery, and named device/session inventory remain required security work. Passkeys are a desirable future phishing-resistant factor. Administrators must also review operational backup, recovery, secrets management, access control, and deployment procedures.
 
 ## Build, test, and publish
 

@@ -27,6 +27,7 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
         var companyIdValue = context.Principal?.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         var roleValue = context.Principal?.FindFirstValue(ClaimTypes.Role);
         var authenticationMethod = context.Principal?.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType);
+        var enrollmentRequiredClaim = context.Principal?.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true") == true;
 
         if (!Guid.TryParse(userIdValue, out var userId) || string.IsNullOrWhiteSpace(securityStamp))
         {
@@ -51,9 +52,14 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
                 role => role.CompanyId == membership.CompanyId && role.IsActive && role.Name == membership.Role,
                 context.HttpContext.RequestAborted);
         var claimedPermissions = context.Principal?.FindAll(BrassLedgerAuthenticationDefaults.PermissionClaimType).Select(claim => claim.Value).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
-        var currentPermissions = currentRole is null
-            ? BrassLedgerRoleTemplates.GetPermissionsForRoleName(membership?.Role ?? string.Empty).ToHashSet(StringComparer.OrdinalIgnoreCase)
-            : currentRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var roleTemplate = BrassLedgerRoleTemplates.BuiltIn.FirstOrDefault(template => string.Equals(template.Name, membership?.Role, StringComparison.OrdinalIgnoreCase));
+        var roleRequiresMfa = currentRole?.RequiresMfa ?? roleTemplate?.RequiresMfa ?? false;
+        var enrollmentRequired = roleRequiresMfa && user is { MfaEnabled: false };
+        var currentPermissions = enrollmentRequired
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : currentRole is null
+                ? (roleTemplate?.Permissions ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : currentRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var isValid = user is not null
             && user.IsActive
@@ -62,6 +68,7 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
             && membership is not null
             && string.Equals(membership.Role, roleValue, StringComparison.Ordinal)
             && (!user.MfaEnabled || string.Equals(authenticationMethod, "mfa", StringComparison.Ordinal))
+            && enrollmentRequiredClaim == enrollmentRequired
             && claimedPermissions.SetEquals(currentPermissions);
 
         if (isValid)
@@ -73,7 +80,7 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
         {
             Id = Guid.NewGuid(),
             UserId = user?.Id,
-            CompanyId = user?.CompanyId,
+            CompanyId = membership?.CompanyId ?? user?.CompanyId,
             UserName = context.Principal?.Identity?.Name ?? string.Empty,
             EventType = "session_rejected",
             Succeeded = false,

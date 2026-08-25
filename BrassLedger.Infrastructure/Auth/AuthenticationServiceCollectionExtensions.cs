@@ -61,6 +61,12 @@ public static class AuthenticationServiceCollectionExtensions
 
         services.AddAuthorization(options =>
         {
+            options.DefaultPolicy = new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .RequireAssertion(context => IsPrivilegedMfaSatisfied(context.User))
+                .Build();
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageAccountSecurity, policy =>
+                policy.RequireAuthenticatedUser());
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ViewWorkspace, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.WorkspaceView));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageLedger, policy =>
@@ -136,8 +142,7 @@ public static class AuthenticationServiceCollectionExtensions
             {
                 policy.RequireAuthenticatedUser();
                 policy.RequireAssertion(context =>
-                    context.User.IsInRole("Administrator")
-                    || context.User.IsInRole("Owner/CEO")
+                    IsSystemAdministrator(context.User)
                     || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.TaxManage));
             });
         });
@@ -146,5 +151,8 @@ public static class AuthenticationServiceCollectionExtensions
     }
 
     private static bool IsSystemAdministrator(System.Security.Claims.ClaimsPrincipal user) =>
-        user.IsInRole("Administrator") || user.IsInRole("Owner/CEO");
+        IsPrivilegedMfaSatisfied(user) && (user.IsInRole("Administrator") || user.IsInRole("Owner/CEO"));
+
+    private static bool IsPrivilegedMfaSatisfied(System.Security.Claims.ClaimsPrincipal user) =>
+        !user.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true");
 }

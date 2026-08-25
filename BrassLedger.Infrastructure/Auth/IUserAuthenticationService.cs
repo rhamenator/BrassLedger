@@ -72,6 +72,7 @@ public sealed record AccountSecuritySnapshot(
     bool MfaEnabled,
     DateTimeOffset? MfaEnrolledAtUtc,
     int RecoveryCodesRemaining,
+    bool MfaRequiredByRole,
     IReadOnlyList<AccountSecurityEventSnapshot> RecentEvents);
 
 public sealed record AccountSecurityEventSnapshot(

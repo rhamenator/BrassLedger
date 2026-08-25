@@ -26,8 +26,9 @@ public static class ServiceCollectionExtensions
     internal const string BaselineSchemaVersion = "2026082501-versioned-schema-baseline";
     internal const string W2ReportingSchemaVersion = "2026082502-w2-reporting-metadata";
     internal const string AccountingInterchangeSchemaVersion = "2026082503-accounting-interchange-batches";
-    internal const string CurrentSchemaVersion = "2026082504-multi-factor-authentication";
-    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, CurrentSchemaVersion];
+    internal const string MultiFactorAuthenticationSchemaVersion = "2026082504-multi-factor-authentication";
+    internal const string CurrentSchemaVersion = "2026082505-privileged-role-mfa";
+    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, CurrentSchemaVersion];
 
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
@@ -224,8 +225,10 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {W2ReportingSchemaVersion} is recorded without prerequisite {BaselineSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (applied.Contains(AccountingInterchangeSchemaVersion) && !applied.Contains(W2ReportingSchemaVersion))
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {AccountingInterchangeSchemaVersion} is recorded without prerequisite {W2ReportingSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
-        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(AccountingInterchangeSchemaVersion))
-            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {AccountingInterchangeSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(MultiFactorAuthenticationSchemaVersion) && !applied.Contains(AccountingInterchangeSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {MultiFactorAuthenticationSchemaVersion} is recorded without prerequisite {AccountingInterchangeSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(MultiFactorAuthenticationSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {MultiFactorAuthenticationSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (!applied.Contains(BaselineSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
             {
@@ -241,8 +244,11 @@ public static class ServiceCollectionExtensions
         if (!applied.Contains(AccountingInterchangeSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, AccountingInterchangeSchemaVersion, "Added durable accounting-interchange validation, import, duplicate, and rejection batch history.", () => EnsureAccountingInterchangeBatchSchemaAsync(dbContext, cancellationToken), cancellationToken);
 
+        if (!applied.Contains(MultiFactorAuthenticationSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, MultiFactorAuthenticationSchemaVersion, "Added protected TOTP enrollment, recovery codes, and bounded sign-in challenges.", () => EnsureMultiFactorAuthenticationSchemaAsync(dbContext, cancellationToken), cancellationToken);
+
         if (!applied.Contains(CurrentSchemaVersion))
-            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added protected TOTP enrollment, recovery codes, and bounded sign-in challenges.", () => EnsureMultiFactorAuthenticationSchemaAsync(dbContext, cancellationToken), cancellationToken);
+            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added configurable MFA enforcement for privileged access roles.", () => EnsurePrivilegedRoleMfaSchemaAsync(dbContext, cancellationToken), cancellationToken);
     }
 
     private static async Task ApplySchemaVersionAsync(BrassLedgerDbContext dbContext, string version, string description, Func<Task> apply, CancellationToken cancellationToken)
@@ -330,6 +336,22 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "MfaSignInChallenges" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "CompanyId" uuid NOT NULL, "TokenHash" text NOT NULL, "SecurityStamp" text NOT NULL, "CreatedAtUtc" timestamptz NOT NULL, "ExpiresAtUtc" timestamptz NOT NULL, "ConsumedAtUtc" timestamptz NULL, "FailedAttemptCount" integer NOT NULL, "IpAddress" text NOT NULL, "UserAgent" text NOT NULL);""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_MfaSignInChallenges_TokenHash" ON "MfaSignInChallenges" ("TokenHash");""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_MfaSignInChallenges_UserId_ExpiresAtUtc" ON "MfaSignInChallenges" ("UserId", "ExpiresAtUtc");""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsurePrivilegedRoleMfaSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await EnsureSqliteColumnAsync(dbContext, "AccessRoles", "RequiresMfa", "ALTER TABLE \"AccessRoles\" ADD COLUMN \"RequiresMfa\" INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""UPDATE "AccessRoles" SET "RequiresMfa" = 1 WHERE "Name" IN ('Administrator', 'Owner/CEO');""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "AccessRoles" ADD COLUMN IF NOT EXISTS "RequiresMfa" boolean NOT NULL DEFAULT false;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""UPDATE "AccessRoles" SET "RequiresMfa" = true WHERE "Name" IN ('Administrator', 'Owner/CEO');""", cancellationToken);
         }
     }
 

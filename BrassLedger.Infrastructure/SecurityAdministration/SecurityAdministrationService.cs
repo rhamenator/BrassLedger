@@ -41,6 +41,7 @@ public sealed class SecurityAdministrationService(
             .Where(item => item.membership.IsActive && item.user.IsActive)
             .GroupBy(item => item.membership.Role, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        var roleMfaRequirements = roles.ToDictionary(role => role.Name, role => role.RequiresMfa, StringComparer.OrdinalIgnoreCase);
 
         return new SecurityAdministrationSnapshot(
             Permissions: BrassLedgerPermissions.Definitions
@@ -52,6 +53,7 @@ public sealed class SecurityAdministrationService(
                     role.Description,
                     role.TemplateCode,
                     role.IsSystemRole,
+                    role.RequiresMfa,
                     operatorCounts.GetValueOrDefault(role.Name),
                     ParsePermissions(role.Permissions)))
                 .ToArray(),
@@ -62,6 +64,8 @@ public sealed class SecurityAdministrationService(
                     item.user.Email,
                     item.membership.Role,
                     item.user.IsActive && item.membership.IsActive,
+                    item.user.MfaEnabled,
+                    roleMfaRequirements.GetValueOrDefault(item.membership.Role),
                     item.user.LastSuccessfulSignInUtc))
                 .ToArray());
     }
@@ -104,9 +108,50 @@ public sealed class SecurityAdministrationService(
             TemplateCode = "custom",
             Permissions = string.Join('|', normalizedPermissions),
             IsSystemRole = false,
-            IsActive = true
+            IsActive = true,
+            RequiresMfa = request.RequiresMfa
         });
 
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return SecurityOperationResult.Success();
+    }
+
+    public async Task<SecurityOperationResult> SetRoleMfaRequirementAsync(
+        string roleName,
+        bool requiresMfa,
+        CancellationToken cancellationToken = default)
+    {
+        if (!CanManage(BrassLedgerPermissions.RoleManage)) return SecurityOperationResult.Failure("You are not authorized to manage roles.");
+        if (string.IsNullOrWhiteSpace(roleName)) return SecurityOperationResult.Failure("Select a valid role.");
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(dbContext, cancellationToken);
+        await EnsureBuiltInRolesAsync(dbContext, companyId, cancellationToken);
+        var role = await dbContext.AccessRoles.SingleOrDefaultAsync(
+            candidate => candidate.CompanyId == companyId && candidate.IsActive && candidate.Name == roleName.Trim(),
+            cancellationToken);
+        if (role is null) return SecurityOperationResult.Failure("Select a valid role.");
+        if (role.RequiresMfa == requiresMfa) return SecurityOperationResult.Success();
+
+        role.RequiresMfa = requiresMfa;
+        var affectedUserIds = await dbContext.CompanyMemberships
+            .Where(membership => membership.CompanyId == companyId && membership.IsActive && membership.Role == role.Name)
+            .Select(membership => membership.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var affectedUsers = await dbContext.Users.Where(user => affectedUserIds.Contains(user.Id)).ToListAsync(cancellationToken);
+        foreach (var user in affectedUsers) user.SecurityStamp = Guid.NewGuid().ToString("N");
+        dbContext.BusinessAuditEntries.Add(new BusinessAuditEntry
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            UserId = CurrentUserId(),
+            Action = "security.role.mfa-requirement-changed",
+            EntityType = "AccessRole",
+            EntityId = role.Id,
+            DetailJson = System.Text.Json.JsonSerializer.Serialize(new { role.Name, RequiresMfa = requiresMfa, AffectedOperatorCount = affectedUsers.Count }),
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        });
         await dbContext.SaveChangesAsync(cancellationToken);
         return SecurityOperationResult.Success();
     }
@@ -220,7 +265,8 @@ public sealed class SecurityAdministrationService(
                     TemplateCode = template.TemplateCode,
                     Permissions = serializedPermissions,
                     IsSystemRole = true,
-                    IsActive = true
+                    IsActive = true,
+                    RequiresMfa = template.RequiresMfa
                 });
                 hasChanges = true;
                 continue;
@@ -268,9 +314,16 @@ public sealed class SecurityAdministrationService(
     {
         var user = httpContextAccessor.HttpContext?.User;
         return user is null
-            || user.IsInRole("Administrator")
-            || user.IsInRole("Owner/CEO")
-            || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission);
+            || (!user.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+                && (user.IsInRole("Administrator")
+                    || user.IsInRole("Owner/CEO")
+                    || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+    }
+
+    private Guid? CurrentUserId()
+    {
+        var value = httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(value, out var userId) ? userId : null;
     }
 
     private static IReadOnlyList<string> ParsePermissions(string permissions)

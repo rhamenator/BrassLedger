@@ -2,6 +2,7 @@ namespace BrassLedger.Infrastructure.Auth;
 
 public static class BrassLedgerAuthorizationPolicies
 {
+    public const string ManageAccountSecurity = "ManageAccountSecurity";
     public const string AdministerSystem = "AdministerSystem";
     public const string ManageTaxes = "ManageTaxes";
     public const string ViewWorkspace = "ViewWorkspace";

@@ -56,13 +56,16 @@ else
                             <span class="module-code">@(role.IsSystemRole ? "SYS" : "CUS")</span>
                             <h3>@role.Name</h3>
                             <p class="module-area">@role.Description</p>
-                            <p><strong>@role.AssignedUserCount</strong> assigned</p>
+                            <p><strong>@role.AssignedUserCount</strong> assigned · <strong>@(role.RequiresMfa ? "MFA required" : "MFA optional")</strong></p>
                             <ul class="feature-list">
                                 @foreach (var permission in role.Permissions)
                                 {
                                     <li>@PermissionLabels.GetValueOrDefault(permission, permission)</li>
                                 }
                             </ul>
+                            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageRoles" Context="roleMfaAuthorization">
+                                <button class="action-secondary" type="button" @onclick="() => SetRoleMfaRequirementAsync(role)">@(role.RequiresMfa ? "Make MFA optional" : "Require MFA")</button>
+                            </AuthorizeView>
                         </article>
                     }
                 </div>
@@ -99,6 +102,8 @@ else
                             </div>
                         </div>
 
+                        <label><InputCheckbox @bind-Value="RoleForm.RequiresMfa" /> Require authenticator MFA before this role can access business data.</label>
+
                         <button class="action-primary" type="submit">Save custom role</button>
                     </div>
                 </EditForm>
@@ -116,7 +121,7 @@ else
                         <div>
                             <span class="detail-label">@user.Role</span>
                             <strong>@user.DisplayName</strong>
-                            <p>@user.UserName · @user.Email</p>
+                            <p>@user.UserName · @user.Email · MFA @(user.MfaEnabled ? "enabled" : user.RoleRequiresMfa ? "enrollment required" : "optional")</p>
                         </div>
                     }
                 </div>
@@ -266,7 +271,7 @@ else
     private async Task CreateRoleAsync(EditContext _)
     {
         var result = await SecurityAdministrationService.CreateRoleAsync(
-            new CreateAccessRoleRequest(RoleForm.Name, RoleForm.Description, RoleForm.Permissions.ToArray()));
+            new CreateAccessRoleRequest(RoleForm.Name, RoleForm.Description, RoleForm.Permissions.ToArray(), RoleForm.RequiresMfa));
 
         StatusMessage = result.Succeeded ? "Custom role saved." : result.ErrorMessage;
         if (result.Succeeded)
@@ -274,6 +279,15 @@ else
             RoleForm = new CreateRoleForm();
             await ReloadSnapshotAsync();
         }
+    }
+
+    private async Task SetRoleMfaRequirementAsync(AccessRoleSnapshot role)
+    {
+        var result = await SecurityAdministrationService.SetRoleMfaRequirementAsync(role.Name, !role.RequiresMfa);
+        StatusMessage = result.Succeeded
+            ? $"{role.Name} now {(role.RequiresMfa ? "allows password-only access" : "requires MFA")}. Assigned operators must sign in again."
+            : result.ErrorMessage;
+        if (result.Succeeded) await ReloadSnapshotAsync();
     }
 
     private async Task CreateOperatorAsync(EditContext _)
@@ -422,6 +436,7 @@ else
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public HashSet<string> Permissions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public bool RequiresMfa { get; set; }
     }
 
     private sealed class CreateOperatorForm

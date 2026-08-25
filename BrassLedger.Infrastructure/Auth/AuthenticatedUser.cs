@@ -9,4 +9,5 @@ public sealed record AuthenticatedUser(
     string Role,
     string SecurityStamp,
     IReadOnlyList<string> Permissions,
-    bool MfaAuthenticated = false);
+    bool MfaAuthenticated = false,
+    bool MfaEnrollmentRequired = false);

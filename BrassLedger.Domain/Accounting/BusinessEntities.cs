@@ -166,6 +166,7 @@ public sealed class AccessRole
     public string Permissions { get; set; } = string.Empty;
     public bool IsSystemRole { get; set; }
     public bool IsActive { get; set; }
+    public bool RequiresMfa { get; set; }
 }
 
 public sealed class AuthenticationAuditEntry

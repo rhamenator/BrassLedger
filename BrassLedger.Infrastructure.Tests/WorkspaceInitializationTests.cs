@@ -58,8 +58,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(File.Exists(databasePath));
         await using var connection = new SqliteConnection($"Data Source={databasePath}");
         await connection.OpenAsync();
-        Assert.Equal("4", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.StartsWith("2026082504-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
+        Assert.Equal("5", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.StartsWith("2026082505-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("4", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("5", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -101,7 +101,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082504-%' OR "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082505-%' OR "VersionId" LIKE '2026082504-%' OR "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
                 ALTER TABLE "PayrollEarningLines" DROP COLUMN "W2ReportingJson";
                 """;
             await command.ExecuteNonQueryAsync();
@@ -111,7 +111,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("4", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("5", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollEarningLines') WHERE name = 'W2ReportingJson';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaRecoveryCodes';"));
@@ -129,7 +129,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082504-%';
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082505-%' OR "VersionId" LIKE '2026082504-%';
                 DROP TABLE "MfaRecoveryCodes";
                 DROP TABLE "MfaSignInChallenges";
                 ALTER TABLE "Users" DROP COLUMN "MfaEnabled";
@@ -138,6 +138,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
                 ALTER TABLE "Users" DROP COLUMN "MfaLastAcceptedTimeStep";
                 ALTER TABLE "Users" DROP COLUMN "MfaFailedAttemptCount";
                 ALTER TABLE "Users" DROP COLUMN "MfaLockoutEndUtc";
+                ALTER TABLE "AccessRoles" DROP COLUMN "RequiresMfa";
                 """;
             await command.ExecuteNonQueryAsync();
         }
@@ -146,9 +147,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("4", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("5", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('Users') WHERE name = 'MfaSecret';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('AccessRoles') WHERE name = 'RequiresMfa';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT RequiresMfa FROM AccessRoles WHERE Name = 'Administrator';"));
         Assert.Equal("controller", await ReadScalarAsync(verified, "SELECT UserName FROM Users WHERE UserName = 'controller';"));
     }
 
@@ -426,8 +429,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(AuthenticationOutcome.Succeeded, authenticationResult.Outcome);
         Assert.NotNull(authenticationResult.User);
         Assert.Equal("Administrator", authenticationResult.User!.Role);
-        Assert.Contains(BrassLedgerPermissions.RoleManage, authenticationResult.User.Permissions);
-        Assert.Contains(BrassLedgerPermissions.UserManage, authenticationResult.User.Permissions);
+        Assert.True(authenticationResult.User.MfaEnrollmentRequired);
+        Assert.Empty(authenticationResult.User.Permissions);
 
         var membershipFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using var membershipDb = await membershipFactory.CreateDbContextAsync();
@@ -2260,6 +2263,19 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var operatorAttempt = await administration.CreateOperatorAsync(new BrassLedger.Application.Security.CreateOperatorRequest("role-only", "Role Only", "role@example.test", "A secure password 123", "A secure password 123", "Controller"));
         Assert.False(operatorAttempt.Succeeded);
         Assert.Contains("not authorized", operatorAttempt.ErrorMessage);
+
+        var restrictedAdministrator = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        restrictedAdministrator.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+        [
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "Administrator"),
+            new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, "0e561f1b-47b0-4c33-bd9f-1a3298ed29c6"),
+            new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+        ], "test"));
+        accessor.HttpContext = restrictedAdministrator;
+        var restrictedAttempt = await administration.CreateRoleAsync(new BrassLedger.Application.Security.CreateAccessRoleRequest(
+            "Restricted escalation", "Must not bypass MFA", [BrassLedgerPermissions.LedgerManage]));
+        Assert.False(restrictedAttempt.Succeeded);
+        Assert.Contains("not authorized", restrictedAttempt.ErrorMessage);
     }
 
     [Fact]
@@ -2289,6 +2305,38 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("Controller", membership.Role);
         Assert.False(membership.IsOwner);
         Assert.True(membership.IsActive);
+    }
+
+    [Fact]
+    public async Task SecurityAdministration_EnforcesAndAuditsConfigurableRoleMfa()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.RoleManage);
+
+        var initialSnapshot = await administration.GetSnapshotAsync();
+        Assert.True(initialSnapshot.Roles.Single(role => role.Name == "Administrator").RequiresMfa);
+        Assert.False(initialSnapshot.Roles.Single(role => role.Name == "Controller").RequiresMfa);
+        var created = await administration.CreateRoleAsync(new BrassLedger.Application.Security.CreateAccessRoleRequest(
+            "Protected reviewer", "Requires a second factor", [BrassLedgerPermissions.ReportingManage], true));
+        Assert.True(created.Succeeded, created.ErrorMessage);
+        Assert.True((await administration.GetSnapshotAsync()).Roles.Single(role => role.Name == "Protected reviewer").RequiresMfa);
+
+        var enabled = await administration.SetRoleMfaRequirementAsync("Controller", true);
+        Assert.True(enabled.Succeeded, enabled.ErrorMessage);
+        var restricted = await authentication.AuthenticateAsync(
+            "controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "role-mfa-test");
+        Assert.Equal(AuthenticationOutcome.Succeeded, restricted.Outcome);
+        Assert.True(restricted.User!.MfaEnrollmentRequired);
+        Assert.Empty(restricted.User.Permissions);
+
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+        Assert.Contains(await dbContext.BusinessAuditEntries.ToListAsync(), entry => entry.Action == "security.role.mfa-requirement-changed" && entry.EntityType == "AccessRole");
     }
 
     [Fact]

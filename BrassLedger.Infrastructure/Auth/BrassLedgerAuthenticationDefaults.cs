@@ -11,6 +11,7 @@ public static class BrassLedgerAuthenticationDefaults
     public const string DisplayNameClaimType = "display_name";
     public const string PermissionClaimType = "permission";
     public const string AuthenticationMethodClaimType = "amr";
+    public const string MfaEnrollmentRequiredClaimType = "mfa_enrollment_required";
     public const string LoginRateLimitPolicy = "login";
     public const int SessionMinutes = 20;
     public const int MaxFailedSignInAttempts = 5;

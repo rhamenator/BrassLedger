@@ -13,7 +13,7 @@ The current application baseline already assumes:
 - per-network login throttling in both the web application and API
 - self-service password changes that invalidate previously issued sessions
 - a self-service control to sign out every other browser session
-- optional RFC 6238 authenticator MFA with a mandatory password-plus-code enrollment ceremony
+- RFC 6238 authenticator MFA with a mandatory password-plus-code enrollment ceremony and configurable role enforcement
 - ten high-entropy, hashed, one-use recovery codes with controlled replacement and disablement
 - five-minute, hashed MFA login challenges with strict attempt limits, TOTP replay prevention, and security-stamp invalidation
 - a recent account-activity view for successful, rejected, and revoked access events
@@ -39,6 +39,8 @@ Password and MFA endpoints share a network-address ceiling of 60 requests per mi
 
 Recovery codes are one use. **Replace recovery codes** requires the current password plus a valid authenticator or remaining recovery code, deletes every prior code, creates a new set, audits the action, and invalidates other sessions. **Disable authenticator MFA** has the same two-factor reauthentication requirement and deletes all remaining codes. If an operator loses both the authenticator and every recovery code, do not bypass MFA informally; use a documented administrator identity-verification and recovery process. That administrator recovery workflow is still pending implementation.
 
+Each company role has a **Require MFA** control in **Administration**. Administrator and Owner/CEO roles require MFA by default; custom roles can require it at creation, and an authorized role manager can change any active role later. Changing the requirement is audited and rotates every assigned operator's security stamp. A password-only operator assigned to a required role receives an authenticated but deliberately restricted session with no business permissions and is directed to **Account security** for enrollment. Company switching applies the destination company's role requirement. Once an account is assigned any active MFA-required role, self-service MFA disablement is unavailable until an authorized role manager removes every such requirement. This prevents a role assignment in a second company from being silently weakened.
+
 The implementation follows [RFC 6238](https://datatracker.ietf.org/doc/html/rfc6238.html), [Microsoft's ASP.NET Core MFA guidance](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/mfa?view=aspnetcore-8.0), and the [OWASP MFA Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html). TOTP materially improves password security but is not phishing-resistant; passkeys remain a future stronger factor.
 
 Company access is validated against the operator's active, company-specific membership on every cookie validation. A role in one company does not grant that role in another company, and disabling a membership invalidates a cookie issued for that company.
@@ -47,7 +49,6 @@ Before using live confidential books in production, the remaining security work 
 
 - verified password-reset and account-invitation delivery
 - a controlled administrator MFA reset after documented identity verification
-- configurable enforcement of MFA for privileged and sensitive-data roles
 - phishing-resistant passkeys where deployment requirements justify them
 - named device/session inventory instead of stamp-based all-other-session revocation
 - externalized key management where appropriate

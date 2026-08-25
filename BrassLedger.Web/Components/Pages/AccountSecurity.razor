@@ -1,5 +1,5 @@
 @page "/account/security"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageAccountSecurity)]
 @inject IUserAuthenticationService AuthenticationService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IHttpContextAccessor HttpContextAccessor
@@ -59,6 +59,10 @@
             else if (Snapshot.MfaEnabled)
             {
                 <p class="page-intro">A password and a fresh authenticator or one-use recovery code are required at sign-in. @Snapshot.RecoveryCodesRemaining recovery code(s) remain.</p>
+                @if (Snapshot.MfaRequiredByRole)
+                {
+                    <p class="page-intro"><strong>MFA cannot be disabled while any active company role assigned to this account requires it.</strong></p>
+                }
                 <details>
                     <summary>Replace recovery codes</summary>
                     <p class="page-intro">This immediately invalidates every prior recovery code and other signed-in session. Enter the current password plus an authenticator or remaining recovery code.</p>
@@ -70,16 +74,19 @@
                         </div>
                     </EditForm>
                 </details>
-                <details>
-                    <summary>Disable authenticator MFA</summary>
-                    <p class="page-intro">Disabling MFA requires both the current password and a current authenticator or recovery code. All sessions and unused recovery codes will be invalidated.</p>
-                    <form class="auth-form" method="post" action="/account/disable-mfa">
-                        <AntiforgeryToken />
-                        <div class="field-group"><label class="field-label" for="disableMfaPassword">Current password</label><input id="disableMfaPassword" class="field-input" name="currentPassword" type="password" autocomplete="current-password" required /></div>
-                        <div class="field-group"><label class="field-label" for="disableMfaCode">Authenticator or recovery code</label><input id="disableMfaCode" class="field-input" name="verificationCode" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required /></div>
-                        <button class="action-secondary" type="submit">Disable MFA and revoke sessions</button>
-                    </form>
-                </details>
+                @if (!Snapshot.MfaRequiredByRole)
+                {
+                    <details>
+                        <summary>Disable authenticator MFA</summary>
+                        <p class="page-intro">Disabling MFA requires both the current password and a current authenticator or recovery code. All sessions and unused recovery codes will be invalidated.</p>
+                        <form class="auth-form" method="post" action="/account/disable-mfa">
+                            <AntiforgeryToken />
+                            <div class="field-group"><label class="field-label" for="disableMfaPassword">Current password</label><input id="disableMfaPassword" class="field-input" name="currentPassword" type="password" autocomplete="current-password" required /></div>
+                            <div class="field-group"><label class="field-label" for="disableMfaCode">Authenticator or recovery code</label><input id="disableMfaCode" class="field-input" name="verificationCode" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required /></div>
+                            <button class="action-secondary" type="submit">Disable MFA and revoke sessions</button>
+                        </form>
+                    </details>
+                }
             }
             else if (Enrollment is null)
             {
@@ -208,6 +215,7 @@
         "mfa-disable-rejected" => "MFA was not disabled. Check both the current password and the authenticator or recovery code.",
         _ => Status switch
         {
+            "mfa-required" => "Your access role requires MFA. Set up and verify an authenticator before opening business data.",
             "password-changed" => "Your password was changed and all other sessions were signed out.",
             "sessions-revoked" => "All other sessions were signed out. This browser remains signed in.",
             "mfa-disabled" => "Authenticator MFA and all remaining recovery codes were disabled. Other sessions were signed out.",

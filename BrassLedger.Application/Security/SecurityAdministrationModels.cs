@@ -4,6 +4,7 @@ public interface ISecurityAdministrationService
 {
     Task<SecurityAdministrationSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default);
     Task<SecurityOperationResult> CreateRoleAsync(CreateAccessRoleRequest request, CancellationToken cancellationToken = default);
+    Task<SecurityOperationResult> SetRoleMfaRequirementAsync(string roleName, bool requiresMfa, CancellationToken cancellationToken = default);
     Task<SecurityOperationResult> CreateOperatorAsync(CreateOperatorRequest request, CancellationToken cancellationToken = default);
 }
 
@@ -22,6 +23,7 @@ public sealed record AccessRoleSnapshot(
     string Description,
     string TemplateCode,
     bool IsSystemRole,
+    bool RequiresMfa,
     int AssignedUserCount,
     IReadOnlyList<string> Permissions);
 
@@ -31,12 +33,15 @@ public sealed record OperatorAccountSnapshot(
     string Email,
     string Role,
     bool IsActive,
+    bool MfaEnabled,
+    bool RoleRequiresMfa,
     DateTimeOffset? LastSuccessfulSignInUtc);
 
 public sealed record CreateAccessRoleRequest(
     string Name,
     string Description,
-    IReadOnlyList<string> Permissions);
+    IReadOnlyList<string> Permissions,
+    bool RequiresMfa = false);
 
 public sealed record CreateOperatorRequest(
     string UserName,

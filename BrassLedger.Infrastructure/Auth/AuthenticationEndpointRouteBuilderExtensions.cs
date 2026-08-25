@@ -27,18 +27,18 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         Delegate switchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleSwitchCompanyAsync;
 
         endpoints.MapPost("/account/login", formLoginHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
-        endpoints.MapPost("/account/logout", formLogoutHandler).RequireAuthorization();
+        endpoints.MapPost("/account/logout", formLogoutHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
         endpoints.MapPost("/account/active-company", formSwitchCompanyHandler).RequireAuthorization();
-        endpoints.MapPost("/account/change-password", changePasswordHandler).RequireAuthorization();
-        endpoints.MapPost("/account/revoke-other-sessions", revokeOtherSessionsHandler).RequireAuthorization();
+        endpoints.MapPost("/account/change-password", changePasswordHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
+        endpoints.MapPost("/account/revoke-other-sessions", revokeOtherSessionsHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
         endpoints.MapPost("/account/mfa", formMfaHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
-        endpoints.MapPost("/account/disable-mfa", disableMfaHandler).RequireAuthorization();
+        endpoints.MapPost("/account/disable-mfa", disableMfaHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
         endpoints.MapPost("/account/bootstrap", bootstrapHandler).AllowAnonymous();
 
         endpoints.MapPost("/api/auth/login", apiLoginHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/api/auth/mfa", apiMfaHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
-        endpoints.MapPost("/api/auth/logout", apiLogoutHandler).RequireAuthorization();
-        endpoints.MapGet("/api/auth/me", (ClaimsPrincipal principal) => Results.Ok(ToResponse(principal))).RequireAuthorization();
+        endpoints.MapPost("/api/auth/logout", apiLogoutHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
+        endpoints.MapGet("/api/auth/me", (ClaimsPrincipal principal) => Results.Ok(ToResponse(principal))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
         endpoints.MapPost("/api/auth/active-company", switchCompanyHandler).RequireAuthorization();
 
         return endpoints;
@@ -129,7 +129,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             CreatePrincipal(authenticationResult.User),
             CreateAuthenticationProperties());
 
-        return Results.LocalRedirect(returnUrl);
+        return Results.LocalRedirect(authenticationResult.User.MfaEnrollmentRequired ? "/account/security?status=mfa-required" : returnUrl);
     }
 
     private static async Task<IResult> HandleApiLoginAsync(HttpContext context, IUserAuthenticationService authenticationService)
@@ -288,7 +288,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             CreatePrincipal(result.User),
             CreateAuthenticationProperties());
 
-        return Results.LocalRedirect("/");
+        return Results.LocalRedirect(result.User.MfaEnrollmentRequired ? "/account/security?status=mfa-required" : "/");
     }
 
     private static async Task<IResult> HandleFormLogoutAsync(HttpContext context, IAntiforgery antiforgery)
@@ -308,7 +308,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         if (user is null) return Results.Forbid();
         user = user with { MfaAuthenticated = HasMfaClaim(context.User) };
         await context.SignInAsync(BrassLedgerAuthenticationDefaults.Scheme, CreatePrincipal(user), CreateAuthenticationProperties());
-        return Results.LocalRedirect(returnUrl);
+        return Results.LocalRedirect(user.MfaEnrollmentRequired ? "/account/security?status=mfa-required" : returnUrl);
     }
 
     private static async Task<IResult> HandleApiLogoutAsync(HttpContext context)
@@ -349,6 +349,9 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, authenticatedUser.MfaAuthenticated ? "mfa" : "pwd")
         };
 
+        if (authenticatedUser.MfaEnrollmentRequired)
+            claims.Add(new Claim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true"));
+
         claims.AddRange(authenticatedUser.Permissions.Select(permission => new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
 
         var identity = new ClaimsIdentity(claims, BrassLedgerAuthenticationDefaults.Scheme);
@@ -376,7 +379,8 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             Email = principal.FindFirstValue(ClaimTypes.Email) ?? string.Empty,
             Role = principal.FindFirstValue(ClaimTypes.Role) ?? string.Empty,
             CompanyId = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType) ?? string.Empty,
-            MfaAuthenticated = HasMfaClaim(principal)
+            MfaAuthenticated = HasMfaClaim(principal),
+            MfaEnrollmentRequired = principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
         };
     }
 
@@ -389,7 +393,8 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             authenticatedUser.Email,
             authenticatedUser.Role,
             CompanyId = authenticatedUser.CompanyId,
-            authenticatedUser.MfaAuthenticated
+            authenticatedUser.MfaAuthenticated,
+            authenticatedUser.MfaEnrollmentRequired
         };
     }
 
