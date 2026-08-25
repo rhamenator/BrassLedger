@@ -58,8 +58,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(File.Exists(databasePath));
         await using var connection = new SqliteConnection($"Data Source={databasePath}");
         await connection.OpenAsync();
-        Assert.Equal("2", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.StartsWith("2026082502-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
+        Assert.Equal("3", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.StartsWith("2026082503-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
     }
 
     [Fact]
@@ -83,7 +83,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("2", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("3", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
         Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
     }
@@ -99,7 +100,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082502-%';
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
                 ALTER TABLE "PayrollEarningLines" DROP COLUMN "W2ReportingJson";
                 """;
             await command.ExecuteNonQueryAsync();
@@ -109,8 +110,31 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("2", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("3", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollEarningLines') WHERE name = 'W2ReportingJson';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
+        Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
+    }
+
+    [Fact]
+    public async Task InitializeBrassLedgerAsync_RejectsMigrationWhosePrerequisiteIsMissing()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082502-%';""";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => services.InitializeBrassLedgerAsync());
+
+        Assert.Contains("without prerequisite", exception.Message, StringComparison.OrdinalIgnoreCase);
+        await using var verified = new SqliteConnection($"Data Source={databasePath}");
+        await verified.OpenAsync();
         Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
     }
 

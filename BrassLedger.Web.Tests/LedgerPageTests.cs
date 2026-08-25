@@ -31,6 +31,9 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("Operating Cash", cut.Markup);
         Assert.Contains("JE-2401", cut.Markup);
         Assert.Contains("Primary Operating", cut.Markup);
+        Assert.Contains("Recent interchange batches", cut.Markup);
+        Assert.Contains("malformed-customers.csv", cut.Markup);
+        Assert.Contains("Fix row 2", cut.Markup);
     }
 }
 
@@ -96,4 +99,6 @@ internal sealed class StubAccountingInterchangeService : IAccountingInterchangeS
 {
     public Task<AccountingInterchangeExport?> ExportQuickBooksOnlineCsvAsync(string entity, CancellationToken cancellationToken = default) => Task.FromResult<AccountingInterchangeExport?>(null);
     public Task<AccountingInterchangeImportResult> ImportQuickBooksOnlineCsvAsync(string entity, Stream content, AccountingInterchangeImportOptions? options = null, CancellationToken cancellationToken = default) => Task.FromResult(AccountingInterchangeImportResult.Success(0, options?.DryRun ?? false));
+    public Task<IReadOnlyList<AccountingInterchangeBatchSnapshot>> GetRecentBatchesAsync(int limit = 20, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<AccountingInterchangeBatchSnapshot>>(
+        [new(Guid.NewGuid(), "quickbooks-online", "customers", "malformed-customers.csv", new string('a', 64), "Rejected", true, 1, 0, 0, 1, ["Fix row 2."], "Controller", DateTimeOffset.UtcNow)]);
 }

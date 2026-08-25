@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using BrassLedger.Application.Accounting;
+using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -464,12 +465,32 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         duplicateJournalForm.Add(new StringContent("Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue"), "file", "quickbooks-journals-retry.csv");
         var duplicateJournalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", duplicateJournalForm);
         Assert.Equal(HttpStatusCode.BadRequest, duplicateJournalImport.StatusCode);
+        using var malformedForm = new MultipartFormDataContent();
+        malformedForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        malformedForm.Add(new StringContent("Display Name,Customer Number\r\n\"unterminated,QBO-BAD-1"), "file", "malformed-customers.csv");
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/interchange/quickbooks-online/customers?dryRun=true", malformedForm)).StatusCode);
         var journalExport = await client.GetStringAsync("/api/interchange/quickbooks-online/journal-entries.csv");
         Assert.Contains("\"Journal No.\",\"Journal Date\",\"Reference\",\"Journal/Description\",\"Account Name\",\"Debits\",\"Credits\",\"Line Description\"", journalExport);
         Assert.Contains("QBO-JE-1", journalExport);
+        using (var scope = isolatedFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<BrassLedgerDbContext>();
+            var otherCompany = new Company { Id = Guid.NewGuid(), Name = $"Other Company {Guid.NewGuid():N}", LegalName = "Other Company", BaseCurrency = "USD", FiscalYearStartMonth = 1 };
+            db.Companies.Add(otherCompany);
+            db.AccountingInterchangeBatches.Add(new AccountingInterchangeBatch { Id = Guid.NewGuid(), CompanyId = otherCompany.Id, ProviderCode = "quickbooks-online", EntityType = "customers", FileName = "other-company.csv", ContentSha256 = new string('a', 64), Status = "Imported", RowCount = 1, ImportedCount = 1, ProcessedAtUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        var batches = await client.GetFromJsonAsync<AccountingInterchangeBatchSnapshot[]>("/api/interchange/batches");
+        Assert.Equal(5, batches!.Length);
+        Assert.DoesNotContain(batches, batch => batch.FileName == "other-company.csv");
+        Assert.Contains(batches, batch => batch.Status == "Validated" && batch.IsDryRun && batch.EntityType == "customers");
+        Assert.Contains(batches, batch => batch.Status == "Imported" && !batch.IsDryRun && batch.ImportedCount == 1);
+        Assert.Contains(batches, batch => batch.Status == "DuplicateRejected" && batch.DuplicateCount == 2 && batch.RejectedCount == 2 && batch.Rejections.Count == 1);
+        Assert.Contains(batches, batch => batch.Status == "Rejected" && batch.FileName == "malformed-customers.csv" && batch.RejectedCount == 1 && batch.ContentSha256.Length == 64);
 
         using var unauthorizedClient = await CreateAuthenticatedClientAsync(isolatedFactory, "operations");
         Assert.Equal(HttpStatusCode.Forbidden, (await unauthorizedClient.GetAsync("/api/interchange/quickbooks-online/chart-of-accounts.csv")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await unauthorizedClient.GetAsync("/api/interchange/batches")).StatusCode);
     }
 
     private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null, string userName = "controller")

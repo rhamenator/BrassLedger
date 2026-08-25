@@ -95,6 +95,11 @@ else
                 <div class="field-group import-action"><span class="field-label">Review and import selected file</span><div class="hero-actions"><button class="action-secondary" type="button" disabled="@(QuickBooksImport.File is null)" @onclick="() => ImportQuickBooksAsync(true)">Validate only</button><button class="action-primary" type="button" disabled="@(QuickBooksImport.File is null)" @onclick="() => ImportQuickBooksAsync(false)">Import CSV</button></div></div>
             </div>
             @if (!string.IsNullOrWhiteSpace(QuickBooksImport.FileName)) { <p class="muted-copy">Selected: @QuickBooksImport.FileName</p> }
+            @if (InterchangeBatches.Count > 0)
+            {
+                <h3>Recent interchange batches</h3>
+                <div class="table-scroll"><table class="data-table"><thead><tr><th>Processed</th><th>File / data</th><th>Outcome</th><th>Counts</th><th>Evidence</th></tr></thead><tbody>@foreach (var batch in InterchangeBatches) { <tr><td>@batch.ProcessedAtUtc.ToLocalTime().ToString("g")<br /><small>@batch.ProcessedBy</small></td><td>@batch.FileName<br /><small>@batch.EntityType</small></td><td>@batch.Status@if (batch.Rejections.Count > 0) { <br /><small>@string.Join(" ", batch.Rejections.Take(2))</small> }</td><td>@batch.ImportedCount imported<br />@batch.DuplicateCount duplicate<br />@batch.RejectedCount rejected</td><td><code>@(batch.ContentSha256.Length >= 12 ? batch.ContentSha256[..12] : "unavailable")</code><br /><small>@batch.RowCount rows</small></td></tr> }</tbody></table></div>
+            }
         </section>
 
         <section class="content-grid">
@@ -297,6 +302,7 @@ else
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private IReadOnlyList<AccountingInterchangeBatchSnapshot> InterchangeBatches = [];
     private string? StatusMessage;
     private JournalEditor JournalForm { get; } = new();
     private JournalReversalEditor ReversalForm { get; } = new();
@@ -315,6 +321,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        InterchangeBatches = await InterchangeService.GetRecentBatchesAsync();
     }
 
     private async Task SaveJournalDraftAsync()
@@ -376,6 +383,7 @@ else
             StatusMessage = result.Succeeded
                 ? dryRun ? $"Validation passed: {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s) are ready to import; no accounting records changed." : $"Imported {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s)."
                 : string.Join(" ", result.Errors);
+            InterchangeBatches = await InterchangeService.GetRecentBatchesAsync();
             if (result.Succeeded && !dryRun) { QuickBooksImport.File = null; QuickBooksImport.FileName = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
         }
         catch (IOException)

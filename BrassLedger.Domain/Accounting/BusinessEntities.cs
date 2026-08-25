@@ -247,6 +247,26 @@ public sealed class BankStatementImportBatch
     public DateTimeOffset ImportedAtUtc { get; set; }
 }
 
+public sealed class AccountingInterchangeBatch
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string ProviderCode { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string ContentSha256 { get; set; } = string.Empty;
+    public string? CommittedImportKey { get; set; }
+    public string Status { get; set; } = "Validated";
+    public bool IsDryRun { get; set; }
+    public int RowCount { get; set; }
+    public int ImportedCount { get; set; }
+    public int DuplicateCount { get; set; }
+    public int RejectedCount { get; set; }
+    public string RejectionJson { get; set; } = "[]";
+    public Guid? ProcessedByUserId { get; set; }
+    public DateTimeOffset ProcessedAtUtc { get; set; }
+}
+
 public sealed class BankStatementTransaction
 {
     public Guid Id { get; set; }

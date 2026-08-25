@@ -16,6 +16,7 @@ public sealed class BrassLedgerDbContext(
     public DbSet<ConsolidationGroupCompany> ConsolidationGroupCompanies => Set<ConsolidationGroupCompany>();
     public DbSet<AccountingPeriod> AccountingPeriods => Set<AccountingPeriod>();
     public DbSet<BusinessAuditEntry> BusinessAuditEntries => Set<BusinessAuditEntry>();
+    public DbSet<AccountingInterchangeBatch> AccountingInterchangeBatches => Set<AccountingInterchangeBatch>();
     public DbSet<IntegrationConnection> IntegrationConnections => Set<IntegrationConnection>();
     public DbSet<InventoryTransaction> InventoryTransactions => Set<InventoryTransaction>();
     public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
@@ -95,6 +96,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<ConsolidationGroupCompany>().HasKey(x => x.Id);
         modelBuilder.Entity<AccountingPeriod>().HasKey(x => x.Id);
         modelBuilder.Entity<BusinessAuditEntry>().HasKey(x => x.Id);
+        modelBuilder.Entity<AccountingInterchangeBatch>().HasKey(x => x.Id);
         modelBuilder.Entity<IntegrationConnection>().HasKey(x => x.Id);
         modelBuilder.Entity<InventoryTransaction>().HasKey(x => x.Id);
         modelBuilder.Entity<AccessRole>().HasKey(x => x.Id);
@@ -413,6 +415,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<ConsolidationGroupCompany>().HasIndex(x => new { x.ConsolidationGroupId, x.MemberCompanyId }).IsUnique();
         modelBuilder.Entity<AccountingPeriod>().HasIndex(x => new { x.CompanyId, x.StartsOn, x.EndsOn }).IsUnique();
         modelBuilder.Entity<BusinessAuditEntry>().HasIndex(x => new { x.CompanyId, x.OccurredAtUtc });
+        modelBuilder.Entity<AccountingInterchangeBatch>().HasIndex(x => new { x.CompanyId, x.ProviderCode, x.EntityType, x.ProcessedAtUtc });
+        modelBuilder.Entity<AccountingInterchangeBatch>().HasIndex(x => new { x.CompanyId, x.CommittedImportKey }).IsUnique();
         modelBuilder.Entity<IntegrationConnection>().HasIndex(x => new { x.CompanyId, x.ProviderCode, x.Name }).IsUnique();
         modelBuilder.Entity<InventoryTransaction>().HasIndex(x => new { x.CompanyId, x.InventoryItemId, x.OccurredOn });
         modelBuilder.Entity<AccessRole>().HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();

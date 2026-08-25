@@ -726,6 +726,8 @@ api.MapGet("/interchange/quickbooks-online/{entity}.csv", async (string entity, 
     return export is null ? Results.NotFound() : Results.File(export.Content, export.ContentType, export.FileName);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 
+api.MapGet("/interchange/batches", async (int? limit, IAccountingInterchangeService service, CancellationToken cancellationToken) => Results.Ok(await service.GetRecentBatchesAsync(limit ?? 20, cancellationToken))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+
 api.MapPost("/interchange/quickbooks-online/{entity}", async (string entity, IFormFile? file, bool? dryRun, IAccountingInterchangeService service, CancellationToken cancellationToken) =>
 {
     if (file is null || file.Length == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Upload a non-empty CSV file."] });

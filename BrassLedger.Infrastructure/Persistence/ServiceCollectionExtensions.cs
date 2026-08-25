@@ -23,8 +23,9 @@ namespace BrassLedger.Infrastructure.Persistence;
 public static class ServiceCollectionExtensions
 {
     internal const string BaselineSchemaVersion = "2026082501-versioned-schema-baseline";
-    internal const string CurrentSchemaVersion = "2026082502-w2-reporting-metadata";
-    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, CurrentSchemaVersion];
+    internal const string W2ReportingSchemaVersion = "2026082502-w2-reporting-metadata";
+    internal const string CurrentSchemaVersion = "2026082503-accounting-interchange-batches";
+    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, CurrentSchemaVersion];
 
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
@@ -215,8 +216,10 @@ public static class ServiceCollectionExtensions
         var unsupported = applied.Where(version => !SupportedSchemaVersions.Contains(version)).OrderBy(version => version, StringComparer.Ordinal).ToArray();
         if (unsupported.Length > 0)
             throw new InvalidOperationException($"This database contains unsupported or newer BrassLedger schema version(s): {string.Join(", ", unsupported)}. Upgrade the application before opening this database; automatic downgrade is prohibited.");
-        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(BaselineSchemaVersion))
-            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {BaselineSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(W2ReportingSchemaVersion) && !applied.Contains(BaselineSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {W2ReportingSchemaVersion} is recorded without prerequisite {BaselineSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(W2ReportingSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {W2ReportingSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (!applied.Contains(BaselineSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
             {
@@ -226,8 +229,11 @@ public static class ServiceCollectionExtensions
                 await EnsureCaseInsensitiveUserNameUniquenessAsync(dbContext, cancellationToken);
             }, cancellationToken);
 
+        if (!applied.Contains(W2ReportingSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, W2ReportingSchemaVersion, "Added durable W-2 reporting metadata to time entries and posted earning lines.", () => EnsureW2ReportingMetadataSchemaAsync(dbContext, cancellationToken), cancellationToken);
+
         if (!applied.Contains(CurrentSchemaVersion))
-            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added durable W-2 reporting metadata to time entries and posted earning lines.", () => EnsureW2ReportingMetadataSchemaAsync(dbContext, cancellationToken), cancellationToken);
+            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added durable accounting-interchange validation, import, duplicate, and rejection batch history.", () => EnsureAccountingInterchangeBatchSchemaAsync(dbContext, cancellationToken), cancellationToken);
     }
 
     private static async Task ApplySchemaVersionAsync(BrassLedgerDbContext dbContext, string version, string description, Func<Task> apply, CancellationToken cancellationToken)
@@ -261,6 +267,24 @@ public static class ServiceCollectionExtensions
         {
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "PayrollTimeEntries" ADD COLUMN IF NOT EXISTS "W2ReportingJson" text NOT NULL DEFAULT '{{}}';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "PayrollEarningLines" ADD COLUMN IF NOT EXISTS "W2ReportingJson" text NOT NULL DEFAULT '{{}}';""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureAccountingInterchangeBatchSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "AccountingInterchangeBatches" ("Id" TEXT NOT NULL PRIMARY KEY, "CompanyId" TEXT NOT NULL, "ProviderCode" TEXT NOT NULL, "EntityType" TEXT NOT NULL, "FileName" TEXT NOT NULL, "ContentSha256" TEXT NOT NULL, "CommittedImportKey" TEXT NULL, "Status" TEXT NOT NULL, "IsDryRun" INTEGER NOT NULL, "RowCount" INTEGER NOT NULL, "ImportedCount" INTEGER NOT NULL, "DuplicateCount" INTEGER NOT NULL, "RejectedCount" INTEGER NOT NULL, "RejectionJson" TEXT NOT NULL, "ProcessedByUserId" TEXT NULL, "ProcessedAtUtc" TEXT NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_AccountingInterchangeBatches_CompanyId_ProviderCode_EntityType_ProcessedAtUtc" ON "AccountingInterchangeBatches" ("CompanyId", "ProviderCode", "EntityType", "ProcessedAtUtc");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_AccountingInterchangeBatches_CompanyId_CommittedImportKey" ON "AccountingInterchangeBatches" ("CompanyId", "CommittedImportKey");""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "AccountingInterchangeBatches" ("Id" uuid NOT NULL PRIMARY KEY, "CompanyId" uuid NOT NULL, "ProviderCode" text NOT NULL, "EntityType" text NOT NULL, "FileName" text NOT NULL, "ContentSha256" text NOT NULL, "CommittedImportKey" text NULL, "Status" text NOT NULL, "IsDryRun" boolean NOT NULL, "RowCount" integer NOT NULL, "ImportedCount" integer NOT NULL, "DuplicateCount" integer NOT NULL, "RejectedCount" integer NOT NULL, "RejectionJson" text NOT NULL, "ProcessedByUserId" uuid NULL, "ProcessedAtUtc" timestamptz NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_AccountingInterchangeBatches_CompanyId_ProviderCode_EntityType_ProcessedAtUtc" ON "AccountingInterchangeBatches" ("CompanyId", "ProviderCode", "EntityType", "ProcessedAtUtc");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_AccountingInterchangeBatches_CompanyId_CommittedImportKey" ON "AccountingInterchangeBatches" ("CompanyId", "CommittedImportKey");""", cancellationToken);
         }
     }
 

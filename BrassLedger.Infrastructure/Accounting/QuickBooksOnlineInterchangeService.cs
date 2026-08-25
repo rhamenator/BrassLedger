@@ -51,14 +51,20 @@ public sealed class QuickBooksOnlineInterchangeService(
         if (normalizedEntity is not ("chart-of-accounts" or "customers" or "vendors" or "journal-entries"))
             return AccountingInterchangeImportResult.Failure("Supported imports are chart-of-accounts, customers, vendors, and general journal entries.");
 
-        var parsed = await ReadCsvAsync(content, cancellationToken);
-        if (!parsed.Succeeded) return AccountingInterchangeImportResult.Failure(parsed.Error!);
-        var rows = parsed.Rows!;
-        if (rows.Count == 0) return AccountingInterchangeImportResult.Failure("The CSV contains no data rows.");
-        if (rows.Count > MaximumRows) return AccountingInterchangeImportResult.Failure($"A QuickBooks import can contain at most {MaximumRows} rows.");
-
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var parsed = await ReadCsvAsync(content, cancellationToken);
+        if (!parsed.Succeeded)
+            return await RecordRejectedBatchAsync(db, companyId, normalizedEntity, options, parsed.ContentSha256, 0, [parsed.Error!], cancellationToken);
+        var rows = parsed.Rows!;
+        if (rows.Count == 0)
+            return await RecordRejectedBatchAsync(db, companyId, normalizedEntity, options, parsed.ContentSha256, 0, ["The CSV contains no data rows."], cancellationToken);
+        if (rows.Count > MaximumRows)
+            return await RecordRejectedBatchAsync(db, companyId, normalizedEntity, options, parsed.ContentSha256, rows.Count, [$"A QuickBooks import can contain at most {MaximumRows} rows."], cancellationToken);
+
+        var committedImportKey = BuildCommittedImportKey(normalizedEntity, parsed.ContentSha256);
+        if (!options.DryRun && await db.AccountingInterchangeBatches.AnyAsync(batch => batch.CompanyId == companyId && batch.CommittedImportKey == committedImportKey, cancellationToken))
+            return await RecordRejectedBatchAsync(db, companyId, normalizedEntity, options, parsed.ContentSha256, rows.Count, ["This exact QuickBooks file and data type were already imported. Use the recorded batch to reconcile it rather than importing it again."], cancellationToken, duplicateCount: rows.Count);
         var result = normalizedEntity switch
         {
             "chart-of-accounts" => await ImportAccountsAsync(db, companyId, rows, options.DryRun, cancellationToken),
@@ -66,15 +72,36 @@ public sealed class QuickBooksOnlineInterchangeService(
             "vendors" => await ImportVendorsAsync(db, companyId, rows, options.DryRun, cancellationToken),
             _ => await ImportJournalEntriesAsync(db, companyId, rows, options.DryRun, cancellationToken)
         };
-        if (!result.Succeeded) return result with { DryRun = options.DryRun, RowCount = rows.Count, ContentSha256 = parsed.ContentSha256 };
+        if (!result.Succeeded)
+            return await RecordRejectedBatchAsync(db, companyId, normalizedEntity, options, parsed.ContentSha256, rows.Count, result.Errors, cancellationToken);
+
+        var batch = NewBatch(companyId, normalizedEntity, options, parsed.ContentSha256, options.DryRun ? "Validated" : "Imported", rows.Count, result.ImportedCount, [], options.DryRun ? null : committedImportKey);
+        db.AccountingInterchangeBatches.Add(batch);
         db.BusinessAuditEntries.Add(new BusinessAuditEntry
         {
             Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = options.DryRun ? "accounting-interchange.quickbooks.validated" : "accounting-interchange.quickbooks.imported",
-            EntityType = "AccountingInterchange", EntityId = Guid.NewGuid(), OccurredAtUtc = DateTimeOffset.UtcNow,
+            EntityType = nameof(AccountingInterchangeBatch), EntityId = batch.Id, OccurredAtUtc = batch.ProcessedAtUtc,
             DetailJson = System.Text.Json.JsonSerializer.Serialize(new { provider = "quickbooks-online", entity = normalizedEntity, fileName = Path.GetFileName(options.FileName), contentSha256 = parsed.ContentSha256, rowCount = rows.Count, importedCount = result.ImportedCount, options.DryRun })
         });
-        await db.SaveChangesAsync(cancellationToken);
-        return result with { DryRun = options.DryRun, RowCount = rows.Count, ContentSha256 = parsed.ContentSha256 };
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException) when (!options.DryRun)
+        {
+            return AccountingInterchangeImportResult.Failure("This exact QuickBooks file and data type were imported concurrently. Refresh the batch history before retrying.") with { DryRun = false, RowCount = rows.Count, ContentSha256 = parsed.ContentSha256, DuplicateCount = rows.Count, RejectedCount = rows.Count };
+        }
+        return result with { DryRun = options.DryRun, RowCount = rows.Count, ContentSha256 = parsed.ContentSha256, BatchId = batch.Id };
+    }
+
+    public async Task<IReadOnlyList<AccountingInterchangeBatchSnapshot>> GetRecentBatchesAsync(int limit = 20, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var boundedLimit = Math.Clamp(limit, 1, 100);
+        var batches = db.Database.IsSqlite()
+            ? await db.AccountingInterchangeBatches.FromSqlInterpolated($"""SELECT * FROM "AccountingInterchangeBatches" WHERE "CompanyId" = {companyId} ORDER BY "ProcessedAtUtc" DESC LIMIT {boundedLimit}""").AsNoTracking().ToListAsync(cancellationToken)
+            : await db.AccountingInterchangeBatches.AsNoTracking().Where(batch => batch.CompanyId == companyId).OrderByDescending(batch => batch.ProcessedAtUtc).Take(boundedLimit).ToListAsync(cancellationToken);
+        var userIds = batches.Where(batch => batch.ProcessedByUserId.HasValue).Select(batch => batch.ProcessedByUserId!.Value).Distinct().ToArray();
+        var users = await db.Users.AsNoTracking().Where(user => userIds.Contains(user.Id)).ToDictionaryAsync(user => user.Id, user => user.DisplayName, cancellationToken);
+        return batches.Select(batch => new AccountingInterchangeBatchSnapshot(batch.Id, batch.ProviderCode, batch.EntityType, batch.FileName, batch.ContentSha256, batch.Status, batch.IsDryRun, batch.RowCount, batch.ImportedCount, batch.DuplicateCount, batch.RejectedCount, DeserializeRejections(batch.RejectionJson), batch.ProcessedByUserId is { } userId ? users.GetValueOrDefault(userId) : null, batch.ProcessedAtUtc)).ToArray();
     }
 
     private static async Task<IEnumerable<string[]>> ExportJournalEntriesAsync(BrassLedgerDbContext db, Guid companyId, CancellationToken ct)
@@ -290,6 +317,34 @@ public sealed class QuickBooksOnlineInterchangeService(
         row.Add(field.ToString());
         if (row.Any(value => value.Length > 0)) records.Add(row);
         return records;
+    }
+
+    private async Task<AccountingInterchangeImportResult> RecordRejectedBatchAsync(BrassLedgerDbContext db, Guid companyId, string entityType, AccountingInterchangeImportOptions options, string contentSha256, int rowCount, IReadOnlyList<string> errors, CancellationToken cancellationToken, int duplicateCount = 0)
+    {
+        var batch = NewBatch(companyId, entityType, options, contentSha256, duplicateCount > 0 ? "DuplicateRejected" : "Rejected", rowCount, 0, errors, null, duplicateCount);
+        db.AccountingInterchangeBatches.Add(batch);
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry
+        {
+            Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = duplicateCount > 0 ? "accounting-interchange.quickbooks.duplicate-rejected" : "accounting-interchange.quickbooks.rejected",
+            EntityType = nameof(AccountingInterchangeBatch), EntityId = batch.Id, OccurredAtUtc = batch.ProcessedAtUtc,
+            DetailJson = System.Text.Json.JsonSerializer.Serialize(new { provider = "quickbooks-online", entity = entityType, batch.FileName, batch.ContentSha256, batch.RowCount, batch.DuplicateCount, batch.RejectedCount, errors, options.DryRun })
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        return AccountingInterchangeImportResult.Failure(errors.ToArray()) with { DryRun = options.DryRun, RowCount = rowCount, ContentSha256 = contentSha256, BatchId = batch.Id, DuplicateCount = duplicateCount, RejectedCount = batch.RejectedCount };
+    }
+
+    private AccountingInterchangeBatch NewBatch(Guid companyId, string entityType, AccountingInterchangeImportOptions options, string contentSha256, string status, int rowCount, int importedCount, IReadOnlyList<string> errors, string? committedImportKey, int duplicateCount = 0) => new()
+    {
+        Id = Guid.NewGuid(), CompanyId = companyId, ProviderCode = "quickbooks-online", EntityType = entityType, FileName = Path.GetFileName(options.FileName), ContentSha256 = contentSha256,
+        CommittedImportKey = committedImportKey, Status = status, IsDryRun = options.DryRun, RowCount = rowCount, ImportedCount = importedCount, DuplicateCount = duplicateCount,
+        RejectedCount = errors.Count == 0 ? 0 : Math.Max(1, rowCount), RejectionJson = System.Text.Json.JsonSerializer.Serialize(errors), ProcessedByUserId = ResolveUserId(), ProcessedAtUtc = DateTimeOffset.UtcNow
+    };
+
+    private static string BuildCommittedImportKey(string entityType, string contentSha256) => $"quickbooks-online:{entityType}:{contentSha256}";
+    private static IReadOnlyList<string> DeserializeRejections(string json)
+    {
+        try { return System.Text.Json.JsonSerializer.Deserialize<string[]>(json) ?? []; }
+        catch (System.Text.Json.JsonException) { return ["Stored rejection details could not be read."]; }
     }
 
     private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken ct)

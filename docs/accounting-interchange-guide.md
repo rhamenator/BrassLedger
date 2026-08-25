@@ -32,7 +32,9 @@ Intuit's supported data types and subscription restrictions can change. Check th
 6. Choose **Import CSV** only after the preview is clean.
 7. Reconcile record counts and control totals in both products.
 
-BrassLedger limits a file to 2 MiB and 1,000 rows, hashes the exact uploaded bytes with SHA-256, and writes an audit event containing the provider, data type, safe file name, hash, row count, result count, operator, time, and whether the run was validation-only. Imports are company-scoped. Master lists are saved atomically with their audit event. Journal imports must contain at least two balanced lines, resolve to one active non-control account per line, and are posted through the normal ledger controls. A stable source-journal identity prevents a retry from double-posting the same journal.
+BrassLedger limits a file to 2 MiB and 1,000 rows and hashes the exact uploaded bytes with SHA-256. Every validation, committed import, rejected batch, and rejected duplicate is retained in the Ledger page's recent batch history with the provider, data type, safe file name, hash, row/result counts, rejection details, operator, and time. The immutable business audit points to the durable batch record. Imports and batch history are company-scoped. Master lists are saved atomically with their batch and audit event. Journal imports must contain at least two balanced lines, resolve to one active non-control account per line, and are posted through the normal ledger controls. A committed file fingerprint and stable source-journal identities prevent retries from double-posting the same data.
+
+Rejected batches are all-or-none: correct the source file, preserve it as conversion evidence, and validate the corrected file as a new batch. The batch history deliberately retains the rejected filename, hash, counts, and messages so the correction can be explained later.
 
 ## Not yet supported
 
