@@ -78,6 +78,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IIntegrationService, IntegrationService>();
         services.AddScoped<IAccountingTransactionService, AccountingTransactionService>();
+        services.AddScoped<IPayrollReportingService, PayrollReportingService>();
+        services.AddScoped<IPayrollReportingService, PayrollReportingService>();
         services.AddScoped<IAccountingInterchangeService, QuickBooksOnlineInterchangeService>();
         services.AddScoped<ISecurityAdministrationService, SecurityAdministrationService>();
         services.AddScoped<ITaxAdministrationService, TaxAdministrationService>();
@@ -478,6 +480,9 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollLiabilityPayments_CompanyId_Reference"" ON ""PayrollLiabilityPayments"" (""CompanyId"", ""Reference"");", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollLiabilityPaymentApplications"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""PayrollLiabilityPaymentId"" TEXT NOT NULL, ""PayrollLiabilityId"" TEXT NOT NULL, ""Amount"" TEXT NOT NULL);", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollLiabilityPaymentApplications_PayrollLiabilityPaymentId_PayrollLiabilityId"" ON ""PayrollLiabilityPaymentApplications"" (""PayrollLiabilityPaymentId"", ""PayrollLiabilityId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollEmployeePayments"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""PayrollRunId"" TEXT NOT NULL, ""PayrollRunEmployeeLineId"" TEXT NOT NULL, ""EmployeeId"" TEXT NOT NULL, ""EmployeeNumber"" TEXT NOT NULL, ""EmployeeName"" TEXT NOT NULL, ""Method"" TEXT NOT NULL, ""Reference"" TEXT NOT NULL, ""BankRoutingNumber"" TEXT NOT NULL, ""BankAccountNumber"" TEXT NOT NULL, ""BankAccountType"" TEXT NOT NULL, ""DestinationLastFour"" TEXT NOT NULL, ""Amount"" TEXT NOT NULL, ""YearToDateGross"" TEXT NOT NULL, ""YearToDateEmployeeTaxes"" TEXT NOT NULL, ""YearToDateEmployeeDeductions"" TEXT NOT NULL, ""YearToDateNetPay"" TEXT NOT NULL, ""Status"" TEXT NOT NULL, ""IssuedAtUtc"" TEXT NOT NULL, ""ReversedAtUtc"" TEXT NULL, ""ConcurrencyToken"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollEmployeePayments_PayrollRunId_EmployeeId"" ON ""PayrollEmployeePayments"" (""PayrollRunId"", ""EmployeeId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_PayrollEmployeePayments_CompanyId_Status_IssuedAtUtc"" ON ""PayrollEmployeePayments"" (""CompanyId"", ""Status"", ""IssuedAtUtc"");", cancellationToken);
             return;
         }
 
@@ -795,6 +800,9 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollLiabilityPayments_CompanyId_Reference"" ON ""PayrollLiabilityPayments"" (""CompanyId"", ""Reference"");", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollLiabilityPaymentApplications"" (""Id"" uuid NOT NULL PRIMARY KEY, ""PayrollLiabilityPaymentId"" uuid NOT NULL, ""PayrollLiabilityId"" uuid NOT NULL, ""Amount"" numeric(18,2) NOT NULL);", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollLiabilityPaymentApplications_PayrollLiabilityPaymentId_PayrollLiabilityId"" ON ""PayrollLiabilityPaymentApplications"" (""PayrollLiabilityPaymentId"", ""PayrollLiabilityId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollEmployeePayments"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""PayrollRunId"" uuid NOT NULL, ""PayrollRunEmployeeLineId"" uuid NOT NULL, ""EmployeeId"" uuid NOT NULL, ""EmployeeNumber"" text NOT NULL, ""EmployeeName"" text NOT NULL, ""Method"" text NOT NULL, ""Reference"" text NOT NULL, ""BankRoutingNumber"" text NOT NULL, ""BankAccountNumber"" text NOT NULL, ""BankAccountType"" text NOT NULL, ""DestinationLastFour"" text NOT NULL, ""Amount"" numeric(18,2) NOT NULL, ""YearToDateGross"" numeric(18,2) NOT NULL, ""YearToDateEmployeeTaxes"" numeric(18,2) NOT NULL, ""YearToDateEmployeeDeductions"" numeric(18,2) NOT NULL, ""YearToDateNetPay"" numeric(18,2) NOT NULL, ""Status"" text NOT NULL, ""IssuedAtUtc"" timestamptz NOT NULL, ""ReversedAtUtc"" timestamptz NULL, ""ConcurrencyToken"" text NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollEmployeePayments_PayrollRunId_EmployeeId"" ON ""PayrollEmployeePayments"" (""PayrollRunId"", ""EmployeeId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_PayrollEmployeePayments_CompanyId_Status_IssuedAtUtc"" ON ""PayrollEmployeePayments"" (""CompanyId"", ""Status"", ""IssuedAtUtc"");", cancellationToken);
         }
     }
 

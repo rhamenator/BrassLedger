@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.AccessPayroll)]
 @inject IBusinessWorkspaceService WorkspaceService
 @inject IAccountingTransactionService TransactionService
+@inject IPayrollReportingService PayrollReportingService
 
 <PageTitle>Payroll</PageTitle>
 
@@ -122,11 +123,39 @@ else
                         @if (run.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="payrollApproveContext"><button class="action-secondary" type="button" @onclick="async () => await ApprovePayrollAsync(run)">Approve</button></Authorized></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollCancelContext"><button class="action-secondary" type="button" @onclick="async () => await CancelPayrollAsync(run)">Cancel</button></Authorized></AuthorizeView> }
                         else if (run.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostPayroll"><Authorized Context="payrollPostContext"><button class="action-primary" type="button" @onclick="async () => await PostApprovedPayrollAsync(run)">Post</button></Authorized></AuthorizeView> }
                         else if (run.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollReverseContext"><button class="action-secondary" type="button" @onclick="async () => await ReversePayrollAsync(run)">Reverse</button></Authorized></AuthorizeView> }
+                        @if (run.Status is "Posted" or "Reversed") { <button class="action-secondary" type="button" @onclick="() => LoadPayrollRegisterAsync(run.Id)">View register</button> }
                     </td></tr>
                 }
                 </tbody></table>
             }
             else { <p>No payroll drafts or posted runs yet.</p> }
+            @if (SelectedRegister is not null)
+            {
+                <section class="report-preview" aria-label="Payroll register preview">
+                    <h3>Register — @SelectedRegister.PayrollReference</h3>
+                    <p class="page-intro">@SelectedRegister.PeriodStart.ToString("MMM d, yyyy") through @SelectedRegister.PeriodEnd.ToString("MMM d, yyyy") · paid @SelectedRegister.PayDate.ToString("MMM d, yyyy") · @SelectedRegister.Status</p>
+                    <a class="action-secondary" href="@($"/payroll/reports/{SelectedRegister.PayrollRunId}/register.csv")">Download CSV</a>
+                    <div class="table-scroll"><table class="data-table"><thead><tr><th>Employee</th><th>Method</th><th>Status</th><th>Gross</th><th>Employee taxes</th><th>Deductions</th><th>Employer taxes</th><th>Employer benefits</th><th>Net</th><th></th></tr></thead><tbody>
+                    @foreach (var employee in SelectedRegister.Employees)
+                    {
+                        <tr><td>@employee.EmployeeNumber — @employee.EmployeeName</td><td>@employee.PaymentMethod</td><td>@employee.PaymentStatus</td><td>@employee.GrossPay.ToString("C")</td><td>@employee.EmployeeWithholdings.ToString("C")</td><td>@((employee.PreTaxDeductions + employee.PostTaxDeductions).ToString("C"))</td><td>@employee.EmployerPayrollTaxes.ToString("C")</td><td>@employee.EmployerBenefitContributions.ToString("C")</td><td>@employee.NetPay.ToString("C")</td><td><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData"><Authorized Context="payStatementContext"><button class="action-secondary" type="button" @onclick="() => LoadPayStatementAsync(SelectedRegister.PayrollRunId, employee.EmployeeId)">Pay statement</button></Authorized></AuthorizeView></td></tr>
+                    }
+                    <tr><th colspan="3">Totals</th><th>@SelectedRegister.GrossPayroll.ToString("C")</th><th>@SelectedRegister.EmployeeWithholdings.ToString("C")</th><th>@((SelectedRegister.PreTaxDeductions + SelectedRegister.PostTaxDeductions).ToString("C"))</th><th>@SelectedRegister.EmployerPayrollTaxes.ToString("C")</th><th>@SelectedRegister.EmployerBenefitContributions.ToString("C")</th><th>@SelectedRegister.NetPay.ToString("C")</th><th></th></tr>
+                    </tbody></table></div>
+                </section>
+            }
+            @if (SelectedPayStatement is not null)
+            {
+                <section class="report-preview pay-statement" aria-label="Pay statement preview">
+                    <h3>Pay statement — @SelectedPayStatement.EmployeeName</h3>
+                    <p>@SelectedPayStatement.CompanyLegalName · @SelectedPayStatement.PayrollReference · @SelectedPayStatement.PeriodStart.ToString("MMM d")–@SelectedPayStatement.PeriodEnd.ToString("MMM d, yyyy") · paid @SelectedPayStatement.PayDate.ToString("MMM d, yyyy")</p>
+                    <p><strong>@SelectedPayStatement.PaymentMethod</strong> · @SelectedPayStatement.MaskedDestination · @SelectedPayStatement.PaymentStatus</p>
+                    <div class="stats-grid"><article class="stat-card"><span class="stat-value">@SelectedPayStatement.GrossPay.ToString("C")</span><span class="stat-label">Gross pay</span></article><article class="stat-card"><span class="stat-value">@SelectedPayStatement.EmployeeWithholdings.ToString("C")</span><span class="stat-label">Employee taxes</span></article><article class="stat-card"><span class="stat-value">@((SelectedPayStatement.PreTaxDeductions + SelectedPayStatement.PostTaxDeductions).ToString("C"))</span><span class="stat-label">Deductions</span></article><article class="stat-card"><span class="stat-value">@SelectedPayStatement.NetPay.ToString("C")</span><span class="stat-label">Net pay</span></article></div>
+                    <h4>Earnings</h4><div class="table-scroll"><table class="data-table"><thead><tr><th>Type</th><th>Date</th><th>Location</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead><tbody>@foreach (var earning in SelectedPayStatement.Earnings) { <tr><td>@earning.Code — @earning.Type</td><td>@(earning.WorkedOn?.ToString("MMM d, yyyy") ?? "—")</td><td>@string.Join(", ", new[] { earning.WorkCity, earning.WorkCounty, earning.WorkState }.Where(value => !string.IsNullOrWhiteSpace(value)))</td><td>@earning.Hours.ToString("N2")</td><td>@earning.Rate.ToString("C")</td><td>@earning.Amount.ToString("C")</td></tr> }</tbody></table></div>
+                    <h4>Taxes and deductions</h4><div class="table-scroll"><table class="data-table"><thead><tr><th>Item</th><th>Jurisdiction / treatment</th><th>Employee</th><th>Employer</th></tr></thead><tbody>@foreach (var tax in SelectedPayStatement.Taxes) { <tr><td>@tax.TaxType</td><td>@tax.JurisdictionName</td><td>@tax.EmployeeAmount.ToString("C")</td><td>@tax.EmployerAmount.ToString("C")</td></tr> } @foreach (var deduction in SelectedPayStatement.Deductions) { <tr><td>@deduction.Type</td><td>@(deduction.IsPreTax ? "Pre-tax" : "Post-tax")</td><td>@deduction.EmployeeAmount.ToString("C")</td><td>@deduction.EmployerAmount.ToString("C")</td></tr> }</tbody></table></div>
+                    <p><strong>YTD:</strong> gross @SelectedPayStatement.YearToDateGross.ToString("C") · employee taxes @SelectedPayStatement.YearToDateEmployeeTaxes.ToString("C") · deductions @SelectedPayStatement.YearToDateEmployeeDeductions.ToString("C") · net @SelectedPayStatement.YearToDateNetPay.ToString("C")</p>
+                </section>
+            }
         </section>
 
         <section class="panel">
@@ -337,6 +366,8 @@ else
     private PayrollTimecardEditor TimecardForm = new();
     private string TimecardVoidReason = string.Empty;
     private PayrollRunEstimate? Preview;
+    private PayrollRegister? SelectedRegister;
+    private PayrollPayStatement? SelectedPayStatement;
     private string ReversalReason = string.Empty;
     private JurisdictionRuleEditor JurisdictionRuleForm { get; } = new();
     private Guid SelectedPayrollSetupEmployeeId;
@@ -351,6 +382,19 @@ else
     private EmployeePayrollEditor? SelectedPayrollSetup => EmployeeSetups.GetValueOrDefault(SelectedPayrollSetupEmployeeId);
     private EmployeeSnapshot? SelectedEmployee => Workspace?.Payroll.Employees.FirstOrDefault(employee => employee.Id == SelectedEmployeeId);
 
+    private async Task LoadPayrollRegisterAsync(Guid payrollRunId)
+    {
+        SelectedRegister = await PayrollReportingService.GetRegisterAsync(payrollRunId);
+        SelectedPayStatement = null;
+        StatusMessage = SelectedRegister is null ? "Payroll register not found." : $"Loaded register {SelectedRegister.PayrollReference}.";
+    }
+
+    private async Task LoadPayStatementAsync(Guid payrollRunId, Guid employeeId)
+    {
+        SelectedPayStatement = await PayrollReportingService.GetPayStatementAsync(payrollRunId, employeeId);
+        StatusMessage = SelectedPayStatement is null ? "Pay statement not found." : $"Loaded pay statement for {SelectedPayStatement.EmployeeName}.";
+    }
+
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
@@ -361,7 +405,9 @@ else
         }
         SelectedPayrollSetupEmployeeId = Workspace.Payroll.Employees.FirstOrDefault()?.Id ?? Guid.Empty;
         SelectedEmployeeId = SelectedPayrollSetupEmployeeId;
-        LiabilityPaymentForm.BankAccountId = Workspace.Treasury.BankAccounts.FirstOrDefault()?.Id ?? Guid.Empty;
+        var defaultBankAccountId = Workspace.Treasury.BankAccounts.FirstOrDefault()?.Id ?? Guid.Empty;
+        RunForm.BankAccountId = defaultBankAccountId;
+        LiabilityPaymentForm.BankAccountId = defaultBankAccountId;
         LoadEmploymentEditor();
         ResetTimecardEditor();
     }

@@ -340,6 +340,21 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal("Posted", run.Status);
         Assert.NotNull(run.JournalEntryId);
         Assert.Equal(bank.CurrentBalance - run.NetPay, workspace.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
+        var register = await client.GetFromJsonAsync<PayrollRegister>($"/api/payroll-runs/{run.Id}/register");
+        Assert.NotNull(register);
+        Assert.Equal(run.NetPay, register!.Employees.Sum(item => item.NetPay));
+        var statement = await client.GetFromJsonAsync<PayrollPayStatement>($"/api/payroll-runs/{run.Id}/employees/{employee.Id}/pay-statement");
+        Assert.NotNull(statement);
+        Assert.Equal(run.NetPay, statement!.NetPay);
+        Assert.Equal(statement.GrossPay, statement.Earnings.Sum(item => item.Amount));
+        var registerCsv = await client.GetAsync($"/api/payroll-runs/{run.Id}/register.csv");
+        Assert.Equal("text/csv", registerCsv.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("\"TOTAL\"", await registerCsv.Content.ReadAsStringAsync());
+        using (var nonPayrollClient = await CreateAuthenticatedClientAsync(isolatedFactory, "controller"))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/register")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/employees/{employee.Id}/pay-statement")).StatusCode);
+        }
         var liability = workspace.Payroll.Liabilities!.First(item => item.Status == "Open");
         var liabilityPaymentResponse = await client.PostAsJsonAsync("/api/payroll-liability-payments", new RecordPayrollLiabilityPaymentRequest(bank.Id, new DateOnly(2026, 6, 13), "API-TAX-PAY-1", "Tax agency", "EFT", [new PayrollLiabilityPaymentApplicationInput(liability.Id, liability.OutstandingAmount)]));
         Assert.Equal(HttpStatusCode.Created, liabilityPaymentResponse.StatusCode);

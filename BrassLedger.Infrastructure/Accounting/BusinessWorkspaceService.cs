@@ -69,9 +69,10 @@ public sealed class BusinessWorkspaceService(
         var bankEntryLines = bankEntryIds.Length == 0
             ? new List<JournalEntryLine>()
             : await dbContext.JournalEntryLines.AsNoTracking().Where(line => bankEntryIds.Contains(line.JournalEntryId)).ToListAsync(cancellationToken);
-        var employees = await dbContext.Employees.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.EmployeeNumber).ToListAsync(cancellationToken);
-        var payrollJurisdictionRules = await dbContext.PayrollJurisdictionRules.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.ResidenceJurisdiction).ThenBy(x => x.WorkJurisdiction).ToListAsync(cancellationToken);
-        var payrollRuns = (await dbContext.PayrollRuns.AsNoTracking().Where(x => x.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(x => x.PayDate).ThenByDescending(x => x.PreparedAtUtc).ToList();
+        var employeeSummary = await dbContext.Employees.AsNoTracking().Where(x => x.CompanyId == company.Id).Select(x => new { x.IsActive, x.MonthlyBasePay }).ToListAsync(cancellationToken);
+        var employees = canAccessPayroll ? await dbContext.Employees.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.EmployeeNumber).ToListAsync(cancellationToken) : [];
+        var payrollJurisdictionRules = canAccessPayroll ? await dbContext.PayrollJurisdictionRules.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.ResidenceJurisdiction).ThenBy(x => x.WorkJurisdiction).ToListAsync(cancellationToken) : [];
+        var payrollRuns = canAccessPayroll ? (await dbContext.PayrollRuns.AsNoTracking().Where(x => x.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(x => x.PayDate).ThenByDescending(x => x.PreparedAtUtc).ToList() : [];
         var payrollTimecards = canAccessPayroll ? (await dbContext.PayrollTimecards.AsNoTracking().Where(x => x.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(x => x.PeriodEnd).ThenBy(x => x.EmployeeId).ToList() : [];
         var payrollTimecardIds = payrollTimecards.Select(timecard => timecard.Id).ToArray();
         var payrollTimeEntries = payrollTimecardIds.Length == 0 ? [] : await dbContext.PayrollTimeEntries.AsNoTracking().Where(entry => payrollTimecardIds.Contains(entry.PayrollTimecardId)).OrderBy(entry => entry.Sequence).ToListAsync(cancellationToken);
@@ -104,7 +105,7 @@ public sealed class BusinessWorkspaceService(
             accounts.Count + journalEntries.Count,
             customers.Count + invoices.Count,
             vendors.Count + vendorBills.Count,
-            employees.Count + taxProfiles.Count,
+            employeeSummary.Count + taxProfiles.Count,
             inventoryItems.Count,
             salesOrders.Count,
             purchaseOrders.Count,
@@ -126,7 +127,7 @@ public sealed class BusinessWorkspaceService(
                 CashOnHand: bankAccounts.Sum(x => x.CurrentBalance),
                 ReceivablesOpen: invoices.Sum(x => x.BalanceDue),
                 PayablesOpen: vendorBills.Sum(x => x.BalanceDue),
-                MonthlyPayroll: employees.Where(x => x.IsActive).Sum(x => x.MonthlyBasePay),
+                MonthlyPayroll: employeeSummary.Where(x => x.IsActive).Sum(x => x.MonthlyBasePay),
                 InventoryItems: inventoryItems.Count,
                 OpenSalesOrders: salesOrders.Count(x => x.Status is "Open" or "Picking" or "Allocated"),
                 OpenProjects: projectJobs.Count(x => x.Status is "Open" or "Billing"),
@@ -229,8 +230,8 @@ public sealed class BusinessWorkspaceService(
                 Transfers: bankTransfers.Select(item => new BankTransferSnapshot(item.Id, item.FromBankAccountId, item.ToBankAccountId, item.TransferDate, item.Amount, item.Reference, item.Memo, item.Status, item.JournalEntryId, item.InboundJournalEntryId, item.ReversalJournalEntryId, item.InboundReversalJournalEntryId, item.ReversalDate, item.ReversalReason)).ToArray(),
                 Adjustments: subledgerAdjustments.Where(item => item.Subledger == "Banking").Select(item => new BankAdjustmentSnapshot(item.Id, item.BankAccountId!.Value, item.AdjustmentDate, item.Amount, item.Reference, item.Reason, item.OffsetAccountNumber, item.Status, item.JournalEntryId, item.ReversalJournalEntryId)).ToArray()),
             Payroll: new PayrollWorkspace(
-                ActiveEmployees: employees.Count(x => x.IsActive),
-                MonthlyGross: employees.Where(x => x.IsActive).Sum(x => x.MonthlyBasePay),
+                ActiveEmployees: employeeSummary.Count(x => x.IsActive),
+                MonthlyGross: employeeSummary.Where(x => x.IsActive).Sum(x => x.MonthlyBasePay),
                 Employees: employees.Select(x => new EmployeeSnapshot(
                     x.EmployeeNumber,
                     $"{x.FirstName} {x.LastName}",

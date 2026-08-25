@@ -1165,7 +1165,32 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal(draft.PreTaxDeductions + draft.EmployeeWithholdings + draft.PostTaxDeductions + draft.EmployerPayrollTaxes + draft.EmployerBenefitContributions, liabilities.Sum(liability => liability.OriginalAmount));
             var expenseAccountId = await verification.Accounts.Where(account => account.Number == "6100").Select(account => account.Id).SingleAsync();
             Assert.Equal(draft.GrossPayroll + draft.EmployerPayrollTaxes + draft.EmployerBenefitContributions, journalLines.Single(line => line.AccountId == expenseAccountId).Debit);
+            var employeePayment = await verification.PayrollEmployeePayments.SingleAsync(payment => payment.PayrollRunId == draft.Id);
+            Assert.Equal((employee.Id, netPay, "Issued"), (employeePayment.EmployeeId, employeePayment.Amount, employeePayment.Status));
+            Assert.Equal(draft.GrossPayroll, employeePayment.YearToDateGross);
+            Assert.Equal(draft.EmployeeWithholdings, employeePayment.YearToDateEmployeeTaxes);
+            await verification.Database.OpenConnectionAsync();
+            await using var paymentCommand = verification.Database.GetDbConnection().CreateCommand();
+            paymentCommand.CommandText = "SELECT EmployeeName FROM PayrollEmployeePayments WHERE Id = $id";
+            var paymentParameter = paymentCommand.CreateParameter(); paymentParameter.ParameterName = "$id"; paymentParameter.Value = employeePayment.Id; paymentCommand.Parameters.Add(paymentParameter);
+            var storedEmployeeName = (await paymentCommand.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+            Assert.StartsWith("enc::", storedEmployeeName);
+            Assert.DoesNotContain(employeePayment.EmployeeName, storedEmployeeName);
         }
+
+        var reporting = scope.ServiceProvider.GetRequiredService<IPayrollReportingService>();
+        var register = await reporting.GetRegisterAsync(draft.Id);
+        Assert.NotNull(register);
+        Assert.Equal(register!.NetPay, register.Employees.Sum(item => item.NetPay));
+        Assert.Equal(draft.GrossPayroll, register.GrossPayroll);
+        var statement = await reporting.GetPayStatementAsync(draft.Id, employee.Id);
+        Assert.NotNull(statement);
+        Assert.Equal(statement!.GrossPay, statement.Earnings.Sum(item => item.Amount));
+        Assert.Equal(statement.NetPay, statement.GrossPay - statement.PreTaxDeductions - statement.EmployeeWithholdings - statement.PostTaxDeductions);
+        Assert.Equal(statement.EmployeeWithholdings, statement.Taxes.Sum(item => item.EmployeeAmount));
+        var registerCsv = await reporting.ExportRegisterCsvAsync(draft.Id);
+        Assert.Contains("\"TOTAL\"", registerCsv);
+        Assert.Contains(draft.NetPay.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture), registerCsv);
 
         var postedWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
         var payable = postedWorkspace.Payroll.Liabilities!.First(liability => liability.Status == "Open");
@@ -1195,6 +1220,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var reversalLines = await verification.JournalEntryLines.Where(line => line.JournalEntryId == reversed.ReversalJournalEntryId).ToListAsync();
             Assert.Equal(reversalLines.Sum(line => line.Debit), reversalLines.Sum(line => line.Credit));
             Assert.All(await verification.PayrollLiabilities.Where(liability => liability.PayrollRunId == draft.Id).ToListAsync(), liability => Assert.Equal((0m, "Reversed"), (liability.OutstandingAmount, liability.Status)));
+            Assert.All(await verification.PayrollEmployeePayments.Where(payment => payment.PayrollRunId == draft.Id).ToListAsync(), payment => Assert.Equal("Reversed", payment.Status));
             Assert.Equal(4, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityType == "PayrollRun" && entry.EntityId == draft.Id));
         }
     }
@@ -1243,11 +1269,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
         accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.WorkspaceView);
-        var restricted = (await workspaceService.GetWorkspaceAsync()).Payroll.Employees.Single(candidate => candidate.Id == employee.Id);
-        Assert.Empty(restricted.AddressLine1);
-        Assert.False(restricted.HasSocialSecurityNumber);
-        Assert.False(restricted.HasBankAccount);
-        Assert.Null(restricted.EmploymentStartedOn);
+        var restrictedPayroll = (await workspaceService.GetWorkspaceAsync()).Payroll;
+        Assert.Empty(restrictedPayroll.Employees);
+        Assert.Empty(restrictedPayroll.Runs!);
+        Assert.Empty(restrictedPayroll.Timecards!);
+        Assert.Empty(restrictedPayroll.Liabilities!);
 
         accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.PayrollSensitiveData);
         var authorized = (await workspaceService.GetWorkspaceAsync()).Payroll.Employees.Single(candidate => candidate.Id == employee.Id);

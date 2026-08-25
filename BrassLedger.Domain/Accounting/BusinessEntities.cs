@@ -801,6 +801,32 @@ public sealed class PayrollLiabilityPaymentApplication
     public decimal Amount { get; set; }
 }
 
+public sealed class PayrollEmployeePayment
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid PayrollRunId { get; set; }
+    public Guid PayrollRunEmployeeLineId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+    public string Method { get; set; } = "Check";
+    public string Reference { get; set; } = string.Empty;
+    public string BankRoutingNumber { get; set; } = string.Empty;
+    public string BankAccountNumber { get; set; } = string.Empty;
+    public string BankAccountType { get; set; } = string.Empty;
+    public string DestinationLastFour { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public decimal YearToDateGross { get; set; }
+    public decimal YearToDateEmployeeTaxes { get; set; }
+    public decimal YearToDateEmployeeDeductions { get; set; }
+    public decimal YearToDateNetPay { get; set; }
+    public string Status { get; set; } = "Issued";
+    public DateTimeOffset IssuedAtUtc { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
 public sealed class TaxRuleSet
 {
     public Guid Id { get; set; }

@@ -447,6 +447,24 @@ api.MapPost("/payroll-liability-payments/reverse", async (ReversePayrollLiabilit
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollLiabilityPayment"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll);
 
+api.MapGet("/payroll-runs/{payrollRunId:guid}/register", async (Guid payrollRunId, IPayrollReportingService service, CancellationToken cancellationToken) =>
+{
+    var report = await service.GetRegisterAsync(payrollRunId, cancellationToken);
+    return report is null ? Results.NotFound() : Results.Ok(report);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.AccessPayroll);
+
+api.MapGet("/payroll-runs/{payrollRunId:guid}/register.csv", async (Guid payrollRunId, IPayrollReportingService service, CancellationToken cancellationToken) =>
+{
+    var csv = await service.ExportRegisterCsvAsync(payrollRunId, cancellationToken);
+    return csv is null ? Results.NotFound() : Results.Text(csv, "text/csv; charset=utf-8");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.AccessPayroll);
+
+api.MapGet("/payroll-runs/{payrollRunId:guid}/employees/{employeeId:guid}/pay-statement", async (Guid payrollRunId, Guid employeeId, IPayrollReportingService service, CancellationToken cancellationToken) =>
+{
+    var statement = await service.GetPayStatementAsync(payrollRunId, employeeId, cancellationToken);
+    return statement is null ? Results.NotFound() : Results.Ok(statement);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+
 api.MapPut("/employees/payroll-setup", async (SaveEmployeePayrollSetupRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveEmployeePayrollSetupAsync(request, cancellationToken);

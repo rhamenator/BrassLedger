@@ -89,6 +89,12 @@ app.MapGet("/reports/{code}.csv", async (string code, BrassLedger.Application.Ac
     return string.IsNullOrEmpty(csv) ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"{code.ToLowerInvariant()}.csv");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 
+app.MapGet("/payroll/reports/{payrollRunId:guid}/register.csv", async (Guid payrollRunId, BrassLedger.Application.Accounting.IPayrollReportingService service, CancellationToken cancellationToken) =>
+{
+    var csv = await service.ExportRegisterCsvAsync(payrollRunId, cancellationToken);
+    return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"payroll-register-{payrollRunId:N}.csv");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.AccessPayroll);
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
