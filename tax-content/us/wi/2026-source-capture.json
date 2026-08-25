@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-wi",
+  "capturedAtUtc": "2026-08-25T05:25:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.revenue.wi.gov/DOR%20Publications/pb166.pdf", "title": "Wisconsin Publication W-166 Withholding Tax Guide", "revision": "January 2026", "mediaType": "application/pdf", "sha256": "c400ce62d7a945f111d01f42e541415d27c3cae45eb30f3fbf25ac5220949fb7", "bytes": 2128837 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "WT-4", "dataType": "enum", "values": ["Single", "Married"] },
+    { "code": "exemptions", "source": "WT-4", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "WT-4", "dataType": "money", "minimum": 0 },
+    { "code": "completeExemption", "source": "WT-4", "dataType": "boolean" },
+    { "code": "reciprocityDeclaration", "source": "W-220", "dataType": "boolean" },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" }
+  ],
+  "calculation": {
+    "methods": ["PublishedWageBracketTables", "ApprovedAlternateAnnualizedFormula"],
+    "annualExemptionDeduction": 400,
+    "alternateDeduction": {
+      "Single": { "fullDeductionBelow": 17780, "fullDeduction": 6702, "phaseOutRate": 0.12, "zeroAtOrAbove": 73630 },
+      "Married": { "fullDeductionBelow": 25727, "fullDeduction": 9461, "phaseOutRate": 0.20, "zeroAtOrAbove": 73032 }
+    },
+    "alternateFormula": "annualGross - filingStatusDeduction(annualGross) - exemptions * 400; apply annual schedule; divide by payroll periods",
+    "annualSchedule": [
+      { "over": 0, "through": 12760, "baseTax": 0, "rate": 0.0354 },
+      { "over": 12760, "through": 25520, "baseTax": 451.70, "rate": 0.0465 },
+      { "over": 25520, "through": 280950, "baseTax": 1045.04, "rate": 0.053 },
+      { "over": 280950, "baseTax": 14582.83, "rate": 0.0765 }
+    ],
+    "missingOrExpiredCertificate": { "exemptions": 0 },
+    "completeExemptionRenewal": { "annual": true, "dueBefore": "April 30", "failureEffect": "Treat as zero exemptions" },
+    "supplementalWages": { "paidWithRegularWages": "Treat as one wage payment", "paidBetweenPeriods": "Aggregate with current or last preceding regular wages in same year", "optionalFlatRatesByEstimatedAnnualGross": [{ "annualGrossAtLeast": 0, "annualGrossUnder": 12760, "rate": 0.0354 }, { "annualGrossAtLeast": 12760, "annualGrossUnder": 25520, "rate": 0.0465 }, { "annualGrossAtLeast": 25520, "annualGrossUnder": 280950, "rate": 0.053 }, { "annualGrossAtLeast": 280950, "rate": 0.0765 }] },
+    "rounding": { "generalInstructionLocated": false, "alternateFormulaExamplesUseCents": true },
+    "officialExamples": [{ "status": "Single", "frequency": "Weekly", "grossWages": 350, "exemptions": 1, "annualGross": 18200, "annualNetWage": 11148.40, "annualTax": 394.65, "periodWithholding": 7.59 }, { "status": "Single", "frequency": "Weekly", "grossWages": 500, "exemptions": 3, "periodWithholding": 14.34 }, { "status": "Married", "frequency": "Biweekly", "grossWages": 1000, "exemptions": 3, "periodWithholding": 22.08 }]
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Wisconsin resident wages are subject whether services are in Wisconsin, partly outside, or entirely outside Wisconsin, subject to authorized special arrangements.",
+    "minnesotaSpecialArrangement": "Do not require Wisconsin withholding when a Wisconsin resident's Minnesota wages are subject to Minnesota withholding; employee may need Wisconsin estimated payments.",
+    "nonresidentRule": "Withhold only Wisconsin-service wages unless an exception applies; make a reasonable payroll-period division for services in and outside Wisconsin.",
+    "nonresidentAnnualDeMinimis": { "expectedWisconsinWagesUnder": 1500, "effect": "No withholding", "thresholdCrossing": "Withhold prospectively enough to offset earlier amounts not withheld" },
+    "reciprocalStates": ["IL", "IN", "KY", "MI"],
+    "reciprocityCertificate": "W-220",
+    "interstateCarrierExceptions": true,
+    "disasterReliefException": true,
+    "militarySpouseExemptionAvailable": true,
+    "multiStateWorkLocationRequired": true,
+    "nonresidentEntertainer": { "paymentsOver": 7000, "separateWithholdingRequired": true, "generalBondOrDepositRate": 0.06, "form": "WT-11", "due": "Within five days after performance concludes", "waiverOrLowerRatePossible": true }
+  },
+  "filing": {
+    "assignedFrequencies": ["Annual", "Quarterly", "Monthly", "Semimonthly"],
+    "numericAssignmentThresholdsPublished": false,
+    "depositReport": { "form": "WT-6", "requiredFor": ["Quarterly", "Monthly", "Semimonthly"], "zeroReportsRequired": true, "electronicRequiredUnlessWaiver": true },
+    "monthlyAndQuarterlyDue": "Last day of month after period",
+    "semimonthlyDue": [{ "payDates": "1st through 15th", "due": "Last day of same month" }, { "payDates": "16th through month end", "due": "15th of following month" }],
+    "annualReconciliation": { "form": "WT-7", "due": "January 31", "allActiveAccounts": true },
+    "wageAndInformationReturnsDue": "January 31"
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": ["The full wage-bracket matrices are checksummed but not transcribed.", "The Department assigns filing frequency but does not publish numeric thresholds in W-166.", "No general rounding sequence is stated.", "The $1,500 nonresident threshold requires stateful catch-up behavior if expected wages rise."],
+  "review": { "currentJanuary2026PublicationCaptured": true, "alternateFormulaTranscribed": true, "supplementalMethodsTranscribed": true, "officialExamplesTranscribed": true, "residencyAndWorkRulesTranscribed": true, "reciprocityTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "filingAssignmentThresholdsVerified": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import direct tables, obtain filing thresholds, verify rounding, and add phase-out, bracket, certificate-renewal, reciprocity, multi-state, $1,500 catch-up, entertainer, and filing regressions." }
+}

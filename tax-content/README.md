@@ -93,3 +93,9 @@ Rhode Island's capture is in `us/ri/2026-source-capture.json`. It preserves the 
 South Carolina's capture is in `us/sc/2026-source-capture.json`. It preserves equivalent subtraction and addition formulas, allowance-dependent standard deduction, periodic constants, official example, resident no-tax-state branch, and filing schedules. Supplemental treatment, rounding, mixed-location allocation, and direct tables remain activation blockers.
 
 Vermont's capture is in `us/vt/2026-source-capture.json`. It preserves both annual schedules, allowances, federal-W-4 fallback, supplemental and deferred-compensation methods, hour-based nonresident allocation, resident other-state reduction, and the separate Child Care Contribution. Direct tables, rounding, and assigned-frequency thresholds remain activation blockers.
+
+Virginia's capture is in `us/va/2026-source-capture.json`. It preserves separate exemption classes, the exact annualized schedule, supplemental alternatives, reciprocal-state conditions, filing thresholds, and the official example. Direct tables, formula rounding, mixed-location allocation, and the scheduled 2027 standard-deduction sunset remain activation blockers.
+
+West Virginia's capture is in `us/wv/2026-source-capture.json`. It preserves the default multiple-job and optional one-job schedules, allowance values, five reciprocal states, the conditional retroactive 30-day mobile-worker exception, work-location evidence, and filing schedules. Direct tables, rounding cross-verification, supplemental treatment, and an absent official example remain activation blockers.
+
+Wisconsin's capture is in `us/wi/2026-source-capture.json`. It preserves the approved alternate formula, deduction phase-outs, supplemental flat-rate menu, reciprocity, resident and nonresident work rules, stateful $1,500 threshold, entertainer withholding, and filing schedules. Direct tables, rounding, and assigned-frequency thresholds remain activation blockers.

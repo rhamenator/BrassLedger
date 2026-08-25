@@ -943,6 +943,56 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task VirginiaSourceCapture_PreservesExemptionClassesReciprocityAndSunsetWarning()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/va/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(8750, calculation.GetProperty("annualWithholdingStandardDeduction").GetInt32());
+        Assert.Equal(930, calculation.GetProperty("personalAndDependentExemptionValue").GetInt32());
+        Assert.Equal(800, calculation.GetProperty("age65AndBlindExemptionValue").GetInt32());
+        Assert.Equal(0.0575m, calculation.GetProperty("supplementalWages").GetProperty("optionalFlatRateWhenRegularWagesHadWithholding").GetDecimal());
+        Assert.Equal(5, root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalJurisdictions").GetArrayLength());
+        Assert.Contains("sunset", root.GetProperty("captureWarnings")[1].GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task WestVirginiaSourceCapture_PreservesTwoSchedulesAndRetroactiveThirtyDayRule()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/wv/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal("TwoEarnerOrTwoOrMoreJobs", calculation.GetProperty("defaultSchedule").GetString());
+        Assert.Equal(5, calculation.GetProperty("annualSchedules").GetProperty("OneEarnerOrOneJob").GetArrayLength());
+        Assert.Equal(0.0458m, calculation.GetProperty("annualSchedules").GetProperty("TwoEarnerOrTwoOrMoreJobs")[4].GetProperty("rate").GetDecimal());
+        Assert.Equal(5, root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates").GetArrayLength());
+        Assert.Contains("first 30", root.GetProperty("residencyAndWorkRules").GetProperty("nonresidentThirtyDayException").GetProperty("overThresholdEffect").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task WisconsinSourceCapture_PreservesPhaseOutSupplementalMenuAndStatefulNonresidentRule()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/wi/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(400, calculation.GetProperty("annualExemptionDeduction").GetInt32());
+        Assert.Equal(0.12m, calculation.GetProperty("alternateDeduction").GetProperty("Single").GetProperty("phaseOutRate").GetDecimal());
+        Assert.Equal(4, calculation.GetProperty("supplementalWages").GetProperty("optionalFlatRatesByEstimatedAnnualGross").GetArrayLength());
+        Assert.Equal(22.08m, calculation.GetProperty("officialExamples")[2].GetProperty("periodWithholding").GetDecimal());
+        Assert.Equal(4, root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates").GetArrayLength());
+        Assert.Contains("offset", root.GetProperty("residencyAndWorkRules").GetProperty("nonresidentAnnualDeMinimis").GetProperty("thresholdCrossing").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();
