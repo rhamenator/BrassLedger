@@ -708,6 +708,57 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task MinnesotaSourceCapture_PreservesSchedulesReciprocityAndResidentCredit()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/mn/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(5300, calculation.GetProperty("annualAllowanceAmount").GetInt32());
+        Assert.Equal(5, calculation.GetProperty("annualSchedules").GetProperty("Single").GetArrayLength());
+        Assert.Equal(0.0985m, calculation.GetProperty("annualSchedules").GetProperty("Married")[4].GetProperty("rate").GetDecimal());
+        Assert.Equal(0.0625m, calculation.GetProperty("supplementalWages").GetProperty("separatelyPaidAndSeparatelyRecordedFlatRate").GetDecimal());
+        Assert.Equal(2, root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates").GetArrayLength());
+        Assert.Contains("actual", root.GetProperty("residencyAndWorkRules").GetProperty("residentWorkingOutsideMinnesota").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task MissouriSourceCapture_PreservesFormulaAllocationAndThresholdConflict()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/mo/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(5, calculation.GetProperty("annualStandardDeductions").EnumerateObject().Count());
+        Assert.Equal(8, calculation.GetProperty("annualBrackets").GetArrayLength());
+        Assert.Equal(0.047m, calculation.GetProperty("supplementalWages").GetProperty("flatRate").GetDecimal());
+        Assert.Equal(59, calculation.GetProperty("officialExample").GetProperty("roundedPeriodicWithholding").GetInt32());
+        Assert.Equal(0.60m, root.GetProperty("residencyAndWorkRules").GetProperty("officialAllocationExample").GetProperty("allocationPercentage").GetDecimal());
+        Assert.False(root.GetProperty("review").GetProperty("filingThresholdConflictResolved").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task MontanaSourceCapture_PreservesThreeSchedulesCeilingAndThirtyDayExceptions()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/mt/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(3, calculation.GetProperty("annualSchedules").EnumerateObject().Count());
+        Assert.Equal(0.0565m, calculation.GetProperty("annualSchedules").GetProperty("HeadOfHousehold")[2].GetProperty("rate").GetDecimal());
+        Assert.Equal("RoundUpToWholeDollar", calculation.GetProperty("rounding").GetProperty("method").GetString());
+        Assert.Equal(232, calculation.GetProperty("officialExamples")[1].GetProperty("withholding").GetInt32());
+        Assert.Equal(8, root.GetProperty("residencyAndWorkRules").GetProperty("thirtyDayNonresidentExemption").GetProperty("excludedWorkers").GetArrayLength());
+        Assert.Equal("ND", root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates")[0].GetString());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();
