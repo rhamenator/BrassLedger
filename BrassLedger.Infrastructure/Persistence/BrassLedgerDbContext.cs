@@ -47,6 +47,7 @@ public sealed class BrassLedgerDbContext(
     public DbSet<PayrollBankOriginConfiguration> PayrollBankOriginConfigurations => Set<PayrollBankOriginConfiguration>();
     public DbSet<PayrollPaymentFile> PayrollPaymentFiles => Set<PayrollPaymentFile>();
     public DbSet<PayrollFiling> PayrollFilings => Set<PayrollFiling>();
+    public DbSet<PayrollFilingCorrection> PayrollFilingCorrections => Set<PayrollFilingCorrection>();
     public DbSet<PayrollClosePeriod> PayrollClosePeriods => Set<PayrollClosePeriod>();
     public DbSet<GeneralLedgerAccount> Accounts => Set<GeneralLedgerAccount>();
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
@@ -135,6 +136,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollBankOriginConfiguration>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollPaymentFile>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollFiling>().HasKey(x => x.Id);
+        modelBuilder.Entity<PayrollFilingCorrection>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollClosePeriod>().HasKey(x => x.Id);
         modelBuilder.Entity<ProjectJob>().HasKey(x => x.Id);
         modelBuilder.Entity<TaxProfile>().HasKey(x => x.Id);
@@ -215,6 +217,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollBankOriginConfiguration>().Property(x => x.CompanyIdentification).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<PayrollPaymentFile>().Property(x => x.Content).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<PayrollFiling>().Property(x => x.DataJson).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<PayrollFiling>().Property(x => x.ApprovedDataJson).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<PayrollFilingCorrection>().Property(x => x.DataJson).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Employee>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollDeductionPlan>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
@@ -227,6 +231,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollBankOriginConfiguration>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollPaymentFile>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollFiling>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<PayrollFilingCorrection>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollClosePeriod>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.InboundReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
 
@@ -415,6 +420,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollTimeEntry>().HasIndex(x => new { x.PayrollTimecardId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PayrollJurisdictionRule>().HasIndex(x => new { x.CompanyId, x.ResidenceJurisdiction, x.WorkJurisdiction }).IsUnique();
         modelBuilder.Entity<PayrollDepositScheduleConfiguration>().HasIndex(x => new { x.CompanyId, x.JurisdictionCode, x.ReturnFormCode, x.TaxYear }).IsUnique();
+        modelBuilder.Entity<PayrollFilingCorrection>().HasOne<PayrollFiling>().WithMany().HasForeignKey(x => x.OriginalPayrollFilingId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollLiability>().HasOne<PayrollDepositScheduleConfiguration>().WithMany().HasForeignKey(x => x.DepositScheduleConfigurationId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollRunEmployeeLine>().HasIndex(x => new { x.PayrollRunId, x.EmployeeId }).IsUnique();
         modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.Sequence }).IsUnique();
@@ -434,6 +440,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollPaymentFile>().HasIndex(x => new { x.CompanyId, x.PayrollRunId, x.Format }).IsUnique();
         modelBuilder.Entity<PayrollPaymentFile>().HasIndex(x => new { x.CompanyId, x.GeneratedAtUtc });
         modelBuilder.Entity<PayrollFiling>().HasIndex(x => new { x.CompanyId, x.FormCode, x.PeriodKey }).IsUnique();
+        modelBuilder.Entity<PayrollFilingCorrection>().HasIndex(x => new { x.CompanyId, x.OriginalPayrollFilingId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PayrollClosePeriod>().HasIndex(x => new { x.CompanyId, x.PeriodType, x.PeriodKey }).IsUnique();
         modelBuilder.Entity<ProjectJob>().HasIndex(x => new { x.CompanyId, x.JobNumber }).IsUnique();
         modelBuilder.Entity<BankAccount>().HasIndex(x => new { x.CompanyId, x.LedgerAccountId });

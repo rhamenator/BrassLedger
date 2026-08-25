@@ -7,17 +7,44 @@ public sealed record ApprovePayrollFilingRequest(Guid FilingId, string Concurren
 public sealed record ReopenPayrollFilingRequest(Guid FilingId, string Reason, string ConcurrencyToken);
 public sealed record ClosePayrollPeriodRequest(string PeriodType, int TaxYear, int? Quarter = null);
 public sealed record ReopenPayrollPeriodRequest(Guid PeriodId, string Reason, string ConcurrencyToken);
+public sealed record SaveForm941CorrectionDraftRequest(
+    Guid? CorrectionId, Guid OriginalPayrollFilingId, string Process, DateOnly DiscoveredOn,
+    string Explanation, string FederalWithholdingCorrectionType, string EmployeeCertificationCode,
+    string EmployeeCertificationEvidenceReference, bool WageStatementsCorrected,
+    string WageStatementEvidenceReference, string ConcurrencyToken = "");
+public sealed record ApproveForm941CorrectionRequest(Guid CorrectionId, string ConcurrencyToken);
+public sealed record VoidForm941CorrectionRequest(Guid CorrectionId, string Reason, string ConcurrencyToken);
 
 public sealed record PayrollFilingSnapshot(
     Guid Id, string FormCode, int TaxYear, int? Quarter, DateOnly PeriodStart, DateOnly PeriodEnd,
     string Status, JsonElement Data, JsonElement Summary, string SourceDigestSha256,
     string OfficialSourceUrl, string ContentVersion, DateTimeOffset PreparedAtUtc,
-    DateTimeOffset? ApprovedAtUtc, string ConcurrencyToken);
+    DateTimeOffset? ApprovedAtUtc, bool HasApprovedBaseline, string ConcurrencyToken);
 
 public sealed record PayrollClosePeriodSnapshot(
     Guid Id, string PeriodType, int TaxYear, int? Quarter, DateOnly PeriodStart, DateOnly PeriodEnd,
     string Status, DateTimeOffset ClosedAtUtc, DateTimeOffset? ReopenedAtUtc,
     string ReopenReason, string ConcurrencyToken);
+
+public sealed record PayrollFilingCorrectionSnapshot(
+    Guid Id, Guid OriginalPayrollFilingId, int Sequence, string FormCode, int TaxYear, int Quarter,
+    string Process, DateOnly DiscoveredOn, string Explanation, string FederalWithholdingCorrectionType,
+    string EmployeeCertificationCode, string EmployeeCertificationEvidenceReference,
+    bool WageStatementsCorrected, string WageStatementEvidenceReference, string Status, JsonElement Data,
+    string CorrectedSourceDigestSha256, string OfficialSourceUrl, string ContentVersion,
+    DateTimeOffset PreparedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? VoidedAtUtc,
+    string VoidReason, string ConcurrencyToken);
+
+public sealed record Form941CorrectionLine(string Code, string Label, decimal OriginallyReported, decimal CorrectedAmount, decimal Difference);
+public sealed record Form941XData(
+    string Form = "941-X", string Revision = "2026-04", int TaxYear = 0, int Quarter = 0,
+    int CorrectionSequence = 0, string Process = "Adjustment", DateOnly DiscoveredOn = default,
+    string EmployerLegalName = "", string EmployerEin = "", IReadOnlyList<Form941CorrectionLine>? Lines = null,
+    decimal TotalTaxDifference = 0, decimal AmountOwed = 0, decimal CreditOrRefund = 0,
+    string Explanation = "", string FederalWithholdingCorrectionType = "None",
+    string EmployeeCertificationCode = "UnderreportedOnly", string EmployeeCertificationEvidenceReference = "",
+    bool WageStatementsCorrected = false, string WageStatementEvidenceReference = "",
+    bool IrsMefTransmissionImplemented = false, bool RequiresProfessionalReview = true);
 
 public sealed record Form941LiabilityDay(DateOnly PayDate, decimal TaxLiability);
 public sealed record Form941Data(
@@ -62,4 +89,9 @@ public interface IPayrollFilingService
     Task<TransactionResult> ReopenFilingAsync(ReopenPayrollFilingRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ClosePeriodAsync(ClosePayrollPeriodRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReopenPeriodAsync(ReopenPayrollPeriodRequest request, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PayrollFilingCorrectionSnapshot>> GetCorrectionsAsync(CancellationToken cancellationToken = default);
+    Task<PayrollFilingCorrectionSnapshot?> GetCorrectionAsync(Guid correctionId, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveForm941CorrectionDraftAsync(SaveForm941CorrectionDraftRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ApproveForm941CorrectionAsync(ApproveForm941CorrectionRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> VoidForm941CorrectionAsync(VoidForm941CorrectionRequest request, CancellationToken cancellationToken = default);
 }

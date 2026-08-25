@@ -1294,6 +1294,43 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.True((await transactions.ReversePayrollRunAsync(new ReversePayrollRunRequest(run.Id, new DateOnly(2026, 6, 10), "Quarter correction", run.ConcurrencyToken))).Succeeded);
         }
 
+        var invalidClaim = await filings.SaveForm941CorrectionDraftAsync(new SaveForm941CorrectionDraftRequest(null, draft.Id, "Claim", new DateOnly(2026, 6, 10), "Correct payroll taxes after reversing the duplicated payroll run.", "None", "UnderreportedOnly", "", false, ""));
+        Assert.False(invalidClaim.Succeeded);
+        Assert.Contains("federal-income-tax", invalidClaim.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var correctionRequest = new SaveForm941CorrectionDraftRequest(null, draft.Id, "Claim", new DateOnly(2026, 6, 10), "Correct payroll taxes after reversing the duplicated payroll run.", "SameYearRepaid", "RepaidOrReimbursed", "EMPLOYEE-REFUND-BATCH-20260610", true, "W2C-BATCH-2026-Q2");
+        var correctionDraft = await filings.SaveForm941CorrectionDraftAsync(correctionRequest);
+        Assert.True(correctionDraft.Succeeded, correctionDraft.ErrorMessage);
+        var correction = await filings.GetCorrectionAsync(correctionDraft.Id!.Value);
+        Assert.NotNull(correction); Assert.Equal("Draft", correction!.Status); Assert.Equal("Claim", correction.Process);
+        Assert.True(correction.Data.GetProperty("CreditOrRefund").GetDecimal() > 0m);
+        Assert.All(correction.Data.GetProperty("Lines").EnumerateArray(), line => Assert.Equal(line.GetProperty("CorrectedAmount").GetDecimal() - line.GetProperty("OriginallyReported").GetDecimal(), line.GetProperty("Difference").GetDecimal()));
+        await using (var db = await factory.CreateDbContextAsync()) { var changedEmployee = await db.Employees.SingleAsync(item => item.Id == employee.Id); changedEmployee.AddressLine2 = "Suite 2"; changedEmployee.ConcurrencyToken = Guid.NewGuid().ToString("N"); await db.SaveChangesAsync(); }
+        var staleCorrection = await filings.ApproveForm941CorrectionAsync(new ApproveForm941CorrectionRequest(correction.Id, correction.ConcurrencyToken));
+        Assert.False(staleCorrection.Succeeded); Assert.Contains("changed", staleCorrection.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await filings.SaveForm941CorrectionDraftAsync(correctionRequest with { CorrectionId = correction.Id, ConcurrencyToken = correction.ConcurrencyToken })).Succeeded);
+        correction = await filings.GetCorrectionAsync(correction.Id);
+        Assert.True((await filings.ApproveForm941CorrectionAsync(new ApproveForm941CorrectionRequest(correction!.Id, correction.ConcurrencyToken))).Succeeded);
+        correction = Assert.Single(await filings.GetCorrectionsAsync()); Assert.Equal("Approved", correction.Status); Assert.Equal(1, correction.Sequence);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.OpenConnectionAsync(); await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "SELECT DataJson FROM PayrollFilingCorrections WHERE Id = $id"; var parameter = command.CreateParameter(); parameter.ParameterName = "$id"; parameter.Value = correction.Id; command.Parameters.Add(parameter);
+            Assert.StartsWith("enc::", (await command.ExecuteScalarAsync())?.ToString());
+        }
+        var additionalCorrectionRun = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 6, 12), "FILING-Q2-CORRECTION-2", [new EmployeePayrollInput(employee.Id, 2_000m)], new DateOnly(2026, 5, 31), new DateOnly(2026, 6, 6)));
+        Assert.True(additionalCorrectionRun.Succeeded, additionalCorrectionRun.ErrorMessage);
+        var mixedClaim = await filings.SaveForm941CorrectionDraftAsync(correctionRequest with { CorrectionId = null, Explanation = "Report the subsequently identified underreported payroll taxes." });
+        Assert.False(mixedClaim.Succeeded); Assert.Contains("claim process", mixedClaim.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var secondDraft = await filings.SaveForm941CorrectionDraftAsync(correctionRequest with { CorrectionId = null, Process = "Adjustment", Explanation = "Report the subsequently identified underreported payroll taxes.", EmployeeCertificationCode = "UnderreportedOnly", EmployeeCertificationEvidenceReference = "", ConcurrencyToken = "" });
+        Assert.True(secondDraft.Succeeded, secondDraft.ErrorMessage);
+        var secondCorrection = await filings.GetCorrectionAsync(secondDraft.Id!.Value); Assert.Equal(2, secondCorrection!.Sequence);
+        Assert.True((await filings.VoidForm941CorrectionAsync(new VoidForm941CorrectionRequest(secondCorrection.Id, "Incorrect explanation selected", secondCorrection.ConcurrencyToken))).Succeeded);
+        var replacementDraft = await filings.SaveForm941CorrectionDraftAsync(correctionRequest with { CorrectionId = null, Process = "Adjustment", Explanation = "Report the subsequently identified underreported payroll taxes with corrected support.", EmployeeCertificationCode = "UnderreportedOnly", EmployeeCertificationEvidenceReference = "", ConcurrencyToken = "" });
+        Assert.True(replacementDraft.Succeeded, replacementDraft.ErrorMessage);
+        var replacementCorrection = await filings.GetCorrectionAsync(replacementDraft.Id!.Value); Assert.Equal(3, replacementCorrection!.Sequence);
+        Assert.True((await filings.ApproveForm941CorrectionAsync(new ApproveForm941CorrectionRequest(replacementCorrection.Id, replacementCorrection.ConcurrencyToken))).Succeeded);
+        var correctionHistory = await filings.GetCorrectionsAsync(); Assert.Equal(3, correctionHistory.Count); Assert.Contains(correctionHistory, item => item.Sequence == 2 && item.Status == "Voided" && item.VoidReason == "Incorrect explanation selected");
+
         var w2 = await filings.SaveDraftAsync(new SavePayrollFilingDraftRequest(null, "W2/W3", 2026));
         Assert.True(w2.Succeeded, w2.ErrorMessage);
         var w2Filing = await filings.GetFilingAsync(w2.Id!.Value);

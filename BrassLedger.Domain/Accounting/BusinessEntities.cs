@@ -978,9 +978,44 @@ public sealed class PayrollFiling
     public DateTimeOffset PreparedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
     public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public string ApprovedDataJson { get; set; } = "{}";
+    public string ApprovedSourceDigestSha256 { get; set; } = string.Empty;
+    public DateTimeOffset? ApprovedBaselineAtUtc { get; set; }
     public Guid? ReopenedByUserId { get; set; }
     public DateTimeOffset? ReopenedAtUtc { get; set; }
     public string ReopenReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollFilingCorrection
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid OriginalPayrollFilingId { get; set; }
+    public int Sequence { get; set; }
+    public string FormCode { get; set; } = "941-X";
+    public int TaxYear { get; set; }
+    public int Quarter { get; set; }
+    public string Process { get; set; } = "Adjustment";
+    public DateOnly DiscoveredOn { get; set; }
+    public string Explanation { get; set; } = string.Empty;
+    public string FederalWithholdingCorrectionType { get; set; } = "None";
+    public string EmployeeCertificationCode { get; set; } = "UnderreportedOnly";
+    public string EmployeeCertificationEvidenceReference { get; set; } = string.Empty;
+    public bool WageStatementsCorrected { get; set; }
+    public string WageStatementEvidenceReference { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
+    public string DataJson { get; set; } = "{}";
+    public string CorrectedSourceDigestSha256 { get; set; } = string.Empty;
+    public string OfficialSourceUrl { get; set; } = string.Empty;
+    public string ContentVersion { get; set; } = string.Empty;
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? VoidedByUserId { get; set; }
+    public DateTimeOffset? VoidedAtUtc { get; set; }
+    public string VoidReason { get; set; } = string.Empty;
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 

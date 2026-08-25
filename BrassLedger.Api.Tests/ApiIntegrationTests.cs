@@ -367,6 +367,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/register")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/employees/{employee.Id}/pay-statement")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-filings")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-filing-corrections")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-deposit-schedules")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-deduction-configuration")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-payment-files")).StatusCode);
@@ -379,6 +380,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.NotNull(filing);
         Assert.True(filing!.Data.GetProperty("WagesTipsAndOtherCompensation").GetDecimal() > 0);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-filings/approve", new ApprovePayrollFilingRequest(filing.Id, filing.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/payroll-filing-corrections")).StatusCode);
         filing = await client.GetFromJsonAsync<PayrollFilingSnapshot>($"/api/payroll-filings/{filing.Id}");
         Assert.Equal("Approved", filing!.Status);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-filings/reopen", new ReopenPayrollFilingRequest(filing.Id, "API correction test", filing.ConcurrencyToken))).StatusCode);

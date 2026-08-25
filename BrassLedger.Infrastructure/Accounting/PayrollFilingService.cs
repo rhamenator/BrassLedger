@@ -16,6 +16,7 @@ public sealed class PayrollFilingService(
     IHttpContextAccessor httpContextAccessor) : IPayrollFilingService
 {
     private const string Form941Source = "https://www.irs.gov/instructions/i941";
+    private const string Form941XSource = "https://www.irs.gov/instructions/i941x";
     private const string Form940Source = "https://www.irs.gov/forms-pubs/about-form-940";
     private const string W2Source = "https://www.irs.gov/instructions/iw2w3";
 
@@ -44,6 +45,125 @@ public sealed class PayrollFilingService(
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         return (await db.PayrollClosePeriods.AsNoTracking().Where(item => item.CompanyId == companyId).OrderByDescending(item => item.TaxYear).ThenByDescending(item => item.Quarter).ToListAsync(cancellationToken))
             .Select(ToSnapshot).ToArray();
+    }
+
+    public async Task<IReadOnlyList<PayrollFilingCorrectionSnapshot>> GetCorrectionsAsync(CancellationToken cancellationToken = default)
+    {
+        RequirePermission(BrassLedgerPermissions.PayrollSensitiveData, "view protected payroll filing correction data");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        return (await db.PayrollFilingCorrections.AsNoTracking().Where(item => item.CompanyId == companyId).OrderByDescending(item => item.TaxYear).ThenByDescending(item => item.Quarter).ThenByDescending(item => item.Sequence).ToListAsync(cancellationToken)).Select(ToSnapshot).ToArray();
+    }
+
+    public async Task<PayrollFilingCorrectionSnapshot?> GetCorrectionAsync(Guid correctionId, CancellationToken cancellationToken = default)
+    {
+        RequirePermission(BrassLedgerPermissions.PayrollSensitiveData, "view protected payroll filing correction data");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var correction = await db.PayrollFilingCorrections.AsNoTracking().SingleOrDefaultAsync(item => item.Id == correctionId && item.CompanyId == companyId, cancellationToken);
+        return correction is null ? null : ToSnapshot(correction);
+    }
+
+    public async Task<TransactionResult> SaveForm941CorrectionDraftAsync(SaveForm941CorrectionDraftRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollPrepare) || !HasPermission(BrassLedgerPermissions.PayrollSensitiveData)) return TransactionResult.Failure("You are not authorized to prepare protected payroll filing corrections.");
+        var process = request.Process?.Trim();
+        var explanation = request.Explanation?.Trim() ?? string.Empty;
+        var employeeEvidence = request.EmployeeCertificationEvidenceReference?.Trim() ?? string.Empty;
+        var wageStatementEvidence = request.WageStatementEvidenceReference?.Trim() ?? string.Empty;
+        if (process is not ("Adjustment" or "Claim")) return TransactionResult.Failure("Form 941-X process must be Adjustment or Claim.");
+        if (explanation.Length < 20) return TransactionResult.Failure("Form 941-X requires a detailed correction explanation of at least 20 characters.");
+        if (request.DiscoveredOn == default || request.DiscoveredOn > DateOnly.FromDateTime(DateTime.Today)) return TransactionResult.Failure("Enter the actual correction discovery date; it cannot be in the future.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var original = await db.PayrollFilings.AsNoTracking().SingleOrDefaultAsync(item => item.Id == request.OriginalPayrollFilingId && item.CompanyId == companyId && item.FormCode == "941" && item.ApprovedSourceDigestSha256 != "", cancellationToken);
+        if (original is null) return TransactionResult.Failure("Select a Form 941 filing with an approved immutable baseline from this company.");
+        var source = await LoadSourceAsync(db, companyId, original.PeriodStart, original.PeriodEnd, cancellationToken);
+        if (source.Runs.Count == 0) return TransactionResult.Failure("Corrected posted payroll does not contain any runs for this filing period.");
+        var corrected = Build941(source, original.TaxYear, original.Quarter!.Value);
+        var priorApproved = await db.PayrollFilingCorrections.AsNoTracking().Where(item => item.CompanyId == companyId && item.OriginalPayrollFilingId == original.Id && item.Status == "Approved").OrderByDescending(item => item.Sequence).FirstOrDefaultAsync(cancellationToken);
+        var baseline = priorApproved is null ? Form941Values(JsonSerializer.Deserialize<Form941Data>(original.ApprovedDataJson) ?? new Form941Data()) : CorrectionValues(JsonSerializer.Deserialize<Form941XData>(priorApproved.DataJson) ?? new Form941XData());
+        var correctedValues = Form941Values(corrected);
+        var lines = Build941CorrectionLines(baseline, correctedValues);
+        if (lines.All(item => item.Difference == 0m)) return TransactionResult.Failure("Corrected posted payroll matches the latest approved filing values; there is no Form 941-X difference to prepare.");
+        var totalDifference = correctedValues["TotalTaxesBeforeAdjustments"] - baseline["TotalTaxesBeforeAdjustments"];
+        var taxLineCodes = new[] { "FederalIncomeTaxWithheld", "SocialSecurityTax", "MedicareTax", "AdditionalMedicareTax" };
+        if (process == "Claim" && (totalDifference >= 0m || lines.Any(item => taxLineCodes.Contains(item.Code) && item.Difference > 0m))) return TransactionResult.Failure("The claim process is limited to overreported tax only. Use the adjustment process for underreported or mixed corrections.");
+        var fitDifference = lines.Single(item => item.Code == "FederalIncomeTaxWithheld").Difference;
+        var fitType = request.FederalWithholdingCorrectionType?.Trim() ?? "None";
+        if (!ValidFederalWithholdingCorrection(fitDifference, original.TaxYear, request.DiscoveredOn, fitType)) return TransactionResult.Failure("The federal-income-tax correction selection is inconsistent with the IRS same-year and prior-year correction restrictions.");
+        var employeeTaxOverreport = lines.Any(item => (item.Code is "SocialSecurityTax" or "MedicareTax" or "AdditionalMedicareTax") && item.Difference < 0m);
+        var certification = request.EmployeeCertificationCode?.Trim() ?? string.Empty;
+        var allowedCertifications = new[] { "UnderreportedOnly", "RepaidOrReimbursed", "EmployeeConsent", "EmployerShareOnly", "NotWithheld" };
+        if (!allowedCertifications.Contains(certification)) return TransactionResult.Failure("Select a supported Form 941-X employee-tax certification.");
+        if (employeeTaxOverreport && (certification == "UnderreportedOnly" || string.IsNullOrWhiteSpace(employeeEvidence))) return TransactionResult.Failure("Overreported employee Social Security or Medicare tax requires the applicable employee protection certification and retained-evidence reference.");
+        if (!employeeTaxOverreport && certification != "UnderreportedOnly" && string.IsNullOrWhiteSpace(employeeEvidence)) return TransactionResult.Failure("Enter the retained-evidence reference for the selected employee-tax certification.");
+        if (!request.WageStatementsCorrected || string.IsNullOrWhiteSpace(wageStatementEvidence)) return TransactionResult.Failure("Certify that applicable Forms W-2/W-2c were or will be filed and enter the retained evidence reference.");
+        PayrollFilingCorrection correction;
+        if (request.CorrectionId.HasValue)
+        {
+            correction = await db.PayrollFilingCorrections.SingleOrDefaultAsync(item => item.Id == request.CorrectionId && item.CompanyId == companyId, cancellationToken) ?? new PayrollFilingCorrection();
+            if (correction.Id == Guid.Empty) return TransactionResult.Failure("Form 941-X draft not found.");
+            if (correction.Status != "Draft" || correction.OriginalPayrollFilingId != original.Id) return TransactionResult.Failure("Only the selected Form 941-X draft can be regenerated.");
+            if (!string.Equals(correction.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The Form 941-X draft changed after it was opened. Refresh and try again.");
+        }
+        else
+        {
+            if (await db.PayrollFilingCorrections.AnyAsync(item => item.CompanyId == companyId && item.OriginalPayrollFilingId == original.Id && item.Status == "Draft", cancellationToken)) return TransactionResult.Failure("A Form 941-X draft already exists for this filing. Regenerate that draft instead.");
+            var latestSequence = await db.PayrollFilingCorrections.Where(item => item.CompanyId == companyId && item.OriginalPayrollFilingId == original.Id).Select(item => (int?)item.Sequence).MaxAsync(cancellationToken) ?? 0;
+            correction = new PayrollFilingCorrection { Id = Guid.NewGuid(), CompanyId = companyId, OriginalPayrollFilingId = original.Id, Sequence = latestSequence + 1, TaxYear = original.TaxYear, Quarter = original.Quarter.Value };
+            db.PayrollFilingCorrections.Add(correction);
+        }
+        var data = new Form941XData(TaxYear: original.TaxYear, Quarter: original.Quarter.Value, CorrectionSequence: correction.Sequence, Process: process, DiscoveredOn: request.DiscoveredOn,
+            EmployerLegalName: corrected.EmployerLegalName, EmployerEin: corrected.EmployerEin, Lines: lines, TotalTaxDifference: totalDifference, AmountOwed: Math.Max(0m, totalDifference), CreditOrRefund: Math.Max(0m, -totalDifference),
+            Explanation: explanation, FederalWithholdingCorrectionType: fitType, EmployeeCertificationCode: certification, EmployeeCertificationEvidenceReference: employeeEvidence,
+            WageStatementsCorrected: request.WageStatementsCorrected, WageStatementEvidenceReference: wageStatementEvidence);
+        correction.Process = process; correction.DiscoveredOn = request.DiscoveredOn; correction.Explanation = explanation; correction.FederalWithholdingCorrectionType = fitType;
+        correction.EmployeeCertificationCode = certification; correction.EmployeeCertificationEvidenceReference = employeeEvidence; correction.WageStatementsCorrected = request.WageStatementsCorrected; correction.WageStatementEvidenceReference = wageStatementEvidence;
+        correction.Status = "Draft"; correction.DataJson = JsonSerializer.Serialize(data); correction.CorrectedSourceDigestSha256 = BuildSourceDigest(source); correction.OfficialSourceUrl = Form941XSource; correction.ContentVersion = "2026-941X-1";
+        correction.PreparedByUserId = ResolveUserId(); correction.PreparedAtUtc = DateTimeOffset.UtcNow; correction.ApprovedByUserId = null; correction.ApprovedAtUtc = null; correction.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAudit(db, companyId, "payroll-filing-correction.draft.generated", nameof(PayrollFilingCorrection), correction.Id, new { correction.OriginalPayrollFilingId, correction.Sequence, correction.Process, correction.TaxYear, correction.Quarter, totalDifference, correction.CorrectedSourceDigestSha256 });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The Form 941-X draft changed while it was being regenerated. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("A conflicting Form 941-X draft or sequence already exists for this filing."); }
+        return TransactionResult.Success(correction.Id);
+    }
+
+    public async Task<TransactionResult> VoidForm941CorrectionAsync(VoidForm941CorrectionRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollReverse) || !HasPermission(BrassLedgerPermissions.PayrollSensitiveData)) return TransactionResult.Failure("You are not authorized to void protected payroll filing corrections.");
+        var reason = request.Reason?.Trim() ?? string.Empty;
+        if (reason.Length < 10) return TransactionResult.Failure("A meaningful Form 941-X void reason of at least 10 characters is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var correction = await db.PayrollFilingCorrections.SingleOrDefaultAsync(item => item.Id == request.CorrectionId && item.CompanyId == companyId, cancellationToken);
+        if (correction is null) return TransactionResult.Failure("Form 941-X correction not found.");
+        if (correction.Status != "Draft") return TransactionResult.Failure("Only a draft Form 941-X correction can be voided.");
+        if (!string.Equals(correction.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The Form 941-X correction changed after it was opened. Refresh and try again.");
+        correction.Status = "Voided"; correction.VoidedByUserId = ResolveUserId(); correction.VoidedAtUtc = DateTimeOffset.UtcNow; correction.VoidReason = reason; correction.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAudit(db, companyId, "payroll-filing-correction.voided", nameof(PayrollFilingCorrection), correction.Id, new { correction.OriginalPayrollFilingId, correction.Sequence, correction.VoidReason });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The Form 941-X correction changed while it was being voided. Refresh and try again."); }
+        return TransactionResult.Success(correction.Id);
+    }
+
+    public async Task<TransactionResult> ApproveForm941CorrectionAsync(ApproveForm941CorrectionRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollApprove) || !HasPermission(BrassLedgerPermissions.PayrollSensitiveData)) return TransactionResult.Failure("You are not authorized to approve protected payroll filing corrections.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var correction = await db.PayrollFilingCorrections.SingleOrDefaultAsync(item => item.Id == request.CorrectionId && item.CompanyId == companyId, cancellationToken);
+        if (correction is null) return TransactionResult.Failure("Form 941-X correction not found.");
+        if (correction.Status != "Draft") return TransactionResult.Failure("Only a draft Form 941-X correction can be approved.");
+        if (!string.Equals(correction.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The Form 941-X correction changed after it was opened. Refresh and try again.");
+        var original = await db.PayrollFilings.AsNoTracking().SingleAsync(item => item.Id == correction.OriginalPayrollFilingId && item.CompanyId == companyId, cancellationToken);
+        var source = await LoadSourceAsync(db, companyId, original.PeriodStart, original.PeriodEnd, cancellationToken);
+        if (!string.Equals(BuildSourceDigest(source), correction.CorrectedSourceDigestSha256, StringComparison.Ordinal)) return TransactionResult.Failure("Posted payroll changed after this Form 941-X draft was generated. Regenerate and review the correction before approval.");
+        correction.Status = "Approved"; correction.ApprovedByUserId = ResolveUserId(); correction.ApprovedAtUtc = DateTimeOffset.UtcNow; correction.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAudit(db, companyId, "payroll-filing-correction.approved", nameof(PayrollFilingCorrection), correction.Id, new { correction.OriginalPayrollFilingId, correction.Sequence, correction.Process, correction.TaxYear, correction.Quarter, correction.CorrectedSourceDigestSha256 });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The Form 941-X correction changed while it was being approved. Refresh and try again."); }
+        return TransactionResult.Success(correction.Id);
     }
 
     public async Task<TransactionResult> SaveDraftAsync(SavePayrollFilingDraftRequest request, CancellationToken cancellationToken = default)
@@ -105,7 +225,12 @@ public sealed class PayrollFilingService(
         if (!string.Equals(filing.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll filing changed after it was opened. Refresh and try again.");
         var source = await LoadSourceAsync(db, companyId, filing.PeriodStart, filing.PeriodEnd, cancellationToken);
         if (!string.Equals(BuildSourceDigest(source), filing.SourceDigestSha256, StringComparison.Ordinal)) return TransactionResult.Failure("Posted payroll changed after this filing draft was generated. Regenerate and review the filing before approval.");
-        filing.Status = "Approved"; filing.ApprovedByUserId = ResolveUserId(); filing.ApprovedAtUtc = DateTimeOffset.UtcNow; filing.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        filing.Status = "Approved"; filing.ApprovedByUserId = ResolveUserId(); filing.ApprovedAtUtc = DateTimeOffset.UtcNow;
+        if (string.IsNullOrWhiteSpace(filing.ApprovedSourceDigestSha256))
+        {
+            filing.ApprovedDataJson = filing.DataJson; filing.ApprovedSourceDigestSha256 = filing.SourceDigestSha256; filing.ApprovedBaselineAtUtc = filing.ApprovedAtUtc;
+        }
+        filing.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddAudit(db, companyId, "payroll-filing.approved", "PayrollFiling", filing.Id, new { filing.FormCode, filing.TaxYear, filing.Quarter, filing.SourceDigestSha256 });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The payroll filing changed while it was being approved. Refresh and try again."); }
@@ -237,6 +362,47 @@ public sealed class PayrollFilingService(
 
     private static string BuildSummaryJson(string formCode, FilingSource source) => JsonSerializer.Serialize(new { formCode, payrollRunCount = source.Runs.Count, employeeCount = source.EmployeeLines.Select(line => line.EmployeeId).Distinct().Count(), grossPayroll = Round(source.EmployeeLines.Sum(line => line.GrossPay)), employeeTaxes = Round(source.TaxLines.Sum(line => line.EmployeeAmount)), employerTaxes = Round(source.TaxLines.Sum(line => line.EmployerAmount)), depositsRecorded = Round(source.Deposits.Sum(item => item.Amount)) });
 
+    private static IReadOnlyDictionary<string, decimal> Form941Values(Form941Data data) => new Dictionary<string, decimal>(StringComparer.Ordinal)
+    {
+        ["EmployeeCount"] = data.EmployeeCount,
+        ["WagesTipsAndOtherCompensation"] = data.WagesTipsAndOtherCompensation,
+        ["FederalIncomeTaxWithheld"] = data.FederalIncomeTaxWithheld,
+        ["SocialSecurityWages"] = data.SocialSecurityWages,
+        ["SocialSecurityTax"] = data.SocialSecurityTax,
+        ["MedicareWagesAndTips"] = data.MedicareWagesAndTips,
+        ["MedicareTax"] = data.MedicareTax,
+        ["AdditionalMedicareTaxableWages"] = data.AdditionalMedicareTaxableWages,
+        ["AdditionalMedicareTax"] = data.AdditionalMedicareTax,
+        ["TotalTaxesBeforeAdjustments"] = data.TotalTaxesBeforeAdjustments
+    };
+
+    private static IReadOnlyDictionary<string, decimal> CorrectionValues(Form941XData data)
+    {
+        var values = data.Lines?.ToDictionary(item => item.Code, item => item.CorrectedAmount, StringComparer.Ordinal) ?? new Dictionary<string, decimal>(StringComparer.Ordinal);
+        if (!values.ContainsKey("TotalTaxesBeforeAdjustments")) values["TotalTaxesBeforeAdjustments"] = data.TotalTaxDifference;
+        return values;
+    }
+
+    private static IReadOnlyList<Form941CorrectionLine> Build941CorrectionLines(IReadOnlyDictionary<string, decimal> baseline, IReadOnlyDictionary<string, decimal> corrected)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["EmployeeCount"] = "Number of employees", ["WagesTipsAndOtherCompensation"] = "Wages, tips, and other compensation",
+            ["FederalIncomeTaxWithheld"] = "Federal income tax withheld", ["SocialSecurityWages"] = "Taxable Social Security wages",
+            ["SocialSecurityTax"] = "Social Security tax", ["MedicareWagesAndTips"] = "Taxable Medicare wages and tips",
+            ["MedicareTax"] = "Medicare tax", ["AdditionalMedicareTaxableWages"] = "Wages subject to Additional Medicare Tax",
+            ["AdditionalMedicareTax"] = "Additional Medicare Tax withholding", ["TotalTaxesBeforeAdjustments"] = "Total taxes before adjustments"
+        };
+        return labels.Select(item => new Form941CorrectionLine(item.Key, item.Value, Round(baseline.GetValueOrDefault(item.Key)), Round(corrected.GetValueOrDefault(item.Key)), Round(corrected.GetValueOrDefault(item.Key) - baseline.GetValueOrDefault(item.Key)))).ToArray();
+    }
+
+    private static bool ValidFederalWithholdingCorrection(decimal difference, int taxYear, DateOnly discoveredOn, string correctionType)
+    {
+        if (difference == 0m) return correctionType == "None";
+        if (correctionType is not ("SameYearRepaid" or "AdministrativeError" or "Section3509")) return false;
+        return discoveredOn.Year == taxYear ? correctionType is "SameYearRepaid" or "AdministrativeError" or "Section3509" : correctionType is "AdministrativeError" or "Section3509";
+    }
+
     private static string BuildSourceDigest(FilingSource source)
     {
         var canonical = JsonSerializer.Serialize(new
@@ -304,7 +470,8 @@ public sealed class PayrollFilingService(
 
     private static string SourceUrl(string formCode) => formCode switch { "941" => Form941Source, "940" => Form940Source, _ => W2Source };
     private static string BuildPeriodKey(int year, int? quarter) => quarter.HasValue ? $"{year}-Q{quarter.Value}" : $"{year}-YEAR";
-    private static PayrollFilingSnapshot ToSnapshot(PayrollFiling filing) => new(filing.Id, filing.FormCode, filing.TaxYear, filing.Quarter, filing.PeriodStart, filing.PeriodEnd, filing.Status, ParseElement(filing.DataJson), ParseElement(filing.SummaryJson), filing.SourceDigestSha256, filing.OfficialSourceUrl, filing.ContentVersion, filing.PreparedAtUtc, filing.ApprovedAtUtc, filing.ConcurrencyToken);
+    private static PayrollFilingSnapshot ToSnapshot(PayrollFiling filing) => new(filing.Id, filing.FormCode, filing.TaxYear, filing.Quarter, filing.PeriodStart, filing.PeriodEnd, filing.Status, ParseElement(filing.DataJson), ParseElement(filing.SummaryJson), filing.SourceDigestSha256, filing.OfficialSourceUrl, filing.ContentVersion, filing.PreparedAtUtc, filing.ApprovedAtUtc, !string.IsNullOrWhiteSpace(filing.ApprovedSourceDigestSha256), filing.ConcurrencyToken);
+    private static PayrollFilingCorrectionSnapshot ToSnapshot(PayrollFilingCorrection correction) => new(correction.Id, correction.OriginalPayrollFilingId, correction.Sequence, correction.FormCode, correction.TaxYear, correction.Quarter, correction.Process, correction.DiscoveredOn, correction.Explanation, correction.FederalWithholdingCorrectionType, correction.EmployeeCertificationCode, correction.EmployeeCertificationEvidenceReference, correction.WageStatementsCorrected, correction.WageStatementEvidenceReference, correction.Status, ParseElement(correction.DataJson), correction.CorrectedSourceDigestSha256, correction.OfficialSourceUrl, correction.ContentVersion, correction.PreparedAtUtc, correction.ApprovedAtUtc, correction.VoidedAtUtc, correction.VoidReason, correction.ConcurrencyToken);
     private static PayrollClosePeriodSnapshot ToSnapshot(PayrollClosePeriod item) => new(item.Id, item.PeriodType, item.TaxYear, item.Quarter, item.PeriodStart, item.PeriodEnd, item.Status, item.ClosedAtUtc, item.ReopenedAtUtc, item.ReopenReason, item.ConcurrencyToken);
     private static JsonElement ParseElement(string json) { using var document = JsonDocument.Parse(json); return document.RootElement.Clone(); }
     private static async Task<bool> IsPeriodClosedAsync(BrassLedgerDbContext db, Guid companyId, DateOnly start, DateOnly end, CancellationToken cancellationToken) => await db.PayrollClosePeriods.AnyAsync(item => item.CompanyId == companyId && item.Status == "Closed" && item.PeriodStart <= end && item.PeriodEnd >= start, cancellationToken);
