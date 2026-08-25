@@ -78,9 +78,10 @@ public sealed record TransactionResult(bool Succeeded, string ErrorMessage, Guid
 }
 
 public sealed record AccountingInterchangeExport(string FileName, string ContentType, byte[] Content);
-public sealed record AccountingInterchangeImportResult(bool Succeeded, int ImportedCount, IReadOnlyList<string> Errors)
+public sealed record AccountingInterchangeImportOptions(bool DryRun = false, string FileName = "");
+public sealed record AccountingInterchangeImportResult(bool Succeeded, int ImportedCount, IReadOnlyList<string> Errors, bool DryRun = false, int RowCount = 0, string ContentSha256 = "")
 {
-    public static AccountingInterchangeImportResult Success(int importedCount) => new(true, importedCount, []);
+    public static AccountingInterchangeImportResult Success(int importedCount, bool dryRun = false, int rowCount = 0, string contentSha256 = "") => new(true, importedCount, [], dryRun, rowCount, contentSha256);
     public static AccountingInterchangeImportResult Failure(params string[] errors) => new(false, 0, errors);
 }
 
@@ -146,5 +147,5 @@ public interface IAccountingTransactionService
 public interface IAccountingInterchangeService
 {
     Task<AccountingInterchangeExport?> ExportQuickBooksOnlineCsvAsync(string entity, CancellationToken cancellationToken = default);
-    Task<AccountingInterchangeImportResult> ImportQuickBooksOnlineCsvAsync(string entity, Stream content, CancellationToken cancellationToken = default);
+    Task<AccountingInterchangeImportResult> ImportQuickBooksOnlineCsvAsync(string entity, Stream content, AccountingInterchangeImportOptions? options = null, CancellationToken cancellationToken = default);
 }

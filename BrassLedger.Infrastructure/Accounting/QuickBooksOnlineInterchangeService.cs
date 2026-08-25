@@ -15,6 +15,7 @@ public sealed class QuickBooksOnlineInterchangeService(
     IAccountingTransactionService transactionService) : IAccountingInterchangeService
 {
     private const int MaximumRows = 1000;
+    private const int MaximumBytes = 2 * 1024 * 1024;
 
     public async Task<AccountingInterchangeExport?> ExportQuickBooksOnlineCsvAsync(string entity, CancellationToken cancellationToken = default)
     {
@@ -35,16 +36,17 @@ public sealed class QuickBooksOnlineInterchangeService(
         if (rows is null) return null;
 
         var header = normalizedEntity == "journal-entries"
-            ? new[] { "Journal Number", "Journal Date", "Reference", "Description", "Account Number", "Debit", "Credit", "Line Description" }
+            ? new[] { "Journal No.", "Journal Date", "Reference", "Journal/Description", "Account Name", "Debits", "Credits", "Line Description" }
             : normalizedEntity == "chart-of-accounts"
-            ? new[] { "Name", "Type", "Detail Type", "Number" }
+            ? new[] { "Account Name", "Type", "Detail Type", "Account Number" }
             : new[] { "Display Name", "Company Name", "Email", normalizedEntity == "customers" ? "Customer Number" : "Vendor Number" };
         var csv = string.Join("\r\n", new[] { header }.Concat(rows).Select(x => string.Join(',', x.Select(EscapeCsv))));
         return new AccountingInterchangeExport($"brassledger-{normalizedEntity}-quickbooks-online.csv", "text/csv", System.Text.Encoding.UTF8.GetBytes(csv));
     }
 
-    public async Task<AccountingInterchangeImportResult> ImportQuickBooksOnlineCsvAsync(string entity, Stream content, CancellationToken cancellationToken = default)
+    public async Task<AccountingInterchangeImportResult> ImportQuickBooksOnlineCsvAsync(string entity, Stream content, AccountingInterchangeImportOptions? options = null, CancellationToken cancellationToken = default)
     {
+        options ??= new();
         var normalizedEntity = NormalizeEntity(entity);
         if (normalizedEntity is not ("chart-of-accounts" or "customers" or "vendors" or "journal-entries"))
             return AccountingInterchangeImportResult.Failure("Supported imports are chart-of-accounts, customers, vendors, and general journal entries.");
@@ -57,13 +59,22 @@ public sealed class QuickBooksOnlineInterchangeService(
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        return normalizedEntity switch
+        var result = normalizedEntity switch
         {
-            "chart-of-accounts" => await ImportAccountsAsync(db, companyId, rows, cancellationToken),
-            "customers" => await ImportCustomersAsync(db, companyId, rows, cancellationToken),
-            "vendors" => await ImportVendorsAsync(db, companyId, rows, cancellationToken),
-            _ => await ImportJournalEntriesAsync(db, companyId, rows, cancellationToken)
+            "chart-of-accounts" => await ImportAccountsAsync(db, companyId, rows, options.DryRun, cancellationToken),
+            "customers" => await ImportCustomersAsync(db, companyId, rows, options.DryRun, cancellationToken),
+            "vendors" => await ImportVendorsAsync(db, companyId, rows, options.DryRun, cancellationToken),
+            _ => await ImportJournalEntriesAsync(db, companyId, rows, options.DryRun, cancellationToken)
         };
+        if (!result.Succeeded) return result with { DryRun = options.DryRun, RowCount = rows.Count, ContentSha256 = parsed.ContentSha256 };
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry
+        {
+            Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = options.DryRun ? "accounting-interchange.quickbooks.validated" : "accounting-interchange.quickbooks.imported",
+            EntityType = "AccountingInterchange", EntityId = Guid.NewGuid(), OccurredAtUtc = DateTimeOffset.UtcNow,
+            DetailJson = System.Text.Json.JsonSerializer.Serialize(new { provider = "quickbooks-online", entity = normalizedEntity, fileName = Path.GetFileName(options.FileName), contentSha256 = parsed.ContentSha256, rowCount = rows.Count, importedCount = result.ImportedCount, options.DryRun })
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        return result with { DryRun = options.DryRun, RowCount = rows.Count, ContentSha256 = parsed.ContentSha256 };
     }
 
     private static async Task<IEnumerable<string[]>> ExportJournalEntriesAsync(BrassLedgerDbContext db, Guid companyId, CancellationToken ct)
@@ -71,34 +82,36 @@ public sealed class QuickBooksOnlineInterchangeService(
         var entries = await db.JournalEntries.Where(entry => entry.CompanyId == companyId && entry.SourceModule == "General Ledger").OrderBy(entry => entry.PostedOn).ThenBy(entry => entry.EntryNumber).ToListAsync(ct);
         var entryIds = entries.Select(entry => entry.Id).ToArray();
         var lines = await db.JournalEntryLines.Where(line => entryIds.Contains(line.JournalEntryId)).ToListAsync(ct);
-        var accountNumbers = await db.Accounts.Where(account => account.CompanyId == companyId).ToDictionaryAsync(account => account.Id, account => account.Number, ct);
+        var accountNames = await db.Accounts.Where(account => account.CompanyId == companyId).ToDictionaryAsync(account => account.Id, account => account.Name, ct);
         return entries.SelectMany(entry => lines.Where(line => line.JournalEntryId == entry.Id).Select(line => new[]
         {
             entry.EntryNumber, entry.PostedOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), entry.Reference, entry.Description,
-            accountNumbers.GetValueOrDefault(line.AccountId, string.Empty), line.Debit.ToString("0.00", CultureInfo.InvariantCulture), line.Credit.ToString("0.00", CultureInfo.InvariantCulture), line.Description
+            accountNames.GetValueOrDefault(line.AccountId, string.Empty), line.Debit.ToString("0.00", CultureInfo.InvariantCulture), line.Credit.ToString("0.00", CultureInfo.InvariantCulture), line.Description
         }));
     }
 
-    private async Task<AccountingInterchangeImportResult> ImportJournalEntriesAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, CancellationToken ct)
+    private async Task<AccountingInterchangeImportResult> ImportJournalEntriesAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, bool dryRun, CancellationToken ct)
     {
         var errors = new List<string>();
+        var eligibleAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount).Select(account => new { account.Number, account.Name }).ToListAsync(ct);
         var imports = new Dictionary<string, (DateOnly Date, string Reference, string Description, List<JournalLineRequest> Lines)>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
         {
             var row = rows[index];
-            var journalNumber = Value(row, "journal number", "journal no", "entry number");
+            var journalNumber = Value(row, "journal number", "journal no.", "journal no", "entry number");
             var dateText = Value(row, "journal date", "date");
-            var accountNumber = Value(row, "account number", "account");
-            if (string.IsNullOrWhiteSpace(journalNumber) || string.IsNullOrWhiteSpace(accountNumber) || !DateOnly.TryParse(dateText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
-                || !decimal.TryParse(Value(row, "debit"), NumberStyles.Number, CultureInfo.InvariantCulture, out var debit)
-                || !decimal.TryParse(Value(row, "credit"), NumberStyles.Number, CultureInfo.InvariantCulture, out var credit))
+            var accountReference = Value(row, "account name", "account number", "account");
+            var accountMatches = eligibleAccounts.Where(account => account.Number.Equals(accountReference, StringComparison.OrdinalIgnoreCase) || account.Name.Equals(accountReference, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (string.IsNullOrWhiteSpace(journalNumber) || accountMatches.Length != 1 || !DateOnly.TryParse(dateText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+                || !decimal.TryParse(Value(row, "debits", "debit"), NumberStyles.Number, CultureInfo.InvariantCulture, out var debit)
+                || !decimal.TryParse(Value(row, "credits", "credit"), NumberStyles.Number, CultureInfo.InvariantCulture, out var credit))
             {
-                errors.Add($"Row {index + 2}: Journal Number, Journal Date, Account Number, Debit, and Credit are required.");
+                errors.Add($"Row {index + 2}: Journal No., Journal Date, one unique active non-control Account Name (or BrassLedger account number), Debits, and Credits are required.");
                 continue;
             }
             if (!imports.TryGetValue(journalNumber, out var journal))
             {
-                journal = (date, Value(row, "reference"), Value(row, "description"), []);
+                journal = (date, Value(row, "reference"), Value(row, "journal/description", "journal", "description"), []);
                 imports.Add(journalNumber, journal);
             }
             else if (journal.Date != date)
@@ -106,27 +119,24 @@ public sealed class QuickBooksOnlineInterchangeService(
                 errors.Add($"Row {index + 2}: every line in journal '{journalNumber}' must have the same date.");
                 continue;
             }
-            journal.Lines.Add(new JournalLineRequest(accountNumber, debit, credit, Value(row, "line description", "description")));
+            journal.Lines.Add(new JournalLineRequest(accountMatches[0].Number, debit, credit, Value(row, "line description", "description")));
         }
         foreach (var (number, journal) in imports)
         {
             if (journal.Lines.Count < 2 || RoundCurrency(journal.Lines.Sum(line => line.Debit)) != RoundCurrency(journal.Lines.Sum(line => line.Credit)))
                 errors.Add($"Journal '{number}' must contain at least two balanced lines.");
         }
-        var accountNumbers = imports.Values.SelectMany(journal => journal.Lines).Select(line => line.AccountNumber).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var allowedAccountNumbers = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount && accountNumbers.Contains(account.Number))
-            .Select(account => account.Number).ToListAsync(ct);
-        errors.AddRange(accountNumbers.Where(number => !allowedAccountNumbers.Contains(number, StringComparer.OrdinalIgnoreCase)).Select(number => $"Account '{number}' is inactive, a control account, or does not exist."));
         var importReferences = imports.Keys.Select(BuildJournalImportReference).ToArray();
         var previouslyImported = await db.JournalEntries.Where(entry => entry.CompanyId == companyId && entry.SourceModule == "General Ledger" && importReferences.Contains(entry.Reference)).Select(entry => entry.Reference).ToListAsync(ct);
         errors.AddRange(previouslyImported.Select(reference => $"QuickBooks journal '{imports.Single(item => BuildJournalImportReference(item.Key) == reference).Key}' was already imported. A file retry will not double-post it."));
         if (errors.Count > 0) return AccountingInterchangeImportResult.Failure(errors.ToArray());
+        if (dryRun) return AccountingInterchangeImportResult.Success(imports.Count, true, rows.Count);
         var posted = await transactionService.PostJournalEntriesAsync(imports.Select(pair => new PostJournalEntryRequest(pair.Value.Date, BuildJournalImportReference(pair.Key), BuildImportedJournalDescription(pair.Key, pair.Value.Reference, pair.Value.Description), pair.Value.Lines)).ToArray(), ct);
         if (!posted.Succeeded) return AccountingInterchangeImportResult.Failure($"Journal import was not committed: {posted.ErrorMessage}");
         return AccountingInterchangeImportResult.Success(imports.Count);
     }
 
-    private static async Task<AccountingInterchangeImportResult> ImportAccountsAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, CancellationToken ct)
+    private static async Task<AccountingInterchangeImportResult> ImportAccountsAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, bool dryRun, CancellationToken ct)
     {
         var errors = new List<string>(); var accounts = new List<GeneralLedgerAccount>(); var numbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
@@ -140,10 +150,10 @@ public sealed class QuickBooksOnlineInterchangeService(
         var existing = await db.Accounts.Where(x => x.CompanyId == companyId && numbers.Contains(x.Number)).Select(x => x.Number).ToListAsync(ct);
         errors.AddRange(existing.Select(x => $"An account with number '{x}' already exists."));
         if (errors.Count > 0) return AccountingInterchangeImportResult.Failure(errors.ToArray());
-        db.Accounts.AddRange(accounts); await db.SaveChangesAsync(ct); return AccountingInterchangeImportResult.Success(accounts.Count);
+        if (!dryRun) db.Accounts.AddRange(accounts); return AccountingInterchangeImportResult.Success(accounts.Count, dryRun, rows.Count);
     }
 
-    private static async Task<AccountingInterchangeImportResult> ImportCustomersAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, CancellationToken ct)
+    private static async Task<AccountingInterchangeImportResult> ImportCustomersAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, bool dryRun, CancellationToken ct)
     {
         var errors = new List<string>(); var customers = new List<Customer>(); var numbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
@@ -157,10 +167,10 @@ public sealed class QuickBooksOnlineInterchangeService(
         var existing = await db.Customers.Where(x => x.CompanyId == companyId && numbers.Contains(x.CustomerNumber)).Select(x => x.CustomerNumber).ToListAsync(ct);
         errors.AddRange(existing.Select(x => $"A customer with number '{x}' already exists."));
         if (errors.Count > 0) return AccountingInterchangeImportResult.Failure(errors.ToArray());
-        db.Customers.AddRange(customers); await db.SaveChangesAsync(ct); return AccountingInterchangeImportResult.Success(customers.Count);
+        if (!dryRun) db.Customers.AddRange(customers); return AccountingInterchangeImportResult.Success(customers.Count, dryRun, rows.Count);
     }
 
-    private static async Task<AccountingInterchangeImportResult> ImportVendorsAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, CancellationToken ct)
+    private static async Task<AccountingInterchangeImportResult> ImportVendorsAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, bool dryRun, CancellationToken ct)
     {
         var errors = new List<string>(); var vendors = new List<Vendor>(); var numbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
@@ -174,7 +184,7 @@ public sealed class QuickBooksOnlineInterchangeService(
         var existing = await db.Vendors.Where(x => x.CompanyId == companyId && numbers.Contains(x.VendorNumber)).Select(x => x.VendorNumber).ToListAsync(ct);
         errors.AddRange(existing.Select(x => $"A vendor with number '{x}' already exists."));
         if (errors.Count > 0) return AccountingInterchangeImportResult.Failure(errors.ToArray());
-        db.Vendors.AddRange(vendors); await db.SaveChangesAsync(ct); return AccountingInterchangeImportResult.Success(vendors.Count);
+        if (!dryRun) db.Vendors.AddRange(vendors); return AccountingInterchangeImportResult.Success(vendors.Count, dryRun, rows.Count);
     }
 
     private static string NormalizeEntity(string entity) => entity.Trim().ToLowerInvariant();
@@ -224,25 +234,37 @@ public sealed class QuickBooksOnlineInterchangeService(
         return Enum.IsDefined(type);
     }
 
-    private static async Task<(bool Succeeded, List<Dictionary<string, string>>? Rows, string? Error)> ReadCsvAsync(Stream content, CancellationToken ct)
+    private static async Task<(bool Succeeded, List<Dictionary<string, string>>? Rows, string? Error, string ContentSha256)> ReadCsvAsync(Stream content, CancellationToken ct)
     {
-        using var reader = new StreamReader(content, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
+        using var buffered = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var read = await content.ReadAsync(buffer, ct);
+            if (read == 0) break;
+            if (buffered.Length + read > MaximumBytes) return (false, null, "QuickBooks CSV imports are limited to 2 MB.", string.Empty);
+            await buffered.WriteAsync(buffer.AsMemory(0, read), ct);
+        }
+        var bytes = buffered.ToArray();
+        var contentSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+        buffered.Position = 0;
+        using var reader = new StreamReader(buffered, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
         var text = await reader.ReadToEndAsync(ct);
         var records = ParseCsvRecords(text);
-        if (records is null) return (false, null, "The CSV contains an unterminated or malformed quoted field.");
-        if (records.Count == 0) return (false, null, "The uploaded file is empty.");
+        if (records is null) return (false, null, "The CSV contains an unterminated or malformed quoted field.", contentSha256);
+        if (records.Count == 0) return (false, null, "The uploaded file is empty.", contentSha256);
         var header = records[0];
-        if (header.Count == 0) return (false, null, "The CSV header is malformed.");
+        if (header.Count == 0) return (false, null, "The CSV header is malformed.", contentSha256);
         var normalizedHeader = header.Select(x => x.Trim().ToLowerInvariant()).ToArray();
-        if (normalizedHeader.Distinct(StringComparer.Ordinal).Count() != normalizedHeader.Length) return (false, null, "CSV headers must be unique.");
+        if (normalizedHeader.Distinct(StringComparer.Ordinal).Count() != normalizedHeader.Length) return (false, null, "CSV headers must be unique.", contentSha256);
         var rows = new List<Dictionary<string, string>>();
         for (var index = 1; index < records.Count; index++)
         {
             var fields = records[index];
-            if (fields.Count != normalizedHeader.Length) return (false, null, $"Row {index + 1} has the wrong number of columns.");
+            if (fields.Count != normalizedHeader.Length) return (false, null, $"Row {index + 1} has the wrong number of columns.", contentSha256);
             rows.Add(normalizedHeader.Zip(fields, (key, value) => new KeyValuePair<string, string>(key, value)).ToDictionary());
         }
-        return (true, rows, null);
+        return (true, rows, null, contentSha256);
     }
 
     private static List<List<string>>? ParseCsvRecords(string text)
@@ -278,4 +300,5 @@ public sealed class QuickBooksOnlineInterchangeService(
         if (httpContext is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
         return await db.Companies.Select(x => x.Id).FirstAsync(ct);
     }
+    private Guid? ResolveUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
 }

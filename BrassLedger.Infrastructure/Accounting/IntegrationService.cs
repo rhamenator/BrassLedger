@@ -12,18 +12,18 @@ public sealed class IntegrationService(IDbContextFactory<BrassLedgerDbContext> d
 {
     private static readonly IReadOnlyList<IntegrationProviderSnapshot> Catalog =
     [
-        new("quickbooks-online", "QuickBooks Online", "Accounting", "CSV interchange and future OAuth synchronization.", true),
-        new("plaid", "Plaid", "Banking", "Bank-account aggregation and transaction feeds.", true),
-        new("stripe", "Stripe", "Payments", "Card, ACH, invoice, and payout events.", true),
-        new("square", "Square", "Payments", "Point-of-sale payments and settlements.", true),
-        new("paypal", "PayPal", "Payments", "Payment and settlement events.", true),
-        new("gusto", "Gusto", "Payroll", "Payroll, direct deposit, and filing provider boundary.", true),
-        new("adp", "ADP", "Payroll", "Enterprise payroll provider boundary.", true),
-        new("paychex", "Paychex", "Payroll", "Payroll provider boundary.", true),
-        new("avalara", "Avalara", "Tax", "Sales-tax calculation and filing provider boundary.", true),
-        new("taxjar", "TaxJar", "Tax", "Sales-tax calculation provider boundary.", true),
-        new("docusign", "DocuSign", "Documents", "Signed-document workflow boundary.", true),
-        new("microsoft-365", "Microsoft 365", "Documents", "SharePoint/OneDrive document storage boundary.", true)
+        new("quickbooks-online", "QuickBooks Online", "Accounting", "Operator-run CSV interchange; OAuth/API synchronization is not implemented.", false, "File interchange available", "Chart of accounts, customers, vendors, and non-control general journals via reviewed CSV", false),
+        new("plaid", "Plaid", "Banking", "Connection profile only; no transaction-feed adapter is deployed.", false),
+        new("stripe", "Stripe", "Payments", "Connection profile only; no payment-event adapter is deployed.", false),
+        new("square", "Square", "Payments", "Connection profile only; no point-of-sale adapter is deployed.", false),
+        new("paypal", "PayPal", "Payments", "Connection profile only; no settlement adapter is deployed.", false),
+        new("gusto", "Gusto", "Payroll", "Connection profile only; no payroll adapter is deployed.", false),
+        new("adp", "ADP", "Payroll", "Connection profile only; no payroll adapter is deployed.", false),
+        new("paychex", "Paychex", "Payroll", "Connection profile only; no payroll adapter is deployed.", false),
+        new("avalara", "Avalara", "Tax", "Connection profile only; no calculation or filing adapter is deployed.", false),
+        new("taxjar", "TaxJar", "Tax", "Connection profile only; no calculation adapter is deployed.", false),
+        new("docusign", "DocuSign", "Documents", "Connection profile only; no signature adapter is deployed.", false),
+        new("microsoft-365", "Microsoft 365", "Documents", "Connection profile only; no SharePoint or OneDrive adapter is deployed.", false)
     ];
 
     public Task<IReadOnlyList<IntegrationProviderSnapshot>> GetCatalogAsync(CancellationToken cancellationToken = default) => Task.FromResult(Catalog);
@@ -43,7 +43,7 @@ public sealed class IntegrationService(IDbContextFactory<BrassLedgerDbContext> d
         if (request.Id.HasValue && entity is null) return TransactionResult.Failure("Integration connection not found.");
         if (entity is null && (string.IsNullOrWhiteSpace(request.CredentialsJson) || !IsJson(request.CredentialsJson))) return TransactionResult.Failure("Provide valid JSON credentials for a new integration connection.");
         if (!string.IsNullOrWhiteSpace(request.CredentialsJson) && !IsJson(request.CredentialsJson)) return TransactionResult.Failure("Credentials must be valid JSON when supplied.");
-        entity ??= new IntegrationConnection { Id = Guid.NewGuid(), CompanyId = companyId.Value }; entity.ProviderCode = request.ProviderCode; entity.Name = request.Name.Trim(); entity.SettingsJson = request.SettingsJson.Trim(); if (!string.IsNullOrWhiteSpace(request.CredentialsJson)) entity.CredentialsJson = request.CredentialsJson.Trim(); entity.Status = request.Enable ? "Configured" : "Disabled";
+        entity ??= new IntegrationConnection { Id = Guid.NewGuid(), CompanyId = companyId.Value }; entity.ProviderCode = request.ProviderCode; entity.Name = request.Name.Trim(); entity.SettingsJson = request.SettingsJson.Trim(); if (!string.IsNullOrWhiteSpace(request.CredentialsJson)) entity.CredentialsJson = request.CredentialsJson.Trim(); entity.Status = request.Enable ? "ProfileOnly" : "Disabled";
         if (db.Entry(entity).State == EntityState.Detached) db.IntegrationConnections.Add(entity);
         db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = UserId(), Action = "integration.configured", EntityType = "IntegrationConnection", EntityId = entity.Id, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { entity.ProviderCode, entity.Name, entity.Status }), OccurredAtUtc = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync(cancellationToken); return TransactionResult.Success(entity.Id);

@@ -726,13 +726,13 @@ api.MapGet("/interchange/quickbooks-online/{entity}.csv", async (string entity, 
     return export is null ? Results.NotFound() : Results.File(export.Content, export.ContentType, export.FileName);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 
-api.MapPost("/interchange/quickbooks-online/{entity}", async (string entity, IFormFile? file, IAccountingInterchangeService service, CancellationToken cancellationToken) =>
+api.MapPost("/interchange/quickbooks-online/{entity}", async (string entity, IFormFile? file, bool? dryRun, IAccountingInterchangeService service, CancellationToken cancellationToken) =>
 {
     if (file is null || file.Length == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Upload a non-empty CSV file."] });
     if (file.Length > 2 * 1024 * 1024) return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["QuickBooks CSV imports are limited to 2 MB."] });
     if (!string.Equals(Path.GetExtension(file.FileName), ".csv", StringComparison.OrdinalIgnoreCase)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Upload a .csv file."] });
     await using var stream = file.OpenReadStream();
-    var result = await service.ImportQuickBooksOnlineCsvAsync(entity, stream, cancellationToken);
+    var result = await service.ImportQuickBooksOnlineCsvAsync(entity, stream, new(dryRun ?? false, file.FileName), cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["import"] = result.Errors.ToArray() });
 }).Accepts<IFormFile>("multipart/form-data").RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 

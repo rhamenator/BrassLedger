@@ -92,7 +92,7 @@ else
             <div class="content-grid interchange-import">
                 <div class="field-group"><label class="field-label">Data to import</label><InputSelect aria-label="QuickBooks data to import" class="field-input" @bind-Value="QuickBooksImport.Entity"><option value="chart-of-accounts">Chart of accounts</option><option value="customers">Customers</option><option value="vendors">Vendors</option><option value="journal-entries">General journal entries</option></InputSelect></div>
                 <div class="field-group"><label class="field-label">QuickBooks CSV file</label><InputFile aria-label="QuickBooks CSV file" class="field-input" accept=".csv,text/csv" OnChange="SelectQuickBooksFile" /></div>
-                <div class="field-group import-action"><span class="field-label">Import selected file</span><button class="action-primary" type="button" disabled="@(QuickBooksImport.File is null)" @onclick="ImportQuickBooksAsync">Import CSV</button></div>
+                <div class="field-group import-action"><span class="field-label">Review and import selected file</span><div class="hero-actions"><button class="action-secondary" type="button" disabled="@(QuickBooksImport.File is null)" @onclick="() => ImportQuickBooksAsync(true)">Validate only</button><button class="action-primary" type="button" disabled="@(QuickBooksImport.File is null)" @onclick="() => ImportQuickBooksAsync(false)">Import CSV</button></div></div>
             </div>
             @if (!string.IsNullOrWhiteSpace(QuickBooksImport.FileName)) { <p class="muted-copy">Selected: @QuickBooksImport.FileName</p> }
         </section>
@@ -366,17 +366,17 @@ else
         QuickBooksImport.FileName = args.File.Name;
     }
 
-    private async Task ImportQuickBooksAsync()
+    private async Task ImportQuickBooksAsync(bool dryRun)
     {
         if (QuickBooksImport.File is null) return;
         try
         {
             await using var content = QuickBooksImport.File.OpenReadStream(2 * 1024 * 1024);
-            var result = await InterchangeService.ImportQuickBooksOnlineCsvAsync(QuickBooksImport.Entity, content);
+            var result = await InterchangeService.ImportQuickBooksOnlineCsvAsync(QuickBooksImport.Entity, content, new(dryRun, QuickBooksImport.FileName));
             StatusMessage = result.Succeeded
-                ? $"Imported {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s)."
+                ? dryRun ? $"Validation passed: {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s) are ready to import; no accounting records changed." : $"Imported {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s)."
                 : string.Join(" ", result.Errors);
-            if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+            if (result.Succeeded && !dryRun) { QuickBooksImport.File = null; QuickBooksImport.FileName = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
         }
         catch (IOException)
         {

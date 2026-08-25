@@ -421,7 +421,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var export = await client.GetAsync("/api/interchange/quickbooks-online/chart-of-accounts.csv");
         Assert.Equal(HttpStatusCode.OK, export.StatusCode);
         var exportedCsv = await export.Content.ReadAsStringAsync();
-        Assert.Contains("\"Name\",\"Type\",\"Detail Type\",\"Number\"", exportedCsv);
+        Assert.Contains("\"Account Name\",\"Type\",\"Detail Type\",\"Account Number\"", exportedCsv);
         Assert.Contains("\"Accounts Receivable\",\"Accounts Receivable\",\"Accounts Receivable\",\"1100\"", exportedCsv);
         Assert.Contains("\"Sales Tax Payable\",\"Other Current Liability\",\"Sales tax payable\",\"2100\"", exportedCsv);
 
@@ -430,24 +430,46 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         using var form = new MultipartFormDataContent();
         form.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
         form.Add(new StringContent("Display Name,Company Name,Email,Customer Number\r\n\"QuickBooks\nImport Co\",QuickBooks Import Co,import@example.test,QBO-IMPORT-1"), "file", "quickbooks-customers.csv");
-        var import = await client.PostAsync("/api/interchange/quickbooks-online/customers", form);
+        var preview = await client.PostAsync("/api/interchange/quickbooks-online/customers?dryRun=true", form);
+        Assert.True(preview.StatusCode == HttpStatusCode.OK, await preview.Content.ReadAsStringAsync());
+        var previewResult = await preview.Content.ReadFromJsonAsync<AccountingInterchangeImportResult>();
+        Assert.True(previewResult!.DryRun); Assert.Equal(1, previewResult.ImportedCount); Assert.Equal(64, previewResult.ContentSha256.Length);
+        var previewWorkspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.DoesNotContain(previewWorkspace!.Receivables.Customers, customer => customer.CustomerNumber == "QBO-IMPORT-1");
+        using var importForm = new MultipartFormDataContent();
+        importForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        importForm.Add(new StringContent("Display Name,Company Name,Email,Customer Number\r\n\"QuickBooks\nImport Co\",QuickBooks Import Co,import@example.test,QBO-IMPORT-1"), "file", "quickbooks-customers.csv");
+        var import = await client.PostAsync("/api/interchange/quickbooks-online/customers", importForm);
         Assert.True(import.StatusCode == HttpStatusCode.OK, await import.Content.ReadAsStringAsync());
         var workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         Assert.NotNull(workspace);
         Assert.Contains(workspace!.Receivables.Customers, customer => customer.CustomerNumber == "QBO-IMPORT-1" && customer.Name == "QuickBooks\nImport Co");
 
+        var controlsResponse = await client.GetAsync("/api/accounting-controls?auditEntryLimit=20");
+        Assert.True(controlsResponse.StatusCode == HttpStatusCode.OK, await controlsResponse.Content.ReadAsStringAsync());
+        var controls = await controlsResponse.Content.ReadFromJsonAsync<AccountingControlsSnapshot>();
+        var validationAudit = Assert.Single(controls!.AuditEntries, entry => entry.Action == "accounting-interchange.quickbooks.validated");
+        var importAudit = Assert.Single(controls.AuditEntries, entry => entry.Action == "accounting-interchange.quickbooks.imported");
+        Assert.Contains(previewResult.ContentSha256, validationAudit.DetailJson);
+        Assert.Contains(previewResult.ContentSha256, importAudit.DetailJson);
+        Assert.Contains("quickbooks-customers.csv", importAudit.DetailJson);
+
         using var journalForm = new MultipartFormDataContent();
         journalForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
-        journalForm.Add(new StringContent("Journal Number,Journal Date,Reference,Description,Account Number,Debit,Credit,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,1000,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,4000,0.00,25.00,Revenue"), "file", "quickbooks-journals.csv");
+        journalForm.Add(new StringContent("Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue"), "file", "quickbooks-journals.csv");
         var journalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", journalForm);
         Assert.True(journalImport.StatusCode == HttpStatusCode.OK, await journalImport.Content.ReadAsStringAsync());
         using var duplicateJournalForm = new MultipartFormDataContent();
         duplicateJournalForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
-        duplicateJournalForm.Add(new StringContent("Journal Number,Journal Date,Reference,Description,Account Number,Debit,Credit,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,1000,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,4000,0.00,25.00,Revenue"), "file", "quickbooks-journals-retry.csv");
+        duplicateJournalForm.Add(new StringContent("Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue"), "file", "quickbooks-journals-retry.csv");
         var duplicateJournalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", duplicateJournalForm);
         Assert.Equal(HttpStatusCode.BadRequest, duplicateJournalImport.StatusCode);
         var journalExport = await client.GetStringAsync("/api/interchange/quickbooks-online/journal-entries.csv");
+        Assert.Contains("\"Journal No.\",\"Journal Date\",\"Reference\",\"Journal/Description\",\"Account Name\",\"Debits\",\"Credits\",\"Line Description\"", journalExport);
         Assert.Contains("QBO-JE-1", journalExport);
+
+        using var unauthorizedClient = await CreateAuthenticatedClientAsync(isolatedFactory, "operations");
+        Assert.Equal(HttpStatusCode.Forbidden, (await unauthorizedClient.GetAsync("/api/interchange/quickbooks-online/chart-of-accounts.csv")).StatusCode);
     }
 
     private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null, string userName = "controller")

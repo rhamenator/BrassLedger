@@ -95,5 +95,5 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
 internal sealed class StubAccountingInterchangeService : IAccountingInterchangeService
 {
     public Task<AccountingInterchangeExport?> ExportQuickBooksOnlineCsvAsync(string entity, CancellationToken cancellationToken = default) => Task.FromResult<AccountingInterchangeExport?>(null);
-    public Task<AccountingInterchangeImportResult> ImportQuickBooksOnlineCsvAsync(string entity, Stream content, CancellationToken cancellationToken = default) => Task.FromResult(AccountingInterchangeImportResult.Success(0));
+    public Task<AccountingInterchangeImportResult> ImportQuickBooksOnlineCsvAsync(string entity, Stream content, AccountingInterchangeImportOptions? options = null, CancellationToken cancellationToken = default) => Task.FromResult(AccountingInterchangeImportResult.Success(0, options?.DryRun ?? false));
 }

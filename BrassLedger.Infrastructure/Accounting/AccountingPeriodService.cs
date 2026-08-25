@@ -17,7 +17,17 @@ public sealed class AccountingPeriodService(IDbContextFactory<BrassLedgerDbConte
         var limit = Math.Clamp(auditEntryLimit, 1, 500);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var periods = await db.AccountingPeriods.AsNoTracking().Where(period => period.CompanyId == companyId).OrderByDescending(period => period.StartsOn).ToListAsync(cancellationToken);
-        var audits = await db.BusinessAuditEntries.AsNoTracking().Where(entry => entry.CompanyId == companyId).OrderByDescending(entry => entry.OccurredAtUtc).Take(limit).ToListAsync(cancellationToken);
+        var audits = db.Database.IsSqlite()
+            ? await db.BusinessAuditEntries
+                .FromSqlInterpolated($"""SELECT * FROM "BusinessAuditEntries" WHERE "CompanyId" = {companyId} ORDER BY "OccurredAtUtc" DESC LIMIT {limit}""")
+                .AsNoTracking()
+                .ToListAsync(cancellationToken)
+            : await db.BusinessAuditEntries
+                .AsNoTracking()
+                .Where(entry => entry.CompanyId == companyId)
+                .OrderByDescending(entry => entry.OccurredAtUtc)
+                .Take(limit)
+                .ToListAsync(cancellationToken);
         var userIds = periods.Where(period => period.ClosedByUserId.HasValue).Select(period => period.ClosedByUserId!.Value).Concat(audits.Where(entry => entry.UserId.HasValue).Select(entry => entry.UserId!.Value)).Distinct().ToArray();
         var users = await db.Users.AsNoTracking().Where(user => userIds.Contains(user.Id)).ToDictionaryAsync(user => user.Id, user => user.DisplayName, cancellationToken);
         return new AccountingControlsSnapshot(

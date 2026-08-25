@@ -202,6 +202,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
             [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString())], "test"));
         accessor.HttpContext = context;
         var integrations = scope.ServiceProvider.GetRequiredService<IIntegrationService>();
+        var catalog = await integrations.GetCatalogAsync();
+        var quickBooks = catalog.Single(provider => provider.Code == "quickbooks-online");
+        Assert.Equal("File interchange available", quickBooks.ImplementationStatus); Assert.False(quickBooks.LiveSynchronizationAvailable);
+        Assert.All(catalog.Where(provider => provider.Code != "quickbooks-online"), provider => Assert.Equal("Profile only", provider.ImplementationStatus));
         var saved = await integrations.SaveConnectionAsync(new SaveIntegrationConnectionRequest(null, "stripe", "Primary Stripe", "{\"mode\":\"test\"}", "{\"apiKey\":\"super-secret\"}", false));
         Assert.True(saved.Succeeded, saved.ErrorMessage);
         var connections = await integrations.GetConnectionsAsync();

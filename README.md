@@ -50,6 +50,7 @@ Module-by-module usage links:
 - Overview and daily review: [docs/user-guide.md#overview](docs/user-guide.md#overview)
 - General ledger: [docs/user-guide.md#ledger](docs/user-guide.md#ledger)
 - Banking imports, matching, transfers, and reconciliation: [docs/banking-guide.md](docs/banking-guide.md)
+- QuickBooks and accounting interchange: [docs/accounting-interchange-guide.md](docs/accounting-interchange-guide.md)
 - Receivables: [docs/user-guide.md#receivables](docs/user-guide.md#receivables)
 - Payables: [docs/user-guide.md#payables](docs/user-guide.md#payables)
 - Operations: [docs/user-guide.md#operations](docs/user-guide.md#operations)
