@@ -437,6 +437,64 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task ArizonaSourceCapture_PreservesElectionDefaultsAndConditionalNonresidentThreshold()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/az/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+        var workRules = root.GetProperty("residencyAndWorkRules");
+
+        Assert.Equal(7, calculation.GetProperty("allowedRates").GetArrayLength());
+        Assert.Equal(0.02m, calculation.GetProperty("missingCertificateDefaultRate").GetDecimal());
+        Assert.Equal(5, calculation.GetProperty("missingCertificateAfterDays").GetInt32());
+        Assert.Equal(60, workRules.GetProperty("nonresidentGeneralThresholdDays").GetInt32());
+        Assert.True(workRules.GetProperty("underThresholdExemptionIsConditional").GetBoolean());
+        Assert.Equal(3, workRules.GetProperty("underThresholdConditions").GetArrayLength());
+        Assert.Equal("A1-E", root.GetProperty("decemberEmployerElection").GetProperty("form").GetString());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task IdahoSourceCapture_PreservesBoth2026VersionsAndSourceConflict()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/id/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var versions = root.GetProperty("calculationVersions").EnumerateArray().ToArray();
+
+        Assert.Equal(2, versions.Length);
+        Assert.Equal(15000, versions[0].GetProperty("percentageThresholds").GetProperty("Annual").GetProperty("SingleOrHeadOfHousehold").GetInt32());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, versions[0].GetProperty("childTaxCreditAllowanceValue").ValueKind);
+        Assert.Equal(16100, versions[1].GetProperty("percentageThresholds").GetProperty("Annual").GetProperty("SingleOrHeadOfHousehold").GetInt32());
+        Assert.Equal(0, versions[1].GetProperty("childTaxCreditAllowanceValue").GetInt32());
+        Assert.Equal(31, root.GetProperty("calculation").GetProperty("officialRevisedExample").GetProperty("withholding").GetInt32());
+        Assert.False(root.GetProperty("calculation").GetProperty("officialAnnualizedExampleConflict").GetProperty("mayBeUsedAsVerifiedRegressionCase").GetBoolean());
+        Assert.All(root.GetProperty("sources").EnumerateArray(), source => Assert.Matches("^[a-f0-9]{64}$", source.GetProperty("sha256").GetString()));
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task MississippiSourceCapture_PreservesDollarExemptionAndMultiStateAllocation()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ms/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+        var deductions = calculation.GetProperty("standardDeductions");
+
+        Assert.Equal(0.04m, calculation.GetProperty("rate").GetDecimal());
+        Assert.Equal(10000, calculation.GetProperty("annualZeroRateAmount").GetInt32());
+        Assert.Equal(2300, deductions.GetProperty("Single").GetInt32());
+        Assert.Equal(4600, deductions.GetProperty("MarriedSpouseNotEmployed").GetInt32());
+        Assert.Equal("money", root.GetProperty("employeeInputs")[1].GetProperty("dataType").GetString());
+        Assert.Equal(6, calculation.GetProperty("derivedValidationCase").GetProperty("withholding").GetInt32());
+        Assert.Contains("mississippiEarnings / totalEarnings", root.GetProperty("residencyAndWorkRules").GetProperty("partlyInsideAndOutsideAllocation").GetProperty("formula").GetString());
+        Assert.False(root.GetProperty("review").GetProperty("rawSourcesChecksummed").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();

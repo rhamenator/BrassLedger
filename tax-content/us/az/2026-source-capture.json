@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-az",
+  "capturedAtUtc": "2026-08-25T04:09:20Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    {
+      "url": "https://azdor.gov/sites/default/files/document/FORMS_WITHHOLDING_2026_A-4_f.pdf",
+      "title": "2026 Arizona Form A-4, Employee's Arizona Withholding Election",
+      "retrievedAtUtc": "2026-08-25T04:09:20Z",
+      "mediaType": "application/pdf",
+      "sha256": "80a6c71c702824d80d9505575257bb052574a5b1cef17dd3da486c7bfe6b4b54",
+      "bytes": 193041
+    },
+    {
+      "url": "https://azdor.gov/sites/default/files/document/FORMS_WITHHOLDING_2026_A-4i.pdf",
+      "title": "2026 Arizona Form A-4 Employer Instructions",
+      "retrievedAtUtc": "2026-08-25T04:09:20Z",
+      "mediaType": "application/pdf",
+      "sha256": "984f9da0cb82854c64223e3899c833d86fecd6b1279bca347a2ae4a4aa17d445",
+      "bytes": 179926
+    },
+    {
+      "url": "https://azdor.gov/sites/default/files/document/FORMS_WITHHOLDING_2026_A1-E_f.pdf",
+      "title": "2026 Form A1-E, Employer Notice of Election to Not Withhold Arizona Taxes in December",
+      "retrievedAtUtc": "2026-08-25T04:09:20Z",
+      "mediaType": "application/pdf",
+      "sha256": "4317dc08d93d9d191ea93310f5cce64767eec2e8cff564ee4007c17c1ebb283d",
+      "bytes": 173558
+    },
+    {
+      "url": "https://azdor.gov/business/withholding-tax/employer-withholding-filing-obligations",
+      "title": "Arizona Employer Withholding Filing Obligations",
+      "rawCaptureStatus": "Official page returned HTTP 403 during direct retrieval on August 25, 2026"
+    }
+  ],
+  "employeeInputs": [
+    { "code": "electedPercentage", "source": "Form A-4 Box 1", "dataType": "decimal", "values": [0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035] },
+    { "code": "additionalPeriodicWithholding", "source": "Form A-4 Box 2", "dataType": "money", "minimum": 0 },
+    { "code": "zeroElection", "source": "Form A-4 Box 3", "dataType": "boolean" },
+    { "code": "arizonaWorkDays", "dataType": "integer", "minimum": 0 },
+    { "code": "nonresidentExemptionConditions", "dataType": "structured-facts" }
+  ],
+  "calculation": {
+    "method": "employee-elected-gross-taxable-wage-percentage",
+    "taxableWageBasis": "Gross taxable wages expected to be reported in federal Form W-2 Box 1",
+    "allowedRates": [0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035],
+    "formula": "zeroElection ? 0 : (grossTaxableWages * electedPercentage) + additionalPeriodicWithholding",
+    "missingCertificateAfterDays": 5,
+    "missingCertificateDefaultRate": 0.02,
+    "zeroElectionRenewalDeadline": "February 15",
+    "expiredZeroElectionFallbackRate": 0.02,
+    "allowancesOrBrackets": false,
+    "roundingRule": "Not stated in the captured forms",
+    "supplementalWages": "The elected percentage applies to gross taxable wages; no separate supplemental-wage method is stated in the captured A-4 publications."
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Withholding is required from Arizona residents for services performed in Arizona.",
+    "nonresidentGeneralThresholdDays": 60,
+    "nonresidentRule": "Withholding is required for a nonresident who performs services in Arizona for 60 days or more in the calendar year; an employee may elect and an employer may begin withholding before day 60.",
+    "underThresholdExemptionIsConditional": true,
+    "underThresholdConditions": [
+      "The employer is not owned or controlled directly or indirectly by an Arizona resident or corporation.",
+      "The employer has no payroll in Arizona and no property or sales in Arizona other than the employee's presence.",
+      "The employee is present in Arizona for fewer than 60 days during the calendar year."
+    ],
+    "daysExcludedFromThreshold": ["Travel through Arizona", "Personal activities", "Training not directly connected with Arizona employment"],
+    "specialRequiredBranches": ["Nonresident professional athletes and entertainers", "Certain mechanized agricultural workers"],
+    "specialExemptionBranches": ["Common-carrier employees", "Domestic service", "Casual labor", "Certain agricultural labor", "Qualifying disaster-recovery workers", "Qualifying motion-picture production employees", "Qualifying Native American employees", "Qualifying military spouses"],
+    "multiStateAllocationRequired": true
+  },
+  "decemberEmployerElection": {
+    "form": "A1-E",
+    "filingDeadline": "July 1, 2026",
+    "effect": "A qualifying employer may elect not to withhold Arizona income tax during December 2026 after filing the election and notifying affected employees.",
+    "employeeResponse": "Employees may submit a revised A-4 to account for the election.",
+    "automaticActivationAllowed": false
+  },
+  "filing": {
+    "annualEligibility": "Prior four-quarter average withholding of $200 or less plus the other official eligibility criteria",
+    "quarterlyLiabilityRange": { "greaterThan": 200, "lessThanOrEqual": 1500 },
+    "aboveQuarterlyRange": "Use the same monthly, semiweekly, or next-business-day deposit schedule that applies for federal withholding.",
+    "returns": ["A1-QRT", "A1-R"],
+    "electronicReturnsRequired": true,
+    "currentThresholdsRawSourceChecksummed": false
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The official filing-obligations page rejected direct retrieval with HTTP 403, so its raw checksum is pending.",
+    "No explicit rounding instruction or distinct supplemental-wage method was located in the captured 2026 A-4 publications.",
+    "The unusual December employer election must be modeled as an employer-level effective-period override, not as an employee tax rate."
+  ],
+  "review": {
+    "formulaTranscribed": true,
+    "residencyAndWorkRulesTranscribed": true,
+    "rawSourcesChecksummed": false,
+    "roundingIndependentlyVerified": false,
+    "supplementalMethodIndependentlyVerified": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Checksum the filing source, verify rounding and supplemental treatment, implement conditional day counting and the December employer election, and add boundary tests before activation."
+  }
+}
