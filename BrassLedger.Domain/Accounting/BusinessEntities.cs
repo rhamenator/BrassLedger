@@ -359,6 +359,30 @@ public sealed class SubledgerAdjustment
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
+public sealed class SubledgerDocumentWorkflow
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string DocumentType { get; set; } = string.Empty;
+    public string DocumentNumber { get; set; } = string.Empty;
+    public string PayloadJson { get; set; } = "{}";
+    public string Status { get; set; } = "Draft";
+    public bool IsRecurringTemplate { get; set; }
+    public string Frequency { get; set; } = string.Empty;
+    public int FrequencyInterval { get; set; } = 1;
+    public DateOnly? NextOccurrenceDate { get; set; }
+    public DateOnly? EndDate { get; set; }
+    public Guid? SourceTemplateId { get; set; }
+    public Guid? PostedDocumentId { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? PostedByUserId { get; set; }
+    public DateTimeOffset? PostedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
 public sealed class InventoryItem
 {
     public Guid Id { get; set; }

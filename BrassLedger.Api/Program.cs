@@ -180,6 +180,48 @@ api.MapPost("/vendor-bills", async (CreateVendorBillRequest request, IAccounting
     return result.Succeeded ? Results.Created($"/api/vendor-bills/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["bill"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
 
+api.MapPost("/invoice-drafts", async (CreateInvoiceRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveInvoiceDraftAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/subledger-document-workflows/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["draft"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments);
+
+api.MapPost("/vendor-bill-drafts", async (CreateVendorBillRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveVendorBillDraftAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/subledger-document-workflows/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["draft"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments);
+
+api.MapPost("/subledger-document-workflows/{workflowId:guid}/approve", async (Guid workflowId, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ApproveSubledgerDocumentAsync(workflowId, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.BadRequest(result);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments);
+
+api.MapPost("/subledger-document-workflows/{workflowId:guid}/post", async (Guid workflowId, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.PostApprovedSubledgerDocumentAsync(workflowId, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.BadRequest(result);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PostSubledgerDocuments);
+
+api.MapPost("/recurring-invoice-templates", async (SaveRecurringInvoiceTemplateRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveRecurringInvoiceTemplateAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/subledger-document-workflows/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["template"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments);
+
+api.MapPost("/recurring-vendor-bill-templates", async (SaveRecurringVendorBillTemplateRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveRecurringVendorBillTemplateAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/subledger-document-workflows/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["template"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments);
+
+api.MapPost("/recurring-subledger-documents/generate", async (DateOnly throughDate, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.GenerateDueRecurringDocumentsAsync(throughDate, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.BadRequest(result);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments);
+
 api.MapPost("/invoices/payments", async (ApplyInvoicePaymentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.ApplyInvoicePaymentAsync(request, cancellationToken);

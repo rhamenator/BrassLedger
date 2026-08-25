@@ -42,6 +42,7 @@ public sealed class BrassLedgerDbContext(
     public DbSet<SubledgerPayment> SubledgerPayments => Set<SubledgerPayment>();
     public DbSet<SubledgerPaymentApplication> SubledgerPaymentApplications => Set<SubledgerPaymentApplication>();
     public DbSet<SubledgerAdjustment> SubledgerAdjustments => Set<SubledgerAdjustment>();
+    public DbSet<SubledgerDocumentWorkflow> SubledgerDocumentWorkflows => Set<SubledgerDocumentWorkflow>();
     public DbSet<VendorBillLine> VendorBillLines => Set<VendorBillLine>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<TaxProfile> TaxProfiles => Set<TaxProfile>();
@@ -82,6 +83,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SubledgerPayment>().HasKey(x => x.Id);
         modelBuilder.Entity<SubledgerPaymentApplication>().HasKey(x => x.Id);
         modelBuilder.Entity<SubledgerAdjustment>().HasKey(x => x.Id);
+        modelBuilder.Entity<SubledgerDocumentWorkflow>().HasKey(x => x.Id);
         modelBuilder.Entity<Customer>().HasKey(x => x.Id);
         modelBuilder.Entity<SalesInvoice>().HasKey(x => x.Id);
         modelBuilder.Entity<Vendor>().HasKey(x => x.Id);
@@ -186,6 +188,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<JournalEntry>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<SubledgerPayment>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<SubledgerDocumentWorkflow>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         ConfigureMoney(modelBuilder.Entity<BankAccount>().Property(x => x.LastReconciledBalance));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.MonthlyBasePay));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.AdditionalWithholding));
@@ -240,6 +243,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SubledgerPaymentApplication>().HasIndex(x => new { x.SubledgerPaymentId, x.DocumentId }).IsUnique();
         modelBuilder.Entity<SubledgerAdjustment>().HasIndex(x => new { x.CompanyId, x.Subledger, x.Reference }).IsUnique();
         modelBuilder.Entity<SubledgerAdjustment>().HasIndex(x => new { x.CompanyId, x.DocumentId });
+        modelBuilder.Entity<SubledgerDocumentWorkflow>().HasIndex(x => new { x.CompanyId, x.DocumentType, x.DocumentNumber, x.IsRecurringTemplate }).IsUnique();
+        modelBuilder.Entity<SubledgerDocumentWorkflow>().HasIndex(x => new { x.CompanyId, x.Status, x.NextOccurrenceDate });
         modelBuilder.Entity<SalesOrder>().HasIndex(x => new { x.CompanyId, x.OrderNumber }).IsUnique();
         modelBuilder.Entity<PurchaseOrder>().HasIndex(x => new { x.CompanyId, x.OrderNumber }).IsUnique();
         modelBuilder.Entity<Employee>().HasIndex(x => new { x.CompanyId, x.EmployeeNumber }).IsUnique();

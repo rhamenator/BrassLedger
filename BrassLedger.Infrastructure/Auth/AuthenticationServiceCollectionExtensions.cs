@@ -48,6 +48,12 @@ public static class AuthenticationServiceCollectionExtensions
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ReversePayments, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PaymentReverse));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SubledgerPrepare));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SubledgerApprove));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.PostSubledgerDocuments, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SubledgerPost));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageOperations, policy =>
                 policy.RequireAssertion(context =>
                     context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage)

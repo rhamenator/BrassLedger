@@ -11,6 +11,9 @@ public static class BrassLedgerPermissions
     public const string ReceivablesManage = "receivables.manage";
     public const string PayablesManage = "payables.manage";
     public const string PaymentReverse = "payments.reverse";
+    public const string SubledgerPrepare = "subledger.documents.prepare";
+    public const string SubledgerApprove = "subledger.documents.approve";
+    public const string SubledgerPost = "subledger.documents.post";
     public const string RequisitionManage = "operations.requisition.manage";
     public const string PurchasingManage = "operations.purchasing.manage";
     public const string CheckDisbursementManage = "treasury.check-disbursement.manage";
@@ -33,6 +36,9 @@ public static class BrassLedgerPermissions
         new(ReceivablesManage, "Receivables", "Work customer balances, invoices, and cash application."),
         new(PayablesManage, "Payables", "Review vendor balances and payable obligations."),
         new(PaymentReverse, "Payment reversals", "Return, void, or reverse posted customer and vendor payments."),
+        new(SubledgerPrepare, "Subledger preparation", "Prepare invoice, bill, and recurring transaction drafts."),
+        new(SubledgerApprove, "Subledger approval", "Approve invoice and bill drafts after review."),
+        new(SubledgerPost, "Subledger posting", "Post approved invoice and bill drafts to their control accounts."),
         new(RequisitionManage, "Requisitioning", "Create and route purchase requisitions."),
         new(PurchasingManage, "Purchasing", "Approve and issue purchase orders."),
         new(CheckDisbursementManage, "Check disbursement", "Prepare payments, checks, and cash disbursements."),

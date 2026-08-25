@@ -41,9 +41,15 @@ public sealed class PayablesPage
         await _session.Page.GetByLabel("Bill line description").Nth(1).FillAsync("Supplies");
         await _session.Page.GetByLabel("Bill line unit cost").Nth(1).FillAsync("40");
         await _session.Page.GetByLabel("Bill line tax").Nth(1).FillAsync("2");
-        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post bill" }).ClickAsync();
-        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor bill posted.");
-        var row = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber });
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save bill draft" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor bill draft saved.");
+        var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber });
+        await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor bill draft approved.");
+        workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber });
+        await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Approved vendor bill posted.");
+        var row = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber }).Filter(new() { HasText = "$90.00" });
         await Assertions.Expect(row).ToContainTextAsync("$90.00");
         await Assertions.Expect(row).ToContainTextAsync("2");
     }

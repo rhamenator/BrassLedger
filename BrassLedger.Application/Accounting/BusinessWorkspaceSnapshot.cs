@@ -76,7 +76,8 @@ public sealed record ReceivablesWorkspace(
     IReadOnlyList<CustomerSnapshot> Customers,
     IReadOnlyList<InvoiceSnapshot> Invoices,
     IReadOnlyList<SubledgerPaymentSnapshot>? Payments = null,
-    IReadOnlyList<SubledgerAdjustmentSnapshot>? Adjustments = null);
+    IReadOnlyList<SubledgerAdjustmentSnapshot>? Adjustments = null,
+    IReadOnlyList<SubledgerDocumentWorkflowSnapshot>? Workflows = null);
 
 public sealed record CustomerSnapshot(
     string CustomerNumber,
@@ -106,7 +107,8 @@ public sealed record PayablesWorkspace(
     IReadOnlyList<VendorSnapshot> Vendors,
     IReadOnlyList<BillSnapshot> Bills,
     IReadOnlyList<SubledgerPaymentSnapshot>? Payments = null,
-    IReadOnlyList<SubledgerAdjustmentSnapshot>? Adjustments = null);
+    IReadOnlyList<SubledgerAdjustmentSnapshot>? Adjustments = null,
+    IReadOnlyList<SubledgerDocumentWorkflowSnapshot>? Workflows = null);
 
 public sealed record VendorSnapshot(
     string VendorNumber,
@@ -133,6 +135,7 @@ public sealed record BillLineSnapshot(int Sequence, string Description, decimal 
 public sealed record SubledgerPaymentSnapshot(Guid Id, string Direction, string CounterpartyName, DateOnly PaymentDate, decimal Amount, decimal AppliedAmount, decimal UnappliedAmount, string Reference, string Method, string Status, IReadOnlyList<PaymentApplicationSnapshot> Applications);
 public sealed record PaymentApplicationSnapshot(Guid DocumentId, string DocumentNumber, decimal Amount);
 public sealed record SubledgerAdjustmentSnapshot(Guid Id, string Subledger, string Kind, Guid CounterpartyId, string CounterpartyName, Guid? DocumentId, string DocumentNumber, Guid? PaymentId, DateOnly AdjustmentDate, decimal Amount, string Reference, string Reason, string OffsetAccountNumber, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId);
+public sealed record SubledgerDocumentWorkflowSnapshot(Guid Id, string DocumentType, string DocumentNumber, string Status, bool IsRecurringTemplate, string Frequency, int FrequencyInterval, DateOnly? NextOccurrenceDate, DateOnly? EndDate, Guid? SourceTemplateId, Guid? PostedDocumentId, DateTimeOffset CreatedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? PostedAtUtc);
 
 public sealed record OperationsWorkspace(
     int InventoryItemCount,

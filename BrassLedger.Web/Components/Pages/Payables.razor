@@ -44,7 +44,7 @@ else
         <section class="panel">
             <h2>Enter and post vendor bill</h2>
             @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
-            <EditForm Model="BillForm" OnValidSubmit="CreateBillAsync">
+            <EditForm Model="BillForm" OnValidSubmit="SaveBillDraftAsync">
                 <div class="content-grid">
                     <div class="field-group"><label class="field-label">Vendor</label><InputSelect aria-label="Bill vendor" class="field-input" @bind-Value="BillForm.VendorId"><option value="@Guid.Empty">Select vendor</option>@foreach (var vendor in Workspace.Payables.Vendors) { <option value="@vendor.Id">@vendor.VendorNumber — @vendor.Name</option> }</InputSelect></div>
                     <div class="field-group"><label class="field-label">Bill number</label><InputText aria-label="Bill number" class="field-input" @bind-Value="BillForm.Number" /></div>
@@ -73,9 +73,11 @@ else
                     </table>
                 </div>
                 <button class="action-secondary" type="button" @onclick="AddBillLine">Add line</button>
-                <button class="action-primary" type="submit">Post bill</button>
+                <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments" Context="billPreparationAuthorization"><button class="action-primary" type="submit">Save bill draft</button><div class="content-grid"><div class="field-group"><label class="field-label">Recurring frequency</label><InputSelect aria-label="Recurring bill frequency" class="field-input" @bind-Value="RecurringForm.Frequency"><option>Monthly</option><option>Weekly</option><option>Quarterly</option><option>Annually</option></InputSelect></div><div class="field-group"><label class="field-label">Every</label><InputNumber aria-label="Recurring bill interval" class="field-input" @bind-Value="RecurringForm.Interval" /></div><div class="field-group"><label class="field-label">Next date</label><InputDate aria-label="Recurring bill next date" class="field-input" @bind-Value="RecurringForm.NextDate" /></div></div><button class="action-secondary" type="button" @onclick="SaveRecurringBillTemplateAsync">Save recurring template</button></AuthorizeView>
             </EditForm>
         </section>
+
+        <section class="panel"><h2>Vendor bill review queue</h2><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments"><div class="content-grid"><div class="field-group"><label class="field-label">Generate recurring drafts through</label><InputDate aria-label="Generate recurring bill drafts through" class="field-input" @bind-Value="RecurringForm.GenerateThrough" /></div><button class="action-secondary" type="button" @onclick="GenerateRecurringDraftsAsync">Generate due drafts</button></div></AuthorizeView><div class="table-scroll"><table class="data-table"><thead><tr><th>Number</th><th>Status</th><th>Source</th><th>Next</th><th>Actions</th></tr></thead><tbody>@foreach (var workflow in Workspace.Payables.Workflows ?? []) { <tr><td>@workflow.DocumentNumber</td><td>@workflow.Status</td><td>@(workflow.IsRecurringTemplate ? $"{workflow.Frequency} template" : workflow.SourceTemplateId.HasValue ? "Recurring draft" : "Manual draft")</td><td>@workflow.NextOccurrenceDate</td><td>@if (!workflow.IsRecurringTemplate && workflow.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments"><button class="action-secondary" type="button" @onclick="() => ApproveWorkflowAsync(workflow.Id)">Approve</button></AuthorizeView> } @if (!workflow.IsRecurringTemplate && workflow.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostSubledgerDocuments"><button class="action-primary" type="button" @onclick="() => PostWorkflowAsync(workflow.Id)">Post</button></AuthorizeView> }</td></tr> }</tbody></table></div></section>
 
         <section class="panel">
             <h2>Record vendor payment or advance</h2>
@@ -195,6 +197,7 @@ else
     private RefundEditor RefundForm { get; } = new();
     private VoidEditor VoidForm { get; } = new();
     private AdjustmentReversalEditor AdjustmentReversalForm { get; } = new();
+    private RecurringEditor RecurringForm { get; } = new();
     private static readonly string[] PaymentMethods = ["Check", "ACH", "Card", "Wire", "Cash", "Other"];
     private IEnumerable<PaymentApplicationEditor> AvailableBillApplications => PaymentForm.Applications.Where(application => application.CounterpartyId == PaymentForm.VendorId);
 
@@ -204,11 +207,11 @@ else
         SyncPaymentApplications();
     }
 
-    private async Task CreateBillAsync()
+    private async Task SaveBillDraftAsync()
     {
         var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount)).ToArray();
-        var result = await TransactionService.CreateVendorBillAsync(new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? "5100", $"Bill {BillForm.Number}", lines));
-        StatusMessage = result.Succeeded ? "Vendor bill posted." : result.ErrorMessage;
+        var result = await TransactionService.SaveVendorBillDraftAsync(new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? "5100", $"Bill {BillForm.Number}", lines));
+        StatusMessage = result.Succeeded ? "Vendor bill draft saved." : result.ErrorMessage;
         if (result.Succeeded)
         {
             Workspace = await WorkspaceService.GetWorkspaceAsync();
@@ -216,6 +219,11 @@ else
             SyncPaymentApplications();
         }
     }
+
+    private async Task SaveRecurringBillTemplateAsync() { var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount)).ToArray(); var request = new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? "5100", $"Recurring bill {BillForm.Number}", lines); var result = await TransactionService.SaveRecurringVendorBillTemplateAsync(new SaveRecurringVendorBillTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring vendor bill template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); BillForm.Reset(); } }
+    private async Task GenerateRecurringDraftsAsync() { var result = await TransactionService.GenerateDueRecurringDocumentsAsync(RecurringForm.GenerateThrough); StatusMessage = result.Succeeded ? "Due recurring drafts generated." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    private async Task ApproveWorkflowAsync(Guid id) { var result = await TransactionService.ApproveSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Vendor bill draft approved." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    private async Task PostWorkflowAsync(Guid id) { var result = await TransactionService.PostApprovedSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Approved vendor bill posted." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); SyncPaymentApplications(); }
 
     private void AddBillLine() => BillForm.Lines.Add(new BillLineEditor());
     private void RemoveBillLine(BillLineEditor line) { if (BillForm.Lines.Count > 1) BillForm.Lines.Remove(line); }
@@ -289,4 +297,5 @@ else
     private sealed class RefundEditor { public Guid PaymentId { get; set; } public Guid BankId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; public string Reason { get; set; } = string.Empty; public void Reset() { PaymentId = Guid.Empty; Amount = 0; Reference = string.Empty; Reason = string.Empty; } }
     private sealed class VoidEditor { public Guid DocumentId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; public void Reset() { DocumentId = Guid.Empty; Reason = string.Empty; } }
     private sealed class AdjustmentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; }
+    private sealed class RecurringEditor { public string Frequency { get; set; } = "Monthly"; public int Interval { get; set; } = 1; public DateOnly NextDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddMonths(1)); public DateOnly GenerateThrough { get; set; } = DateOnly.FromDateTime(DateTime.Today); }
 }

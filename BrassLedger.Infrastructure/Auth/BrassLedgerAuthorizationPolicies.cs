@@ -13,6 +13,9 @@ public static class BrassLedgerAuthorizationPolicies
     public const string ManageReceivables = "ManageReceivables";
     public const string ManagePayables = "ManagePayables";
     public const string ReversePayments = "ReversePayments";
+    public const string PrepareSubledgerDocuments = "PrepareSubledgerDocuments";
+    public const string ApproveSubledgerDocuments = "ApproveSubledgerDocuments";
+    public const string PostSubledgerDocuments = "PostSubledgerDocuments";
     public const string ManageOperations = "ManageOperations";
     public const string ManagePayroll = "ManagePayroll";
     public const string ManageProjects = "ManageProjects";

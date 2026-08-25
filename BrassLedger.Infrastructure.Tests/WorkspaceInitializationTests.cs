@@ -632,6 +632,66 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SubledgerWorkflow_DraftsApprovesPostsAndGeneratesRecurringDocumentsWithoutPrematureLedgerChanges()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var customer = before.Receivables.Customers.First();
+        var vendor = before.Payables.Vendors.First();
+        var invoiceRequest = new CreateInvoiceRequest(customer.Id, "INV-WF-1", new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31), 50m, 0m, "4000", "Workflow invoice");
+
+        var draft = await transactions.SaveInvoiceDraftAsync(invoiceRequest);
+        Assert.True(draft.Succeeded, draft.ErrorMessage);
+        var afterDraft = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(before.Receivables.OpenBalance, afterDraft.Receivables.OpenBalance);
+        Assert.DoesNotContain(afterDraft.Receivables.Invoices, item => item.InvoiceNumber == "INV-WF-1");
+        Assert.Contains(afterDraft.Receivables.Workflows!, item => item.Id == draft.Id && item.Status == "Draft");
+        Assert.False((await transactions.PostApprovedSubledgerDocumentAsync(draft.Id!.Value)).Succeeded);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(draft.Id.Value)).Succeeded);
+        var posted = await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value);
+        Assert.True(posted.Succeeded, posted.ErrorMessage);
+        var afterPost = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(before.Receivables.OpenBalance + 50m, afterPost.Receivables.OpenBalance);
+        Assert.Contains(afterPost.Receivables.Invoices, item => item.Id == posted.Id && item.InvoiceNumber == "INV-WF-1");
+        Assert.Contains(afterPost.Receivables.Workflows!, item => item.Id == draft.Id && item.Status == "Posted" && item.PostedDocumentId == posted.Id);
+
+        var template = await transactions.SaveRecurringVendorBillTemplateAsync(new SaveRecurringVendorBillTemplateRequest(
+            new CreateVendorBillRequest(vendor.Id, "RB-WF", new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 16), 25m, "5100", "Monthly service"),
+            "Monthly", 1, new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 1)));
+        Assert.True(template.Succeeded, template.ErrorMessage);
+        Assert.True((await transactions.GenerateDueRecurringDocumentsAsync(new DateOnly(2026, 10, 1))).Succeeded);
+        var generatedWorkspace = await workspaceService.GetWorkspaceAsync();
+        var generated = generatedWorkspace.Payables.Workflows!.Where(item => item.SourceTemplateId == template.Id && item.Status == "Draft").OrderBy(item => item.DocumentNumber).ToArray();
+        Assert.Equal(2, generated.Length);
+        Assert.Equal(["RB-WF-20260901", "RB-WF-20261001"], generated.Select(item => item.DocumentNumber));
+        Assert.Equal(before.Payables.OpenBalance, generatedWorkspace.Payables.OpenBalance);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(generated[0].Id)).Succeeded);
+        Assert.True((await transactions.PostApprovedSubledgerDocumentAsync(generated[0].Id)).Succeeded);
+        Assert.Equal(before.Payables.OpenBalance + 25m, (await workspaceService.GetWorkspaceAsync()).Payables.OpenBalance);
+    }
+
+    [Fact]
+    public async Task SubledgerWorkflow_EnforcesPreparationApprovalAndPostingPermissionsSeparately()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+        var companyId = await db.Companies.Select(item => item.Id).FirstAsync(); var customerId = await db.Customers.Where(item => item.CompanyId == companyId).Select(item => item.Id).FirstAsync();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>(); var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        void ActAs(params string[] permissions) { var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()) }; claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
+        var request = new CreateInvoiceRequest(customerId, "INV-WF-SOD-1", new DateOnly(2026, 8, 2), new DateOnly(2026, 9, 1), 10m, 0m, "4000", "Workflow permissions");
+        ActAs(BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var draft = await transactions.SaveInvoiceDraftAsync(request); Assert.True(draft.Succeeded, draft.ErrorMessage); Assert.False((await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value)).Succeeded);
+        ActAs(BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(draft.Id.Value)).Succeeded); Assert.False((await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value)).Succeeded);
+        ActAs(BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        Assert.True((await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value)).Succeeded);
+    }
+
+    [Fact]
     public async Task TransactionService_PostsInvoiceTaxToSalesTaxPayable_NotRevenue()
     {
         using var services = CreateServiceProvider();

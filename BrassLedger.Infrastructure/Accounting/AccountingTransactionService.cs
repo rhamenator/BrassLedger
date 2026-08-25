@@ -188,6 +188,7 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default)
     {
+        if (!HasPermission(BrassLedgerPermissions.ReceivablesManage)) return TransactionResult.Failure("You are not authorized to post invoices.");
         var requestedLines = request.Lines?.ToArray() ?? [];
         if (string.IsNullOrWhiteSpace(request.InvoiceNumber) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("An invoice number and description are required.");
         if (request.DueDate < request.InvoiceDate) return TransactionResult.Failure("The invoice due date cannot precede the invoice date.");
@@ -243,6 +244,7 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> CreateVendorBillAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default)
     {
+        if (!HasPermission(BrassLedgerPermissions.PayablesManage)) return TransactionResult.Failure("You are not authorized to post vendor bills.");
         var requestedLines = request.Lines?.ToArray() ?? [];
         if (string.IsNullOrWhiteSpace(request.BillNumber) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("A bill number and description are required.");
         if (request.DueDate < request.BillDate) return TransactionResult.Failure("The bill due date cannot precede the bill date.");
@@ -289,6 +291,103 @@ public sealed class AccountingTransactionService(
         catch (DbUpdateException) { return TransactionResult.Failure("Bill number already exists or was posted concurrently. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);
         return TransactionResult.Success(bill.Id);
+    }
+
+    public Task<TransactionResult> SaveInvoiceDraftAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default) =>
+        SaveSubledgerWorkflowAsync("Invoice", request.InvoiceNumber, request, false, string.Empty, 1, null, null, cancellationToken);
+
+    public Task<TransactionResult> SaveVendorBillDraftAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default) =>
+        SaveSubledgerWorkflowAsync("VendorBill", request.BillNumber, request, false, string.Empty, 1, null, null, cancellationToken);
+
+    public async Task<TransactionResult> ApproveSubledgerDocumentAsync(Guid workflowId, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.SubledgerApprove)) return TransactionResult.Failure("You are not authorized to approve invoice or bill drafts.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var workflow = await db.SubledgerDocumentWorkflows.SingleOrDefaultAsync(item => item.Id == workflowId && item.CompanyId == companyId, cancellationToken);
+        if (workflow is null || workflow.IsRecurringTemplate || workflow.Status != "Draft") return TransactionResult.Failure("Only an invoice or bill draft can be approved.");
+        var modulePermission = workflow.DocumentType == "Invoice" ? BrassLedgerPermissions.ReceivablesManage : BrassLedgerPermissions.PayablesManage;
+        if (!HasPermission(modulePermission)) return TransactionResult.Failure("You are not authorized for this subledger.");
+        workflow.Status = "Approved"; workflow.ApprovedByUserId = ResolveUserId(); workflow.ApprovedAtUtc = DateTimeOffset.UtcNow; workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddWorkflowAudit(db, workflow, "subledger-document.approved");
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The draft changed during approval. Refresh and try again."); }
+        return TransactionResult.Success(workflow.Id);
+    }
+
+    public async Task<TransactionResult> PostApprovedSubledgerDocumentAsync(Guid workflowId, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.SubledgerPost)) return TransactionResult.Failure("You are not authorized to post approved invoice or bill drafts.");
+        string documentType; string payload;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
+        {
+            var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+            var workflow = await db.SubledgerDocumentWorkflows.AsNoTracking().SingleOrDefaultAsync(item => item.Id == workflowId && item.CompanyId == companyId, cancellationToken);
+            if (workflow is null || workflow.IsRecurringTemplate || workflow.Status != "Approved") return TransactionResult.Failure("Only an approved invoice or bill draft can be posted.");
+            documentType = workflow.DocumentType; payload = workflow.PayloadJson;
+        }
+        var modulePermission = documentType == "Invoice" ? BrassLedgerPermissions.ReceivablesManage : BrassLedgerPermissions.PayablesManage;
+        if (!HasPermission(modulePermission)) return TransactionResult.Failure("You are not authorized for this subledger.");
+        TransactionResult posting;
+        try
+        {
+            posting = documentType == "Invoice"
+                ? await CreateInvoiceAsync(System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(payload)!, cancellationToken)
+                : await CreateVendorBillAsync(System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(payload)!, cancellationToken);
+        }
+        catch (System.Text.Json.JsonException) { return TransactionResult.Failure("The approved draft payload is invalid."); }
+        if (!posting.Succeeded) return posting;
+        await using var updateDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var updateCompanyId = await ResolveCompanyIdAsync(updateDb, cancellationToken);
+        var tracked = await updateDb.SubledgerDocumentWorkflows.SingleAsync(item => item.Id == workflowId && item.CompanyId == updateCompanyId, cancellationToken);
+        if (tracked.Status != "Approved") return TransactionResult.Failure("The draft changed while it was posting; the source document was posted and requires administrative review.");
+        tracked.Status = "Posted"; tracked.PostedDocumentId = posting.Id; tracked.PostedByUserId = ResolveUserId(); tracked.PostedAtUtc = DateTimeOffset.UtcNow; tracked.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddWorkflowAudit(updateDb, tracked, "subledger-document.posted");
+        await updateDb.SaveChangesAsync(cancellationToken);
+        return TransactionResult.Success(posting.Id!.Value);
+    }
+
+    public Task<TransactionResult> SaveRecurringInvoiceTemplateAsync(SaveRecurringInvoiceTemplateRequest request, CancellationToken cancellationToken = default) =>
+        SaveSubledgerWorkflowAsync("Invoice", request.Invoice.InvoiceNumber, request.Invoice, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
+
+    public Task<TransactionResult> SaveRecurringVendorBillTemplateAsync(SaveRecurringVendorBillTemplateRequest request, CancellationToken cancellationToken = default) =>
+        SaveSubledgerWorkflowAsync("VendorBill", request.Bill.BillNumber, request.Bill, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
+
+    public async Task<TransactionResult> GenerateDueRecurringDocumentsAsync(DateOnly throughDate, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.SubledgerPrepare)) return TransactionResult.Failure("You are not authorized to generate recurring document drafts.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var templates = await db.SubledgerDocumentWorkflows.Where(item => item.CompanyId == companyId && item.IsRecurringTemplate && item.Status == "Active" && item.NextOccurrenceDate <= throughDate && (item.EndDate == null || item.NextOccurrenceDate <= item.EndDate)).ToListAsync(cancellationToken);
+        var generated = 0;
+        foreach (var template in templates)
+        {
+            var occurrence = template.NextOccurrenceDate!.Value;
+            while (occurrence <= throughDate && (!template.EndDate.HasValue || occurrence <= template.EndDate.Value))
+            {
+                var number = $"{template.DocumentNumber}-{occurrence:yyyyMMdd}";
+                string payload;
+                if (template.DocumentType == "Invoice")
+                {
+                    var source = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(template.PayloadJson)!;
+                    payload = System.Text.Json.JsonSerializer.Serialize(source with { InvoiceNumber = number, InvoiceDate = occurrence, DueDate = occurrence.AddDays(source.DueDate.DayNumber - source.InvoiceDate.DayNumber) });
+                }
+                else
+                {
+                    var source = System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(template.PayloadJson)!;
+                    payload = System.Text.Json.JsonSerializer.Serialize(source with { BillNumber = number, BillDate = occurrence, DueDate = occurrence.AddDays(source.DueDate.DayNumber - source.BillDate.DayNumber) });
+                }
+                if (!await db.SubledgerDocumentWorkflows.AnyAsync(item => item.CompanyId == companyId && item.DocumentType == template.DocumentType && item.DocumentNumber == number && !item.IsRecurringTemplate, cancellationToken))
+                {
+                    var draft = new SubledgerDocumentWorkflow { Id = Guid.NewGuid(), CompanyId = companyId, DocumentType = template.DocumentType, DocumentNumber = number, PayloadJson = payload, Status = "Draft", SourceTemplateId = template.Id, CreatedByUserId = ResolveUserId(), CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+                    db.SubledgerDocumentWorkflows.Add(draft); AddWorkflowAudit(db, draft, "subledger-document.generated"); generated++;
+                }
+                occurrence = AdvanceOccurrence(occurrence, template.Frequency, template.FrequencyInterval);
+            }
+            template.NextOccurrenceDate = occurrence; template.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            if (template.EndDate.HasValue && occurrence > template.EndDate.Value) template.Status = "Completed";
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return generated == 0 ? TransactionResult.Failure("No recurring templates were due through that date.") : TransactionResult.Success(templates.First().Id);
     }
 
     public async Task<TransactionResult> ApplyInvoicePaymentAsync(ApplyInvoicePaymentRequest request, CancellationToken cancellationToken = default)
@@ -1046,6 +1145,38 @@ public sealed class AccountingTransactionService(
         AdjustmentDate = date, Amount = amount, Reference = reference.Trim(), Reason = reason.Trim(), OffsetAccountNumber = offsetAccountNumber, Status = "Posted", JournalEntryId = journalEntryId,
         CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N")
     };
+
+    private async Task<TransactionResult> SaveSubledgerWorkflowAsync<T>(string documentType, string documentNumber, T payload, bool recurring, string frequency, int interval, DateOnly? nextDate, DateOnly? endDate, CancellationToken cancellationToken)
+    {
+        if (!HasPermission(BrassLedgerPermissions.SubledgerPrepare)) return TransactionResult.Failure("You are not authorized to prepare invoice or bill drafts.");
+        var modulePermission = documentType == "Invoice" ? BrassLedgerPermissions.ReceivablesManage : BrassLedgerPermissions.PayablesManage;
+        if (!HasPermission(modulePermission)) return TransactionResult.Failure("You are not authorized for this subledger.");
+        if (string.IsNullOrWhiteSpace(documentNumber)) return TransactionResult.Failure("A document number is required.");
+        var normalizedFrequency = (frequency ?? string.Empty).Trim();
+        if (recurring && (normalizedFrequency is not ("Weekly" or "Monthly" or "Quarterly" or "Annually") || interval is < 1 or > 12 || !nextDate.HasValue || (endDate.HasValue && endDate.Value < nextDate.Value))) return TransactionResult.Failure("Recurring templates require Weekly, Monthly, Quarterly, or Annually frequency, an interval from 1 to 12, and valid occurrence dates.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        if (await db.SubledgerDocumentWorkflows.AnyAsync(item => item.CompanyId == companyId && item.DocumentType == documentType && item.DocumentNumber == documentNumber.Trim() && item.IsRecurringTemplate == recurring, cancellationToken)) return TransactionResult.Failure("That draft or recurring template number already exists.");
+        var workflow = new SubledgerDocumentWorkflow { Id = Guid.NewGuid(), CompanyId = companyId, DocumentType = documentType, DocumentNumber = documentNumber.Trim(), PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload), Status = recurring ? "Active" : "Draft", IsRecurringTemplate = recurring, Frequency = recurring ? normalizedFrequency : string.Empty, FrequencyInterval = recurring ? interval : 1, NextOccurrenceDate = nextDate, EndDate = endDate, CreatedByUserId = ResolveUserId(), CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        db.SubledgerDocumentWorkflows.Add(workflow); AddWorkflowAudit(db, workflow, recurring ? "recurring-template.saved" : "subledger-document.draft.saved");
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return TransactionResult.Failure("The draft or recurring template number already exists or changed concurrently."); }
+        return TransactionResult.Success(workflow.Id);
+    }
+
+    private static DateOnly AdvanceOccurrence(DateOnly date, string frequency, int interval) => frequency switch
+    {
+        "Weekly" => date.AddDays(7 * interval),
+        "Monthly" => date.AddMonths(interval),
+        "Quarterly" => date.AddMonths(3 * interval),
+        "Annually" => date.AddYears(interval),
+        _ => throw new InvalidOperationException("Unsupported recurrence frequency.")
+    };
+
+    private void AddWorkflowAudit(BrassLedgerDbContext db, SubledgerDocumentWorkflow workflow, string action) => db.BusinessAuditEntries.Add(new BusinessAuditEntry
+    {
+        Id = Guid.NewGuid(), CompanyId = workflow.CompanyId, UserId = ResolveUserId(), Action = action, EntityType = "SubledgerDocumentWorkflow", EntityId = workflow.Id,
+        DetailJson = System.Text.Json.JsonSerializer.Serialize(new { workflow.DocumentType, workflow.DocumentNumber, workflow.Status, workflow.IsRecurringTemplate, workflow.Frequency, workflow.FrequencyInterval, workflow.NextOccurrenceDate, workflow.EndDate, workflow.SourceTemplateId, workflow.PostedDocumentId }), OccurredAtUtc = DateTimeOffset.UtcNow
+    });
 
     private void AddAdjustmentAudit(BrassLedgerDbContext db, SubledgerAdjustment adjustment, string action)
     {

@@ -44,7 +44,7 @@ else
         <section class="panel">
             <h2>Create and post invoice</h2>
             @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
-            <EditForm Model="InvoiceForm" OnValidSubmit="CreateInvoiceAsync">
+            <EditForm Model="InvoiceForm" OnValidSubmit="SaveInvoiceDraftAsync">
                 <div class="content-grid">
                     <div class="field-group"><label class="field-label">Customer</label><InputSelect aria-label="Invoice customer" class="field-input" @bind-Value="InvoiceForm.CustomerId"><option value="@Guid.Empty">Select customer</option>@foreach (var customer in Workspace.Receivables.Customers) { <option value="@customer.Id">@customer.CustomerNumber — @customer.Name</option> }</InputSelect></div>
                     <div class="field-group"><label class="field-label">Invoice number</label><InputText aria-label="Invoice number" class="field-input" @bind-Value="InvoiceForm.Number" /></div>
@@ -73,9 +73,11 @@ else
                     </table>
                 </div>
                 <button class="action-secondary" type="button" @onclick="AddInvoiceLine">Add line</button>
-                <button class="action-primary" type="submit">Post invoice</button>
+                <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments" Context="invoicePreparationAuthorization"><button class="action-primary" type="submit">Save invoice draft</button><div class="content-grid"><div class="field-group"><label class="field-label">Recurring frequency</label><InputSelect aria-label="Recurring invoice frequency" class="field-input" @bind-Value="RecurringForm.Frequency"><option>Monthly</option><option>Weekly</option><option>Quarterly</option><option>Annually</option></InputSelect></div><div class="field-group"><label class="field-label">Every</label><InputNumber aria-label="Recurring invoice interval" class="field-input" @bind-Value="RecurringForm.Interval" /></div><div class="field-group"><label class="field-label">Next date</label><InputDate aria-label="Recurring invoice next date" class="field-input" @bind-Value="RecurringForm.NextDate" /></div></div><button class="action-secondary" type="button" @onclick="SaveRecurringInvoiceTemplateAsync">Save recurring template</button></AuthorizeView>
             </EditForm>
         </section>
+
+        <section class="panel"><h2>Invoice review queue</h2><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments"><div class="content-grid"><div class="field-group"><label class="field-label">Generate recurring drafts through</label><InputDate aria-label="Generate recurring invoice drafts through" class="field-input" @bind-Value="RecurringForm.GenerateThrough" /></div><button class="action-secondary" type="button" @onclick="GenerateRecurringDraftsAsync">Generate due drafts</button></div></AuthorizeView><div class="table-scroll"><table class="data-table"><thead><tr><th>Number</th><th>Status</th><th>Source</th><th>Next</th><th>Actions</th></tr></thead><tbody>@foreach (var workflow in Workspace.Receivables.Workflows ?? []) { <tr><td>@workflow.DocumentNumber</td><td>@workflow.Status</td><td>@(workflow.IsRecurringTemplate ? $"{workflow.Frequency} template" : workflow.SourceTemplateId.HasValue ? "Recurring draft" : "Manual draft")</td><td>@workflow.NextOccurrenceDate</td><td>@if (!workflow.IsRecurringTemplate && workflow.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments"><button class="action-secondary" type="button" @onclick="() => ApproveWorkflowAsync(workflow.Id)">Approve</button></AuthorizeView> } @if (!workflow.IsRecurringTemplate && workflow.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostSubledgerDocuments"><button class="action-primary" type="button" @onclick="() => PostWorkflowAsync(workflow.Id)">Post</button></AuthorizeView> }</td></tr> }</tbody></table></div></section>
 
         <section class="panel">
             <h2>Record customer payment or deposit</h2>
@@ -203,6 +205,7 @@ else
     private RefundEditor RefundForm { get; } = new();
     private VoidEditor VoidForm { get; } = new();
     private AdjustmentReversalEditor AdjustmentReversalForm { get; } = new();
+    private RecurringEditor RecurringForm { get; } = new();
     private static readonly string[] PaymentMethods = ["Check", "ACH", "Card", "Wire", "Cash", "Other"];
     private IEnumerable<PaymentApplicationEditor> AvailableInvoiceApplications => PaymentForm.Applications.Where(application => application.CounterpartyId == PaymentForm.CustomerId);
 
@@ -212,11 +215,11 @@ else
         SyncPaymentApplications();
     }
 
-    private async Task CreateInvoiceAsync()
+    private async Task SaveInvoiceDraftAsync()
     {
         var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount)).ToArray();
-        var result = await TransactionService.CreateInvoiceAsync(new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? "4000", $"Invoice {InvoiceForm.Number}", lines));
-        StatusMessage = result.Succeeded ? "Invoice posted." : result.ErrorMessage;
+        var result = await TransactionService.SaveInvoiceDraftAsync(new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? "4000", $"Invoice {InvoiceForm.Number}", lines));
+        StatusMessage = result.Succeeded ? "Invoice draft saved." : result.ErrorMessage;
         if (result.Succeeded)
         {
             Workspace = await WorkspaceService.GetWorkspaceAsync();
@@ -224,6 +227,11 @@ else
             SyncPaymentApplications();
         }
     }
+
+    private async Task SaveRecurringInvoiceTemplateAsync() { var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount)).ToArray(); var request = new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? "4000", $"Recurring invoice {InvoiceForm.Number}", lines); var result = await TransactionService.SaveRecurringInvoiceTemplateAsync(new SaveRecurringInvoiceTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring invoice template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); InvoiceForm.Reset(); } }
+    private async Task GenerateRecurringDraftsAsync() { var result = await TransactionService.GenerateDueRecurringDocumentsAsync(RecurringForm.GenerateThrough); StatusMessage = result.Succeeded ? "Due recurring drafts generated." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    private async Task ApproveWorkflowAsync(Guid id) { var result = await TransactionService.ApproveSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Invoice draft approved." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    private async Task PostWorkflowAsync(Guid id) { var result = await TransactionService.PostApprovedSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Approved invoice posted." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); SyncPaymentApplications(); }
 
     private void AddInvoiceLine() => InvoiceForm.Lines.Add(new InvoiceLineEditor());
     private void RemoveInvoiceLine(InvoiceLineEditor line) { if (InvoiceForm.Lines.Count > 1) InvoiceForm.Lines.Remove(line); }
@@ -297,4 +305,5 @@ else
     private sealed class RefundEditor { public Guid PaymentId { get; set; } public Guid BankId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; public string Reason { get; set; } = string.Empty; public void Reset() { PaymentId = Guid.Empty; Amount = 0; Reference = string.Empty; Reason = string.Empty; } }
     private sealed class VoidEditor { public Guid DocumentId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; public void Reset() { DocumentId = Guid.Empty; Reason = string.Empty; } }
     private sealed class AdjustmentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; }
+    private sealed class RecurringEditor { public string Frequency { get; set; } = "Monthly"; public int Interval { get; set; } = 1; public DateOnly NextDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddMonths(1)); public DateOnly GenerateThrough { get; set; } = DateOnly.FromDateTime(DateTime.Today); }
 }
