@@ -2,10 +2,13 @@
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.AdministerSystem)]
 @inject ISecurityAdministrationService SecurityAdministrationService
 @inject IIntegrationService IntegrationService
+@inject IQuickBooksOnlineConnectionService QuickBooksOnlineConnectionService
+@inject IQuickBooksOnlineSyncService QuickBooksOnlineSyncService
 @inject ICompanyManagementService CompanyManagementService
 @inject IConsolidationService ConsolidationService
 @inject IAccountingPeriodService AccountingPeriodService
 @inject IBackupService BackupService
+@inject NavigationManager NavigationManager
 
 <PageTitle>Administration</PageTitle>
 
@@ -286,18 +289,93 @@ else
 
         <section class="panel">
             <h2>Integration catalog</h2>
-            <p class="page-intro">Connection credentials are encrypted at rest and never shown again after saving. The table distinguishes working file interchange from profile-only placeholders. Saving or activating a profile does not establish a connection, validate credentials, or enable live synchronization.</p>
-            <EditForm Model="IntegrationForm" OnValidSubmit="SaveIntegrationConnectionAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Provider</label><InputSelect aria-label="Integration provider" class="field-input" @bind-Value="IntegrationForm.ProviderCode"><option value="">Select provider</option>@foreach (var provider in Providers) { <option value="@provider.Code">@provider.Name — @provider.ImplementationStatus</option> }</InputSelect></div><div class="field-group"><label class="field-label">Profile name</label><InputText aria-label="Integration connection name" class="field-input" @bind-Value="IntegrationForm.Name" /></div><div class="field-group"><label class="field-label">Settings JSON</label><InputTextArea aria-label="Integration settings JSON" class="field-input" @bind-Value="IntegrationForm.SettingsJson" /></div><div class="field-group"><label class="field-label">Credentials JSON</label><InputTextArea aria-label="Integration credentials JSON" class="field-input" autocomplete="off" @bind-Value="IntegrationForm.CredentialsJson" /></div><div class="field-group"><label><InputCheckbox aria-label="Enable integration connection" @bind-Value="IntegrationForm.Enable" /> Mark profile active (does not connect)</label></div></div><button class="action-secondary" type="submit">Save connection profile</button></EditForm>
-            <table class="data-table">
-                <thead><tr><th>Provider</th><th>Implementation</th><th>Supported now</th><th>Profile status</th></tr></thead>
-                <tbody>
-                    @foreach (var provider in Providers)
+            <p class="page-intro">QuickBooks uses Intuit’s authorization page; its client secret is deployment configuration and its rotating tokens are protected at rest. BrassLedger never asks an operator to paste QuickBooks credentials into JSON.</p>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageUsers" Context="integrationAuthorization">
+                <Authorized>
+                    @if (QuickBooksAvailability is not null)
                     {
-                        var connections = Connections.Where(connection => connection.ProviderCode == provider.Code).ToArray();
-                        <tr><td>@provider.Name<br /><small>@provider.Category</small></td><td>@provider.ImplementationStatus<br /><small>@provider.Description</small></td><td>@provider.SupportedCapabilities<br /><small>Live sync: @(provider.LiveSynchronizationAvailable ? "available" : "not implemented")</small></td><td>@(connections.Length == 0 ? "No stored profile" : string.Join(", ", connections.Select(connection => $"{connection.Name}: {connection.Status}"))) @foreach (var connection in connections.Where(connection => connection.Status != "Disabled")) { <button class="action-secondary" type="button" @onclick="() => DisableIntegrationConnectionAsync(connection)">Disable @connection.Name</button> }</td></tr>
+                        <div class="notice-panel"><strong>QuickBooks Online</strong><p>@QuickBooksAvailability.Message</p></div>
+                        <EditForm Model="QuickBooksForm" OnValidSubmit="ConnectQuickBooksAsync">
+                            <div class="content-grid">
+                                <div class="field-group"><label class="field-label">Connection name</label><InputText aria-label="QuickBooks connection name" class="field-input" @bind-Value="QuickBooksForm.ConnectionName" /></div>
+                                <div class="field-group"><label class="field-label">Intuit environment</label><input aria-label="QuickBooks environment" class="field-input" value="@QuickBooksAvailability.Environment" disabled /></div>
+                            </div>
+                            <button class="action-primary" type="submit" disabled="@(!QuickBooksAvailability.Configured)">Connect through Intuit</button>
+                        </EditForm>
                     }
-                </tbody>
-            </table>
+                    @{ var quickBooksConnections = Connections.Where(connection => connection.ProviderCode == "quickbooks-online").ToArray(); }
+                    <div class="field-group"><label class="field-label">QuickBooks data to import</label><InputSelect aria-label="QuickBooks API sync entity" class="field-input" @bind-Value="QuickBooksSyncEntity"><option value="accounts">Chart of accounts</option><option value="customers">Customers</option><option value="vendors">Vendors</option></InputSelect><small>Preview fetches and compares data without changing accounting records. Import is enabled only for the exact snapshot you previewed during this session.</small></div>
+                    @if (quickBooksConnections.Length == 0)
+                    {
+                        <p class="muted-copy">No QuickBooks company is connected. Reviewed CSV interchange remains available from the Ledger page.</p>
+                    }
+                    else
+                    {
+                        <div class="table-scroll">
+                            <table class="data-table">
+                                <thead><tr><th>Name</th><th>Company</th><th>Status</th><th>Last validated</th><th>Actions</th></tr></thead>
+                                <tbody>
+                                @foreach (var connection in quickBooksConnections)
+                                {
+                                    <tr>
+                                        <td>@connection.Name</td>
+                                        <td>@DescribeQuickBooksConnection(connection)</td>
+                                        <td>@connection.Status</td>
+                                        <td>@(connection.LastValidatedAtUtc?.LocalDateTime.ToString("g") ?? "Not validated")</td>
+                                        <td>
+                                            @if (connection.Status is not "Disconnected") { <button class="action-secondary" type="button" @onclick="() => ValidateQuickBooksAsync(connection.Id)">Validate</button> }
+                                            @if (connection.Status == "Connected")
+                                            {
+                                                <button class="action-secondary" type="button" @onclick="() => RunQuickBooksSyncAsync(connection.Id, true)">Preview import</button>
+                                                <button class="action-primary" type="button" disabled="@(!HasCurrentQuickBooksPreview(connection.Id))" @onclick="() => RunQuickBooksSyncAsync(connection.Id, false)">Import previewed snapshot</button>
+                                            }
+                                            <button class="action-secondary" type="button" @onclick="() => ReconnectQuickBooksAsync(connection)">Reconnect</button>
+                                            @if (connection.Status is not "Disconnected")
+                                            {
+                                                @if (PendingQuickBooksDisconnectId == connection.Id)
+                                                {
+                                                    <button class="action-danger" type="button" @onclick="() => DisconnectQuickBooksAsync(connection.Id)">Confirm disconnect</button>
+                                                    <button class="action-secondary" type="button" @onclick="CancelQuickBooksDisconnect">Cancel</button>
+                                                }
+                                                else
+                                                {
+                                                    <button class="action-secondary" type="button" @onclick="() => PendingQuickBooksDisconnectId = connection.Id">Disconnect</button>
+                                                }
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+
+                    @if (LatestQuickBooksSync is not null)
+                    {
+                        <div class="notice-panel" role="status">
+                            <strong>@(LatestQuickBooksSync.DryRun ? "QuickBooks import preview" : "QuickBooks import result")</strong>
+                            <p>Fetched @LatestQuickBooksSync.FetchedCount; create @LatestQuickBooksSync.CreatedCount; update @LatestQuickBooksSync.UpdatedCount; unchanged @LatestQuickBooksSync.UnchangedCount; conflicts @LatestQuickBooksSync.ConflictCount; rejected @LatestQuickBooksSync.RejectedCount.</p>
+                            @if (LatestQuickBooksSync.Issues.Count > 0) { <ul class="warning-list">@foreach (var issue in LatestQuickBooksSync.Issues) { <li>@issue.Code — @issue.Message @if (!string.IsNullOrWhiteSpace(issue.ProviderEntityId)) { <span>(QuickBooks ID @issue.ProviderEntityId)</span> }</li> }</ul> }
+                        </div>
+                    }
+                    @if (QuickBooksSyncRuns.Count > 0)
+                    {
+                        <h3>Recent QuickBooks API synchronization runs</h3>
+                        <div class="table-scroll"><table class="data-table"><thead><tr><th>Completed</th><th>Entity</th><th>Mode</th><th>Status</th><th>Counts</th><th>Operator</th></tr></thead><tbody>@foreach (var run in QuickBooksSyncRuns) { <tr><td>@run.CompletedAtUtc.LocalDateTime</td><td>@run.EntityType</td><td>@(run.IsDryRun ? "Preview" : "Import")</td><td>@run.Status</td><td>@run.CreatedCount create · @run.UpdatedCount update · @run.ConflictCount conflict · @run.RejectedCount rejected</td><td>@(run.InitiatedBy ?? "Unknown")</td></tr> }</tbody></table></div>
+                    }
+
+                    <details>
+                        <summary>Other provider connection profiles</summary>
+                        <p class="page-intro">These entries store protected configuration only. They do not claim a working connection or synchronization adapter.</p>
+                        <EditForm Model="IntegrationForm" OnValidSubmit="SaveIntegrationConnectionAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Provider</label><InputSelect aria-label="Integration provider" class="field-input" @bind-Value="IntegrationForm.ProviderCode"><option value="">Select provider</option>@foreach (var provider in Providers.Where(provider => provider.Code != "quickbooks-online")) { <option value="@provider.Code">@provider.Name — @provider.ImplementationStatus</option> }</InputSelect></div><div class="field-group"><label class="field-label">Profile name</label><InputText aria-label="Integration connection name" class="field-input" @bind-Value="IntegrationForm.Name" /></div><div class="field-group"><label class="field-label">Settings JSON</label><InputTextArea aria-label="Integration settings JSON" class="field-input" @bind-Value="IntegrationForm.SettingsJson" /></div><div class="field-group"><label class="field-label">Credentials JSON</label><InputTextArea aria-label="Integration credentials JSON" class="field-input" autocomplete="off" @bind-Value="IntegrationForm.CredentialsJson" /></div><div class="field-group"><label><InputCheckbox aria-label="Enable integration connection" @bind-Value="IntegrationForm.Enable" /> Mark profile active (does not connect)</label></div></div><button class="action-secondary" type="submit">Save connection profile</button></EditForm>
+                    </details>
+                </Authorized>
+                <NotAuthorized><p class="muted-copy">User-administration permission is required to manage external accounting authorizations.</p></NotAuthorized>
+            </AuthorizeView>
+            <div class="table-scroll"><table class="data-table">
+                <thead><tr><th>Provider</th><th>Implementation</th><th>Supported now</th><th>Profile status</th></tr></thead>
+                <tbody>@foreach (var provider in Providers) { var connections = Connections.Where(connection => connection.ProviderCode == provider.Code).ToArray(); <tr><td>@provider.Name<br /><small>@provider.Category</small></td><td>@provider.ImplementationStatus<br /><small>@provider.Description</small></td><td>@provider.SupportedCapabilities<br /><small>Live sync: @(provider.LiveSynchronizationAvailable ? "available" : "not implemented")</small></td><td>@(connections.Length == 0 ? "No stored profile" : string.Join(", ", connections.Select(connection => $"{connection.Name}: {connection.Status}"))) @foreach (var connection in connections.Where(connection => connection.ProviderCode != "quickbooks-online" && connection.Status != "Disabled")) { <button class="action-secondary" type="button" @onclick="() => DisableIntegrationConnectionAsync(connection)">Disable @connection.Name</button> }</td></tr> }</tbody>
+            </table></div>
         </section>
     </section>
 }
@@ -320,6 +398,13 @@ else
     private AccountingControlsSnapshot AccountingControls { get; set; } = new([], []);
     private AccountingPeriodEditor AccountingPeriodForm { get; set; } = new();
     private IntegrationConnectionEditor IntegrationForm { get; set; } = new();
+    private QuickBooksConnectionEditor QuickBooksForm { get; set; } = new();
+    private QuickBooksOnlineAvailability? QuickBooksAvailability { get; set; }
+    private Guid? PendingQuickBooksDisconnectId { get; set; }
+    private string QuickBooksSyncEntity { get; set; } = "accounts";
+    private QuickBooksSyncResult? LatestQuickBooksSync { get; set; }
+    private IReadOnlyList<QuickBooksSyncRunSnapshot> QuickBooksSyncRuns { get; set; } = [];
+    private Dictionary<string, string> QuickBooksPreviewSnapshots { get; } = new(StringComparer.Ordinal);
     private BackupResult? LatestBackup { get; set; }
     private BackupVerificationResult? BackupVerification { get; set; }
     private BackupRecoveryRehearsalResult? RecoveryRehearsal { get; set; }
@@ -327,7 +412,20 @@ else
     protected override async Task OnInitializedAsync()
     {
         await ReloadSnapshotAsync();
+        if (string.Equals(QuickBooksCallbackStatus, "connected", StringComparison.OrdinalIgnoreCase))
+            StatusMessage = $"Connected and validated {QuickBooksCallbackCompany ?? "the selected QuickBooks company"}.";
+        else if (string.Equals(QuickBooksCallbackStatus, "error", StringComparison.OrdinalIgnoreCase))
+            StatusMessage = string.IsNullOrWhiteSpace(QuickBooksCallbackMessage) ? "QuickBooks authorization did not complete." : QuickBooksCallbackMessage;
     }
+
+    [SupplyParameterFromQuery(Name = "quickbooks")]
+    public string? QuickBooksCallbackStatus { get; set; }
+
+    [SupplyParameterFromQuery(Name = "company")]
+    public string? QuickBooksCallbackCompany { get; set; }
+
+    [SupplyParameterFromQuery(Name = "message")]
+    public string? QuickBooksCallbackMessage { get; set; }
 
     private async Task CreateRoleAsync(EditContext _)
     {
@@ -410,6 +508,79 @@ else
         var result = await IntegrationService.SaveConnectionAsync(new SaveIntegrationConnectionRequest(null, IntegrationForm.ProviderCode, IntegrationForm.Name, IntegrationForm.SettingsJson, IntegrationForm.CredentialsJson, IntegrationForm.Enable));
         StatusMessage = result.Succeeded ? "Integration connection profile saved. Credentials are not displayed after saving." : result.ErrorMessage;
         if (result.Succeeded) { IntegrationForm = new IntegrationConnectionEditor(); Connections = await IntegrationService.GetConnectionsAsync(); }
+    }
+
+    private async Task ConnectQuickBooksAsync()
+    {
+        if (QuickBooksAvailability is null) return;
+        var result = await QuickBooksOnlineConnectionService.BeginAuthorizationAsync(new(null, QuickBooksForm.ConnectionName, QuickBooksAvailability.Environment));
+        StatusMessage = result.ErrorMessage;
+        if (result.Succeeded && !string.IsNullOrWhiteSpace(result.AuthorizationUrl))
+            NavigationManager.NavigateTo(result.AuthorizationUrl, forceLoad: true);
+    }
+
+    private async Task ReconnectQuickBooksAsync(IntegrationConnectionSnapshot connection)
+    {
+        if (QuickBooksAvailability is null) return;
+        var result = await QuickBooksOnlineConnectionService.BeginAuthorizationAsync(new(connection.Id, connection.Name, QuickBooksAvailability.Environment));
+        StatusMessage = result.ErrorMessage;
+        if (result.Succeeded && !string.IsNullOrWhiteSpace(result.AuthorizationUrl))
+            NavigationManager.NavigateTo(result.AuthorizationUrl, forceLoad: true);
+    }
+
+    private async Task ValidateQuickBooksAsync(Guid connectionId)
+    {
+        var result = await QuickBooksOnlineConnectionService.ValidateConnectionAsync(connectionId);
+        StatusMessage = result.Succeeded ? "The QuickBooks company and authorization were validated." : result.ErrorMessage;
+        Connections = await IntegrationService.GetConnectionsAsync();
+    }
+
+    private async Task RunQuickBooksSyncAsync(Guid connectionId, bool dryRun)
+    {
+        var key = QuickBooksPreviewKey(connectionId);
+        var expectedSnapshot = dryRun ? string.Empty : QuickBooksPreviewSnapshots.GetValueOrDefault(key, string.Empty);
+        if (!dryRun && string.IsNullOrWhiteSpace(expectedSnapshot))
+        {
+            StatusMessage = "Preview this QuickBooks data type before importing it.";
+            return;
+        }
+        LatestQuickBooksSync = await QuickBooksOnlineSyncService.ImportAsync(new(connectionId, QuickBooksSyncEntity, dryRun, expectedSnapshot));
+        StatusMessage = LatestQuickBooksSync.Succeeded
+            ? dryRun ? "Preview complete. Review the counts and issues before importing this exact snapshot." : "The previewed QuickBooks snapshot was imported through controlled entity links."
+            : LatestQuickBooksSync.ErrorMessage;
+        if (dryRun && LatestQuickBooksSync.Succeeded) QuickBooksPreviewSnapshots[key] = LatestQuickBooksSync.SnapshotSha256;
+        if (!dryRun || !LatestQuickBooksSync.Succeeded) QuickBooksPreviewSnapshots.Remove(key);
+        QuickBooksSyncRuns = await QuickBooksOnlineSyncService.GetRecentRunsAsync(limit: 20);
+        if (!dryRun && LatestQuickBooksSync.Succeeded) Connections = await IntegrationService.GetConnectionsAsync();
+    }
+
+    private bool HasCurrentQuickBooksPreview(Guid connectionId) => QuickBooksPreviewSnapshots.ContainsKey(QuickBooksPreviewKey(connectionId));
+    private string QuickBooksPreviewKey(Guid connectionId) => $"{connectionId:N}:{QuickBooksSyncEntity}";
+
+    private async Task DisconnectQuickBooksAsync(Guid connectionId)
+    {
+        var result = await QuickBooksOnlineConnectionService.DisconnectAsync(connectionId);
+        StatusMessage = result.Succeeded ? "The QuickBooks authorization was revoked and protected tokens were removed." : result.ErrorMessage;
+        PendingQuickBooksDisconnectId = null;
+        Connections = await IntegrationService.GetConnectionsAsync();
+    }
+
+    private void CancelQuickBooksDisconnect() => PendingQuickBooksDisconnectId = null;
+
+    private static string DescribeQuickBooksConnection(IntegrationConnectionSnapshot connection)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(connection.SettingsJson);
+            var root = document.RootElement;
+            var companyName = root.TryGetProperty("CompanyName", out var company) ? company.GetString() : null;
+            var environment = root.TryGetProperty("Environment", out var environmentValue) ? environmentValue.GetString() : null;
+            return string.IsNullOrWhiteSpace(companyName) ? environment ?? "Not linked" : $"{companyName} ({environment})";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return "Connection metadata unavailable";
+        }
     }
 
     private async Task CreateBackupAsync()
@@ -508,6 +679,8 @@ else
         Snapshot = await SecurityAdministrationService.GetSnapshotAsync();
         Providers = await IntegrationService.GetCatalogAsync();
         Connections = await IntegrationService.GetConnectionsAsync();
+        QuickBooksAvailability = await QuickBooksOnlineConnectionService.GetAvailabilityAsync();
+        QuickBooksSyncRuns = await QuickBooksOnlineSyncService.GetRecentRunsAsync(limit: 20);
         Companies = await CompanyManagementService.GetMyCompaniesAsync();
         ConsolidationGroups = await ConsolidationService.GetGroupsAsync();
         AccountingControls = await AccountingPeriodService.GetSnapshotAsync();
@@ -542,4 +715,5 @@ else
     private sealed class ConsolidationGroupEditor { public string Name { get; set; } = string.Empty; public string ReportingCurrency { get; set; } = "USD"; public HashSet<Guid> MemberCompanyIds { get; } = []; public Dictionary<Guid, decimal> OwnershipPercentages { get; } = []; }
     private sealed class AccountingPeriodEditor { public DateOnly StartsOn { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly EndsOn { get; set; } = new(DateTime.Today.Year, 12, 31); public string Notes { get; set; } = string.Empty; }
     private sealed class IntegrationConnectionEditor { public string ProviderCode { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public string SettingsJson { get; set; } = "{}"; public string CredentialsJson { get; set; } = "{}"; public bool Enable { get; set; } }
+    private sealed class QuickBooksConnectionEditor { public string ConnectionName { get; set; } = "Primary QuickBooks company"; }
 }

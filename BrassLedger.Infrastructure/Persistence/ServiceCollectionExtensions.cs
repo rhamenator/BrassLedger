@@ -31,8 +31,10 @@ public static class ServiceCollectionExtensions
     internal const string AccountRecoverySchemaVersion = "2026082506-account-invitations-and-recovery";
     internal const string AccountEmailLookupSchemaVersion = "2026082507-account-email-lookup";
     internal const string SecurityEmailActionValiditySchemaVersion = "2026082508-security-email-action-validity";
-    internal const string CurrentSchemaVersion = "2026082509-named-user-sessions";
-    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, SecurityEmailActionValiditySchemaVersion, CurrentSchemaVersion];
+    internal const string NamedUserSessionSchemaVersion = "2026082509-named-user-sessions";
+    internal const string QuickBooksOAuthSchemaVersion = "2026082510-quickbooks-oauth-connections";
+    internal const string CurrentSchemaVersion = "2026082511-external-entity-sync";
+    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, SecurityEmailActionValiditySchemaVersion, NamedUserSessionSchemaVersion, QuickBooksOAuthSchemaVersion, CurrentSchemaVersion];
 
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
@@ -78,6 +80,8 @@ public static class ServiceCollectionExtensions
         services.AddHttpContextAccessor();
         services.AddHttpClient("TaxSourceCapture", client => client.Timeout = TimeSpan.FromSeconds(45))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddHttpClient("QuickBooksOnline", client => client.Timeout = TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddSingleton(new BrassLedgerStoragePaths(dataDirectory, keysDirectory));
         services.AddSingleton(Options.Create(BuildBootstrapOptions(configuration, seedSampleData)));
         services.AddOptions<AccountEmailOptions>()
@@ -92,6 +96,19 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.PasswordResetLifetimeMinutes is >= 10 and <= 120, "AccountEmail:PasswordResetLifetimeMinutes must be between 10 and 120.")
             .Validate(options => options.MaximumDeliveryAttempts is >= 1 and <= 20, "AccountEmail:MaximumDeliveryAttempts must be between 1 and 20.")
             .Validate(options => options.DeliveryTimeoutSeconds is >= 5 and <= 120, "AccountEmail:DeliveryTimeoutSeconds must be between 5 and 120.")
+            .ValidateOnStart();
+        services.AddOptions<QuickBooksOnlineOptions>()
+            .Bind(configuration.GetSection("QuickBooksOnline"))
+            .Validate(options => (options.Environment ?? string.Empty).Trim().ToUpperInvariant() is "SANDBOX" or "PRODUCTION", "QuickBooksOnline:Environment must be Sandbox or Production.")
+            .Validate(options => options.AuthorizationStateLifetimeMinutes is >= 5 and <= 30, "QuickBooksOnline:AuthorizationStateLifetimeMinutes must be between 5 and 30.")
+            .Validate(options => IsSecureProviderUri(options.AuthorizationEndpoint), "QuickBooksOnline:AuthorizationEndpoint must be an absolute HTTPS URL without credentials or a fragment.")
+            .Validate(options => IsSecureProviderUri(options.TokenEndpoint), "QuickBooksOnline:TokenEndpoint must be an absolute HTTPS URL without credentials, a query, or a fragment.")
+            .Validate(options => IsSecureProviderUri(options.RevocationEndpoint), "QuickBooksOnline:RevocationEndpoint must be an absolute HTTPS URL without credentials, a query, or a fragment.")
+            .Validate(options => IsSecureProviderUri(options.SandboxApiBaseUrl), "QuickBooksOnline:SandboxApiBaseUrl must be an absolute HTTPS URL without credentials, a query, or a fragment.")
+            .Validate(options => IsSecureProviderUri(options.ProductionApiBaseUrl), "QuickBooksOnline:ProductionApiBaseUrl must be an absolute HTTPS URL without credentials, a query, or a fragment.")
+            .Validate(options => !options.Enabled || !string.IsNullOrWhiteSpace(options.ClientId), "QuickBooksOnline:ClientId is required when QuickBooks OAuth is enabled.")
+            .Validate(options => !options.Enabled || !string.IsNullOrWhiteSpace(options.ClientSecret), "QuickBooksOnline:ClientSecret is required when QuickBooks OAuth is enabled.")
+            .Validate(options => !options.Enabled || IsSecureRedirectUri(options.RedirectUri, options.Environment), "QuickBooksOnline:RedirectUri must be an absolute HTTPS URL; Sandbox may use HTTP only for a loopback host.")
             .ValidateOnStart();
         services.AddSingleton<ISensitiveDataProtector, SensitiveDataProtector>();
         services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
@@ -110,6 +127,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAccountingPeriodService, AccountingPeriodService>();
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IIntegrationService, IntegrationService>();
+        services.AddSingleton<IQuickBooksOnlineClient, QuickBooksOnlineClient>();
+        services.AddScoped<IQuickBooksOnlineConnectionService, QuickBooksOnlineConnectionService>();
+        services.AddScoped<IQuickBooksOnlineSyncService, QuickBooksOnlineSyncService>();
         services.AddScoped<IAccountingTransactionService, AccountingTransactionService>();
         services.AddScoped<IPayrollReportingService, PayrollReportingService>();
         services.AddScoped<IPayrollFilingService, PayrollFilingService>();
@@ -152,6 +172,28 @@ public static class ServiceCollectionExtensions
         var options = configuration.GetSection("Bootstrap").Get<BootstrapOptions>() ?? new BootstrapOptions();
         options.SeedSampleData = options.SeedSampleData || seedSampleData;
         return options;
+    }
+
+    private static bool IsSecureProviderUri(string value)
+    {
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttps
+            && !string.IsNullOrWhiteSpace(uri.Host)
+            && string.IsNullOrEmpty(uri.UserInfo)
+            && string.IsNullOrEmpty(uri.Query)
+            && string.IsNullOrEmpty(uri.Fragment);
+    }
+
+    private static bool IsSecureRedirectUri(string value, string environment)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)) return false;
+        if (uri.Scheme == Uri.UriSchemeHttps && !string.IsNullOrWhiteSpace(uri.Host)) return true;
+        return string.Equals(environment, "Sandbox", StringComparison.OrdinalIgnoreCase)
+            && uri.Scheme == Uri.UriSchemeHttp
+            && uri.IsLoopback;
     }
 
     private static string BuildDataDirectory(IConfiguration configuration, string contentRootPath)
@@ -258,8 +300,12 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {AccountEmailLookupSchemaVersion} is recorded without prerequisite {AccountRecoverySchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (applied.Contains(SecurityEmailActionValiditySchemaVersion) && !applied.Contains(AccountEmailLookupSchemaVersion))
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {SecurityEmailActionValiditySchemaVersion} is recorded without prerequisite {AccountEmailLookupSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
-        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(SecurityEmailActionValiditySchemaVersion))
-            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {SecurityEmailActionValiditySchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(NamedUserSessionSchemaVersion) && !applied.Contains(SecurityEmailActionValiditySchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {NamedUserSessionSchemaVersion} is recorded without prerequisite {SecurityEmailActionValiditySchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(QuickBooksOAuthSchemaVersion) && !applied.Contains(NamedUserSessionSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {QuickBooksOAuthSchemaVersion} is recorded without prerequisite {NamedUserSessionSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(QuickBooksOAuthSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {QuickBooksOAuthSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (!applied.Contains(BaselineSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
             {
@@ -290,8 +336,14 @@ public static class ServiceCollectionExtensions
         if (!applied.Contains(SecurityEmailActionValiditySchemaVersion))
             await ApplySchemaVersionAsync(dbContext, SecurityEmailActionValiditySchemaVersion, "Prevented delivery of links whose one-use account action expired or was invalidated.", () => EnsureSecurityEmailActionValiditySchemaAsync(dbContext, cancellationToken), cancellationToken);
 
+        if (!applied.Contains(NamedUserSessionSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, NamedUserSessionSchemaVersion, "Added durable, individually revocable named user sessions.", () => EnsureNamedUserSessionSchemaAsync(dbContext, cancellationToken), cancellationToken);
+
+        if (!applied.Contains(QuickBooksOAuthSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, QuickBooksOAuthSchemaVersion, "Added one-use QuickBooks OAuth authorization state and credential concurrency metadata.", () => EnsureQuickBooksOAuthSchemaAsync(dbContext, cancellationToken), cancellationToken);
+
         if (!applied.Contains(CurrentSchemaVersion))
-            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added durable, individually revocable named user sessions.", () => EnsureNamedUserSessionSchemaAsync(dbContext, cancellationToken), cancellationToken);
+            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added durable external-entity links and auditable dry-run or committed synchronization history.", () => EnsureExternalEntitySyncSchemaAsync(dbContext, cancellationToken), cancellationToken);
     }
 
     private static async Task ApplySchemaVersionAsync(BrassLedgerDbContext dbContext, string version, string description, Func<Task> apply, CancellationToken cancellationToken)
@@ -467,6 +519,48 @@ public static class ServiceCollectionExtensions
         {
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "UserSessions" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "SecurityStamp" text NOT NULL, "AuthenticationMethod" text NOT NULL, "CreatedAtUtc" timestamptz NOT NULL, "LastSeenAtUtc" timestamptz NOT NULL, "ExpiresAtUtc" timestamptz NOT NULL, "RevokedAtUtc" timestamptz NULL, "IpAddress" text NOT NULL, "UserAgent" text NOT NULL, CONSTRAINT "FK_UserSessions_Users_UserId" FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE CASCADE);""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_UserSessions_UserId_RevokedAtUtc_ExpiresAtUtc" ON "UserSessions" ("UserId", "RevokedAtUtc", "ExpiresAtUtc");""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureQuickBooksOAuthSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await EnsureSqliteColumnAsync(dbContext, "IntegrationConnections", "CredentialVersion", "ALTER TABLE \"IntegrationConnections\" ADD COLUMN \"CredentialVersion\" INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "OAuthAuthorizationAttempts" ("Id" TEXT NOT NULL PRIMARY KEY, "CompanyId" TEXT NOT NULL, "UserId" TEXT NOT NULL, "ConnectionId" TEXT NULL, "ProviderCode" TEXT NOT NULL, "ConnectionName" TEXT NOT NULL, "Environment" TEXT NOT NULL, "StateHash" TEXT NOT NULL, "CreatedAtUtc" TEXT NOT NULL, "ExpiresAtUtc" TEXT NOT NULL, "ConsumedAtUtc" TEXT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_OAuthAuthorizationAttempts_StateHash" ON "OAuthAuthorizationAttempts" ("StateHash");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_OAuthAuthorizationAttempts_CompanyId_UserId_ExpiresAtUtc" ON "OAuthAuthorizationAttempts" ("CompanyId", "UserId", "ExpiresAtUtc");""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "IntegrationConnections" ADD COLUMN IF NOT EXISTS "CredentialVersion" integer NOT NULL DEFAULT 0;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "OAuthAuthorizationAttempts" ("Id" uuid NOT NULL PRIMARY KEY, "CompanyId" uuid NOT NULL, "UserId" uuid NOT NULL, "ConnectionId" uuid NULL, "ProviderCode" text NOT NULL, "ConnectionName" text NOT NULL, "Environment" text NOT NULL, "StateHash" text NOT NULL, "CreatedAtUtc" timestamptz NOT NULL, "ExpiresAtUtc" timestamptz NOT NULL, "ConsumedAtUtc" timestamptz NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_OAuthAuthorizationAttempts_StateHash" ON "OAuthAuthorizationAttempts" ("StateHash");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_OAuthAuthorizationAttempts_CompanyId_UserId_ExpiresAtUtc" ON "OAuthAuthorizationAttempts" ("CompanyId", "UserId", "ExpiresAtUtc");""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureExternalEntitySyncSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "ExternalEntityLinks" ("Id" TEXT NOT NULL PRIMARY KEY, "CompanyId" TEXT NOT NULL, "IntegrationConnectionId" TEXT NOT NULL, "ProviderCode" TEXT NOT NULL, "EntityType" TEXT NOT NULL, "ProviderEntityId" TEXT NOT NULL, "LocalEntityId" TEXT NOT NULL, "ProviderSyncToken" TEXT NOT NULL, "LastRemoteFingerprint" TEXT NOT NULL, "LastLocalFingerprint" TEXT NOT NULL, "LastSynchronizedAtUtc" TEXT NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_ExternalEntityLinks_IntegrationConnectionId_EntityType_ProviderEntityId" ON "ExternalEntityLinks" ("IntegrationConnectionId", "EntityType", "ProviderEntityId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_ExternalEntityLinks_IntegrationConnectionId_EntityType_LocalEntityId" ON "ExternalEntityLinks" ("IntegrationConnectionId", "EntityType", "LocalEntityId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "IntegrationSyncRuns" ("Id" TEXT NOT NULL PRIMARY KEY, "CompanyId" TEXT NOT NULL, "IntegrationConnectionId" TEXT NOT NULL, "ProviderCode" TEXT NOT NULL, "EntityType" TEXT NOT NULL, "Direction" TEXT NOT NULL, "IsDryRun" INTEGER NOT NULL, "Status" TEXT NOT NULL, "FetchedCount" INTEGER NOT NULL, "CreatedCount" INTEGER NOT NULL, "UpdatedCount" INTEGER NOT NULL, "UnchangedCount" INTEGER NOT NULL, "ConflictCount" INTEGER NOT NULL, "RejectedCount" INTEGER NOT NULL, "SnapshotSha256" TEXT NOT NULL, "DetailJson" TEXT NOT NULL, "InitiatedByUserId" TEXT NULL, "StartedAtUtc" TEXT NOT NULL, "CompletedAtUtc" TEXT NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_IntegrationSyncRuns_CompanyId_IntegrationConnectionId_CompletedAtUtc" ON "IntegrationSyncRuns" ("CompanyId", "IntegrationConnectionId", "CompletedAtUtc");""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "ExternalEntityLinks" ("Id" uuid NOT NULL PRIMARY KEY, "CompanyId" uuid NOT NULL, "IntegrationConnectionId" uuid NOT NULL, "ProviderCode" text NOT NULL, "EntityType" text NOT NULL, "ProviderEntityId" text NOT NULL, "LocalEntityId" uuid NOT NULL, "ProviderSyncToken" text NOT NULL, "LastRemoteFingerprint" text NOT NULL, "LastLocalFingerprint" text NOT NULL, "LastSynchronizedAtUtc" timestamptz NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_ExternalEntityLinks_IntegrationConnectionId_EntityType_ProviderEntityId" ON "ExternalEntityLinks" ("IntegrationConnectionId", "EntityType", "ProviderEntityId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_ExternalEntityLinks_IntegrationConnectionId_EntityType_LocalEntityId" ON "ExternalEntityLinks" ("IntegrationConnectionId", "EntityType", "LocalEntityId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "IntegrationSyncRuns" ("Id" uuid NOT NULL PRIMARY KEY, "CompanyId" uuid NOT NULL, "IntegrationConnectionId" uuid NOT NULL, "ProviderCode" text NOT NULL, "EntityType" text NOT NULL, "Direction" text NOT NULL, "IsDryRun" boolean NOT NULL, "Status" text NOT NULL, "FetchedCount" integer NOT NULL, "CreatedCount" integer NOT NULL, "UpdatedCount" integer NOT NULL, "UnchangedCount" integer NOT NULL, "ConflictCount" integer NOT NULL, "RejectedCount" integer NOT NULL, "SnapshotSha256" text NOT NULL, "DetailJson" text NOT NULL, "InitiatedByUserId" uuid NULL, "StartedAtUtc" timestamptz NOT NULL, "CompletedAtUtc" timestamptz NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_IntegrationSyncRuns_CompanyId_IntegrationConnectionId_CompletedAtUtc" ON "IntegrationSyncRuns" ("CompanyId", "IntegrationConnectionId", "CompletedAtUtc");""", cancellationToken);
         }
     }
 

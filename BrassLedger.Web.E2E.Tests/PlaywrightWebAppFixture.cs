@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text.RegularExpressions;
+using Microsoft.Data.Sqlite;
 using Microsoft.Playwright;
 
 namespace BrassLedger.Web.E2E.Tests;
@@ -86,6 +87,54 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         });
 
         return new UiSession(this, browserKind, browser, page);
+    }
+
+    public async Task CreateQuickBooksAdministratorAsync()
+    {
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO "AccessRoles" ("Id", "CompanyId", "Name", "Description", "TemplateCode", "Permissions", "IsSystemRole", "IsActive", "RequiresMfa")
+            SELECT $roleId, "CompanyId", 'Integration Test Administrator',
+                   (SELECT "Description" FROM "AccessRoles" WHERE "CompanyId" = "Users"."CompanyId" AND "Name" = 'Controller'),
+                   'e2e-integration-admin',
+                   (SELECT "Permissions" FROM "AccessRoles" WHERE "CompanyId" = "Users"."CompanyId" AND "Name" = 'Controller') || '|security.users.manage',
+                   0, 1, 0
+            FROM "Users" WHERE "UserName" = 'controller';
+            INSERT OR IGNORE INTO "Users" (
+                "Id", "CompanyId", "UserName", "DisplayName", "Email", "EmailLookupHash", "EmailConfirmedAtUtc",
+                "PasswordHash", "SecurityStamp", "Role", "IsActive", "FailedSignInCount", "LastFailedSignInUtc",
+                "LockoutEndUtc", "LastSuccessfulSignInUtc", "LastPasswordChangedUtc", "MfaEnabled", "MfaSecret",
+                "MfaEnrolledAtUtc", "MfaLastAcceptedTimeStep", "MfaFailedAttemptCount", "MfaLockoutEndUtc")
+            SELECT $userId, "CompanyId", 'integration-admin', "DisplayName", "Email", NULL, "EmailConfirmedAtUtc",
+                   "PasswordHash", $securityStamp, 'Integration Test Administrator', 1, 0, NULL,
+                   NULL, NULL, "LastPasswordChangedUtc", 0, "MfaSecret", NULL, NULL, 0, NULL
+            FROM "Users" WHERE "UserName" = 'controller';
+            INSERT OR IGNORE INTO "CompanyMemberships" ("Id", "UserId", "CompanyId", "Role", "IsOwner", "IsActive", "GrantedAtUtc")
+            SELECT $membershipId, "Id", "CompanyId", 'Integration Test Administrator', 0, 1, $grantedAtUtc
+            FROM "Users" WHERE "UserName" = 'integration-admin';
+            """;
+        command.Parameters.AddWithValue("$roleId", Guid.NewGuid().ToString().ToUpperInvariant());
+        command.Parameters.AddWithValue("$userId", Guid.NewGuid().ToString().ToUpperInvariant());
+        command.Parameters.AddWithValue("$securityStamp", Guid.NewGuid().ToString("N"));
+        command.Parameters.AddWithValue("$membershipId", Guid.NewGuid().ToString().ToUpperInvariant());
+        command.Parameters.AddWithValue("$grantedAtUtc", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task RemoveQuickBooksAdministratorAsync()
+    {
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM "CompanyMemberships"
+            WHERE "UserId" = (SELECT "Id" FROM "Users" WHERE "UserName" = 'integration-admin');
+            DELETE FROM "Users" WHERE "UserName" = 'integration-admin';
+            DELETE FROM "AccessRoles" WHERE "TemplateCode" = 'e2e-integration-admin';
+            """;
+        await command.ExecuteNonQueryAsync();
     }
 
     private void StartApplication()

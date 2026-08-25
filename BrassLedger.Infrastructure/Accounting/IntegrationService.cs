@@ -12,7 +12,7 @@ public sealed class IntegrationService(IDbContextFactory<BrassLedgerDbContext> d
 {
     private static readonly IReadOnlyList<IntegrationProviderSnapshot> Catalog =
     [
-        new("quickbooks-online", "QuickBooks Online", "Accounting", "Operator-run CSV interchange; OAuth/API synchronization is not implemented.", false, "File interchange available", "Chart of accounts, customers, vendors, non-control general journals, and zero-tax invoice draft interchange via reviewed CSV", false),
+        new("quickbooks-online", "QuickBooks Online", "Accounting", "Secure OAuth connection, company validation, token rotation, revocation, and operator-run CSV interchange are implemented; transactional API synchronization is still being completed.", true, "OAuth connection and file interchange", "Protected OAuth lifecycle plus chart of accounts, customers, vendors, non-control general journals, and zero-tax invoice draft interchange via reviewed CSV", false),
         new("plaid", "Plaid", "Banking", "Connection profile only; no transaction-feed adapter is deployed.", false),
         new("stripe", "Stripe", "Payments", "Connection profile only; no payment-event adapter is deployed.", false),
         new("square", "Square", "Payments", "Connection profile only; no point-of-sale adapter is deployed.", false),
@@ -38,6 +38,7 @@ public sealed class IntegrationService(IDbContextFactory<BrassLedgerDbContext> d
     public async Task<TransactionResult> SaveConnectionAsync(SaveIntegrationConnectionRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || !Catalog.Any(provider => provider.Code == request.ProviderCode) || !IsJson(request.SettingsJson)) return TransactionResult.Failure("Select a known provider and provide valid JSON settings.");
+        if (request.ProviderCode == "quickbooks-online") return TransactionResult.Failure("Use the protected QuickBooks connect or reconnect workflow; QuickBooks credentials cannot be entered as JSON.");
         var companyId = CompanyId(); if (companyId is null) return TransactionResult.Failure("An active company is required.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var entity = request.Id is { } id ? await db.IntegrationConnections.SingleOrDefaultAsync(connection => connection.CompanyId == companyId && connection.Id == id, cancellationToken) : null;
         if (request.Id.HasValue && entity is null) return TransactionResult.Failure("Integration connection not found.");

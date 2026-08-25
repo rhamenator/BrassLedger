@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using BrassLedger.Application.Accounting;
 using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
+using BrassLedger.Infrastructure.Accounting;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -903,6 +904,87 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.Forbidden, (await unauthorizedClient.GetAsync("/api/interchange/batches")).StatusCode);
     }
 
+    [Fact]
+    public async Task QuickBooksOAuthApi_RequiresAntiforgeryAndCompletesAuditedConnectionLifecycle()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory(configureSecurityEmail: false, configureQuickBooks: true);
+        await using (var permissionScope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var permissionDbFactory = permissionScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var permissionDb = await permissionDbFactory.CreateDbContextAsync();
+            var controllerRole = await permissionDb.AccessRoles.SingleAsync(role => role.Name == "Controller");
+            controllerRole.Permissions = string.Join('|', controllerRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Append(BrassLedgerPermissions.UserManage).Distinct(StringComparer.OrdinalIgnoreCase));
+            await permissionDb.SaveChangesAsync();
+        }
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var missingToken = await client.PostAsJsonAsync("/api/integrations/quickbooks-online/connect", new BeginQuickBooksAuthorizationRequest(null, "API books", "Sandbox"));
+        Assert.Equal(HttpStatusCode.BadRequest, missingToken.StatusCode);
+
+        var antiforgery = await GetAntiforgeryTokenAsync(client);
+        using var connectRequest = new HttpRequestMessage(HttpMethod.Post, "/api/integrations/quickbooks-online/connect")
+        {
+            Content = JsonContent.Create(new BeginQuickBooksAuthorizationRequest(null, "API books", "Sandbox"))
+        };
+        connectRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        var connectResponse = await client.SendAsync(connectRequest);
+        Assert.Equal(HttpStatusCode.OK, connectResponse.StatusCode);
+        var start = await connectResponse.Content.ReadFromJsonAsync<QuickBooksAuthorizationStartResult>();
+        Assert.True(start!.Succeeded);
+        Assert.DoesNotContain("api-client-secret", start.AuthorizationUrl, StringComparison.Ordinal);
+        var state = QueryHelpers.ParseQuery(new Uri(start.AuthorizationUrl!).Query)["state"].ToString();
+
+        var callback = await client.GetAsync($"/api/integrations/quickbooks-online/callback?state={Uri.EscapeDataString(state)}&code=api-code&realmId=24680");
+        Assert.Equal(HttpStatusCode.OK, callback.StatusCode);
+        var completion = await callback.Content.ReadFromJsonAsync<QuickBooksAuthorizationCompletionResult>();
+        Assert.True(completion!.Succeeded);
+
+        var connections = await client.GetFromJsonAsync<IntegrationConnectionSnapshot[]>("/api/integrations");
+        var connected = Assert.Single(connections!, connection => connection.Id == completion.ConnectionId);
+        Assert.Equal("Connected", connected.Status);
+        Assert.Contains("API QuickBooks Company", connected.SettingsJson, StringComparison.Ordinal);
+
+        isolatedFactory.QuickBooksClient.Entities["accounts"] = [new("API-A-1", "0", true, "API integration expense", "7988", string.Empty, "Expense", "OtherBusinessExpenses")];
+        using var previewRequest = new HttpRequestMessage(HttpMethod.Post, "/api/integrations/quickbooks-online/sync")
+        {
+            Content = JsonContent.Create(new QuickBooksSyncRequest(connected.Id, "accounts", true))
+        };
+        previewRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        var previewResponse = await client.SendAsync(previewRequest);
+        Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
+        var preview = await previewResponse.Content.ReadFromJsonAsync<QuickBooksSyncResult>();
+        Assert.True(preview!.DryRun);
+        Assert.Equal(1, preview.CreatedCount);
+        using var commitRequest = new HttpRequestMessage(HttpMethod.Post, "/api/integrations/quickbooks-online/sync")
+        {
+            Content = JsonContent.Create(new QuickBooksSyncRequest(connected.Id, "accounts", false, preview.SnapshotSha256))
+        };
+        commitRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        var commitResponse = await client.SendAsync(commitRequest);
+        Assert.Equal(HttpStatusCode.OK, commitResponse.StatusCode);
+        var committed = await commitResponse.Content.ReadFromJsonAsync<QuickBooksSyncResult>();
+        Assert.Equal(1, committed!.CreatedCount);
+        var syncRuns = await client.GetFromJsonAsync<QuickBooksSyncRunSnapshot[]>($"/api/integrations/quickbooks-online/sync-runs?connectionId={connected.Id}");
+        Assert.Equal(2, syncRuns!.Length);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/integrations/quickbooks-online/callback?state={Uri.EscapeDataString(state)}&code=replay&realmId=24680")).StatusCode);
+        using var validateRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/integrations/quickbooks-online/{connected.Id}/validate");
+        validateRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(validateRequest)).StatusCode);
+        using var disconnectRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/integrations/quickbooks-online/{connected.Id}/disconnect");
+        disconnectRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(disconnectRequest)).StatusCode);
+        Assert.Equal("api-refresh-token", isolatedFactory.QuickBooksClient.LastRevokedToken);
+
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var stored = await db.IntegrationConnections.SingleAsync(connection => connection.Id == connected.Id);
+        Assert.Equal("Disconnected", stored.Status);
+        Assert.Equal("{}", stored.CredentialsJson);
+        Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.connected" && audit.EntityId == connected.Id);
+        Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.disconnected" && audit.EntityId == connected.Id);
+    }
+
     private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null, string userName = "controller")
     {
         var testFactory = factory ?? _factory;
@@ -975,17 +1057,24 @@ public sealed class BrassLedgerApiFactory : WebApplicationFactory<Program>, IDis
 {
     private readonly string _contentRootPath = Path.Combine(Path.GetTempPath(), "BrassLedger.Api.Tests", Guid.NewGuid().ToString("N"));
     private readonly bool _configureSecurityEmail;
+    private readonly bool _configureQuickBooks;
 
-    public BrassLedgerApiFactory() : this(false)
+    public BrassLedgerApiFactory() : this(false, false)
     {
     }
 
-    internal BrassLedgerApiFactory(bool configureSecurityEmail)
+    internal BrassLedgerApiFactory(bool configureSecurityEmail) : this(configureSecurityEmail, false)
+    {
+    }
+
+    internal BrassLedgerApiFactory(bool configureSecurityEmail, bool configureQuickBooks)
     {
         _configureSecurityEmail = configureSecurityEmail;
+        _configureQuickBooks = configureQuickBooks;
     }
 
     public RecordingSecurityEmailTransport SecurityEmailTransport { get; } = new();
+    public RecordingQuickBooksOnlineClient QuickBooksClient { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -1003,6 +1092,19 @@ public sealed class BrassLedgerApiFactory : WebApplicationFactory<Program>, IDis
             {
                 services.RemoveAll<ISecurityEmailTransport>();
                 services.AddSingleton<ISecurityEmailTransport>(SecurityEmailTransport);
+            });
+        }
+        if (_configureQuickBooks)
+        {
+            builder.UseSetting("QuickBooksOnline:Enabled", "true");
+            builder.UseSetting("QuickBooksOnline:Environment", "Sandbox");
+            builder.UseSetting("QuickBooksOnline:ClientId", "api-client");
+            builder.UseSetting("QuickBooksOnline:ClientSecret", "api-client-secret");
+            builder.UseSetting("QuickBooksOnline:RedirectUri", "http://127.0.0.1:5099/api/integrations/quickbooks-online/callback");
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IQuickBooksOnlineClient>();
+                services.AddSingleton<IQuickBooksOnlineClient>(QuickBooksClient);
             });
         }
     }
@@ -1036,6 +1138,39 @@ public sealed class BrassLedgerApiFactory : WebApplicationFactory<Program>, IDis
             Messages.Add(new RecordedSecurityEmail(recipient, subject, body));
             return Task.FromResult($"<{Guid.NewGuid():N}@example.test>");
         }
+    }
+
+    public sealed class RecordingQuickBooksOnlineClient : IQuickBooksOnlineClient
+    {
+        public string LastRevokedToken { get; private set; } = string.Empty;
+        public Dictionary<string, List<QuickBooksRemoteEntity>> Entities { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public string BuildAuthorizationUrl(string state) => QueryHelpers.AddQueryString("https://appcenter.intuit.com/connect/oauth2", new Dictionary<string, string?>
+        {
+            ["client_id"] = "api-client",
+            ["response_type"] = "code",
+            ["scope"] = "com.intuit.quickbooks.accounting",
+            ["redirect_uri"] = "http://127.0.0.1:5099/api/integrations/quickbooks-online/callback",
+            ["state"] = state
+        });
+
+        public Task<QuickBooksTokenResponse> ExchangeAuthorizationCodeAsync(string code, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new QuickBooksTokenResponse(true, string.Empty, "api-access-token", "api-refresh-token", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400));
+
+        public Task<QuickBooksTokenResponse> RefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new QuickBooksTokenResponse(true, string.Empty, "api-access-token-two", "api-refresh-token-two", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400));
+
+        public Task<QuickBooksProviderResult> RevokeTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
+        {
+            LastRevokedToken = refreshToken;
+            return Task.FromResult(new QuickBooksProviderResult(true, string.Empty));
+        }
+
+        public Task<QuickBooksCompanyInfoResponse> GetCompanyInfoAsync(string environment, string realmId, string accessToken, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new QuickBooksCompanyInfoResponse(true, string.Empty, "API QuickBooks Company", "API QuickBooks Company LLC", "US"));
+
+        public Task<QuickBooksEntityQueryResponse> QueryEntitiesAsync(string environment, string realmId, string accessToken, string entityType, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new QuickBooksEntityQueryResponse(true, string.Empty, Entities.GetValueOrDefault(entityType, [])));
     }
 
     public sealed record RecordedSecurityEmail(string Recipient, string Subject, string Body);

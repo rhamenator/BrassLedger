@@ -23,6 +23,9 @@ public sealed class BrassLedgerDbContext(
     public DbSet<BusinessAuditEntry> BusinessAuditEntries => Set<BusinessAuditEntry>();
     public DbSet<AccountingInterchangeBatch> AccountingInterchangeBatches => Set<AccountingInterchangeBatch>();
     public DbSet<IntegrationConnection> IntegrationConnections => Set<IntegrationConnection>();
+    public DbSet<OAuthAuthorizationAttempt> OAuthAuthorizationAttempts => Set<OAuthAuthorizationAttempt>();
+    public DbSet<ExternalEntityLink> ExternalEntityLinks => Set<ExternalEntityLink>();
+    public DbSet<IntegrationSyncRun> IntegrationSyncRuns => Set<IntegrationSyncRun>();
     public DbSet<InventoryTransaction> InventoryTransactions => Set<InventoryTransaction>();
     public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
     public DbSet<AuthenticationAuditEntry> AuthenticationAuditEntries => Set<AuthenticationAuditEntry>();
@@ -108,6 +111,9 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<BusinessAuditEntry>().HasKey(x => x.Id);
         modelBuilder.Entity<AccountingInterchangeBatch>().HasKey(x => x.Id);
         modelBuilder.Entity<IntegrationConnection>().HasKey(x => x.Id);
+        modelBuilder.Entity<OAuthAuthorizationAttempt>().HasKey(x => x.Id);
+        modelBuilder.Entity<ExternalEntityLink>().HasKey(x => x.Id);
+        modelBuilder.Entity<IntegrationSyncRun>().HasKey(x => x.Id);
         modelBuilder.Entity<InventoryTransaction>().HasKey(x => x.Id);
         modelBuilder.Entity<AccessRole>().HasKey(x => x.Id);
         modelBuilder.Entity<AuthenticationAuditEntry>().HasKey(x => x.Id);
@@ -283,6 +289,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SecurityEmailOutboxMessage>().Property(x => x.RecipientEmail).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<SecurityEmailOutboxMessage>().Property(x => x.Body).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<IntegrationConnection>().Property(x => x.CredentialsJson).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<IntegrationConnection>().Property(x => x.CredentialVersion).IsConcurrencyToken();
         modelBuilder.Entity<AccessRole>().Property(x => x.Description).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Customer>().Property(x => x.Name).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Customer>().Property(x => x.Email).HasConversion(encryptedStringConverter);
@@ -443,6 +450,11 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<AccountingInterchangeBatch>().HasIndex(x => new { x.CompanyId, x.ProviderCode, x.EntityType, x.ProcessedAtUtc });
         modelBuilder.Entity<AccountingInterchangeBatch>().HasIndex(x => new { x.CompanyId, x.CommittedImportKey }).IsUnique();
         modelBuilder.Entity<IntegrationConnection>().HasIndex(x => new { x.CompanyId, x.ProviderCode, x.Name }).IsUnique();
+        modelBuilder.Entity<OAuthAuthorizationAttempt>().HasIndex(x => x.StateHash).IsUnique();
+        modelBuilder.Entity<OAuthAuthorizationAttempt>().HasIndex(x => new { x.CompanyId, x.UserId, x.ExpiresAtUtc });
+        modelBuilder.Entity<ExternalEntityLink>().HasIndex(x => new { x.IntegrationConnectionId, x.EntityType, x.ProviderEntityId }).IsUnique();
+        modelBuilder.Entity<ExternalEntityLink>().HasIndex(x => new { x.IntegrationConnectionId, x.EntityType, x.LocalEntityId }).IsUnique();
+        modelBuilder.Entity<IntegrationSyncRun>().HasIndex(x => new { x.CompanyId, x.IntegrationConnectionId, x.CompletedAtUtc });
         modelBuilder.Entity<InventoryTransaction>().HasIndex(x => new { x.CompanyId, x.InventoryItemId, x.OccurredOn });
         modelBuilder.Entity<AccessRole>().HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();
         modelBuilder.Entity<AuthenticationAuditEntry>().HasIndex(x => new { x.UserName, x.OccurredUtc });

@@ -189,6 +189,60 @@ public sealed class IntegrationConnection
     public string SettingsJson { get; set; } = "{}";
     public string CredentialsJson { get; set; } = "{}";
     public DateTimeOffset? LastValidatedAtUtc { get; set; }
+    public int CredentialVersion { get; set; }
+}
+
+public sealed class OAuthAuthorizationAttempt
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid? ConnectionId { get; set; }
+    public string ProviderCode { get; set; } = string.Empty;
+    public string ConnectionName { get; set; } = string.Empty;
+    public string Environment { get; set; } = string.Empty;
+    public string StateHash { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? ConsumedAtUtc { get; set; }
+}
+
+public sealed class ExternalEntityLink
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid IntegrationConnectionId { get; set; }
+    public string ProviderCode { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public string ProviderEntityId { get; set; } = string.Empty;
+    public Guid LocalEntityId { get; set; }
+    public string ProviderSyncToken { get; set; } = string.Empty;
+    public string LastRemoteFingerprint { get; set; } = string.Empty;
+    public string LastLocalFingerprint { get; set; } = string.Empty;
+    public DateTimeOffset LastSynchronizedAtUtc { get; set; }
+}
+
+public sealed class IntegrationSyncRun
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid IntegrationConnectionId { get; set; }
+    public string ProviderCode { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public string Direction { get; set; } = "Import";
+    public bool IsDryRun { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public int FetchedCount { get; set; }
+    public int CreatedCount { get; set; }
+    public int UpdatedCount { get; set; }
+    public int UnchangedCount { get; set; }
+    public int ConflictCount { get; set; }
+    public int RejectedCount { get; set; }
+    public string SnapshotSha256 { get; set; } = string.Empty;
+    public string DetailJson { get; set; } = "[]";
+    public Guid? InitiatedByUserId { get; set; }
+    public DateTimeOffset StartedAtUtc { get; set; }
+    public DateTimeOffset CompletedAtUtc { get; set; }
 }
 
 public sealed class InventoryTransaction

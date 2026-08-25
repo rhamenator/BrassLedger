@@ -39,7 +39,8 @@ app.UseBrassLedgerSecurityHeaders();
 app.Use(async (context, next) =>
 {
     if (context.Request.Path.StartsWithSegments("/account/action", StringComparison.OrdinalIgnoreCase)
-        || context.Request.Path.StartsWithSegments("/forgot-password", StringComparison.OrdinalIgnoreCase))
+        || context.Request.Path.StartsWithSegments("/forgot-password", StringComparison.OrdinalIgnoreCase)
+        || context.Request.Path.StartsWithSegments("/integrations/quickbooks-online/callback", StringComparison.OrdinalIgnoreCase))
     {
         context.Response.Headers.CacheControl = "no-store, no-cache";
         context.Response.Headers.Pragma = "no-cache";
@@ -82,6 +83,23 @@ app.UseAuthorization();
 app.UseRateLimiter();
 app.UseAntiforgery();
 app.MapBrassLedgerAuthenticationEndpoints();
+
+app.MapGet("/integrations/quickbooks-online/callback", async (
+    string? state,
+    string? code,
+    string? realmId,
+    string? error,
+    string? error_description,
+    BrassLedger.Application.Accounting.IQuickBooksOnlineConnectionService service,
+    CancellationToken cancellationToken) =>
+{
+    var result = await service.CompleteAuthorizationAsync(
+        new(state ?? string.Empty, code, realmId, error, error_description),
+        cancellationToken);
+    return result.Succeeded
+        ? Results.Redirect($"/administration?quickbooks=connected&company={Uri.EscapeDataString(result.CompanyName ?? "QuickBooks company")}")
+        : Results.Redirect($"/administration?quickbooks=error&message={Uri.EscapeDataString(result.ErrorMessage)}");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageUsers);
 
 app.MapGet("/interchange/quickbooks-online/{entity}.csv", async (string entity, BrassLedger.Application.Accounting.IAccountingInterchangeService service, CancellationToken cancellationToken) =>
 {

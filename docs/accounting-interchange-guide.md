@@ -1,8 +1,37 @@
 # Accounting Interchange Guide
 
-## Supported QuickBooks workflow
+## Supported QuickBooks workflows
 
-BrassLedger currently provides operator-run CSV interchange with QuickBooks Online. It does not connect to an Intuit company, request OAuth tokens, call the QuickBooks Accounting API, or synchronize changes in the background. A saved QuickBooks connection profile is therefore only protected configuration for future adapter work; it is not evidence of a working connection.
+BrassLedger supports two separate QuickBooks Online workflows:
+
+- secure OAuth 2.0 connection to an Intuit company, followed by controlled inbound API synchronization of accounts, customers, and vendors; and
+- operator-run CSV interchange for accounts, customers, vendors, non-control general journals, and zero-tax invoice drafts.
+
+QuickBooks client credentials are installation configuration, not company data. Operators never paste a client secret, access token, or refresh token into the application. The Intuit callback is bound to the initiating BrassLedger operator and active company by a cryptographically random, hashed, one-use state that expires after 10 minutes by default. BrassLedger validates the selected company with the Accounting API before it saves the connection. Access and rotating refresh tokens are protected at rest, never returned in connection snapshots, and replaced under per-process serialization with a database concurrency check. Disconnect retains the protected token if Intuit cannot confirm revocation, marks the connection `DisconnectPending`, and lets an administrator retry instead of leaving an untracked remote authorization.
+
+### Configure OAuth
+
+Create an app in the Intuit Developer Portal and register the exact callback URL used by the running BrassLedger host. Configure secrets through the deployment secret store or environment, not a committed settings file:
+
+```text
+QuickBooksOnline__Enabled=true
+QuickBooksOnline__Environment=Sandbox
+QuickBooksOnline__ClientId=<Intuit client ID>
+QuickBooksOnline__ClientSecret=<Intuit client secret>
+QuickBooksOnline__RedirectUri=https://ledger.example.com/integrations/quickbooks-online/callback
+```
+
+Use `/api/integrations/quickbooks-online/callback` instead when the Intuit redirect targets `BrassLedger.Api`. Production callbacks must be HTTPS. Sandbox may use HTTP only on a loopback host, and Intuit still requires the registered redirect URI to match exactly. The desktop host normally selects a dynamic loopback port, so OAuth requires either a fixed registered sandbox port or a stable HTTPS deployment; CSV interchange does not have this requirement. Set `Environment=Production` only with production Intuit keys. BrassLedger refuses a connection request whose requested environment differs from the configured environment.
+
+The authorization, token, revocation, sandbox API, and production API endpoints have secure Intuit defaults. Endpoint overrides must be absolute HTTPS URLs without embedded credentials. See Intuit's [OAuth 2.0 authorization documentation](https://developer.intuit.com/app/developer/qbo/docs/develop/authentication-and-authorization/oauth-2.0) and its maintained [.NET OAuth sample](https://github.com/IntuitDeveloper/OAuth2-Dotnet_UsingSDK).
+
+### Controlled API import
+
+In Administration, select accounts, customers, or vendors and choose **Preview import**. The preview fetches a bounded provider snapshot, compares it with company-scoped external-entity links, and records create, update, unchanged, conflict, and rejection counts without changing accounting records. **Import previewed snapshot** is enabled only for that entity and connection. A commit is rejected unless the same operator previewed the exact SHA-256 snapshot during the preceding 30 minutes and no later commit attempt superseded that preview.
+
+The first committed import creates stable links from the Intuit entity ID to the BrassLedger entity ID. A repeated identical snapshot is unchanged rather than duplicated. A remote-only change can update a linked master record; any local change since the previous synchronization prevents overwrite and becomes a visible conflict. If both systems changed the record, it also remains a conflict. QuickBooks Accounts Receivable and Accounts Payable accounts require explicit control-account mapping and are never created automatically. Inactive, malformed, unsupported, missing, or natural-key-colliding records are retained as issues rather than silently deleted or coerced. Every preview, rejected commit, provider failure, and successful commit has a durable company-scoped run record and business-audit event.
+
+The API import is intentionally operator-initiated; it is not an unattended background or two-way sync. It currently imports master data only. Imported transactional data continues to use the reviewed CSV/draft workflows described below.
 
 The Ledger page can export and import:
 
@@ -24,6 +53,7 @@ Authoritative Intuit references:
 - [Import customers or vendors](https://quickbooks.intuit.com/learn-support/en-us/help-article/customer-list/import-customers-vendors-email-contacts-quickbooks/L12erg8Db_US_en_US)
 - [QuickBooks Online import types and ordering](https://quickbooks.intuit.com/learn-support/en-us/help-article/import-export-data-files/common-questions-importing-data-quickbooks-online/L4OYJRFdj_US_en_US)
 - [Import multiple invoices](https://quickbooks.intuit.com/learn-support/en-us/help-article/import-export-data-files/import-multiple-invoices/L7E9Xrd8l_US_en_US)
+- [QuickBooks Online Accounting API](https://developer.intuit.com/app/developer/qbo/docs/develop)
 
 Intuit's supported data types and subscription restrictions can change. Check the current in-product sample file and mapping screen before a live transfer. BrassLedger's reviewed shapes are not a substitute for Intuit's current sample file.
 
@@ -46,10 +76,11 @@ Rejected batches are all-or-none: correct the source file, preserve it as conver
 
 The following are not implemented and must not be represented as available:
 
-- QuickBooks Online OAuth/API synchronization;
 - QuickBooks Desktop IIF import or export;
-- products/services, classes, locations, taxable invoices, bills, payments, credit memos, and opening balances through this adapter;
-- automatic conflict resolution or two-way synchronization; and
+- products/services, classes, locations, taxable invoices, bills, payments, credit memos, journal entries, and opening balances through the API adapter;
+- outbound API synchronization, background synchronization, automatic conflict resolution, or two-way synchronization;
+- an administrator UI for explicitly mapping a pre-existing BrassLedger record or control account to an Intuit entity; and
+- distributed credential-operation leasing across multiple simultaneously active BrassLedger application instances. Until that lease is implemented, route QuickBooks connect, refresh, validation, disconnect, and synchronization operations to one application instance; database concurrency tokens still prevent a stale request from overwriting newer protected credentials; and
 - file adapters for Xero, Sage, Wave, FreshBooks, or GnuCash.
 
 QuickBooks Desktop IIF is a tab-separated format with product/version-specific headers and important limitations. BrassLedger will not emit an IIF file until its supported record types have fixtures from Intuit's current import kit and independent import verification. See Intuit's [IIF overview](https://quickbooks.intuit.com/learn-support/en-us/help-article/list-management/iif-overview-import-kit-sample-files-headers/L5CZIpJne_US_en_US) and [IIF import/export guidance](https://quickbooks.intuit.com/learn-support/en-us/help-article/import-export-data-files/export-import-edit-iif-files/L56LT9Z0Q_US_en_US).
