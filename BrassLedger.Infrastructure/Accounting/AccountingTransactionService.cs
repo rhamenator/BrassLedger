@@ -1072,28 +1072,38 @@ public sealed class AccountingTransactionService(
         if (expansion.Request is null) return TransactionResult.Failure(expansion.ErrorMessage);
         var expandedRequest = expansion.Request;
         if (expandedRequest.Employees.Any(line => ResolveGrossPay(line) <= 0)) return TransactionResult.Failure("Provide positive earnings for each payroll employee, either directly or through an approved timecard.");
+        var deductionLiabilityAccounts = expandedRequest.Employees.SelectMany(employee => employee.Deductions ?? []).Select(deduction => NormalizeLiabilityAccountNumber(deduction.LiabilityAccountNumber)).Append("2200").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var validLiabilityAccountCount = await db.Accounts.CountAsync(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Liability && deductionLiabilityAccounts.Contains(account.Number), cancellationToken);
+        if (validLiabilityAccountCount != deductionLiabilityAccounts.Length) return TransactionResult.Failure("Every payroll deduction liability account must be an active liability account in this company.");
         if (await db.PayrollRuns.AnyAsync(run => run.CompanyId == companyId && run.Reference == request.Reference.Trim(), cancellationToken))
             return TransactionResult.Failure("Payroll run reference already exists.");
         var estimate = await CalculateEmployeePayrollAsync(db, companyId, expandedRequest, cancellationToken);
         if (estimate is null) return TransactionResult.Failure("Each payroll employee must be active and have applicable effective Federal or work-state tax profiles.");
+        var runEmployees = await db.Employees.Where(employee => employee.CompanyId == companyId && estimate.Employees.Select(line => line.EmployeeId).Contains(employee.Id)).ToDictionaryAsync(employee => employee.Id, cancellationToken);
+        foreach (var estimateLine in estimate.Employees)
+        {
+            var input = expandedRequest.Employees.Single(candidate => candidate.EmployeeId == estimateLine.EmployeeId);
+            var deductions = ResolvePayrollDeductions(input, runEmployees[estimateLine.EmployeeId]);
+            if (RoundCurrency(deductions.Where(deduction => deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount)) != estimateLine.PreTaxDeductions || RoundCurrency(deductions.Where(deduction => !deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount)) != estimateLine.PostTaxDeductions)
+                return TransactionResult.Failure($"Payroll deductions for {estimateLine.EmployeeName} exceed available gross or net pay. Reduce them before saving the draft.");
+        }
         var bank = await db.BankAccounts.SingleOrDefaultAsync(account => account.Id == request.BankAccountId && account.CompanyId == companyId, cancellationToken);
         if (bank is null) return TransactionResult.Failure("Payroll funding account not found.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var contentSnapshot = await db.TaxContentPackages.Where(package => package.CompanyId == companyId && package.Status == "Approved" && package.EffectiveOn <= request.PayDate).OrderBy(package => package.PackageCode).ThenBy(package => package.Version).Select(package => new { package.PackageCode, package.Version, package.EffectiveOn, package.MinimumEngineVersion }).ToListAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        var run = new PayrollRun { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bank.Id, PayDate = request.PayDate, PeriodStart = periodStart, PeriodEnd = periodEnd, RunType = runType, Status = "Draft", Reference = request.Reference.Trim(), GrossPayroll = estimate.GrossPayroll, PreTaxDeductions = estimate.PreTaxDeductions, EmployeeWithholdings = estimate.EmployeeWithholdings, PostTaxDeductions = estimate.PostTaxDeductions, EmployerPayrollTaxes = estimate.EmployerPayrollTaxes, NetPay = estimate.NetPay, PreparedByUserId = ResolveUserId(), PreparedAtUtc = now, TaxContentSnapshotJson = System.Text.Json.JsonSerializer.Serialize(contentSnapshot), ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        var run = new PayrollRun { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bank.Id, PayDate = request.PayDate, PeriodStart = periodStart, PeriodEnd = periodEnd, RunType = runType, Status = "Draft", Reference = request.Reference.Trim(), GrossPayroll = estimate.GrossPayroll, PreTaxDeductions = estimate.PreTaxDeductions, EmployeeWithholdings = estimate.EmployeeWithholdings, PostTaxDeductions = estimate.PostTaxDeductions, EmployerPayrollTaxes = estimate.EmployerPayrollTaxes, EmployerBenefitContributions = estimate.EmployerBenefitContributions, NetPay = estimate.NetPay, PreparedByUserId = ResolveUserId(), PreparedAtUtc = now, TaxContentSnapshotJson = System.Text.Json.JsonSerializer.Serialize(contentSnapshot), ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.PayrollRuns.Add(run);
-        var runEmployees = await db.Employees.Where(employee => employee.CompanyId == companyId && estimate.Employees.Select(line => line.EmployeeId).Contains(employee.Id)).ToDictionaryAsync(employee => employee.Id, cancellationToken);
         foreach (var estimateLine in estimate.Employees)
         {
             var employee = runEmployees[estimateLine.EmployeeId];
             var input = expandedRequest.Employees.Single(candidate => candidate.EmployeeId == estimateLine.EmployeeId);
-            var line = new PayrollRunEmployeeLine { Id = Guid.NewGuid(), PayrollRunId = run.Id, EmployeeId = estimateLine.EmployeeId, WorkState = estimateLine.WorkState, WorkCity = employee.WorkCity, ResidenceState = string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState, ResidenceCity = employee.ResidenceCity, FilingStatus = estimateLine.FilingStatus, PayrollFrequency = employee.PayrollFrequency, GrossPay = estimateLine.GrossPay, TaxableWages = estimateLine.GrossPay - estimateLine.PreTaxDeductions, YearToDateGrossBefore = estimateLine.YearToDateGrossBefore, YearToDateGrossAfter = estimateLine.YearToDateGrossBefore + estimateLine.GrossPay, PreTaxDeductions = estimateLine.PreTaxDeductions, EmployeeWithholdings = estimateLine.EmployeeWithholdings, PostTaxDeductions = estimateLine.PostTaxDeductions, EmployerPayrollTaxes = estimateLine.EmployerPayrollTaxes, NetPay = estimateLine.NetPay };
+            var line = new PayrollRunEmployeeLine { Id = Guid.NewGuid(), PayrollRunId = run.Id, EmployeeId = estimateLine.EmployeeId, WorkState = estimateLine.WorkState, WorkCity = employee.WorkCity, ResidenceState = string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState, ResidenceCity = employee.ResidenceCity, FilingStatus = estimateLine.FilingStatus, PayrollFrequency = employee.PayrollFrequency, GrossPay = estimateLine.GrossPay, TaxableWages = estimateLine.GrossPay - estimateLine.PreTaxDeductions, YearToDateGrossBefore = estimateLine.YearToDateGrossBefore, YearToDateGrossAfter = estimateLine.YearToDateGrossBefore + estimateLine.GrossPay, PreTaxDeductions = estimateLine.PreTaxDeductions, EmployeeWithholdings = estimateLine.EmployeeWithholdings, PostTaxDeductions = estimateLine.PostTaxDeductions, EmployerPayrollTaxes = estimateLine.EmployerPayrollTaxes, EmployerBenefitContributions = estimateLine.EmployerBenefitContributions, NetPay = estimateLine.NetPay };
             db.PayrollRunEmployeeLines.Add(line);
             var earnings = input.Earnings is { Count: > 0 } ? input.Earnings : [new PayrollEarningInput("REGULAR", "Regular", 0, 0, estimateLine.GrossPay, true, null, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict)];
             db.PayrollEarningLines.AddRange(earnings.Select((earning, index) => new PayrollEarningLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, PayrollTimeEntryId = earning.SourceTimeEntryId, Sequence = index + 1, EarningCode = earning.EarningCode.Trim(), EarningType = earning.EarningType.Trim(), Hours = earning.Hours, Rate = earning.Rate, Amount = RoundCurrency(earning.Amount), IsTaxable = earning.IsTaxable, WorkedOn = earning.WorkedOn, WorkState = string.IsNullOrWhiteSpace(earning.WorkState) ? employee.State : earning.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(earning.WorkCounty) ? employee.WorkCounty : earning.WorkCounty.Trim(), WorkCity = string.IsNullOrWhiteSpace(earning.WorkCity) ? employee.WorkCity : earning.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(earning.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : earning.WorkSchoolDistrict.Trim() }));
-            var deductions = input.Deductions ?? [];
-            db.PayrollDeductionLines.AddRange(deductions.Select((deduction, index) => new PayrollDeductionLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, DeductionCode = deduction.DeductionCode.Trim(), DeductionType = deduction.DeductionType.Trim(), EmployeeAmount = RoundCurrency(deduction.EmployeeAmount), EmployerAmount = RoundCurrency(deduction.EmployerAmount), IsPreTax = deduction.IsPreTax, ExemptFromFederalIncomeTax = deduction.ExemptFromFederalIncomeTax, ExemptFromFica = deduction.ExemptFromFica, ExemptFromFuta = deduction.ExemptFromFuta, LiabilityAccountNumber = deduction.LiabilityAccountNumber.Trim() }));
+            var deductions = ResolvePayrollDeductions(input, employee);
+            db.PayrollDeductionLines.AddRange(deductions.Select((deduction, index) => new PayrollDeductionLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, DeductionCode = deduction.DeductionCode.Trim(), DeductionType = deduction.DeductionType.Trim(), EmployeeAmount = RoundCurrency(deduction.EmployeeAmount), EmployerAmount = RoundCurrency(deduction.EmployerAmount), IsPreTax = deduction.IsPreTax, ExemptFromFederalIncomeTax = deduction.ExemptFromFederalIncomeTax, ExemptFromFica = deduction.ExemptFromFica, ExemptFromFuta = deduction.ExemptFromFuta, LiabilityAccountNumber = NormalizeLiabilityAccountNumber(deduction.LiabilityAccountNumber) }));
             db.PayrollTaxLines.AddRange((estimateLine.Taxes ?? []).Select((tax, index) => new PayrollTaxLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, ObligationCode = tax.ObligationCode, JurisdictionCode = tax.JurisdictionCode, JurisdictionName = tax.JurisdictionName, TaxType = tax.TaxType, TaxableWages = tax.TaxableWages, YearToDateTaxableWagesBefore = tax.YearToDateTaxableWagesBefore, EmployeeAmount = tax.EmployeeAmount, EmployerAmount = tax.EmployerAmount, TaxRuleSetId = tax.TaxRuleSetId, TaxContentPackageId = tax.TaxContentPackageId, ContentVersion = tax.ContentVersion, Source = tax.Source, CalculationTraceJson = tax.CalculationTraceJson }));
         }
         foreach (var timecard in expansion.Timecards)
@@ -1140,14 +1150,25 @@ public sealed class AccountingTransactionService(
         if (bank is null) return TransactionResult.Failure("Payroll funding account not found.");
         if (bank.CurrentBalance < run.NetPay) return TransactionResult.Failure("Payroll funding account does not have sufficient book balance for net pay.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var liabilities = run.PreTaxDeductions + run.EmployeeWithholdings + run.PostTaxDeductions + run.EmployerPayrollTaxes;
-        var postingLines = new List<JournalLineRequest> { new("6100", run.GrossPayroll + run.EmployerPayrollTaxes, 0, "Gross payroll and employer taxes"), new(await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken), 0, run.NetPay, "Net payroll funding") };
-        if (liabilities > 0) postingLines.Add(new("2200", 0, liabilities, "Payroll liabilities"));
+        var employeeLines = await db.PayrollRunEmployeeLines.Where(line => line.PayrollRunId == run.Id).ToListAsync(cancellationToken);
+        var employeeLineIds = employeeLines.Select(line => line.Id).ToArray();
+        var taxLines = await db.PayrollTaxLines.Where(line => employeeLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
+        var deductionLines = await db.PayrollDeductionLines.Where(line => employeeLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
+        if (await db.PayrollLiabilities.AnyAsync(liability => liability.PayrollRunId == run.Id, cancellationToken)) return TransactionResult.Failure("Payroll liabilities were already created for this run.");
+        var liabilityAmounts = taxLines.Where(line => line.EmployeeAmount + line.EmployerAmount > 0).Select(line => new { AccountNumber = "2200", Amount = line.EmployeeAmount + line.EmployerAmount })
+            .Concat(deductionLines.Where(line => line.EmployeeAmount + line.EmployerAmount > 0).Select(line => new { AccountNumber = NormalizeLiabilityAccountNumber(line.LiabilityAccountNumber), Amount = line.EmployeeAmount + line.EmployerAmount }))
+            .ToArray();
+        var expectedLiabilities = RoundCurrency(run.PreTaxDeductions + run.EmployeeWithholdings + run.PostTaxDeductions + run.EmployerPayrollTaxes + run.EmployerBenefitContributions);
+        if (RoundCurrency(liabilityAmounts.Sum(item => item.Amount)) != expectedLiabilities) return TransactionResult.Failure("Payroll tax and deduction details do not reconcile to the run liabilities. Cancel and recalculate the draft.");
+        var postingLines = new List<JournalLineRequest> { new("6100", run.GrossPayroll + run.EmployerPayrollTaxes + run.EmployerBenefitContributions, 0, "Gross payroll, employer taxes, and employer benefit contributions"), new(await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken), 0, run.NetPay, "Net payroll funding") };
+        postingLines.AddRange(liabilityAmounts.GroupBy(item => item.AccountNumber, StringComparer.OrdinalIgnoreCase).Select(group => new JournalLineRequest(group.Key, 0, RoundCurrency(group.Sum(item => item.Amount)), "Payroll liabilities")));
         var posting = await PostAsync(db, companyId, run.PayDate, "Payroll", run.Reference, "Employee payroll run", postingLines, cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: run.Id, sourceDocumentType: "PayrollRun");
         if (!posting.Succeeded) return posting;
+        db.PayrollLiabilities.AddRange(taxLines.Where(line => line.EmployeeAmount + line.EmployerAmount > 0).Select(line => new PayrollLiability { Id = Guid.NewGuid(), CompanyId = companyId, PayrollRunId = run.Id, PayrollRunEmployeeLineId = line.PayrollRunEmployeeLineId, SourceType = "Tax", SourceLineId = line.Id, ObligationCode = line.ObligationCode, JurisdictionCode = line.JurisdictionCode, JurisdictionName = line.JurisdictionName, Description = line.TaxType, LiabilityAccountNumber = "2200", OriginalAmount = RoundCurrency(line.EmployeeAmount + line.EmployerAmount), OutstandingAmount = RoundCurrency(line.EmployeeAmount + line.EmployerAmount), Status = "Open", ConcurrencyToken = Guid.NewGuid().ToString("N") }));
+        db.PayrollLiabilities.AddRange(deductionLines.Where(line => line.EmployeeAmount + line.EmployerAmount > 0).Select(line => new PayrollLiability { Id = Guid.NewGuid(), CompanyId = companyId, PayrollRunId = run.Id, PayrollRunEmployeeLineId = line.PayrollRunEmployeeLineId, SourceType = "Deduction", SourceLineId = line.Id, ObligationCode = line.DeductionCode, Description = line.DeductionType, LiabilityAccountNumber = NormalizeLiabilityAccountNumber(line.LiabilityAccountNumber), OriginalAmount = RoundCurrency(line.EmployeeAmount + line.EmployerAmount), OutstandingAmount = RoundCurrency(line.EmployeeAmount + line.EmployerAmount), Status = "Open", ConcurrencyToken = Guid.NewGuid().ToString("N") }));
         run.Status = "Posted"; run.JournalEntryId = posting.Id; run.PostedByUserId = ResolveUserId(); run.PostedAtUtc = DateTimeOffset.UtcNow; run.ConcurrencyToken = Guid.NewGuid().ToString("N");
         bank.CurrentBalance -= run.NetPay; bank.UnreconciledAmount += run.NetPay; bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        AddPayrollAudit(db, companyId, "payroll-run.posted", run, new { run.JournalEntryId, run.GrossPayroll, run.NetPay });
+        AddPayrollAudit(db, companyId, "payroll-run.posted", run, new { run.JournalEntryId, run.GrossPayroll, run.NetPay, liabilityCount = liabilityAmounts.Length, liabilityTotal = expectedLiabilities });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The payroll run or funding account changed while posting. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);
@@ -1187,6 +1208,103 @@ public sealed class AccountingTransactionService(
         return TransactionResult.Success(run.Id);
     }
 
+    public async Task<TransactionResult> RecordPayrollLiabilityPaymentAsync(RecordPayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollPost)) return TransactionResult.Failure("You are not authorized to remit payroll liabilities.");
+        if (request.BankAccountId == Guid.Empty || string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Payee)) return TransactionResult.Failure("Select a funding account and enter the remittance reference and payee.");
+        var method = request.Method?.Trim() ?? string.Empty;
+        if (method is not ("EFT" or "ACH" or "Check" or "Wire" or "Other")) return TransactionResult.Failure("Payroll liability payment method must be EFT, ACH, Check, Wire, or Other.");
+        var applications = request.Applications?.Select(application => application with { Amount = RoundCurrency(application.Amount) }).ToArray() ?? [];
+        if (applications.Length == 0 || applications.Length > 500 || applications.Any(application => application.PayrollLiabilityId == Guid.Empty || application.Amount <= 0) || applications.Select(application => application.PayrollLiabilityId).Distinct().Count() != applications.Length)
+            return TransactionResult.Failure("Select between 1 and 500 unique payroll liabilities with positive payment amounts.");
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        if (await db.PayrollLiabilityPayments.AnyAsync(payment => payment.CompanyId == companyId && payment.Reference == request.Reference.Trim(), cancellationToken)) return TransactionResult.Failure("That payroll remittance reference already exists.");
+        var bank = await db.BankAccounts.SingleOrDefaultAsync(account => account.Id == request.BankAccountId && account.CompanyId == companyId, cancellationToken);
+        if (bank is null) return TransactionResult.Failure("Payroll remittance funding account not found.");
+        var liabilityIds = applications.Select(application => application.PayrollLiabilityId).ToArray();
+        var liabilities = await db.PayrollLiabilities.Where(liability => liability.CompanyId == companyId && liabilityIds.Contains(liability.Id)).ToDictionaryAsync(liability => liability.Id, cancellationToken);
+        if (liabilities.Count != applications.Length) return TransactionResult.Failure("Every selected payroll liability must belong to the active company.");
+        var payrollRunIds = liabilities.Values.Select(liability => liability.PayrollRunId).Distinct().ToArray();
+        if (await db.PayrollRuns.AnyAsync(run => run.CompanyId == companyId && payrollRunIds.Contains(run.Id) && run.PayDate > request.PaymentDate, cancellationToken)) return TransactionResult.Failure("A payroll liability payment cannot precede the pay date that created the obligation.");
+        foreach (var application in applications)
+        {
+            var liability = liabilities[application.PayrollLiabilityId];
+            if (liability.Status is not ("Open" or "PartiallyPaid") || application.Amount > liability.OutstandingAmount) return TransactionResult.Failure($"Payment for {liability.ObligationCode} exceeds its open balance or the liability is not payable.");
+        }
+        var amount = RoundCurrency(applications.Sum(application => application.Amount));
+        if (bank.CurrentBalance < amount) return TransactionResult.Failure("The payroll remittance funding account does not have sufficient book balance.");
+        var accountNumbers = liabilities.Values.Select(liability => liability.LiabilityAccountNumber).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (await db.Accounts.CountAsync(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Liability && accountNumbers.Contains(account.Number), cancellationToken) != accountNumbers.Length)
+            return TransactionResult.Failure("One or more payroll liability accounts are unavailable or no longer classified as liabilities.");
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var paymentId = Guid.NewGuid();
+        var postingLines = applications.GroupBy(application => liabilities[application.PayrollLiabilityId].LiabilityAccountNumber, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new JournalLineRequest(group.Key, RoundCurrency(group.Sum(application => application.Amount)), 0, "Payroll liability remittance"))
+            .Append(new JournalLineRequest(await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken), 0, amount, $"Payment to {request.Payee.Trim()}"))
+            .ToArray();
+        var posting = await PostAsync(db, companyId, request.PaymentDate, "Payroll", request.Reference, $"Payroll liability payment to {request.Payee.Trim()}", postingLines, cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: paymentId, sourceDocumentType: "PayrollLiabilityPayment");
+        if (!posting.Succeeded) return posting;
+        var now = DateTimeOffset.UtcNow;
+        var payment = new PayrollLiabilityPayment { Id = paymentId, CompanyId = companyId, BankAccountId = bank.Id, PaymentDate = request.PaymentDate, Reference = request.Reference.Trim(), Payee = request.Payee.Trim(), Method = method, Amount = amount, Status = "Posted", JournalEntryId = posting.Id!.Value, CreatedByUserId = ResolveUserId(), CreatedAtUtc = now, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        db.PayrollLiabilityPayments.Add(payment);
+        foreach (var application in applications)
+        {
+            var liability = liabilities[application.PayrollLiabilityId];
+            liability.OutstandingAmount = RoundCurrency(liability.OutstandingAmount - application.Amount);
+            liability.Status = liability.OutstandingAmount == 0 ? "Paid" : "PartiallyPaid";
+            liability.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            db.PayrollLiabilityPaymentApplications.Add(new PayrollLiabilityPaymentApplication { Id = Guid.NewGuid(), PayrollLiabilityPaymentId = payment.Id, PayrollLiabilityId = liability.Id, Amount = RoundCurrency(application.Amount) });
+        }
+        bank.CurrentBalance -= amount; bank.UnreconciledAmount += amount; bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddPayrollLiabilityPaymentAudit(db, companyId, "payroll-liability-payment.posted", payment, new { applicationCount = applications.Length, payment.Amount, payment.Payee, payment.Method, payment.JournalEntryId });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("A payroll liability or funding account changed while the remittance was posting. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The payroll remittance reference was already used or an application changed concurrently."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(payment.Id);
+    }
+
+    public async Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollReverse)) return TransactionResult.Failure("You are not authorized to reverse payroll liability payments.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A payroll remittance reversal reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var payment = await db.PayrollLiabilityPayments.SingleOrDefaultAsync(candidate => candidate.Id == request.PaymentId && candidate.CompanyId == companyId, cancellationToken);
+        if (payment is null) return TransactionResult.Failure("Payroll liability payment not found.");
+        if (payment.Status != "Posted" || payment.ReversalJournalEntryId.HasValue) return TransactionResult.Failure("Only an unreversed posted payroll liability payment can be reversed.");
+        if (!string.Equals(payment.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll liability payment changed after it was opened. Refresh and try again.");
+        if (request.ReversalDate < payment.PaymentDate) return TransactionResult.Failure("A payroll remittance reversal cannot precede the payment date.");
+        if (await IsInCompletedReconciliationAsync(db, payment.JournalEntryId, cancellationToken)) return TransactionResult.Failure("Reopen the bank reconciliation before reversing this payroll liability payment.");
+        var applications = await db.PayrollLiabilityPaymentApplications.Where(application => application.PayrollLiabilityPaymentId == payment.Id).ToListAsync(cancellationToken);
+        var liabilityIds = applications.Select(application => application.PayrollLiabilityId).ToArray();
+        var liabilities = await db.PayrollLiabilities.Where(liability => liability.CompanyId == companyId && liabilityIds.Contains(liability.Id)).ToDictionaryAsync(liability => liability.Id, cancellationToken);
+        if (liabilities.Count != applications.Count || applications.Any(application => liabilities[application.PayrollLiabilityId].Status == "Reversed" || liabilities[application.PayrollLiabilityId].OutstandingAmount + application.Amount > liabilities[application.PayrollLiabilityId].OriginalAmount))
+            return TransactionResult.Failure("One or more applied payroll liabilities can no longer accept this payment reversal.");
+        var bank = await db.BankAccounts.SingleAsync(account => account.Id == payment.BankAccountId && account.CompanyId == companyId, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var reversal = await PostInverseAsync(db, companyId, payment.JournalEntryId, request.ReversalDate, $"REV-{payment.Reference}", request.Reason.Trim(), payment.Id, "PayrollLiabilityPaymentReversal", bank.Id, cancellationToken, "Payroll");
+        if (!reversal.Succeeded) return reversal;
+        foreach (var application in applications)
+        {
+            var liability = liabilities[application.PayrollLiabilityId];
+            liability.OutstandingAmount = RoundCurrency(liability.OutstandingAmount + application.Amount);
+            liability.Status = liability.OutstandingAmount == liability.OriginalAmount ? "Open" : "PartiallyPaid";
+            liability.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        }
+        payment.Status = "Reversed"; payment.ReversalJournalEntryId = reversal.Id; payment.ReversedByUserId = ResolveUserId(); payment.ReversedAtUtc = DateTimeOffset.UtcNow; payment.ReversalDate = request.ReversalDate; payment.ReversalReason = request.Reason.Trim(); payment.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        bank.CurrentBalance += payment.Amount; bank.UnreconciledAmount += payment.Amount; bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddPayrollLiabilityPaymentAudit(db, companyId, "payroll-liability-payment.reversed", payment, new { payment.ReversalJournalEntryId, payment.ReversalDate, payment.ReversalReason });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("A payroll liability, payment, or funding account changed while reversing. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(payment.Id);
+    }
+
     public async Task<TransactionResult> ReversePayrollRunAsync(ReversePayrollRunRequest request, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.PayrollReverse)) return TransactionResult.Failure("You are not authorized to reverse payroll runs.");
@@ -1199,6 +1317,8 @@ public sealed class AccountingTransactionService(
         if (!string.Equals(run.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll run changed after it was opened. Refresh and try again.");
         if (request.ReversalDate < run.PayDate) return TransactionResult.Failure("A payroll reversal cannot precede the original pay date.");
         if (await IsInCompletedReconciliationAsync(db, run.JournalEntryId.Value, cancellationToken)) return TransactionResult.Failure("Reopen the bank reconciliation before reversing this payroll run.");
+        var liabilities = await db.PayrollLiabilities.Where(liability => liability.CompanyId == companyId && liability.PayrollRunId == run.Id).ToListAsync(cancellationToken);
+        if (liabilities.Any(liability => liability.OutstandingAmount != liability.OriginalAmount)) return TransactionResult.Failure("Reverse every payment applied to this payroll run's liabilities before reversing the payroll run.");
         var original = await db.JournalEntries.SingleAsync(entry => entry.Id == run.JournalEntryId && entry.CompanyId == companyId, cancellationToken);
         var originalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == original.Id).ToListAsync(cancellationToken);
         var accountIds = originalLines.Select(line => line.AccountId).Distinct().ToArray();
@@ -1212,6 +1332,7 @@ public sealed class AccountingTransactionService(
         reversal.ReversalOfJournalEntryId = original.Id; reversal.ConcurrencyToken = Guid.NewGuid().ToString("N");
         original.Status = "Reversed"; original.ReversedByJournalEntryId = reversal.Id; original.ConcurrencyToken = Guid.NewGuid().ToString("N");
         run.Status = "Reversed"; run.ReversalJournalEntryId = reversal.Id; run.ReversedByUserId = ResolveUserId(); run.ReversedAtUtc = DateTimeOffset.UtcNow; run.ReversalDate = request.ReversalDate; run.ReversalReason = request.Reason.Trim(); run.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        foreach (var liability in liabilities) { liability.Status = "Reversed"; liability.OutstandingAmount = 0; liability.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
         bank.CurrentBalance += run.NetPay; bank.UnreconciledAmount += run.NetPay; bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddPayrollAudit(db, companyId, "payroll-run.reversed", run, new { run.JournalEntryId, run.ReversalJournalEntryId, run.ReversalDate, run.ReversalReason });
         try { await db.SaveChangesAsync(cancellationToken); }
@@ -1539,6 +1660,7 @@ public sealed class AccountingTransactionService(
             decimal employeeTaxes = 0, residentEmployeeTaxes = 0, employerTaxes = 0;
             var taxLines = new List<PayrollTaxEstimate>();
             var selectedObligations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var residentObligations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var candidate in applicableRules)
             {
                 var rule = candidate.Rule;
@@ -1548,6 +1670,7 @@ public sealed class AccountingTransactionService(
                 else employerTaxes += amount;
                 var obligation = NormalizeObligation(rule.ObligationCode, rule.TaxType, rule.JurisdictionCode);
                 selectedObligations.Add(obligation);
+                if (isEmployeeTax && candidate.Scope.IsResidence) residentObligations.Add(obligation);
                 var priorTaxable = employeePriorTaxLines.Where(line => line.ObligationCode == obligation).Sum(line => line.TaxableWages);
                 taxLines.Add(new PayrollTaxEstimate(obligation, rule.JurisdictionCode, rule.JurisdictionName, rule.TaxType, candidate.Scope.TaxableWages, priorTaxable, isEmployeeTax ? amount : 0, isEmployeeTax ? 0 : amount, rule.Id, rule.TaxContentPackageId, rule.ContentVersion, rule.Source, System.Text.Json.JsonSerializer.Serialize(new { rule.CalculationMethod, rule.CalculationVariant, taxableWages = candidate.Scope.TaxableWages, candidate.Scope.IsResidence, candidate.Scope.WorkState, candidate.Scope.WorkCounty, candidate.Scope.WorkCity, candidate.Scope.WorkSchoolDistrict, amount })));
             }
@@ -1564,6 +1687,7 @@ public sealed class AccountingTransactionService(
                 var amount = RoundCurrency(cappedTaxable * profile.Rate);
                 if (isEmployeeTax) { employeeTaxes += amount; if (scope.IsResidence) residentEmployeeTaxes += amount; }
                 else employerTaxes += amount;
+                if (isEmployeeTax && scope.IsResidence) residentObligations.Add(obligation);
                 taxLines.Add(new PayrollTaxEstimate(obligation, profile.Jurisdiction, profile.Jurisdiction, profile.TaxType, cappedTaxable, priorGross, isEmployeeTax ? amount : 0, isEmployeeTax ? 0 : amount, null, null, string.Empty, profile.Source, System.Text.Json.JsonSerializer.Serialize(new { method = "profile-rate", profile.Rate, profile.AnnualWageBase, taxableWages = cappedTaxable, scope.IsResidence, scope.WorkState, scope.WorkCounty, scope.WorkCity, scope.WorkSchoolDistrict, amount })));
             }
             var federalIncomeTaxable = Math.Max(0, taxableEarnings - employee.PreTaxBenefitDeductions - requestedDeductions.Where(deduction => deduction.ExemptFromFederalIncomeTax).Sum(deduction => deduction.EmployeeAmount));
@@ -1577,16 +1701,19 @@ public sealed class AccountingTransactionService(
                 employerTaxes += federal.EmployerAmount;
                 taxLines.Add(new PayrollTaxEstimate(federal.ObligationCode, "US", "Federal", federal.TaxType, federal.TaxableWages, federal.YearToDateTaxableWagesBefore, federal.EmployeeAmount, federal.EmployerAmount, null, null, FederalPayrollTaxCalculator.ContentVersion, federal.Source, federal.CalculationTraceJson));
             }
-            employeeTaxes -= RoundCurrency(residentEmployeeTaxes * rules.Select(rule => rule.ResidentCreditRate).DefaultIfEmpty(0m).Max());
+            var residentCredit = RoundCurrency(residentEmployeeTaxes * rules.Select(rule => rule.ResidentCreditRate).DefaultIfEmpty(0m).Max());
+            employeeTaxes -= residentCredit;
+            ApplyResidentCredit(taxLines, residentObligations, residentCredit);
             var additionalWithholding = employee.FederalWithholdingExempt ? 0 : Math.Max(0, employee.AdditionalWithholding);
             employeeTaxes = RoundCurrency(employeeTaxes + additionalWithholding);
             if (additionalWithholding > 0) taxLines.Add(new PayrollTaxEstimate("FEDERAL-ADDITIONAL-WITHHOLDING", "US", "Federal", "Additional withholding", taxable, priorLines.Where(line => line.EmployeeId == employee.Id).Sum(line => line.TaxableWages), additionalWithholding, 0, null, null, string.Empty, "Employee election", System.Text.Json.JsonSerializer.Serialize(new { amount = additionalWithholding })));
             var postTax = Math.Min(Math.Max(0, employee.PostTaxBenefitDeductions + requestedPostTax), Math.Max(0, taxable - employeeTaxes));
             var net = RoundCurrency(Math.Max(0, grossPay - preTax - employeeTaxes - postTax));
             var ytdGross = priorLines.Where(line => line.EmployeeId == employee.Id).Sum(line => line.GrossPay);
-            estimates.Add(new EmployeePayrollEstimate(employee.Id, $"{employee.FirstName} {employee.LastName}", employee.State, employee.FilingStatus, grossPay, preTax, employeeTaxes, postTax, RoundCurrency(employerTaxes), net, ytdGross, taxLines));
+            var employerBenefitContributions = RoundCurrency(requestedDeductions.Sum(deduction => deduction.EmployerAmount));
+            estimates.Add(new EmployeePayrollEstimate(employee.Id, $"{employee.FirstName} {employee.LastName}", employee.State, employee.FilingStatus, grossPay, preTax, employeeTaxes, postTax, RoundCurrency(employerTaxes), net, ytdGross, taxLines, employerBenefitContributions));
         }
-        return new PayrollRunEstimate(estimates.Sum(line => line.GrossPay), estimates.Sum(line => line.PreTaxDeductions), estimates.Sum(line => line.EmployeeWithholdings), estimates.Sum(line => line.PostTaxDeductions), estimates.Sum(line => line.EmployerPayrollTaxes), estimates.Sum(line => line.NetPay), estimates);
+        return new PayrollRunEstimate(estimates.Sum(line => line.GrossPay), estimates.Sum(line => line.PreTaxDeductions), estimates.Sum(line => line.EmployeeWithholdings), estimates.Sum(line => line.PostTaxDeductions), estimates.Sum(line => line.EmployerPayrollTaxes), estimates.Sum(line => line.NetPay), estimates, estimates.Sum(line => line.EmployerBenefitContributions));
     }
 
     private sealed record PayrollWorkLocationKey(string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict);
@@ -1698,6 +1825,36 @@ public sealed class AccountingTransactionService(
     }
 
     private static decimal ResolveGrossPay(EmployeePayrollInput input) => RoundCurrency(input.Earnings is { Count: > 0 } ? input.Earnings.Sum(earning => earning.Amount) : input.GrossPay);
+
+    private static IReadOnlyList<PayrollDeductionInput> ResolvePayrollDeductions(EmployeePayrollInput input, Employee employee)
+    {
+        var deductions = new List<PayrollDeductionInput>();
+        if (employee.PreTaxBenefitDeductions > 0)
+            deductions.Add(new PayrollDeductionInput("RECURRING-PRE-TAX", "Recurring pre-tax benefit", employee.PreTaxBenefitDeductions, IsPreTax: true, ExemptFromFederalIncomeTax: true));
+        if (employee.PostTaxBenefitDeductions > 0)
+            deductions.Add(new PayrollDeductionInput("RECURRING-POST-TAX", "Recurring post-tax benefit", employee.PostTaxBenefitDeductions));
+        deductions.AddRange(input.Deductions ?? []);
+        return deductions;
+    }
+
+    private static string NormalizeLiabilityAccountNumber(string accountNumber) => string.IsNullOrWhiteSpace(accountNumber) ? "2200" : accountNumber.Trim();
+
+    private static void ApplyResidentCredit(List<PayrollTaxEstimate> taxLines, IReadOnlySet<string> residentObligations, decimal credit)
+    {
+        var remaining = credit;
+        for (var index = 0; index < taxLines.Count && remaining > 0; index++)
+        {
+            var tax = taxLines[index];
+            if (!residentObligations.Contains(tax.ObligationCode) || tax.EmployeeAmount <= 0) continue;
+            var applied = Math.Min(remaining, tax.EmployeeAmount);
+            taxLines[index] = tax with
+            {
+                EmployeeAmount = tax.EmployeeAmount - applied,
+                CalculationTraceJson = System.Text.Json.JsonSerializer.Serialize(new { underlyingCalculationTrace = tax.CalculationTraceJson, residentCreditApplied = applied, amountAfterCredit = tax.EmployeeAmount - applied })
+            };
+            remaining -= applied;
+        }
+    }
 
     private static bool IsEmployeeTax(string taxType) => taxType.Contains("withholding", StringComparison.OrdinalIgnoreCase) || taxType.Contains("employee", StringComparison.OrdinalIgnoreCase);
 
@@ -1855,6 +2012,14 @@ public sealed class AccountingTransactionService(
         {
             Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action,
             EntityType = "PayrollRun", EntityId = run.Id,
+            DetailJson = System.Text.Json.JsonSerializer.Serialize(details), OccurredAtUtc = DateTimeOffset.UtcNow
+        });
+
+    private void AddPayrollLiabilityPaymentAudit(BrassLedgerDbContext db, Guid companyId, string action, PayrollLiabilityPayment payment, object details) =>
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry
+        {
+            Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action,
+            EntityType = "PayrollLiabilityPayment", EntityId = payment.Id,
             DetailJson = System.Text.Json.JsonSerializer.Serialize(details), OccurredAtUtc = DateTimeOffset.UtcNow
         });
 
@@ -2085,7 +2250,7 @@ public sealed class AccountingTransactionService(
         });
     }
 
-    private async Task<TransactionResult> PostInverseAsync(BrassLedgerDbContext db, Guid companyId, Guid originalJournalEntryId, DateOnly date, string reference, string description, Guid sourceDocumentId, string sourceDocumentType, Guid? bankAccountId, CancellationToken cancellationToken)
+    private async Task<TransactionResult> PostInverseAsync(BrassLedgerDbContext db, Guid companyId, Guid originalJournalEntryId, DateOnly date, string reference, string description, Guid sourceDocumentId, string sourceDocumentType, Guid? bankAccountId, CancellationToken cancellationToken, string sourceModule = "Subledger Adjustment")
     {
         var original = await db.JournalEntries.SingleOrDefaultAsync(entry => entry.Id == originalJournalEntryId && entry.CompanyId == companyId && entry.IsPosted, cancellationToken);
         if (original is null || original.ReversedByJournalEntryId.HasValue) return TransactionResult.Failure("The original journal is unavailable or has already been reversed.");
@@ -2099,7 +2264,7 @@ public sealed class AccountingTransactionService(
         if (debits != credits) return TransactionResult.Failure("The original journal is not balanced.");
         var now = DateTimeOffset.UtcNow;
         var userId = ResolveUserId();
-        var entry = new JournalEntry { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bankAccountId, SourceDocumentId = sourceDocumentId, SourceDocumentType = sourceDocumentType, EntryNumber = $"JE-{date:yyyyMMdd}-{Guid.NewGuid():N}"[..20], PostedOn = date, SourceModule = "Subledger Adjustment", Reference = reference.Trim(), Description = description.Trim(), TotalAmount = debits, Status = "Posted", IsPosted = true, CreatedByUserId = userId, CreatedAtUtc = now, ApprovedByUserId = userId, ApprovedAtUtc = now, PostedByUserId = userId, PostedAtUtc = now, ReversalOfJournalEntryId = original.Id, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        var entry = new JournalEntry { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bankAccountId, SourceDocumentId = sourceDocumentId, SourceDocumentType = sourceDocumentType, EntryNumber = $"JE-{date:yyyyMMdd}-{Guid.NewGuid():N}"[..20], PostedOn = date, SourceModule = sourceModule, Reference = reference.Trim(), Description = description.Trim(), TotalAmount = debits, Status = "Posted", IsPosted = true, CreatedByUserId = userId, CreatedAtUtc = now, ApprovedByUserId = userId, ApprovedAtUtc = now, PostedByUserId = userId, PostedAtUtc = now, ReversalOfJournalEntryId = original.Id, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.JournalEntries.Add(entry);
         original.Status = "Reversed";
         original.ReversedByJournalEntryId = entry.Id;

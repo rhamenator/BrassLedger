@@ -67,6 +67,14 @@ Before approving a run:
 
 After posting, reconcile the payroll journal, funding account, and payroll liabilities. Reverse through payroll rather than editing a posted run or deleting its journal.
 
+## Liabilities and remittances
+
+Posting a payroll run creates a liability record for every positive tax and deduction line. Each payable links to the exact payroll run, employee calculation line, and originating tax or deduction line. Employer benefit contributions are recorded separately from employer payroll taxes, included in payroll expense, credited to the configured liability account, and never deducted from employee net pay. Recurring employee benefit deductions are also persisted as lines instead of disappearing into run totals.
+
+The sum of the new liability records must reconcile exactly to employee deductions, employee withholding, employer taxes, and employer benefit contributions before posting can proceed. Deduction liability accounts must exist in the active company and be active liability accounts. BrassLedger does not invent deposit due dates: **Schedule required** remains visible until authoritative filing/deposit configuration supplies one.
+
+An authorized poster can remit one or many open liabilities from a bank account using EFT, ACH, check, wire, or another documented method. Applications cannot exceed their open balances, cannot cross companies, cannot precede the payroll pay date, and update the liability and bank/ledger balances in one transaction. Remittances retain their application detail and can be reversed with a reason and linked inverse journal, unless their bank journal is part of a completed reconciliation. A payroll run cannot be reversed while any of its liability payments remains applied.
+
 ## Current release boundary
 
-The lifecycle, protected fields, auditable timecards, detailed earning entry, multi-location earning allocation, 2026 FIT/FICA engine, ledger posting, and reversal controls are implemented and tested. BrassLedger is not yet ready for live payroll until the remaining payroll goal is completed: deduction/benefit setup and limits, draft cancellation and correction workflows, direct-deposit/check output, pay statements, liability deposits, quarter/year close, federal/state/local forms and e-file-ready exports, authoritative reciprocity and special-allocation content, all required state/local executable content, and independent accounting/tax review.
+The lifecycle, protected fields, auditable timecards, detailed earning entry, multi-location earning allocation, 2026 FIT/FICA engine, reconciled liability/remittance subledger, ledger posting, and reversal controls are implemented and tested. BrassLedger is not yet ready for live payroll until the remaining payroll goal is completed: configurable deduction/benefit plans and legal limits, direct-deposit/check output, pay statements, authoritative deposit schedules, quarter/year close, federal/state/local forms and e-file-ready exports, authoritative reciprocity and special-allocation content, all required state/local executable content, and independent accounting/tax review.

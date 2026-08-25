@@ -75,6 +75,12 @@ public sealed class BusinessWorkspaceService(
         var payrollTimecards = canAccessPayroll ? (await dbContext.PayrollTimecards.AsNoTracking().Where(x => x.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(x => x.PeriodEnd).ThenBy(x => x.EmployeeId).ToList() : [];
         var payrollTimecardIds = payrollTimecards.Select(timecard => timecard.Id).ToArray();
         var payrollTimeEntries = payrollTimecardIds.Length == 0 ? [] : await dbContext.PayrollTimeEntries.AsNoTracking().Where(entry => payrollTimecardIds.Contains(entry.PayrollTimecardId)).OrderBy(entry => entry.Sequence).ToListAsync(cancellationToken);
+        var payrollLiabilities = canAccessPayroll ? await dbContext.PayrollLiabilities.AsNoTracking().Where(liability => liability.CompanyId == company.Id).OrderBy(liability => liability.Status).ThenBy(liability => liability.DueDate).ThenBy(liability => liability.ObligationCode).ToListAsync(cancellationToken) : [];
+        var payrollLiabilityPayments = canAccessPayroll ? (await dbContext.PayrollLiabilityPayments.AsNoTracking().Where(payment => payment.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(payment => payment.PaymentDate).ThenByDescending(payment => payment.CreatedAtUtc).ToList() : [];
+        var payrollLiabilityPaymentIds = payrollLiabilityPayments.Select(payment => payment.Id).ToArray();
+        var payrollLiabilityPaymentApplications = payrollLiabilityPaymentIds.Length == 0 ? [] : await dbContext.PayrollLiabilityPaymentApplications.AsNoTracking().Where(application => payrollLiabilityPaymentIds.Contains(application.PayrollLiabilityPaymentId)).ToListAsync(cancellationToken);
+        var payrollLiabilityEmployeeLineIds = payrollLiabilities.Select(liability => liability.PayrollRunEmployeeLineId).Distinct().ToArray();
+        var payrollLiabilityEmployeeLines = payrollLiabilityEmployeeLineIds.Length == 0 ? [] : await dbContext.PayrollRunEmployeeLines.AsNoTracking().Where(line => payrollLiabilityEmployeeLineIds.Contains(line.Id)).ToListAsync(cancellationToken);
         var projectJobs = await dbContext.ProjectJobs.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.JobNumber).ToListAsync(cancellationToken);
         var taxProfiles = await dbContext.TaxProfiles.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Jurisdiction).ThenBy(x => x.TaxType).ToListAsync(cancellationToken);
         var reports = await dbContext.ReportCatalogItems.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Category).ThenBy(x => x.Name).ToListAsync(cancellationToken);
@@ -87,6 +93,9 @@ public sealed class BusinessWorkspaceService(
         var vendorBillLineLookup = vendorBillLines.ToLookup(line => line.VendorBillId);
         var paymentApplicationLookup = paymentApplications.ToLookup(application => application.SubledgerPaymentId);
         var payrollTimeEntryLookup = payrollTimeEntries.ToLookup(entry => entry.PayrollTimecardId);
+        var payrollLiabilityEmployeeByLineId = payrollLiabilityEmployeeLines.ToDictionary(line => line.Id, line => line.EmployeeId);
+        var payrollLiabilityById = payrollLiabilities.ToDictionary(liability => liability.Id);
+        var payrollLiabilityPaymentApplicationLookup = payrollLiabilityPaymentApplications.ToLookup(application => application.PayrollLiabilityPaymentId);
         var employeeById = employees.ToDictionary(employee => employee.Id);
         var invoiceNumbersById = invoices.ToDictionary(invoice => invoice.Id, invoice => invoice.InvoiceNumber);
         var billNumbersById = vendorBills.ToDictionary(bill => bill.Id, bill => bill.BillNumber);
@@ -262,13 +271,20 @@ public sealed class BusinessWorkspaceService(
                     canViewPayrollSensitiveData ? x.FederalStep4Deductions : 0m,
                     canViewPayrollSensitiveData && x.FederalWithholdingExempt)).ToArray(),
                 JurisdictionRules: payrollJurisdictionRules.Select(rule => new PayrollJurisdictionRuleSnapshot(rule.Id, rule.ResidenceJurisdiction, rule.WorkJurisdiction, rule.ExemptWorkWithholding, rule.ResidentCreditRate, rule.IsActive, rule.Notes)).ToArray(),
-                Runs: payrollRuns.Select(run => new PayrollRunSnapshot(run.Id, run.Reference, run.PeriodStart, run.PeriodEnd, run.PayDate, run.RunType, run.Status, run.GrossPayroll, run.EmployeeWithholdings, run.EmployerPayrollTaxes, run.NetPay, run.ConcurrencyToken, run.JournalEntryId, run.ReversalJournalEntryId, run.PreparedAtUtc, run.ApprovedAtUtc, run.PostedAtUtc, run.ReversedAtUtc, run.ReversalReason, run.CancelledAtUtc, run.CancellationReason)).ToArray(),
+                Runs: payrollRuns.Select(run => new PayrollRunSnapshot(run.Id, run.Reference, run.PeriodStart, run.PeriodEnd, run.PayDate, run.RunType, run.Status, run.GrossPayroll, run.EmployeeWithholdings, run.EmployerPayrollTaxes, run.NetPay, run.ConcurrencyToken, run.JournalEntryId, run.ReversalJournalEntryId, run.PreparedAtUtc, run.ApprovedAtUtc, run.PostedAtUtc, run.ReversedAtUtc, run.ReversalReason, run.CancelledAtUtc, run.CancellationReason, run.EmployerBenefitContributions)).ToArray(),
                 Timecards: payrollTimecards.Select(timecard =>
                 {
                     var employee = employeeById[timecard.EmployeeId];
                     var entries = payrollTimeEntryLookup[timecard.Id].Select(entry => new PayrollTimeEntrySnapshot(entry.Id, entry.Sequence, entry.WorkDate, entry.EarningCode, entry.EarningType, entry.Hours, entry.Rate, entry.Amount, entry.IsTaxable, entry.WorkState, entry.WorkCounty, entry.WorkCity, entry.WorkSchoolDistrict, entry.ProjectJobId, entry.Notes)).ToArray();
                     return new PayrollTimecardSnapshot(timecard.Id, employee.Id, employee.EmployeeNumber, $"{employee.FirstName} {employee.LastName}", timecard.PeriodStart, timecard.PeriodEnd, timecard.Status, entries.Sum(entry => entry.Hours), entries.Sum(entry => entry.Amount), timecard.Notes, timecard.ConcurrencyToken, timecard.PayrollRunId, timecard.PreparedAtUtc, timecard.SubmittedAtUtc, timecard.ApprovedAtUtc, timecard.VoidedAtUtc, timecard.VoidReason, entries);
-                }).ToArray()),
+                }).ToArray(),
+                Liabilities: payrollLiabilities.Select(liability =>
+                {
+                    var employeeId = payrollLiabilityEmployeeByLineId[liability.PayrollRunEmployeeLineId];
+                    var employee = employeeById[employeeId];
+                    return new PayrollLiabilitySnapshot(liability.Id, liability.PayrollRunId, employeeId, $"{employee.FirstName} {employee.LastName}", liability.SourceType, liability.ObligationCode, liability.JurisdictionCode, liability.JurisdictionName, liability.Description, liability.LiabilityAccountNumber, liability.OriginalAmount, liability.OutstandingAmount, liability.Status, liability.DueDate, liability.ConcurrencyToken);
+                }).ToArray(),
+                LiabilityPayments: payrollLiabilityPayments.Select(payment => new PayrollLiabilityPaymentSnapshot(payment.Id, payment.BankAccountId, payment.PaymentDate, payment.Reference, payment.Payee, payment.Method, payment.Amount, payment.Status, payment.JournalEntryId, payment.ReversalJournalEntryId, payment.ConcurrencyToken, payrollLiabilityPaymentApplicationLookup[payment.Id].Select(application => new PayrollLiabilityPaymentApplicationSnapshot(application.PayrollLiabilityId, payrollLiabilityById[application.PayrollLiabilityId].ObligationCode, application.Amount)).ToArray())).ToArray()),
             Projects: new ProjectsWorkspace(
                 OpenJobs: projectJobs.Count(x => x.Status is "Open" or "Billing"),
                 BudgetAmount: projectJobs.Sum(x => x.BudgetAmount),

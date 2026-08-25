@@ -340,6 +340,15 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal("Posted", run.Status);
         Assert.NotNull(run.JournalEntryId);
         Assert.Equal(bank.CurrentBalance - run.NetPay, workspace.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
+        var liability = workspace.Payroll.Liabilities!.First(item => item.Status == "Open");
+        var liabilityPaymentResponse = await client.PostAsJsonAsync("/api/payroll-liability-payments", new RecordPayrollLiabilityPaymentRequest(bank.Id, new DateOnly(2026, 6, 13), "API-TAX-PAY-1", "Tax agency", "EFT", [new PayrollLiabilityPaymentApplicationInput(liability.Id, liability.OutstandingAmount)]));
+        Assert.Equal(HttpStatusCode.Created, liabilityPaymentResponse.StatusCode);
+        workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var liabilityPayment = workspace!.Payroll.LiabilityPayments!.Single(item => item.Reference == "API-TAX-PAY-1");
+        Assert.Equal("Paid", workspace.Payroll.Liabilities!.Single(item => item.Id == liability.Id).Status);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-liability-payments/reverse", new ReversePayrollLiabilityPaymentRequest(liabilityPayment.Id, new DateOnly(2026, 6, 13), "API correction", liabilityPayment.ConcurrencyToken))).StatusCode);
+        workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == run.Id);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-runs/reverse", new ReversePayrollRunRequest(run.Id, new DateOnly(2026, 6, 13), "API payroll correction", run.ConcurrencyToken))).StatusCode);
 
         workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");

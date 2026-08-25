@@ -1109,6 +1109,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
             ])
         ], new DateOnly(2026, 5, 24), new DateOnly(2026, 5, 30));
 
+        var invalidLiabilityAccount = await transactions.SaveEmployeePayrollRunDraftAsync(request with { Reference = "PR-INVALID-LIABILITY", Employees = [new EmployeePayrollInput(employee.Id, 1_000m, Deductions: [new PayrollDeductionInput("BAD", "Invalid account", 10m, LiabilityAccountNumber: "1000")])] });
+        Assert.False(invalidLiabilityAccount.Succeeded);
+        Assert.Contains("liability account", invalidLiabilityAccount.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var draftResult = await transactions.SaveEmployeePayrollRunDraftAsync(request);
         Assert.True(draftResult.Succeeded, draftResult.ErrorMessage);
         PayrollRun draft;
@@ -1119,6 +1122,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Null(draft.JournalEntryId);
             Assert.Equal(new DateOnly(2026, 5, 24), draft.PeriodStart);
             Assert.Equal(1_187.50m, draft.GrossPayroll);
+            Assert.Equal(25m, draft.EmployerBenefitContributions);
             var employeeLine = await verification.PayrollRunEmployeeLines.SingleAsync(line => line.PayrollRunId == draft.Id);
             Assert.Equal(2, await verification.PayrollEarningLines.CountAsync(line => line.PayrollRunEmployeeLineId == employeeLine.Id));
             Assert.Equal(2, await verification.PayrollDeductionLines.CountAsync(line => line.PayrollRunEmployeeLineId == employeeLine.Id));
@@ -1155,7 +1159,30 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal(originalBankBalance - netPay, await verification.BankAccounts.Where(account => account.Id == bankId).Select(account => account.CurrentBalance).SingleAsync());
             var journalLines = await verification.JournalEntryLines.Where(line => line.JournalEntryId == journalId).ToListAsync();
             Assert.Equal(journalLines.Sum(line => line.Debit), journalLines.Sum(line => line.Credit));
+            var liabilities = await verification.PayrollLiabilities.Where(liability => liability.PayrollRunId == draft.Id).ToListAsync();
+            Assert.NotEmpty(liabilities);
+            Assert.All(liabilities, liability => Assert.Equal((liability.OriginalAmount, "Open"), (liability.OutstandingAmount, liability.Status)));
+            Assert.Equal(draft.PreTaxDeductions + draft.EmployeeWithholdings + draft.PostTaxDeductions + draft.EmployerPayrollTaxes + draft.EmployerBenefitContributions, liabilities.Sum(liability => liability.OriginalAmount));
+            var expenseAccountId = await verification.Accounts.Where(account => account.Number == "6100").Select(account => account.Id).SingleAsync();
+            Assert.Equal(draft.GrossPayroll + draft.EmployerPayrollTaxes + draft.EmployerBenefitContributions, journalLines.Single(line => line.AccountId == expenseAccountId).Debit);
         }
+
+        var postedWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var payable = postedWorkspace.Payroll.Liabilities!.First(liability => liability.Status == "Open");
+        var overpayment = await transactions.RecordPayrollLiabilityPaymentAsync(new RecordPayrollLiabilityPaymentRequest(bankId, new DateOnly(2026, 6, 6), "LIABILITY-OVERPAY", "Tax agency", "EFT", [new PayrollLiabilityPaymentApplicationInput(payable.Id, payable.OutstandingAmount + .01m)]));
+        Assert.False(overpayment.Succeeded);
+        var remittance = await transactions.RecordPayrollLiabilityPaymentAsync(new RecordPayrollLiabilityPaymentRequest(bankId, new DateOnly(2026, 6, 6), "LIABILITY-PAY-1", "Tax agency", "EFT", [new PayrollLiabilityPaymentApplicationInput(payable.Id, payable.OutstandingAmount)]));
+        Assert.True(remittance.Succeeded, remittance.ErrorMessage);
+        var afterRemittance = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        Assert.Equal("Paid", afterRemittance.Payroll.Liabilities!.Single(liability => liability.Id == payable.Id).Status);
+        var payment = afterRemittance.Payroll.LiabilityPayments!.Single(item => item.Id == remittance.Id);
+        Assert.Equal(payable.OutstandingAmount, payment.Amount);
+        Assert.False((await transactions.ReversePayrollRunAsync(new ReversePayrollRunRequest(draft.Id, new DateOnly(2026, 6, 6), "Blocked while remitted", postedToken))).Succeeded);
+        var paymentReversal = await transactions.ReversePayrollLiabilityPaymentAsync(new ReversePayrollLiabilityPaymentRequest(payment.Id, new DateOnly(2026, 6, 6), "Correct remittance selection", payment.ConcurrencyToken));
+        Assert.True(paymentReversal.Succeeded, paymentReversal.ErrorMessage);
+        var afterPaymentReversal = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        Assert.Equal("Open", afterPaymentReversal.Payroll.Liabilities!.Single(liability => liability.Id == payable.Id).Status);
+        Assert.Equal("Reversed", afterPaymentReversal.Payroll.LiabilityPayments!.Single(item => item.Id == payment.Id).Status);
 
         var reversal = await transactions.ReversePayrollRunAsync(new ReversePayrollRunRequest(draft.Id, new DateOnly(2026, 6, 6), "Incorrect overtime location", postedToken));
         Assert.True(reversal.Succeeded, reversal.ErrorMessage);
@@ -1167,6 +1194,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal(originalBankBalance, await verification.BankAccounts.Where(account => account.Id == bankId).Select(account => account.CurrentBalance).SingleAsync());
             var reversalLines = await verification.JournalEntryLines.Where(line => line.JournalEntryId == reversed.ReversalJournalEntryId).ToListAsync();
             Assert.Equal(reversalLines.Sum(line => line.Debit), reversalLines.Sum(line => line.Credit));
+            Assert.All(await verification.PayrollLiabilities.Where(liability => liability.PayrollRunId == draft.Id).ToListAsync(), liability => Assert.Equal((0m, "Reversed"), (liability.OutstandingAmount, liability.Status)));
             Assert.Equal(4, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityType == "PayrollRun" && entry.EntityId == draft.Id));
         }
     }
@@ -1430,7 +1458,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(rule.Succeeded, rule.ErrorMessage);
         var preview = await transactions.PreviewEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bank.Id, new DateOnly(2026, 5, 15), "LOCATION-PREVIEW", [new EmployeePayrollInput(employee.Id, 1_000m)]));
         Assert.NotNull(preview);
-        Assert.Equal(124.58m, Assert.Single(preview!.Employees).EmployeeWithholdings); // $38.08 verified 2026 FIT, $76.50 employee FICA, and $10 residence tax after the configured credit.
+        var employeeEstimate = Assert.Single(preview!.Employees);
+        Assert.Equal(124.58m, employeeEstimate.EmployeeWithholdings); // $38.08 verified 2026 FIT, $76.50 employee FICA, and $10 residence tax after the configured credit.
+        Assert.Equal(employeeEstimate.EmployeeWithholdings, employeeEstimate.Taxes!.Sum(tax => tax.EmployeeAmount));
     }
 
     [Fact]

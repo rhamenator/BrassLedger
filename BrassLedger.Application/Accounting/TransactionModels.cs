@@ -50,11 +50,14 @@ public sealed record SavePayrollTimecardDraftRequest(Guid? TimecardId, Guid Empl
 public sealed record SubmitPayrollTimecardRequest(Guid TimecardId, string ConcurrencyToken);
 public sealed record ApprovePayrollTimecardRequest(Guid TimecardId, string ConcurrencyToken);
 public sealed record VoidPayrollTimecardRequest(Guid TimecardId, string Reason, string ConcurrencyToken);
+public sealed record PayrollLiabilityPaymentApplicationInput(Guid PayrollLiabilityId, decimal Amount);
+public sealed record RecordPayrollLiabilityPaymentRequest(Guid BankAccountId, DateOnly PaymentDate, string Reference, string Payee, string Method, IReadOnlyList<PayrollLiabilityPaymentApplicationInput> Applications);
+public sealed record ReversePayrollLiabilityPaymentRequest(Guid PaymentId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record EmployeePayrollInput(Guid EmployeeId, decimal GrossPay, IReadOnlyList<PayrollEarningInput>? Earnings = null, IReadOnlyList<PayrollDeductionInput>? Deductions = null);
 public sealed record PostEmployeePayrollRunRequest(Guid BankAccountId, DateOnly PayDate, string Reference, IReadOnlyList<EmployeePayrollInput> Employees, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null, string RunType = "Regular", IReadOnlyList<Guid>? ApprovedTimecardIds = null);
 public sealed record PayrollTaxEstimate(string ObligationCode, string JurisdictionCode, string JurisdictionName, string TaxType, decimal TaxableWages, decimal YearToDateTaxableWagesBefore, decimal EmployeeAmount, decimal EmployerAmount, Guid? TaxRuleSetId, Guid? TaxContentPackageId, string ContentVersion, string Source, string CalculationTraceJson);
-public sealed record EmployeePayrollEstimate(Guid EmployeeId, string EmployeeName, string WorkState, string FilingStatus, decimal GrossPay, decimal PreTaxDeductions, decimal EmployeeWithholdings, decimal PostTaxDeductions, decimal EmployerPayrollTaxes, decimal NetPay, decimal YearToDateGrossBefore = 0, IReadOnlyList<PayrollTaxEstimate>? Taxes = null);
-public sealed record PayrollRunEstimate(decimal GrossPayroll, decimal PreTaxDeductions, decimal EmployeeWithholdings, decimal PostTaxDeductions, decimal EmployerPayrollTaxes, decimal NetPay, IReadOnlyList<EmployeePayrollEstimate> Employees);
+public sealed record EmployeePayrollEstimate(Guid EmployeeId, string EmployeeName, string WorkState, string FilingStatus, decimal GrossPay, decimal PreTaxDeductions, decimal EmployeeWithholdings, decimal PostTaxDeductions, decimal EmployerPayrollTaxes, decimal NetPay, decimal YearToDateGrossBefore = 0, IReadOnlyList<PayrollTaxEstimate>? Taxes = null, decimal EmployerBenefitContributions = 0);
+public sealed record PayrollRunEstimate(decimal GrossPayroll, decimal PreTaxDeductions, decimal EmployeeWithholdings, decimal PostTaxDeductions, decimal EmployerPayrollTaxes, decimal NetPay, IReadOnlyList<EmployeePayrollEstimate> Employees, decimal EmployerBenefitContributions = 0);
 public sealed record ApprovePayrollRunRequest(Guid PayrollRunId, string ConcurrencyToken);
 public sealed record PostApprovedPayrollRunRequest(Guid PayrollRunId, string ConcurrencyToken);
 public sealed record CancelPayrollRunRequest(Guid PayrollRunId, string Reason, string ConcurrencyToken);
@@ -128,6 +131,8 @@ public interface IAccountingTransactionService
     Task<TransactionResult> SubmitPayrollTimecardAsync(SubmitPayrollTimecardRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApprovePayrollTimecardAsync(ApprovePayrollTimecardRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> VoidPayrollTimecardAsync(VoidPayrollTimecardRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RecordPayrollLiabilityPaymentAsync(RecordPayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default);
 }

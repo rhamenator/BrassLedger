@@ -435,6 +435,18 @@ api.MapPost("/payroll-timecards/void", async (VoidPayrollTimecardRequest request
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["timecard"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll);
 
+api.MapPost("/payroll-liability-payments", async (RecordPayrollLiabilityPaymentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.RecordPayrollLiabilityPaymentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/payroll-liability-payments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollLiabilityPayment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PostPayroll);
+
+api.MapPost("/payroll-liability-payments/reverse", async (ReversePayrollLiabilityPaymentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ReversePayrollLiabilityPaymentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollLiabilityPayment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll);
+
 api.MapPut("/employees/payroll-setup", async (SaveEmployeePayrollSetupRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveEmployeePayrollSetupAsync(request, cancellationToken);

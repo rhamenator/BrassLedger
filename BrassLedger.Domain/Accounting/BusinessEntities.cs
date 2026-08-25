@@ -638,6 +638,7 @@ public sealed class PayrollRun
     public decimal EmployeeWithholdings { get; set; }
     public decimal PostTaxDeductions { get; set; }
     public decimal EmployerPayrollTaxes { get; set; }
+    public decimal EmployerBenefitContributions { get; set; }
     public decimal NetPay { get; set; }
     public Guid? JournalEntryId { get; set; }
     public Guid? ReversalJournalEntryId { get; set; }
@@ -690,6 +691,7 @@ public sealed class PayrollRunEmployeeLine
     public decimal EmployeeWithholdings { get; set; }
     public decimal PostTaxDeductions { get; set; }
     public decimal EmployerPayrollTaxes { get; set; }
+    public decimal EmployerBenefitContributions { get; set; }
     public decimal NetPay { get; set; }
     public string CalculationTraceJson { get; set; } = "[]";
 }
@@ -747,6 +749,56 @@ public sealed class PayrollTaxLine
     public string ContentVersion { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;
     public string CalculationTraceJson { get; set; } = "{}";
+}
+
+public sealed class PayrollLiability
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid PayrollRunId { get; set; }
+    public Guid PayrollRunEmployeeLineId { get; set; }
+    public string SourceType { get; set; } = string.Empty;
+    public Guid SourceLineId { get; set; }
+    public string ObligationCode { get; set; } = string.Empty;
+    public string JurisdictionCode { get; set; } = string.Empty;
+    public string JurisdictionName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string LiabilityAccountNumber { get; set; } = "2200";
+    public decimal OriginalAmount { get; set; }
+    public decimal OutstandingAmount { get; set; }
+    public string Status { get; set; } = "Open";
+    public DateOnly? DueDate { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollLiabilityPayment
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid BankAccountId { get; set; }
+    public DateOnly PaymentDate { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Payee { get; set; } = string.Empty;
+    public string Method { get; set; } = "EFT";
+    public decimal Amount { get; set; }
+    public string Status { get; set; } = "Posted";
+    public Guid JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollLiabilityPaymentApplication
+{
+    public Guid Id { get; set; }
+    public Guid PayrollLiabilityPaymentId { get; set; }
+    public Guid PayrollLiabilityId { get; set; }
+    public decimal Amount { get; set; }
 }
 
 public sealed class TaxRuleSet

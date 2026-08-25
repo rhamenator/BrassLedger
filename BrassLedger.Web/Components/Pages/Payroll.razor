@@ -105,7 +105,7 @@ else
             <table class="data-table"><thead><tr><th>Employee</th><th>Work state</th><th>Gross pay</th></tr></thead><tbody>@foreach (var employee in Workspace.Payroll.Employees.Where(employee => employee.IsActive)) { var employeeId = employee.Id; <tr><td>@employee.FullName</td><td>@employee.State</td><td><input type="number" min="0" step="0.01" aria-label="@($"Gross pay for {employee.FullName}")" class="field-input" value="@RunLines[employeeId].ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetRunLine(employeeId, args.Value)" /></td></tr> }</tbody></table>
             <button class="action-secondary" type="submit">Preview payroll</button>
             @if (Preview is not null) { <button class="action-primary" type="button" @onclick="SavePayrollDraftAsync">Save reviewed draft</button> }</EditForm>
-            @if (Preview is not null) { <table class="data-table"><thead><tr><th>Employee</th><th>Gross</th><th>Pre-tax benefits</th><th>Withholding</th><th>Post-tax benefits</th><th>Employer taxes</th><th>Net pay</th></tr></thead><tbody>@foreach (var line in Preview.Employees) { <tr><td>@line.EmployeeName (@line.WorkState)</td><td>@line.GrossPay.ToString("C")</td><td>@line.PreTaxDeductions.ToString("C")</td><td>@line.EmployeeWithholdings.ToString("C")</td><td>@line.PostTaxDeductions.ToString("C")</td><td>@line.EmployerPayrollTaxes.ToString("C")</td><td>@line.NetPay.ToString("C")</td></tr> }</tbody></table> }
+            @if (Preview is not null) { <table class="data-table"><thead><tr><th>Employee</th><th>Gross</th><th>Pre-tax benefits</th><th>Withholding</th><th>Post-tax benefits</th><th>Employer taxes</th><th>Employer benefits</th><th>Net pay</th></tr></thead><tbody>@foreach (var line in Preview.Employees) { <tr><td>@line.EmployeeName (@line.WorkState)</td><td>@line.GrossPay.ToString("C")</td><td>@line.PreTaxDeductions.ToString("C")</td><td>@line.EmployeeWithholdings.ToString("C")</td><td>@line.PostTaxDeductions.ToString("C")</td><td>@line.EmployerPayrollTaxes.ToString("C")</td><td>@line.EmployerBenefitContributions.ToString("C")</td><td>@line.NetPay.ToString("C")</td></tr> }</tbody></table> }
         </section>
         </Authorized></AuthorizeView>
 
@@ -115,10 +115,10 @@ else
             <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollReverseReasonContext"><div class="field-group"><label class="field-label">Cancellation / reversal reason</label><InputText aria-label="Payroll cancellation or reversal reason" class="field-input" @bind-Value="ReversalReason" /></div></Authorized></AuthorizeView>
             @if (Workspace.Payroll.Runs?.Count > 0)
             {
-                <table class="data-table"><thead><tr><th>Reference</th><th>Period</th><th>Pay date</th><th>Type</th><th>Status</th><th>Gross</th><th>Withholding</th><th>Employer tax</th><th>Net</th><th>Action</th></tr></thead><tbody>
+                <table class="data-table"><thead><tr><th>Reference</th><th>Period</th><th>Pay date</th><th>Type</th><th>Status</th><th>Gross</th><th>Withholding</th><th>Employer tax</th><th>Employer benefits</th><th>Net</th><th>Action</th></tr></thead><tbody>
                 @foreach (var run in Workspace.Payroll.Runs)
                 {
-                    <tr><td>@run.Reference</td><td>@run.PeriodStart.ToString("MMM d")–@run.PeriodEnd.ToString("MMM d, yyyy")</td><td>@run.PayDate.ToString("MMM d, yyyy")</td><td>@run.RunType</td><td>@run.Status</td><td>@run.GrossPayroll.ToString("C")</td><td>@run.EmployeeWithholdings.ToString("C")</td><td>@run.EmployerPayrollTaxes.ToString("C")</td><td>@run.NetPay.ToString("C")</td><td>
+                    <tr><td>@run.Reference</td><td>@run.PeriodStart.ToString("MMM d")–@run.PeriodEnd.ToString("MMM d, yyyy")</td><td>@run.PayDate.ToString("MMM d, yyyy")</td><td>@run.RunType</td><td>@run.Status</td><td>@run.GrossPayroll.ToString("C")</td><td>@run.EmployeeWithholdings.ToString("C")</td><td>@run.EmployerPayrollTaxes.ToString("C")</td><td>@run.EmployerBenefitContributions.ToString("C")</td><td>@run.NetPay.ToString("C")</td><td>
                         @if (run.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="payrollApproveContext"><button class="action-secondary" type="button" @onclick="async () => await ApprovePayrollAsync(run)">Approve</button></Authorized></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollCancelContext"><button class="action-secondary" type="button" @onclick="async () => await CancelPayrollAsync(run)">Cancel</button></Authorized></AuthorizeView> }
                         else if (run.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostPayroll"><Authorized Context="payrollPostContext"><button class="action-primary" type="button" @onclick="async () => await PostApprovedPayrollAsync(run)">Post</button></Authorized></AuthorizeView> }
                         else if (run.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollReverseContext"><button class="action-secondary" type="button" @onclick="async () => await ReversePayrollAsync(run)">Reverse</button></Authorized></AuthorizeView> }
@@ -127,6 +127,46 @@ else
                 </tbody></table>
             }
             else { <p>No payroll drafts or posted runs yet.</p> }
+        </section>
+
+        <section class="panel">
+            <h2>Payroll liabilities</h2>
+            <p class="page-intro">Posting creates one traceable payable for every tax and deduction line. A blank due date means the filing or deposit schedule still requires configuration; it is not permission to defer payment.</p>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostPayroll"><Authorized Context="liabilityPaymentContext">
+                @if (Workspace.Payroll.Liabilities?.Any(liability => liability.Status is "Open" or "PartiallyPaid") == true)
+                {
+                <div class="content-grid">
+                    <div class="field-group"><label class="field-label">Funding account</label><InputSelect aria-label="Liability payment funding account" class="field-input" @bind-Value="LiabilityPaymentForm.BankAccountId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name — @bank.CurrentBalance.ToString("C")</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Payment date</label><InputDate aria-label="Liability payment date" class="field-input" @bind-Value="LiabilityPaymentForm.PaymentDate" /></div>
+                    <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Liability payment reference" class="field-input" @bind-Value="LiabilityPaymentForm.Reference" /></div>
+                    <div class="field-group"><label class="field-label">Payee / agency</label><InputText aria-label="Liability payment payee" class="field-input" @bind-Value="LiabilityPaymentForm.Payee" /></div>
+                    <div class="field-group"><label class="field-label">Method</label><InputSelect aria-label="Liability payment method" class="field-input" @bind-Value="LiabilityPaymentForm.Method"><option>EFT</option><option>ACH</option><option>Check</option><option>Wire</option><option>Other</option></InputSelect></div>
+                </div>
+                    <div class="liability-selection-list">
+                    @foreach (var liability in Workspace.Payroll.Liabilities.Where(liability => liability.Status is "Open" or "PartiallyPaid"))
+                    {
+                        <div class="liability-selection-row"><label class="check-field"><input type="checkbox" aria-label="@($"Select {liability.ObligationCode} for payment")" checked="@SelectedLiabilityIds.Contains(liability.Id)" @onchange="args => ToggleLiabilityPayment(liability, args.Value)" /> @liability.EmployeeName · @liability.ObligationCode · @liability.OutstandingAmount.ToString("C")</label><input type="number" min="0.01" max="@liability.OutstandingAmount" step="0.01" aria-label="@($"Payment amount for {liability.ObligationCode}")" class="field-input" value="@LiabilityPaymentAmounts.GetValueOrDefault(liability.Id).ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetLiabilityPaymentAmount(liability.Id, args.Value)" disabled="@(!SelectedLiabilityIds.Contains(liability.Id))" /></div>
+                    }
+                    </div>
+                    <button class="action-primary" type="button" @onclick="RecordLiabilityPaymentAsync">Record selected remittance</button>
+                }
+            </Authorized></AuthorizeView>
+            @if (Workspace.Payroll.Liabilities?.Count > 0)
+            {
+                <div class="table-scroll"><table class="data-table"><thead><tr><th>Employee</th><th>Obligation</th><th>Jurisdiction</th><th>Source</th><th>Account</th><th>Original</th><th>Outstanding</th><th>Due</th><th>Status</th></tr></thead><tbody>
+                @foreach (var liability in Workspace.Payroll.Liabilities)
+                {
+                    <tr><td>@liability.EmployeeName</td><td>@liability.ObligationCode<br /><span class="muted-copy">@liability.Description</span></td><td>@(string.IsNullOrWhiteSpace(liability.JurisdictionName) ? "—" : liability.JurisdictionName)</td><td>@liability.SourceType</td><td>@liability.LiabilityAccountNumber</td><td>@liability.OriginalAmount.ToString("C")</td><td>@liability.OutstandingAmount.ToString("C")</td><td>@(liability.DueDate?.ToString("MMM d, yyyy") ?? "Schedule required")</td><td>@liability.Status</td></tr>
+                }
+                </tbody></table></div>
+            }
+            else { <p>No posted payroll liabilities yet.</p> }
+            @if (Workspace.Payroll.LiabilityPayments?.Count > 0)
+            {
+                <h3>Remittance history</h3>
+                <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="liabilityPaymentReverseContext"><div class="field-group"><label class="field-label">Remittance reversal reason</label><InputText aria-label="Liability payment reversal reason" class="field-input" @bind-Value="LiabilityPaymentReversalReason" /></div></Authorized></AuthorizeView>
+                <div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Reference</th><th>Payee</th><th>Method</th><th>Amount</th><th>Applications</th><th>Status</th><th></th></tr></thead><tbody>@foreach (var payment in Workspace.Payroll.LiabilityPayments) { <tr><td>@payment.PaymentDate</td><td>@payment.Reference</td><td>@payment.Payee</td><td>@payment.Method</td><td>@payment.Amount.ToString("C")</td><td>@payment.Applications.Count</td><td>@payment.Status</td><td>@if (payment.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="liabilityPaymentReverseActionContext"><button class="action-secondary" type="button" @onclick="() => ReverseLiabilityPaymentAsync(payment)">Reverse</button></Authorized></AuthorizeView> }</td></tr> }</tbody></table></div>
+            }
         </section>
 
         <section class="panel">
@@ -302,6 +342,10 @@ else
     private Guid SelectedPayrollSetupEmployeeId;
     private Guid SelectedEmployeeId;
     private HashSet<Guid> SelectedApprovedTimecardIds { get; } = [];
+    private HashSet<Guid> SelectedLiabilityIds { get; } = [];
+    private Dictionary<Guid, decimal> LiabilityPaymentAmounts { get; } = [];
+    private PayrollLiabilityPaymentEditor LiabilityPaymentForm { get; } = new();
+    private string LiabilityPaymentReversalReason = string.Empty;
     private EmployeeEmploymentEditor EmploymentForm = new();
     private EmployeeSnapshot? SelectedPayrollSetupEmployee => Workspace?.Payroll.Employees.FirstOrDefault(employee => employee.Id == SelectedPayrollSetupEmployeeId);
     private EmployeePayrollEditor? SelectedPayrollSetup => EmployeeSetups.GetValueOrDefault(SelectedPayrollSetupEmployeeId);
@@ -317,6 +361,7 @@ else
         }
         SelectedPayrollSetupEmployeeId = Workspace.Payroll.Employees.FirstOrDefault()?.Id ?? Guid.Empty;
         SelectedEmployeeId = SelectedPayrollSetupEmployeeId;
+        LiabilityPaymentForm.BankAccountId = Workspace.Treasury.BankAccounts.FirstOrDefault()?.Id ?? Guid.Empty;
         LoadEmploymentEditor();
         ResetTimecardEditor();
     }
@@ -451,6 +496,33 @@ else
         if (result.Succeeded) ReversalReason = string.Empty;
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
+    private void ToggleLiabilityPayment(PayrollLiabilitySnapshot liability, object? value)
+    {
+        var selected = value is bool boolean ? boolean : bool.TryParse(value?.ToString(), out var parsed) && parsed;
+        if (selected) { SelectedLiabilityIds.Add(liability.Id); LiabilityPaymentAmounts[liability.Id] = liability.OutstandingAmount; }
+        else { SelectedLiabilityIds.Remove(liability.Id); LiabilityPaymentAmounts.Remove(liability.Id); }
+    }
+    private void SetLiabilityPaymentAmount(Guid liabilityId, object? value)
+    {
+        if (decimal.TryParse(value?.ToString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var amount)) LiabilityPaymentAmounts[liabilityId] = amount;
+    }
+    private async Task RecordLiabilityPaymentAsync()
+    {
+        var applications = SelectedLiabilityIds.Select(id => new PayrollLiabilityPaymentApplicationInput(id, LiabilityPaymentAmounts.GetValueOrDefault(id))).ToArray();
+        var result = await TransactionService.RecordPayrollLiabilityPaymentAsync(new RecordPayrollLiabilityPaymentRequest(LiabilityPaymentForm.BankAccountId, LiabilityPaymentForm.PaymentDate, LiabilityPaymentForm.Reference, LiabilityPaymentForm.Payee, LiabilityPaymentForm.Method, applications));
+        StatusMessage = result.Succeeded ? "Payroll liability remittance posted and applied." : result.ErrorMessage;
+        if (result.Succeeded) { SelectedLiabilityIds.Clear(); LiabilityPaymentAmounts.Clear(); LiabilityPaymentForm.Reset(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    }
+    private async Task ReverseLiabilityPaymentAsync(PayrollLiabilityPaymentSnapshot payment)
+    {
+        if (string.IsNullOrWhiteSpace(LiabilityPaymentReversalReason)) { StatusMessage = "Enter a remittance reversal reason first."; return; }
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var reversalDate = today < payment.PaymentDate ? payment.PaymentDate : today;
+        var result = await TransactionService.ReversePayrollLiabilityPaymentAsync(new ReversePayrollLiabilityPaymentRequest(payment.Id, reversalDate, LiabilityPaymentReversalReason, payment.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Payroll liability remittance reversed and balances reopened." : result.ErrorMessage;
+        if (result.Succeeded) LiabilityPaymentReversalReason = string.Empty;
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
     private async Task SaveSetupAsync(Guid employeeId, EmployeePayrollEditor setup)
     {
         var result = await TransactionService.SaveEmployeePayrollSetupAsync(new SaveEmployeePayrollSetupRequest(employeeId, setup.FilingStatus, setup.Allowances, setup.AdditionalWithholding, setup.PreTaxBenefitDeductions, setup.PostTaxBenefitDeductions, setup.ResidenceState, setup.ResidenceCity, setup.WorkState, setup.WorkCity, setup.PayrollFrequency, setup.FederalFormW4Year, setup.FederalStep2MultipleJobs, setup.FederalStep3Credits, setup.FederalStep4OtherIncome, setup.FederalStep4Deductions, setup.FederalWithholdingExempt));
@@ -479,6 +551,7 @@ else
     private sealed class PayrollRunEditor { public Guid BankAccountId { get; set; } public DateOnly PayDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly PeriodStart { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(-13)); public DateOnly PeriodEnd { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string RunType { get; set; } = "Regular"; public string Reference { get; set; } = $"PR-{DateTime.Today:yyyyMMdd}"; }
     private sealed class PayrollTimecardEditor { public Guid? Id { get; set; } public Guid EmployeeId { get; set; } public DateOnly PeriodStart { get; set; } public DateOnly PeriodEnd { get; set; } public string Notes { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; public List<PayrollTimeEntryEditor> Entries { get; set; } = []; }
     private sealed class PayrollTimeEntryEditor { public DateOnly WorkDate { get; set; } public string EarningCode { get; set; } = "REG"; public string EarningType { get; set; } = "Regular"; public decimal Hours { get; set; } public decimal Rate { get; set; } public decimal Amount { get; set; } public bool IsTaxable { get; set; } = true; public string WorkState { get; set; } = string.Empty; public string WorkCounty { get; set; } = string.Empty; public string WorkCity { get; set; } = string.Empty; public string WorkSchoolDistrict { get; set; } = string.Empty; public Guid? ProjectJobId { get; set; } public string Notes { get; set; } = string.Empty; }
+    private sealed class PayrollLiabilityPaymentEditor { public Guid BankAccountId { get; set; } public DateOnly PaymentDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = $"TAX-{DateTime.Today:yyyyMMdd}"; public string Payee { get; set; } = string.Empty; public string Method { get; set; } = "EFT"; public void Reset() { Reference = $"TAX-{DateTime.Today:yyyyMMdd}"; Payee = string.Empty; } }
     private sealed class EmployeePayrollEditor(string filingStatus, string payrollFrequency, int allowances, decimal additionalWithholding, decimal preTaxBenefitDeductions, decimal postTaxBenefitDeductions, string residenceState, string residenceCity, string workState, string workCity, int federalFormW4Year, bool federalStep2MultipleJobs, decimal federalStep3Credits, decimal federalStep4OtherIncome, decimal federalStep4Deductions, bool federalWithholdingExempt) { public string FilingStatus { get; set; } = filingStatus; public string PayrollFrequency { get; set; } = payrollFrequency; public int Allowances { get; set; } = allowances; public decimal AdditionalWithholding { get; set; } = additionalWithholding; public decimal PreTaxBenefitDeductions { get; set; } = preTaxBenefitDeductions; public decimal PostTaxBenefitDeductions { get; set; } = postTaxBenefitDeductions; public string ResidenceState { get; set; } = residenceState; public string ResidenceCity { get; set; } = residenceCity; public string WorkState { get; set; } = workState; public string WorkCity { get; set; } = workCity; public int FederalFormW4Year { get; set; } = federalFormW4Year; public bool FederalStep2MultipleJobs { get; set; } = federalStep2MultipleJobs; public decimal FederalStep3Credits { get; set; } = federalStep3Credits; public decimal FederalStep4OtherIncome { get; set; } = federalStep4OtherIncome; public decimal FederalStep4Deductions { get; set; } = federalStep4Deductions; public bool FederalWithholdingExempt { get; set; } = federalWithholdingExempt; }
     private sealed class JurisdictionRuleEditor { public string ResidenceJurisdiction { get; set; } = string.Empty; public string WorkJurisdiction { get; set; } = string.Empty; public bool ExemptWorkWithholding { get; set; } public decimal ResidentCreditRate { get; set; } public string Notes { get; set; } = string.Empty; }
     private sealed class EmployeeEmploymentEditor { public string AddressLine1 { get; set; } = string.Empty; public string AddressLine2 { get; set; } = string.Empty; public string PostalCode { get; set; } = string.Empty; public string ResidenceCounty { get; set; } = string.Empty; public string ResidenceSchoolDistrict { get; set; } = string.Empty; public string WorkCounty { get; set; } = string.Empty; public string WorkSchoolDistrict { get; set; } = string.Empty; public DateOnly? EmploymentStartedOn { get; set; } public DateOnly? EmploymentEndedOn { get; set; } public decimal HourlyRate { get; set; } public decimal OvertimeRate { get; set; } public bool DirectDepositEnabled { get; set; } public string BankAccountType { get; set; } = string.Empty; public string SocialSecurityNumber { get; set; } = string.Empty; public string BankRoutingNumber { get; set; } = string.Empty; public string BankAccountNumber { get; set; } = string.Empty; public bool ClearSocialSecurityNumber { get; set; } public bool ClearBankDetails { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; }
