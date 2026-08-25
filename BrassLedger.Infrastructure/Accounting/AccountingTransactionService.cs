@@ -291,8 +291,111 @@ public sealed class AccountingTransactionService(
         return TransactionResult.Success(bill.Id);
     }
 
-    public Task<TransactionResult> ApplyInvoicePaymentAsync(ApplyInvoicePaymentRequest request, CancellationToken cancellationToken = default) => ApplyPaymentAsync(request.InvoiceId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, true, cancellationToken);
-    public Task<TransactionResult> ApplyBillPaymentAsync(ApplyBillPaymentRequest request, CancellationToken cancellationToken = default) => ApplyPaymentAsync(request.VendorBillId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, false, cancellationToken);
+    public async Task<TransactionResult> ApplyInvoicePaymentAsync(ApplyInvoicePaymentRequest request, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var customerId = await db.SalesInvoices.Where(invoice => invoice.Id == request.InvoiceId && invoice.CompanyId == companyId).Select(invoice => (Guid?)invoice.CustomerId).SingleOrDefaultAsync(cancellationToken);
+        return customerId is null
+            ? TransactionResult.Failure("Invoice not found.")
+            : await RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customerId.Value, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, "Other", [new PaymentDocumentApplicationRequest(request.InvoiceId, request.Amount)]), cancellationToken);
+    }
+
+    public async Task<TransactionResult> ApplyBillPaymentAsync(ApplyBillPaymentRequest request, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var vendorId = await db.VendorBills.Where(bill => bill.Id == request.VendorBillId && bill.CompanyId == companyId).Select(bill => (Guid?)bill.VendorId).SingleOrDefaultAsync(cancellationToken);
+        return vendorId is null
+            ? TransactionResult.Failure("Vendor bill not found.")
+            : await RecordVendorPaymentAsync(new RecordVendorPaymentRequest(vendorId.Value, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, "Other", [new PaymentDocumentApplicationRequest(request.VendorBillId, request.Amount)]), cancellationToken);
+    }
+
+    public Task<TransactionResult> RecordCustomerPaymentAsync(RecordCustomerPaymentRequest request, CancellationToken cancellationToken = default) =>
+        !HasPermission(BrassLedgerPermissions.ReceivablesManage)
+            ? Task.FromResult(TransactionResult.Failure("You are not authorized to record customer payments."))
+            : RecordSubledgerPaymentAsync("CustomerReceipt", request.CustomerId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, request.Method, request.Applications, cancellationToken);
+
+    public Task<TransactionResult> RecordVendorPaymentAsync(RecordVendorPaymentRequest request, CancellationToken cancellationToken = default) =>
+        !HasPermission(BrassLedgerPermissions.PayablesManage)
+            ? Task.FromResult(TransactionResult.Failure("You are not authorized to record vendor payments."))
+            : RecordSubledgerPaymentAsync("VendorDisbursement", request.VendorId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, request.Method, request.Applications, cancellationToken);
+
+    public async Task<TransactionResult> ReverseSubledgerPaymentAsync(ReverseSubledgerPaymentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PaymentReverse)) return TransactionResult.Failure("You are not authorized to reverse payments.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A payment reversal reason is required.");
+        var reversalKind = (request.ReversalKind ?? string.Empty).Trim();
+        if (reversalKind is not ("Reversed" or "Returned" or "Voided")) return TransactionResult.Failure("Payment reversal kind must be Reversed, Returned, or Voided.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var payment = await db.SubledgerPayments.SingleOrDefaultAsync(item => item.Id == request.PaymentId && item.CompanyId == companyId, cancellationToken);
+        if (payment is null) return TransactionResult.Failure("Payment not found.");
+        if (payment.Status != "Posted") return TransactionResult.Failure("Only a posted payment can be reversed, returned, or voided.");
+        if (request.ReversalDate < payment.PaymentDate) return TransactionResult.Failure("A payment reversal cannot precede the payment date.");
+        if (await db.BankReconciliationItems.AnyAsync(item => item.JournalEntryId == payment.JournalEntryId, cancellationToken)) return TransactionResult.Failure("A reconciled payment cannot be reversed until its bank reconciliation is reopened.");
+        var bank = await db.BankAccounts.SingleAsync(account => account.Id == payment.BankAccountId && account.CompanyId == companyId, cancellationToken);
+        var cashAccountNumber = await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken);
+        if (string.IsNullOrWhiteSpace(cashAccountNumber)) return TransactionResult.Failure("The payment bank account is not mapped to an active ledger account.");
+        var applications = await db.SubledgerPaymentApplications.Where(item => item.SubledgerPaymentId == payment.Id).ToListAsync(cancellationToken);
+        IReadOnlyList<JournalLineRequest> lines;
+        if (payment.Direction == "CustomerReceipt")
+        {
+            var invoices = await db.SalesInvoices.Where(invoice => invoice.CompanyId == companyId && applications.Select(item => item.DocumentId).Contains(invoice.Id)).ToDictionaryAsync(invoice => invoice.Id, cancellationToken);
+            if (invoices.Count != applications.Count) return TransactionResult.Failure("One or more original invoice applications are unavailable.");
+            foreach (var application in applications)
+            {
+                var invoice = invoices[application.DocumentId];
+                invoice.BalanceDue += application.Amount;
+                invoice.Status = invoice.BalanceDue == invoice.TotalAmount ? "Open" : "Partial";
+                invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            }
+            var customer = await db.Customers.SingleAsync(item => item.Id == payment.CounterpartyId && item.CompanyId == companyId, cancellationToken);
+            customer.OpenBalance += payment.AppliedAmount;
+            var reversalLines = new List<JournalLineRequest> { new(cashAccountNumber, 0, payment.Amount, $"{reversalKind} customer receipt") };
+            if (payment.AppliedAmount > 0) reversalLines.Add(new("1100", payment.AppliedAmount, 0, "Restore invoice balances"));
+            if (payment.UnappliedAmount > 0) reversalLines.Add(new("2150", payment.UnappliedAmount, 0, "Remove customer deposit"));
+            lines = reversalLines;
+            bank.CurrentBalance -= payment.Amount;
+        }
+        else if (payment.Direction == "VendorDisbursement")
+        {
+            var bills = await db.VendorBills.Where(bill => bill.CompanyId == companyId && applications.Select(item => item.DocumentId).Contains(bill.Id)).ToDictionaryAsync(bill => bill.Id, cancellationToken);
+            if (bills.Count != applications.Count) return TransactionResult.Failure("One or more original bill applications are unavailable.");
+            foreach (var application in applications)
+            {
+                var bill = bills[application.DocumentId];
+                bill.BalanceDue += application.Amount;
+                bill.Status = bill.BalanceDue == bill.TotalAmount ? "Open" : "Partial";
+                bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            }
+            var vendor = await db.Vendors.SingleAsync(item => item.Id == payment.CounterpartyId && item.CompanyId == companyId, cancellationToken);
+            vendor.OpenBalance += payment.AppliedAmount;
+            var reversalLines = new List<JournalLineRequest> { new(cashAccountNumber, payment.Amount, 0, $"{reversalKind} vendor disbursement") };
+            if (payment.AppliedAmount > 0) reversalLines.Add(new("2000", 0, payment.AppliedAmount, "Restore bill balances"));
+            if (payment.UnappliedAmount > 0) reversalLines.Add(new("1300", 0, payment.UnappliedAmount, "Remove vendor advance"));
+            lines = reversalLines;
+            bank.CurrentBalance += payment.Amount;
+        }
+        else return TransactionResult.Failure("The payment direction is not supported.");
+
+        var posting = await PostAsync(db, companyId, request.ReversalDate, payment.Direction == "CustomerReceipt" ? "Accounts Receivable" : "Accounts Payable", $"REV-{payment.Reference}", $"{reversalKind} payment: {request.Reason.Trim()}", lines, cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: payment.Id, sourceDocumentType: "SubledgerPaymentReversal");
+        if (!posting.Succeeded) return posting;
+        payment.Status = reversalKind;
+        payment.ReversalJournalEntryId = posting.Id;
+        payment.ReversedByUserId = ResolveUserId();
+        payment.ReversedAtUtc = DateTimeOffset.UtcNow;
+        payment.ReversalReason = request.Reason.Trim();
+        payment.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        bank.UnreconciledAmount += payment.Amount;
+        bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddPaymentAudit(db, companyId, payment, "payment.reversed", new { reversalKind, request.ReversalDate, payment.ReversalJournalEntryId, payment.ReversalReason });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The payment changed during reversal. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(payment.Id);
+    }
 
     public async Task<TransactionResult> ReconcileBankAccountAsync(ReconcileBankAccountRequest request, CancellationToken cancellationToken = default)
     {
@@ -554,42 +657,101 @@ public sealed class AccountingTransactionService(
 
     private static string StateJurisdiction(string state) => TaxRuleCatalog.StateJurisdictions.FirstOrDefault(jurisdiction => string.Equals(jurisdiction.Code, state.Trim(), StringComparison.OrdinalIgnoreCase))?.Name ?? state.Trim();
 
-    private async Task<TransactionResult> ApplyPaymentAsync(Guid documentId, Guid bankAccountId, DateOnly date, decimal amount, string reference, bool receivable, CancellationToken cancellationToken)
+    private async Task<TransactionResult> RecordSubledgerPaymentAsync(string direction, Guid counterpartyId, Guid bankAccountId, DateOnly date, decimal amount, string reference, string method, IReadOnlyList<PaymentDocumentApplicationRequest> requestedApplications, CancellationToken cancellationToken)
     {
         if (amount <= 0) return TransactionResult.Failure("Payment amount must be greater than zero.");
+        if (string.IsNullOrWhiteSpace(reference)) return TransactionResult.Failure("A payment reference is required.");
+        var normalizedMethod = method?.Trim() ?? string.Empty;
+        if (normalizedMethod is not ("Cash" or "Check" or "ACH" or "Card" or "Wire" or "Other")) return TransactionResult.Failure("Payment method must be Cash, Check, ACH, Card, Wire, or Other.");
+        var applications = requestedApplications?.ToArray() ?? [];
+        if (applications.Any(application => application.DocumentId == Guid.Empty || application.Amount <= 0) || applications.Select(application => application.DocumentId).Distinct().Count() != applications.Length)
+            return TransactionResult.Failure("Payment applications require unique documents and positive amounts.");
+        var appliedAmount = RoundCurrency(applications.Sum(application => application.Amount));
+        amount = RoundCurrency(amount);
+        if (appliedAmount > amount) return TransactionResult.Failure("Applied amounts cannot exceed the total payment.");
+        var unappliedAmount = amount - appliedAmount;
+
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        var bank = await db.BankAccounts.SingleOrDefaultAsync(x => x.Id == bankAccountId && x.CompanyId == companyId, cancellationToken);
+        if (await db.SubledgerPayments.AnyAsync(payment => payment.CompanyId == companyId && payment.Direction == direction && payment.Reference == reference.Trim(), cancellationToken))
+            return TransactionResult.Failure("That payment reference has already been recorded for this payment type.");
+        var bank = await db.BankAccounts.SingleOrDefaultAsync(account => account.Id == bankAccountId && account.CompanyId == companyId, cancellationToken);
         if (bank is null) return TransactionResult.Failure("Bank account not found.");
+        var cashAccountNumber = await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken);
+        if (string.IsNullOrWhiteSpace(cashAccountNumber)) return TransactionResult.Failure("The payment bank account is not mapped to an active ledger account.");
+        if (direction == "VendorDisbursement" && bank.CurrentBalance < amount) return TransactionResult.Failure("The bank account does not have sufficient book balance for this payment.");
+
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        if (receivable)
+        var paymentId = Guid.NewGuid();
+        IReadOnlyList<JournalLineRequest> postingLines;
+        if (direction == "CustomerReceipt")
         {
-            var invoice = await db.SalesInvoices.SingleOrDefaultAsync(x => x.Id == documentId && x.CompanyId == companyId, cancellationToken);
-            if (invoice is null || amount > invoice.BalanceDue) return TransactionResult.Failure("Payment cannot exceed the remaining invoice balance.");
-            var cashAccountNumber = await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken);
-            var post = await PostAsync(db, companyId, date, "Accounts Receivable", reference, "Customer payment", [new(cashAccountNumber, amount, 0, "Cash received"), new("1100", 0, amount, "Invoice payment")], cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: invoice.Id, sourceDocumentType: "SalesInvoice");
-            if (!post.Succeeded) return post;
-            invoice.BalanceDue -= amount; invoice.Status = invoice.BalanceDue == 0 ? "Paid" : "Partial"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
-            var customer = await db.Customers.SingleAsync(x => x.Id == invoice.CustomerId, cancellationToken); customer.OpenBalance -= amount;
+            if (!await db.Customers.AnyAsync(customer => customer.Id == counterpartyId && customer.CompanyId == companyId, cancellationToken)) return TransactionResult.Failure("Customer not found.");
+            var ids = applications.Select(application => application.DocumentId).ToArray();
+            var invoices = await db.SalesInvoices.Where(invoice => invoice.CompanyId == companyId && invoice.CustomerId == counterpartyId && ids.Contains(invoice.Id)).ToDictionaryAsync(invoice => invoice.Id, cancellationToken);
+            if (invoices.Count != applications.Length) return TransactionResult.Failure("Every invoice application must belong to the selected customer.");
+            foreach (var application in applications)
+            {
+                var invoice = invoices[application.DocumentId];
+                if (date < invoice.InvoiceDate) return TransactionResult.Failure($"Payment date cannot precede invoice {invoice.InvoiceNumber}.");
+                if (application.Amount > invoice.BalanceDue) return TransactionResult.Failure($"Application to invoice {invoice.InvoiceNumber} exceeds its remaining balance.");
+                invoice.BalanceDue -= application.Amount;
+                invoice.Status = invoice.BalanceDue == 0 ? "Paid" : "Partial";
+                invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            }
+            var customer = await db.Customers.SingleAsync(item => item.Id == counterpartyId && item.CompanyId == companyId, cancellationToken);
+            customer.OpenBalance -= appliedAmount;
+            var lines = new List<JournalLineRequest> { new(cashAccountNumber, amount, 0, "Customer cash receipt") };
+            if (appliedAmount > 0) lines.Add(new("1100", 0, appliedAmount, "Invoice applications"));
+            if (unappliedAmount > 0) lines.Add(new("2150", 0, unappliedAmount, "Unapplied customer deposit"));
+            postingLines = lines;
             bank.CurrentBalance += amount;
         }
-        else
+        else if (direction == "VendorDisbursement")
         {
-            var bill = await db.VendorBills.SingleOrDefaultAsync(x => x.Id == documentId && x.CompanyId == companyId, cancellationToken);
-            if (bill is null || amount > bill.BalanceDue) return TransactionResult.Failure("Payment cannot exceed the remaining bill balance.");
-            var cashAccountNumber = await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken);
-            var post = await PostAsync(db, companyId, date, "Accounts Payable", reference, "Vendor payment", [new("2000", amount, 0, "Bill payment"), new(cashAccountNumber, 0, amount, "Cash paid")], cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: bill.Id, sourceDocumentType: "VendorBill");
-            if (!post.Succeeded) return post;
-            bill.BalanceDue -= amount; bill.Status = bill.BalanceDue == 0 ? "Paid" : "Partial"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
-            var vendor = await db.Vendors.SingleAsync(x => x.Id == bill.VendorId, cancellationToken); vendor.OpenBalance -= amount;
+            if (!await db.Vendors.AnyAsync(vendor => vendor.Id == counterpartyId && vendor.CompanyId == companyId, cancellationToken)) return TransactionResult.Failure("Vendor not found.");
+            var ids = applications.Select(application => application.DocumentId).ToArray();
+            var bills = await db.VendorBills.Where(bill => bill.CompanyId == companyId && bill.VendorId == counterpartyId && ids.Contains(bill.Id)).ToDictionaryAsync(bill => bill.Id, cancellationToken);
+            if (bills.Count != applications.Length) return TransactionResult.Failure("Every bill application must belong to the selected vendor.");
+            foreach (var application in applications)
+            {
+                var bill = bills[application.DocumentId];
+                if (date < bill.BillDate) return TransactionResult.Failure($"Payment date cannot precede bill {bill.BillNumber}.");
+                if (application.Amount > bill.BalanceDue) return TransactionResult.Failure($"Application to bill {bill.BillNumber} exceeds its remaining balance.");
+                bill.BalanceDue -= application.Amount;
+                bill.Status = bill.BalanceDue == 0 ? "Paid" : "Partial";
+                bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            }
+            var vendor = await db.Vendors.SingleAsync(item => item.Id == counterpartyId && item.CompanyId == companyId, cancellationToken);
+            vendor.OpenBalance -= appliedAmount;
+            var lines = new List<JournalLineRequest>();
+            if (appliedAmount > 0) lines.Add(new("2000", appliedAmount, 0, "Bill applications"));
+            if (unappliedAmount > 0) lines.Add(new("1300", unappliedAmount, 0, "Unapplied vendor advance"));
+            lines.Add(new(cashAccountNumber, 0, amount, "Vendor cash disbursement"));
+            postingLines = lines;
             bank.CurrentBalance -= amount;
         }
+        else return TransactionResult.Failure("The payment direction is not supported.");
+
+        var posting = await PostAsync(db, companyId, date, direction == "CustomerReceipt" ? "Accounts Receivable" : "Accounts Payable", reference, direction == "CustomerReceipt" ? "Customer payment" : "Vendor payment", postingLines, cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: paymentId, sourceDocumentType: "SubledgerPayment");
+        if (!posting.Succeeded) return posting;
+        var payment = new SubledgerPayment
+        {
+            Id = paymentId, CompanyId = companyId, Direction = direction, CounterpartyId = counterpartyId, BankAccountId = bank.Id,
+            PaymentDate = date, Amount = amount, AppliedAmount = appliedAmount, UnappliedAmount = unappliedAmount,
+            Reference = reference.Trim(), Method = normalizedMethod, Status = "Posted", JournalEntryId = posting.Id!.Value,
+            CreatedByUserId = ResolveUserId(), CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N")
+        };
+        db.SubledgerPayments.Add(payment);
+        db.SubledgerPaymentApplications.AddRange(applications.Select(application => new SubledgerPaymentApplication { Id = Guid.NewGuid(), SubledgerPaymentId = payment.Id, DocumentId = application.DocumentId, Amount = RoundCurrency(application.Amount) }));
         bank.UnreconciledAmount += amount;
         bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddPaymentAudit(db, companyId, payment, "payment.posted", new { applicationCount = applications.Length });
         try { await db.SaveChangesAsync(cancellationToken); }
-        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("This payment was changed by another user. Refresh the document and try again."); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("A document or bank balance changed while the payment was posting. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The payment reference already exists or its documents changed concurrently. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);
-        return TransactionResult.Success(documentId);
+        return TransactionResult.Success(payment.Id);
     }
 
     private async Task<TransactionResult> PostAsync(BrassLedgerDbContext db, Guid companyId, DateOnly date, string module, string reference, string description, IReadOnlyList<JournalLineRequest> lines, CancellationToken ct, Guid? bankAccountId = null, bool allowControlAccounts = false, Guid? sourceDocumentId = null, string? sourceDocumentType = null)
@@ -644,6 +806,16 @@ public sealed class AccountingTransactionService(
         {
             Id = Guid.NewGuid(), CompanyId = companyId, UserId = userId, Action = action, EntityType = "JournalEntry", EntityId = entry.Id,
             DetailJson = System.Text.Json.JsonSerializer.Serialize(new { entry.EntryNumber, entry.PostedOn, entry.SourceModule, entry.Reference, entry.Description, entry.TotalAmount, entry.Status, details }),
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        });
+    }
+
+    private void AddPaymentAudit(BrassLedgerDbContext db, Guid companyId, SubledgerPayment payment, string action, object details)
+    {
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry
+        {
+            Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = "SubledgerPayment", EntityId = payment.Id,
+            DetailJson = System.Text.Json.JsonSerializer.Serialize(new { payment.Direction, payment.CounterpartyId, payment.BankAccountId, payment.PaymentDate, payment.Amount, payment.AppliedAmount, payment.UnappliedAmount, payment.Reference, payment.Method, payment.Status, details }),
             OccurredAtUtc = DateTimeOffset.UtcNow
         });
     }

@@ -192,6 +192,24 @@ api.MapPost("/vendor-bills/payments", async (ApplyBillPaymentRequest request, IA
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payment"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
 
+api.MapPost("/customer-payments", async (RecordCustomerPaymentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.RecordCustomerPaymentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/customer-payments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReceivables);
+
+api.MapPost("/vendor-payments", async (RecordVendorPaymentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.RecordVendorPaymentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/vendor-payments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/subledger-payments/reverse", async (ReverseSubledgerPaymentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ReverseSubledgerPaymentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
 api.MapPost("/bank-reconciliations", async (ReconcileBankAccountRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.ReconcileBankAccountAsync(request, cancellationToken);

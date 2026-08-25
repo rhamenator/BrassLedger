@@ -61,8 +61,10 @@ internal static class BrassLedgerSeedData
             new GeneralLedgerAccount { Id = Guid.Parse("9de93f5f-b061-44c8-9c63-3b6e6bdb982b"), CompanyId = CompanyId, Number = "1010", Name = "Payroll Clearing", Type = AccountType.Asset, CurrentBalance = 15960.21m, IsControlAccount = false, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("bdb4983d-0b35-44ab-a9f0-723b9184d288"), CompanyId = CompanyId, Number = "1100", Name = "Accounts Receivable", Type = AccountType.Asset, CurrentBalance = 48215.90m, IsControlAccount = true, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("7d7fd728-81de-4ad4-b417-77ad7193882f"), CompanyId = CompanyId, Number = "1200", Name = "Inventory Asset", Type = AccountType.Asset, CurrentBalance = 27680.15m, IsControlAccount = true, IsActive = true },
+            new GeneralLedgerAccount { Id = Guid.Parse("34eb607b-a149-473a-bf4c-da2308871efe"), CompanyId = CompanyId, Number = "1300", Name = "Vendor Advances", Type = AccountType.Asset, CurrentBalance = 0m, IsControlAccount = true, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("7b2df519-fd50-4ca5-8704-6bfbe83cf322"), CompanyId = CompanyId, Number = "2000", Name = "Accounts Payable", Type = AccountType.Liability, CurrentBalance = 31844.77m, IsControlAccount = true, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("0c34d5fd-6946-4dd6-8e55-d1c784a6ace8"), CompanyId = CompanyId, Number = "2100", Name = "Sales Tax Payable", Type = AccountType.Liability, CurrentBalance = 0m, IsControlAccount = true, IsActive = true },
+            new GeneralLedgerAccount { Id = Guid.Parse("276954f0-f5b7-402a-ab82-1117183e87b7"), CompanyId = CompanyId, Number = "2150", Name = "Customer Deposits", Type = AccountType.Liability, CurrentBalance = 0m, IsControlAccount = true, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("6e7d8f0a-4e9a-4c5e-9a9a-96e2e3d33de2"), CompanyId = CompanyId, Number = "2200", Name = "Payroll Liabilities", Type = AccountType.Liability, CurrentBalance = 0m, IsControlAccount = true, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("01d8733f-fac4-47c7-b31c-c6585e97ff40"), CompanyId = CompanyId, Number = "3000", Name = "Owner Equity", Type = AccountType.Equity, CurrentBalance = 95000.00m, IsControlAccount = false, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("8218f913-99cc-41f1-9d13-952de1911091"), CompanyId = CompanyId, Number = "4000", Name = "Product Revenue", Type = AccountType.Revenue, CurrentBalance = 640225.18m, IsControlAccount = false, IsActive = true },
@@ -163,14 +165,14 @@ internal static class BrassLedgerSeedData
 
         var journalLines = new[]
         {
-            new JournalEntryLine { Id = Guid.Parse("bd13ab5f-a291-4b27-a1e6-4027867ecae6"), JournalEntryId = journalEntries[0].Id, AccountId = accounts[1].Id, Description = "Invoice receivable", Debit = 12720m, Credit = 0m },
-            new JournalEntryLine { Id = Guid.Parse("76586e01-b349-4319-b69f-f7bf7ec794bf"), JournalEntryId = journalEntries[0].Id, AccountId = accounts[5].Id, Description = "Invoice revenue", Debit = 0m, Credit = 12720m },
-            new JournalEntryLine { Id = Guid.Parse("6a16aafb-3f8c-40b4-89c9-8bfed82f9b44"), JournalEntryId = journalEntries[1].Id, AccountId = accounts[6].Id, Description = "Material expense", Debit = 13210.50m, Credit = 0m },
-            new JournalEntryLine { Id = Guid.Parse("d6cf1726-e382-47f3-8a77-2bdcc28ef7e3"), JournalEntryId = journalEntries[1].Id, AccountId = accounts[3].Id, Description = "Accounts payable", Debit = 0m, Credit = 13210.50m },
-            new JournalEntryLine { Id = Guid.Parse("e30f3cad-0683-4b8f-a32e-a12957d0950f"), JournalEntryId = journalEntries[2].Id, AccountId = accounts[7].Id, Description = "Payroll expense", Debit = 24367m, Credit = 0m },
+            new JournalEntryLine { Id = Guid.Parse("bd13ab5f-a291-4b27-a1e6-4027867ecae6"), JournalEntryId = journalEntries[0].Id, AccountId = accounts.Single(account => account.Number == "1100").Id, Description = "Invoice receivable", Debit = 12720m, Credit = 0m },
+            new JournalEntryLine { Id = Guid.Parse("76586e01-b349-4319-b69f-f7bf7ec794bf"), JournalEntryId = journalEntries[0].Id, AccountId = accounts.Single(account => account.Number == "4000").Id, Description = "Invoice revenue", Debit = 0m, Credit = 12720m },
+            new JournalEntryLine { Id = Guid.Parse("6a16aafb-3f8c-40b4-89c9-8bfed82f9b44"), JournalEntryId = journalEntries[1].Id, AccountId = accounts.Single(account => account.Number == "5100").Id, Description = "Material expense", Debit = 13210.50m, Credit = 0m },
+            new JournalEntryLine { Id = Guid.Parse("d6cf1726-e382-47f3-8a77-2bdcc28ef7e3"), JournalEntryId = journalEntries[1].Id, AccountId = accounts.Single(account => account.Number == "2000").Id, Description = "Accounts payable", Debit = 0m, Credit = 13210.50m },
+            new JournalEntryLine { Id = Guid.Parse("e30f3cad-0683-4b8f-a32e-a12957d0950f"), JournalEntryId = journalEntries[2].Id, AccountId = accounts.Single(account => account.Number == "6100").Id, Description = "Payroll expense", Debit = 24367m, Credit = 0m },
             new JournalEntryLine { Id = Guid.Parse("6d7209d8-4bfa-4c54-a908-8d72c1e7ca1c"), JournalEntryId = journalEntries[2].Id, AccountId = accounts[0].Id, Description = "Payroll cash", Debit = 0m, Credit = 24367m },
-            new JournalEntryLine { Id = Guid.Parse("53b1bd9f-6f88-4678-ac8d-b0f80fca6b0a"), JournalEntryId = journalEntries[3].Id, AccountId = accounts[2].Id, Description = "Inventory receipt", Debit = 22110m, Credit = 0m },
-            new JournalEntryLine { Id = Guid.Parse("09af8522-8846-487e-ba32-b1d90443759b"), JournalEntryId = journalEntries[3].Id, AccountId = accounts[3].Id, Description = "Received not invoiced", Debit = 0m, Credit = 22110m }
+            new JournalEntryLine { Id = Guid.Parse("53b1bd9f-6f88-4678-ac8d-b0f80fca6b0a"), JournalEntryId = journalEntries[3].Id, AccountId = accounts.Single(account => account.Number == "1200").Id, Description = "Inventory receipt", Debit = 22110m, Credit = 0m },
+            new JournalEntryLine { Id = Guid.Parse("09af8522-8846-487e-ba32-b1d90443759b"), JournalEntryId = journalEntries[3].Id, AccountId = accounts.Single(account => account.Number == "2000").Id, Description = "Received not invoiced", Debit = 0m, Credit = 22110m }
         };
 
         var reportCatalog = new[]

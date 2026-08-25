@@ -74,7 +74,8 @@ public sealed record ReceivablesWorkspace(
     decimal OpenBalance,
     int PastDueCount,
     IReadOnlyList<CustomerSnapshot> Customers,
-    IReadOnlyList<InvoiceSnapshot> Invoices);
+    IReadOnlyList<InvoiceSnapshot> Invoices,
+    IReadOnlyList<SubledgerPaymentSnapshot>? Payments = null);
 
 public sealed record CustomerSnapshot(
     string CustomerNumber,
@@ -93,7 +94,8 @@ public sealed record InvoiceSnapshot(
     decimal TotalAmount,
     decimal BalanceDue,
     Guid Id = default,
-    IReadOnlyList<InvoiceLineSnapshot>? Lines = null);
+    IReadOnlyList<InvoiceLineSnapshot>? Lines = null,
+    Guid CustomerId = default);
 
 public sealed record InvoiceLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber);
 
@@ -101,7 +103,8 @@ public sealed record PayablesWorkspace(
     decimal OpenBalance,
     int DueThisWeekCount,
     IReadOnlyList<VendorSnapshot> Vendors,
-    IReadOnlyList<BillSnapshot> Bills);
+    IReadOnlyList<BillSnapshot> Bills,
+    IReadOnlyList<SubledgerPaymentSnapshot>? Payments = null);
 
 public sealed record VendorSnapshot(
     string VendorNumber,
@@ -120,9 +123,13 @@ public sealed record BillSnapshot(
     decimal TotalAmount,
     decimal BalanceDue,
     Guid Id = default,
-    IReadOnlyList<BillLineSnapshot>? Lines = null);
+    IReadOnlyList<BillLineSnapshot>? Lines = null,
+    Guid VendorId = default);
 
 public sealed record BillLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitCost, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string ExpenseAccountNumber);
+
+public sealed record SubledgerPaymentSnapshot(Guid Id, string Direction, string CounterpartyName, DateOnly PaymentDate, decimal Amount, decimal AppliedAmount, decimal UnappliedAmount, string Reference, string Method, string Status, IReadOnlyList<PaymentApplicationSnapshot> Applications);
+public sealed record PaymentApplicationSnapshot(Guid DocumentId, string DocumentNumber, decimal Amount);
 
 public sealed record OperationsWorkspace(
     int InventoryItemCount,

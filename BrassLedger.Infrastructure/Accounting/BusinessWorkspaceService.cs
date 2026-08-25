@@ -36,6 +36,14 @@ public sealed class BusinessWorkspaceService(
         var vendorBills = await dbContext.VendorBills.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.DueDate).ToListAsync(cancellationToken);
         var vendorBillIds = vendorBills.Select(bill => bill.Id).ToArray();
         var vendorBillLines = vendorBillIds.Length == 0 ? [] : await dbContext.VendorBillLines.AsNoTracking().Where(line => vendorBillIds.Contains(line.VendorBillId)).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
+        var subledgerPayments = (await dbContext.SubledgerPayments.AsNoTracking()
+                .Where(payment => payment.CompanyId == company.Id)
+                .ToListAsync(cancellationToken))
+            .OrderByDescending(payment => payment.PaymentDate)
+            .ThenByDescending(payment => payment.CreatedAtUtc)
+            .ToList();
+        var paymentIds = subledgerPayments.Select(payment => payment.Id).ToArray();
+        var paymentApplications = paymentIds.Length == 0 ? [] : await dbContext.SubledgerPaymentApplications.AsNoTracking().Where(application => paymentIds.Contains(application.SubledgerPaymentId)).ToListAsync(cancellationToken);
         var inventoryItems = await dbContext.InventoryItems.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsActive).OrderBy(x => x.Sku).ToListAsync(cancellationToken);
         var salesOrders = await dbContext.SalesOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
         var purchaseOrders = await dbContext.PurchaseOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
@@ -60,6 +68,9 @@ public sealed class BusinessWorkspaceService(
         var accountNumbersById = accounts.ToDictionary(account => account.Id, account => account.Number);
         var invoiceLineLookup = invoiceLines.ToLookup(line => line.SalesInvoiceId);
         var vendorBillLineLookup = vendorBillLines.ToLookup(line => line.VendorBillId);
+        var paymentApplicationLookup = paymentApplications.ToLookup(application => application.SubledgerPaymentId);
+        var invoiceNumbersById = invoices.ToDictionary(invoice => invoice.Id, invoice => invoice.InvoiceNumber);
+        var billNumbersById = vendorBills.ToDictionary(bill => bill.Id, bill => bill.BillNumber);
 
         var moduleCounts = BuildModuleCounts(
             accounts.Count + journalEntries.Count,
@@ -127,7 +138,9 @@ public sealed class BusinessWorkspaceService(
                     x.TotalAmount,
                     x.BalanceDue,
                     x.Id,
-                    invoiceLineLookup[x.Id].Select(line => new InvoiceLineSnapshot(line.Sequence, line.Description, line.Quantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"))).ToArray())).ToArray()),
+                    invoiceLineLookup[x.Id].Select(line => new InvoiceLineSnapshot(line.Sequence, line.Description, line.Quantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"))).ToArray(),
+                    x.CustomerId)).ToArray(),
+                Payments: subledgerPayments.Where(payment => payment.Direction == "CustomerReceipt").Select(payment => new SubledgerPaymentSnapshot(payment.Id, payment.Direction, customerNames.GetValueOrDefault(payment.CounterpartyId, "Unknown customer"), payment.PaymentDate, payment.Amount, payment.AppliedAmount, payment.UnappliedAmount, payment.Reference, payment.Method, payment.Status, paymentApplicationLookup[payment.Id].Select(application => new PaymentApplicationSnapshot(application.DocumentId, invoiceNumbersById.GetValueOrDefault(application.DocumentId, "Unavailable"), application.Amount)).ToArray())).ToArray()),
             Payables: new PayablesWorkspace(
                 OpenBalance: vendorBills.Sum(x => x.BalanceDue),
                 DueThisWeekCount: vendorBills.Count(x => x.DueDate <= DateOnly.FromDateTime(DateTime.Today.AddDays(7)) && x.BalanceDue > 0m),
@@ -141,7 +154,9 @@ public sealed class BusinessWorkspaceService(
                     x.TotalAmount,
                     x.BalanceDue,
                     x.Id,
-                    vendorBillLineLookup[x.Id].Select(line => new BillLineSnapshot(line.Sequence, line.Description, line.Quantity, line.UnitCost, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.ExpenseAccountId, "Unavailable"))).ToArray())).ToArray()),
+                    vendorBillLineLookup[x.Id].Select(line => new BillLineSnapshot(line.Sequence, line.Description, line.Quantity, line.UnitCost, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.ExpenseAccountId, "Unavailable"))).ToArray(),
+                    x.VendorId)).ToArray(),
+                Payments: subledgerPayments.Where(payment => payment.Direction == "VendorDisbursement").Select(payment => new SubledgerPaymentSnapshot(payment.Id, payment.Direction, vendorNames.GetValueOrDefault(payment.CounterpartyId, "Unknown vendor"), payment.PaymentDate, payment.Amount, payment.AppliedAmount, payment.UnappliedAmount, payment.Reference, payment.Method, payment.Status, paymentApplicationLookup[payment.Id].Select(application => new PaymentApplicationSnapshot(application.DocumentId, billNumbersById.GetValueOrDefault(application.DocumentId, "Unavailable"), application.Amount)).ToArray())).ToArray()),
             Operations: new OperationsWorkspace(
                 InventoryItemCount: inventoryItems.Count,
                 ReorderAlerts: inventoryItems.Count(x => x.QuantityOnHand <= x.ReorderPoint),

@@ -78,13 +78,39 @@ else
         </section>
 
         <section class="panel">
-            <h2>Apply vendor payment</h2>
-            <EditForm Model="PaymentForm" OnValidSubmit="ApplyPaymentAsync"><div class="content-grid">
-                <div class="field-group"><label class="field-label">Bill</label><InputSelect aria-label="Payment bill" class="field-input" @bind-Value="PaymentForm.BillId"><option value="@Guid.Empty">Select bill</option>@foreach (var bill in Workspace.Payables.Bills.Where(x => x.BalanceDue > 0)) { <option value="@bill.Id">@bill.BillNumber — @bill.BalanceDue.ToString("C")</option> }</InputSelect></div>
-                <div class="field-group"><label class="field-label">Payment account</label><InputSelect aria-label="Payment account" class="field-input" @bind-Value="PaymentForm.BankId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div>
-                <div class="field-group"><label class="field-label">Amount</label><InputNumber aria-label="Payment amount" class="field-input" @bind-Value="PaymentForm.Amount" /></div>
-                <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Payment reference" class="field-input" @bind-Value="PaymentForm.Reference" /></div>
-            </div><button class="action-primary" type="submit">Apply payment</button></EditForm>
+            <h2>Record vendor payment or advance</h2>
+            <p class="page-intro">Apply one disbursement across bills or leave part of it unapplied as a vendor advance.</p>
+            <EditForm Model="PaymentForm" OnValidSubmit="ApplyPaymentAsync">
+                <div class="content-grid">
+                    <div class="field-group"><label class="field-label">Vendor</label><InputSelect aria-label="Payment vendor" class="field-input" @bind-Value="PaymentForm.VendorId"><option value="@Guid.Empty">Select vendor</option>@foreach (var vendor in Workspace.Payables.Vendors) { <option value="@vendor.Id">@vendor.VendorNumber — @vendor.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Payment account</label><InputSelect aria-label="Payment account" class="field-input" @bind-Value="PaymentForm.BankId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Payment date</label><InputDate aria-label="Vendor payment date" class="field-input" @bind-Value="PaymentForm.Date" /></div>
+                    <div class="field-group"><label class="field-label">Payment total</label><InputNumber aria-label="Vendor payment total" class="field-input" @bind-Value="PaymentForm.Amount" /></div>
+                    <div class="field-group"><label class="field-label">Method</label><InputSelect aria-label="Vendor payment method" class="field-input" @bind-Value="PaymentForm.Method">@foreach (var method in PaymentMethods) { <option value="@method">@method</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Payment reference" class="field-input" @bind-Value="PaymentForm.Reference" /></div>
+                </div>
+                @if (PaymentForm.VendorId != Guid.Empty)
+                {
+                    <div class="table-scroll"><table class="data-table"><thead><tr><th>Apply</th><th>Bill</th><th>Due</th><th>Open balance</th><th>Apply amount</th></tr></thead><tbody>
+                        @foreach (var application in AvailableBillApplications)
+                        {
+                            <tr @key="application.DocumentId"><td><InputCheckbox aria-label="@($"Apply to {application.DocumentNumber}")" @bind-Value="application.Selected" /></td><td>@application.DocumentNumber</td><td>@application.DueDate</td><td>@application.OpenBalance.ToString("C")</td><td><InputNumber aria-label="@($"Amount for {application.DocumentNumber}")" class="field-input" disabled="@(!application.Selected)" @bind-Value="application.Amount" /></td></tr>
+                        }
+                    </tbody><tfoot><tr><th colspan="3">Payment allocation</th><th>Applied: @PaymentForm.AppliedAmount.ToString("C")</th><th>Unapplied advance: @PaymentForm.UnappliedAmount.ToString("C")</th></tr></tfoot></table></div>
+                }
+                <button class="action-primary" type="submit">Record vendor payment</button>
+            </EditForm>
+        </section>
+
+        <section class="panel">
+            <h2>Vendor payment history</h2>
+            <div class="content-grid"><div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Vendor payment reversal date" class="field-input" @bind-Value="ReversalForm.Date" /></div><div class="field-group"><label class="field-label">Outcome</label><InputSelect aria-label="Vendor payment reversal kind" class="field-input" @bind-Value="ReversalForm.Kind"><option>Voided</option><option>Returned</option><option>Reversed</option></InputSelect></div><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Vendor payment reversal reason" class="field-input" @bind-Value="ReversalForm.Reason" /></div></div>
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Vendor</th><th>Reference</th><th>Method</th><th>Total</th><th>Applied</th><th>Advance</th><th>Status</th><th></th></tr></thead><tbody>
+                @foreach (var payment in Workspace.Payables.Payments ?? [])
+                {
+                    <tr><td>@payment.PaymentDate</td><td>@payment.CounterpartyName</td><td>@payment.Reference</td><td>@payment.Method</td><td>@payment.Amount.ToString("C")</td><td>@payment.AppliedAmount.ToString("C")</td><td>@payment.UnappliedAmount.ToString("C")</td><td>@payment.Status</td><td>@if (payment.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayments"><button class="action-secondary" type="button" @onclick="() => ReversePaymentAsync(payment.Id)">Record @ReversalForm.Kind.ToLowerInvariant()</button></AuthorizeView> }</td></tr>
+                }
+            </tbody></table></div>
         </section>
 
         <section class="content-grid">
@@ -150,10 +176,14 @@ else
     private string? StatusMessage;
     private BillEditor BillForm { get; } = new();
     private PaymentEditor PaymentForm { get; } = new();
+    private PaymentReversalEditor ReversalForm { get; } = new();
+    private static readonly string[] PaymentMethods = ["Check", "ACH", "Card", "Wire", "Cash", "Other"];
+    private IEnumerable<PaymentApplicationEditor> AvailableBillApplications => PaymentForm.Applications.Where(application => application.CounterpartyId == PaymentForm.VendorId);
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        SyncPaymentApplications();
     }
 
     private async Task CreateBillAsync()
@@ -165,6 +195,7 @@ else
         {
             Workspace = await WorkspaceService.GetWorkspaceAsync();
             BillForm.Reset();
+            SyncPaymentApplications();
         }
     }
 
@@ -173,9 +204,24 @@ else
 
     private async Task ApplyPaymentAsync()
     {
-        var result = await TransactionService.ApplyBillPaymentAsync(new ApplyBillPaymentRequest(PaymentForm.BillId, PaymentForm.BankId, DateOnly.FromDateTime(DateTime.Today), PaymentForm.Amount, PaymentForm.Reference));
-        StatusMessage = result.Succeeded ? "Vendor payment applied." : result.ErrorMessage;
-        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+        var applications = AvailableBillApplications.Where(application => application.Selected).Select(application => new PaymentDocumentApplicationRequest(application.DocumentId, application.Amount)).ToArray();
+        var result = await TransactionService.RecordVendorPaymentAsync(new RecordVendorPaymentRequest(PaymentForm.VendorId, PaymentForm.BankId, PaymentForm.Date, PaymentForm.Amount, PaymentForm.Reference, PaymentForm.Method, applications));
+        StatusMessage = result.Succeeded ? "Vendor payment recorded." : result.ErrorMessage;
+        if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); PaymentForm.Reset(); SyncPaymentApplications(); }
+    }
+
+    private async Task ReversePaymentAsync(Guid paymentId)
+    {
+        var result = await TransactionService.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(paymentId, ReversalForm.Date, ReversalForm.Reason, ReversalForm.Kind));
+        StatusMessage = result.Succeeded ? $"Vendor payment marked {ReversalForm.Kind.ToLowerInvariant()}." : result.ErrorMessage;
+        if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); PaymentForm.Reset(); SyncPaymentApplications(); ReversalForm.Reason = string.Empty; }
+    }
+
+    private void SyncPaymentApplications()
+    {
+        PaymentForm.Applications.Clear();
+        if (Workspace is null) return;
+        PaymentForm.Applications.AddRange(Workspace.Payables.Bills.Where(bill => bill.BalanceDue > 0).Select(bill => new PaymentApplicationEditor(bill.Id, bill.VendorId, bill.BillNumber, bill.DueDate, bill.BalanceDue)));
     }
 
     private sealed class BillEditor
@@ -198,5 +244,22 @@ else
         public string ExpenseAccount { get; set; } = "5100";
         public decimal Total => decimal.Round(Quantity * UnitCost - Discount + Tax, 2, MidpointRounding.AwayFromZero);
     }
-    private sealed class PaymentEditor { public Guid BillId { get; set; } public Guid BankId { get; set; } public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; }
+    private sealed class PaymentEditor
+    {
+        public Guid VendorId { get; set; }
+        public Guid BankId { get; set; }
+        public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public decimal Amount { get; set; }
+        public string Method { get; set; } = "Check";
+        public string Reference { get; set; } = string.Empty;
+        public List<PaymentApplicationEditor> Applications { get; } = [];
+        public decimal AppliedAmount => Applications.Where(application => application.Selected).Sum(application => application.Amount);
+        public decimal UnappliedAmount => Math.Max(0m, Amount - AppliedAmount);
+        public void Reset() { VendorId = Guid.Empty; Amount = 0m; Reference = string.Empty; Applications.Clear(); }
+    }
+    private sealed class PaymentApplicationEditor(Guid documentId, Guid counterpartyId, string documentNumber, DateOnly dueDate, decimal openBalance)
+    {
+        public Guid DocumentId { get; } = documentId; public Guid CounterpartyId { get; } = counterpartyId; public string DocumentNumber { get; } = documentNumber; public DateOnly DueDate { get; } = dueDate; public decimal OpenBalance { get; } = openBalance; public bool Selected { get; set; } public decimal Amount { get; set; } = openBalance;
+    }
+    private sealed class PaymentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Kind { get; set; } = "Voided"; public string Reason { get; set; } = string.Empty; }
 }

@@ -48,4 +48,27 @@ public sealed class ReceivablesPage
         await Assertions.Expect(row).ToContainTextAsync("$165.00");
         await Assertions.Expect(row).ToContainTextAsync("2");
     }
+
+    public async Task RecordAndReturnCustomerPaymentAsync(string invoiceNumber, string paymentReference)
+    {
+        await _session.Page.GetByLabel("Payment customer").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Payment deposit account").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Payment total").FillAsync("180");
+        await _session.Page.GetByLabel("Payment method").SelectOptionAsync("ACH");
+        await _session.Page.GetByLabel("Payment reference").FillAsync(paymentReference);
+        await _session.Page.GetByLabel($"Apply to {invoiceNumber}").CheckAsync();
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Record customer payment" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer payment recorded.");
+
+        var historyRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference });
+        await Assertions.Expect(historyRow).ToContainTextAsync("$180.00");
+        await Assertions.Expect(historyRow).ToContainTextAsync("$165.00");
+        await Assertions.Expect(historyRow).ToContainTextAsync("$15.00");
+        await Assertions.Expect(historyRow).ToContainTextAsync("Posted");
+
+        await _session.Page.GetByLabel("Customer payment reversal reason").FillAsync("E2E returned deposit");
+        await historyRow.GetByRole(AriaRole.Button, new() { Name = "Record returned" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer payment marked returned.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference })).ToContainTextAsync("Returned");
+    }
 }

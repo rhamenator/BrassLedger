@@ -157,6 +157,52 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task CustomerPaymentApi_AppliesMultipleInvoices_PreservesDeposit_AndReturnsPayment()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var before = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.NotNull(before);
+        var customer = before!.Receivables.Customers.First();
+        var bank = before.Treasury.BankAccounts.First();
+
+        async Task<Guid> CreateInvoiceAsync(string number, decimal amount)
+        {
+            var response = await client.PostAsJsonAsync("/api/invoices", new CreateInvoiceRequest(
+                customer.Id, number, new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), amount, 0m, "4000", "Payment API workflow"));
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<TransactionResult>();
+            Assert.NotNull(result?.Id);
+            return result!.Id!.Value;
+        }
+
+        var firstInvoiceId = await CreateInvoiceAsync("INV-API-PAY-1", 40m);
+        var secondInvoiceId = await CreateInvoiceAsync("INV-API-PAY-2", 35m);
+        var paymentResponse = await client.PostAsJsonAsync("/api/customer-payments", new RecordCustomerPaymentRequest(
+            customer.Id, bank.Id, new DateOnly(2026, 5, 2), 90m, "DEP-API-PAY-1", "ACH",
+            [new PaymentDocumentApplicationRequest(firstInvoiceId, 40m), new PaymentDocumentApplicationRequest(secondInvoiceId, 35m)]));
+        Assert.Equal(HttpStatusCode.Created, paymentResponse.StatusCode);
+        var paymentResult = await paymentResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        Assert.NotNull(paymentResult?.Id);
+
+        var paid = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.NotNull(paid);
+        var recorded = Assert.Single(paid!.Receivables.Payments!, payment => payment.Id == paymentResult!.Id);
+        Assert.Equal(75m, recorded.AppliedAmount);
+        Assert.Equal(15m, recorded.UnappliedAmount);
+        Assert.Equal(2, recorded.Applications.Count);
+
+        var returnResponse = await client.PostAsJsonAsync("/api/subledger-payments/reverse", new ReverseSubledgerPaymentRequest(
+            paymentResult!.Id!.Value, new DateOnly(2026, 5, 3), "Bank returned the ACH", "Returned"));
+        Assert.Equal(HttpStatusCode.OK, returnResponse.StatusCode);
+        var returned = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.NotNull(returned);
+        Assert.Equal("Returned", returned!.Receivables.Payments!.Single(payment => payment.Id == paymentResult.Id).Status);
+        Assert.Equal(40m, returned.Receivables.Invoices.Single(invoice => invoice.Id == firstInvoiceId).BalanceDue);
+        Assert.Equal(35m, returned.Receivables.Invoices.Single(invoice => invoice.Id == secondInvoiceId).BalanceDue);
+    }
+
+    [Fact]
     public async Task JournalDraftApi_RequiresApprovalBeforePostingAndPreservesReversalLinks()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();

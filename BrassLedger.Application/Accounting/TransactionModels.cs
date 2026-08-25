@@ -10,6 +10,10 @@ public sealed record VendorBillLineRequest(string Description, decimal Quantity,
 public sealed record CreateVendorBillRequest(Guid VendorId, string BillNumber, DateOnly BillDate, DateOnly DueDate, decimal TotalAmount, string ExpenseAccountNumber, string Description, IReadOnlyList<VendorBillLineRequest>? Lines = null);
 public sealed record ApplyInvoicePaymentRequest(Guid InvoiceId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference);
 public sealed record ApplyBillPaymentRequest(Guid VendorBillId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference);
+public sealed record PaymentDocumentApplicationRequest(Guid DocumentId, decimal Amount);
+public sealed record RecordCustomerPaymentRequest(Guid CustomerId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference, string Method, IReadOnlyList<PaymentDocumentApplicationRequest> Applications);
+public sealed record RecordVendorPaymentRequest(Guid VendorId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference, string Method, IReadOnlyList<PaymentDocumentApplicationRequest> Applications);
+public sealed record ReverseSubledgerPaymentRequest(Guid PaymentId, DateOnly ReversalDate, string Reason, string ReversalKind = "Reversed");
 public sealed record ReconcileBankAccountRequest(Guid BankAccountId, DateOnly StatementDate, decimal StatementClosingBalance, IReadOnlyList<Guid>? ClearedJournalEntryIds = null);
 public sealed record UpdateBankLedgerMappingRequest(Guid BankAccountId, string LedgerAccountNumber);
 public sealed record PostPayrollRunRequest(
@@ -53,6 +57,9 @@ public interface IAccountingTransactionService
     Task<TransactionResult> CreateVendorBillAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApplyInvoicePaymentAsync(ApplyInvoicePaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApplyBillPaymentAsync(ApplyBillPaymentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RecordCustomerPaymentAsync(RecordCustomerPaymentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RecordVendorPaymentAsync(RecordVendorPaymentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseSubledgerPaymentAsync(ReverseSubledgerPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReconcileBankAccountAsync(ReconcileBankAccountRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> UpdateBankLedgerMappingAsync(UpdateBankLedgerMappingRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> PostPayrollRunAsync(PostPayrollRunRequest request, CancellationToken cancellationToken = default);

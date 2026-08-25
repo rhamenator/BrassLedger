@@ -387,6 +387,180 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task CustomerPayment_AppliesMultipleInvoices_PreservesDeposit_AndReturnsAuditably()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var initial = await workspaceService.GetWorkspaceAsync();
+        var customer = initial.Receivables.Customers.First();
+        var bank = initial.Treasury.BankAccounts.First();
+        var first = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-PAY-MULTI-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "First payment invoice"));
+        var second = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-PAY-MULTI-2", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 50m, 0m, "4000", "Second payment invoice"));
+        Assert.True(first.Succeeded, first.ErrorMessage);
+        Assert.True(second.Succeeded, second.ErrorMessage);
+        var beforePayment = await workspaceService.GetWorkspaceAsync();
+
+        var result = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(
+            customer.Id, bank.Id, new DateOnly(2026, 5, 2), 180m, "DEP-MULTI-1", "ACH",
+            [new PaymentDocumentApplicationRequest(first.Id!.Value, 100m), new PaymentDocumentApplicationRequest(second.Id!.Value, 50m)]));
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await dbContextFactory.CreateDbContextAsync())
+        {
+            var payment = await db.SubledgerPayments.SingleAsync(item => item.Id == result.Id);
+            Assert.Equal(150m, payment.AppliedAmount);
+            Assert.Equal(30m, payment.UnappliedAmount);
+            Assert.Equal("Posted", payment.Status);
+            Assert.Equal(2, await db.SubledgerPaymentApplications.CountAsync(item => item.SubledgerPaymentId == payment.Id));
+            var postings = await (from line in db.JournalEntryLines join account in db.Accounts on line.AccountId equals account.Id where line.JournalEntryId == payment.JournalEntryId select new { account.Number, line.Debit, line.Credit }).ToListAsync();
+            Assert.Contains(postings, line => line.Number == bank.LedgerAccountNumber && line.Debit == 180m);
+            Assert.Contains(postings, line => line.Number == "1100" && line.Credit == 150m);
+            Assert.Contains(postings, line => line.Number == "2150" && line.Credit == 30m);
+            Assert.Equal(postings.Sum(line => line.Debit), postings.Sum(line => line.Credit));
+            Assert.True(await db.BusinessAuditEntries.AnyAsync(entry => entry.EntityId == payment.Id && entry.Action == "payment.posted"));
+        }
+        var afterPayment = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(0m, afterPayment.Receivables.Invoices.Single(invoice => invoice.Id == first.Id).BalanceDue);
+        Assert.Equal(0m, afterPayment.Receivables.Invoices.Single(invoice => invoice.Id == second.Id).BalanceDue);
+        Assert.Equal(beforePayment.Receivables.OpenBalance - 150m, afterPayment.Receivables.OpenBalance);
+        Assert.Equal(beforePayment.Treasury.CashOnHand + 180m, afterPayment.Treasury.CashOnHand);
+        Assert.Contains(afterPayment.Receivables.Payments ?? [], payment => payment.Id == result.Id && payment.Applications.Count == 2 && payment.UnappliedAmount == 30m);
+
+        var returned = await transactions.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(result.Id!.Value, new DateOnly(2026, 5, 3), "ACH was returned", "Returned"));
+        Assert.True(returned.Succeeded, returned.ErrorMessage);
+        var afterReturn = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(100m, afterReturn.Receivables.Invoices.Single(invoice => invoice.Id == first.Id).BalanceDue);
+        Assert.Equal(50m, afterReturn.Receivables.Invoices.Single(invoice => invoice.Id == second.Id).BalanceDue);
+        Assert.Equal(beforePayment.Receivables.OpenBalance, afterReturn.Receivables.OpenBalance);
+        Assert.Equal(beforePayment.Treasury.CashOnHand, afterReturn.Treasury.CashOnHand);
+        await using (var db = await dbContextFactory.CreateDbContextAsync())
+        {
+            var payment = await db.SubledgerPayments.SingleAsync(item => item.Id == result.Id);
+            Assert.Equal("Returned", payment.Status);
+            Assert.NotNull(payment.ReversalJournalEntryId);
+            Assert.True(await db.BusinessAuditEntries.AnyAsync(entry => entry.EntityId == payment.Id && entry.Action == "payment.reversed"));
+        }
+        var repeated = await transactions.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(result.Id.Value, new DateOnly(2026, 5, 4), "Repeat", "Returned"));
+        Assert.False(repeated.Succeeded);
+        var duplicateReference = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customer.Id, bank.Id, new DateOnly(2026, 5, 4), 1m, "DEP-MULTI-1", "Cash", []));
+        Assert.False(duplicateReference.Succeeded);
+    }
+
+    [Fact]
+    public async Task VendorPayment_AppliesMultipleBills_PreservesAdvance_AndVoidsAuditably()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var initial = await workspaceService.GetWorkspaceAsync();
+        var vendor = initial.Payables.Vendors.First();
+        var bank = initial.Treasury.BankAccounts.First();
+        var first = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(vendor.Id, "B-PAY-MULTI-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 40m, "5100", "First payment bill"));
+        var second = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(vendor.Id, "B-PAY-MULTI-2", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 60m, "5100", "Second payment bill"));
+        Assert.True(first.Succeeded, first.ErrorMessage);
+        Assert.True(second.Succeeded, second.ErrorMessage);
+        var beforePayment = await workspaceService.GetWorkspaceAsync();
+
+        var result = await transactions.RecordVendorPaymentAsync(new RecordVendorPaymentRequest(
+            vendor.Id, bank.Id, new DateOnly(2026, 5, 2), 120m, "CHK-MULTI-1", "Check",
+            [new PaymentDocumentApplicationRequest(first.Id!.Value, 40m), new PaymentDocumentApplicationRequest(second.Id!.Value, 60m)]));
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await dbContextFactory.CreateDbContextAsync())
+        {
+            var payment = await db.SubledgerPayments.SingleAsync(item => item.Id == result.Id);
+            Assert.Equal(100m, payment.AppliedAmount);
+            Assert.Equal(20m, payment.UnappliedAmount);
+            var postings = await (from line in db.JournalEntryLines join account in db.Accounts on line.AccountId equals account.Id where line.JournalEntryId == payment.JournalEntryId select new { account.Number, line.Debit, line.Credit }).ToListAsync();
+            Assert.Contains(postings, line => line.Number == "2000" && line.Debit == 100m);
+            Assert.Contains(postings, line => line.Number == "1300" && line.Debit == 20m);
+            Assert.Contains(postings, line => line.Number == bank.LedgerAccountNumber && line.Credit == 120m);
+            Assert.Equal(postings.Sum(line => line.Debit), postings.Sum(line => line.Credit));
+        }
+        var afterPayment = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(beforePayment.Payables.OpenBalance - 100m, afterPayment.Payables.OpenBalance);
+        Assert.Equal(beforePayment.Treasury.CashOnHand - 120m, afterPayment.Treasury.CashOnHand);
+
+        var voided = await transactions.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(result.Id!.Value, new DateOnly(2026, 5, 3), "Check spoiled", "Voided"));
+        Assert.True(voided.Succeeded, voided.ErrorMessage);
+        var afterVoid = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(beforePayment.Payables.OpenBalance, afterVoid.Payables.OpenBalance);
+        Assert.Equal(beforePayment.Treasury.CashOnHand, afterVoid.Treasury.CashOnHand);
+        Assert.Contains(afterVoid.Payables.Payments ?? [], payment => payment.Id == result.Id && payment.Status == "Voided");
+    }
+
+    [Fact]
+    public async Task PaymentService_RejectsCrossCounterpartyApplicationsAndOverapplicationWithoutPosting()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var customer = workspace.Receivables.Customers.First();
+        var otherInvoice = workspace.Receivables.Invoices.First(invoice => invoice.CustomerId != customer.Id);
+        var bank = workspace.Treasury.BankAccounts.First();
+
+        var wrongCustomer = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customer.Id, bank.Id, new DateOnly(2026, 5, 2), 10m, "BAD-PAY-1", "ACH", [new PaymentDocumentApplicationRequest(otherInvoice.Id, 10m)]));
+        var overapplied = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customer.Id, bank.Id, new DateOnly(2026, 5, 2), 10m, "BAD-PAY-2", "ACH", [new PaymentDocumentApplicationRequest(workspace.Receivables.Invoices.First(invoice => invoice.CustomerId == customer.Id).Id, 11m)]));
+
+        Assert.False(wrongCustomer.Succeeded);
+        Assert.False(overapplied.Succeeded);
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        Assert.False(await db.SubledgerPayments.AnyAsync(payment => payment.Reference.StartsWith("BAD-PAY")));
+        Assert.False(await db.JournalEntries.AnyAsync(entry => entry.Reference.StartsWith("BAD-PAY")));
+    }
+
+    [Fact]
+    public async Task PaymentLifecycle_EnforcesRecordingAndReversalPermissionsSeparately()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        var companyId = await db.Companies.Select(company => company.Id).FirstAsync();
+        var customerId = await db.Customers.Where(customer => customer.CompanyId == companyId).Select(customer => customer.Id).FirstAsync();
+        var vendorId = await db.Vendors.Where(vendor => vendor.CompanyId == companyId).Select(vendor => vendor.Id).FirstAsync();
+        var bankId = await db.BankAccounts.Where(bank => bank.CompanyId == companyId).Select(bank => bank.Id).FirstAsync();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+
+        void ActAs(params string[] permissions)
+        {
+            var claims = new List<System.Security.Claims.Claim>
+            {
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString())
+            };
+            claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test"))
+            };
+        }
+
+        ActAs(BrassLedgerPermissions.ReceivablesManage);
+        var invoice = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customerId, "INV-PAY-SOD-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 25m, 0m, "4000", "Payment authority test"));
+        Assert.True(invoice.Succeeded, invoice.ErrorMessage);
+        var receipt = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customerId, bankId, new DateOnly(2026, 5, 2), 25m, "DEP-PAY-SOD-1", "ACH", [new PaymentDocumentApplicationRequest(invoice.Id!.Value, 25m)]));
+        Assert.True(receipt.Succeeded, receipt.ErrorMessage);
+        Assert.False((await transactions.RecordVendorPaymentAsync(new RecordVendorPaymentRequest(vendorId, bankId, new DateOnly(2026, 5, 2), 1m, "CHK-PAY-SOD-1", "Check", []))).Succeeded);
+        Assert.False((await transactions.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(receipt.Id!.Value, new DateOnly(2026, 5, 3), "Unauthorized return", "Returned"))).Succeeded);
+
+        ActAs(BrassLedgerPermissions.PaymentReverse);
+        var returned = await transactions.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(receipt.Id.Value, new DateOnly(2026, 5, 3), "Authorized return", "Returned"));
+        Assert.True(returned.Succeeded, returned.ErrorMessage);
+    }
+
+    [Fact]
     public async Task TransactionService_PostsInvoiceTaxToSalesTaxPayable_NotRevenue()
     {
         using var services = CreateServiceProvider();
@@ -941,7 +1115,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var reconciliation = await db.BankReconciliations.SingleAsync(item => item.BankAccountId == reconcileBank.Id);
         Assert.Equal(reconcileBank.CurrentBalance, reconciliation.StatementClosingBalance);
         Assert.NotEmpty(await db.BankReconciliationItems.Where(item => item.BankReconciliationId == reconciliation.Id).ToListAsync());
-        Assert.Equal(2, await db.JournalEntries.CountAsync(entry => entry.SourceDocumentType == "VendorBill" && entry.SourceDocumentId == billResult.Id));
+        Assert.Equal(1, await db.JournalEntries.CountAsync(entry => entry.SourceDocumentType == "VendorBill" && entry.SourceDocumentId == billResult.Id));
+        var durablePayment = await db.SubledgerPayments.SingleAsync(payment => payment.Id == paymentResult.Id);
+        Assert.Equal("SubledgerPayment", await db.JournalEntries.Where(entry => entry.Id == durablePayment.JournalEntryId).Select(entry => entry.SourceDocumentType).SingleAsync());
+        Assert.True(await db.SubledgerPaymentApplications.AnyAsync(application => application.SubledgerPaymentId == durablePayment.Id && application.DocumentId == billResult.Id));
     }
 
     [Fact]

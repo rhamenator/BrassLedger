@@ -10,6 +10,7 @@ public static class BrassLedgerPermissions
     public const string JournalReverse = "ledger.journal.reverse";
     public const string ReceivablesManage = "receivables.manage";
     public const string PayablesManage = "payables.manage";
+    public const string PaymentReverse = "payments.reverse";
     public const string RequisitionManage = "operations.requisition.manage";
     public const string PurchasingManage = "operations.purchasing.manage";
     public const string CheckDisbursementManage = "treasury.check-disbursement.manage";
@@ -31,6 +32,7 @@ public static class BrassLedgerPermissions
         new(JournalReverse, "Journal reversal", "Create auditable reversals of posted general journals."),
         new(ReceivablesManage, "Receivables", "Work customer balances, invoices, and cash application."),
         new(PayablesManage, "Payables", "Review vendor balances and payable obligations."),
+        new(PaymentReverse, "Payment reversals", "Return, void, or reverse posted customer and vendor payments."),
         new(RequisitionManage, "Requisitioning", "Create and route purchase requisitions."),
         new(PurchasingManage, "Purchasing", "Approve and issue purchase orders."),
         new(CheckDisbursementManage, "Check disbursement", "Prepare payments, checks, and cash disbursements."),

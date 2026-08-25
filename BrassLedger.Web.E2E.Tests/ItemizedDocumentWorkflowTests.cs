@@ -22,11 +22,15 @@ public sealed class ItemizedDocumentWorkflowTests
         var payables = new PayablesPage(session);
 
         await receivables.OpenAsync();
-        await receivables.CreateItemizedInvoiceAsync($"INV-E2E-{browserKind}");
+        var invoiceNumber = $"INV-E2E-{browserKind}";
+        await receivables.CreateItemizedInvoiceAsync(invoiceNumber);
+        await receivables.RecordAndReturnCustomerPaymentAsync(invoiceNumber, $"DEP-E2E-{browserKind}");
         await session.AssertNoUiFailuresAsync("itemized invoice workflow");
 
         await payables.OpenAsync();
-        await payables.CreateItemizedBillAsync($"B-E2E-{browserKind}");
+        var billNumber = $"B-E2E-{browserKind}";
+        await payables.CreateItemizedBillAsync(billNumber);
+        await payables.RecordAndVoidVendorPaymentAsync(billNumber, $"CHK-E2E-{browserKind}");
         await session.AssertNoUiFailuresAsync("itemized bill workflow");
     }
 }

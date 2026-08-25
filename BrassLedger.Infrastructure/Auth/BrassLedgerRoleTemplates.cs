@@ -16,6 +16,7 @@ public static class BrassLedgerRoleTemplates
             BrassLedgerPermissions.JournalReverse,
             BrassLedgerPermissions.ReceivablesManage,
             BrassLedgerPermissions.PayablesManage,
+            BrassLedgerPermissions.PaymentReverse,
             BrassLedgerPermissions.ReportingManage,
             BrassLedgerPermissions.TaxManage,
             BrassLedgerPermissions.PublishManage,

@@ -39,6 +39,8 @@ public sealed class BrassLedgerDbContext(
     public DbSet<ReportCatalogItem> ReportCatalogItems => Set<ReportCatalogItem>();
     public DbSet<SalesInvoice> SalesInvoices => Set<SalesInvoice>();
     public DbSet<SalesInvoiceLine> SalesInvoiceLines => Set<SalesInvoiceLine>();
+    public DbSet<SubledgerPayment> SubledgerPayments => Set<SubledgerPayment>();
+    public DbSet<SubledgerPaymentApplication> SubledgerPaymentApplications => Set<SubledgerPaymentApplication>();
     public DbSet<VendorBillLine> VendorBillLines => Set<VendorBillLine>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<TaxProfile> TaxProfiles => Set<TaxProfile>();
@@ -76,6 +78,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<JournalEntryLine>().HasKey(x => x.Id);
         modelBuilder.Entity<SalesInvoiceLine>().HasKey(x => x.Id);
         modelBuilder.Entity<VendorBillLine>().HasKey(x => x.Id);
+        modelBuilder.Entity<SubledgerPayment>().HasKey(x => x.Id);
+        modelBuilder.Entity<SubledgerPaymentApplication>().HasKey(x => x.Id);
         modelBuilder.Entity<Customer>().HasKey(x => x.Id);
         modelBuilder.Entity<SalesInvoice>().HasKey(x => x.Id);
         modelBuilder.Entity<Vendor>().HasKey(x => x.Id);
@@ -107,6 +111,10 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SalesInvoiceLine>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(line => line.RevenueAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<VendorBillLine>().HasOne<VendorBill>().WithMany().HasForeignKey(line => line.VendorBillId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<VendorBillLine>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(line => line.ExpenseAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SubledgerPayment>().HasOne<BankAccount>().WithMany().HasForeignKey(payment => payment.BankAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SubledgerPayment>().HasOne<JournalEntry>().WithMany().HasForeignKey(payment => payment.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SubledgerPayment>().HasOne<JournalEntry>().WithMany().HasForeignKey(payment => payment.ReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SubledgerPaymentApplication>().HasOne<SubledgerPayment>().WithMany().HasForeignKey(application => application.SubledgerPaymentId).OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<GeneralLedgerAccount>()
             .Property(x => x.Type)
@@ -151,6 +159,10 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<VendorBillLine>().Property(x => x.DiscountAmount));
         ConfigureMoney(modelBuilder.Entity<VendorBillLine>().Property(x => x.TaxAmount));
         ConfigureMoney(modelBuilder.Entity<VendorBillLine>().Property(x => x.LineTotal));
+        ConfigureMoney(modelBuilder.Entity<SubledgerPayment>().Property(x => x.Amount));
+        ConfigureMoney(modelBuilder.Entity<SubledgerPayment>().Property(x => x.AppliedAmount));
+        ConfigureMoney(modelBuilder.Entity<SubledgerPayment>().Property(x => x.UnappliedAmount));
+        ConfigureMoney(modelBuilder.Entity<SubledgerPaymentApplication>().Property(x => x.Amount));
         ConfigureMoney(modelBuilder.Entity<InventoryItem>().Property(x => x.UnitPrice));
         ConfigureMoney(modelBuilder.Entity<InventoryTransaction>().Property(x => x.QuantityChange));
         ConfigureMoney(modelBuilder.Entity<InventoryTransaction>().Property(x => x.UnitCost));
@@ -165,6 +177,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<VendorBill>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<BankAccount>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<JournalEntry>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<SubledgerPayment>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         ConfigureMoney(modelBuilder.Entity<BankAccount>().Property(x => x.LastReconciledBalance));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.MonthlyBasePay));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.AdditionalWithholding));
@@ -214,6 +227,9 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SalesInvoiceLine>().HasIndex(x => new { x.SalesInvoiceId, x.Sequence }).IsUnique();
         modelBuilder.Entity<VendorBill>().HasIndex(x => new { x.CompanyId, x.BillNumber }).IsUnique();
         modelBuilder.Entity<VendorBillLine>().HasIndex(x => new { x.VendorBillId, x.Sequence }).IsUnique();
+        modelBuilder.Entity<SubledgerPayment>().HasIndex(x => new { x.CompanyId, x.Direction, x.Reference }).IsUnique();
+        modelBuilder.Entity<SubledgerPayment>().HasIndex(x => new { x.CompanyId, x.CounterpartyId, x.PaymentDate });
+        modelBuilder.Entity<SubledgerPaymentApplication>().HasIndex(x => new { x.SubledgerPaymentId, x.DocumentId }).IsUnique();
         modelBuilder.Entity<SalesOrder>().HasIndex(x => new { x.CompanyId, x.OrderNumber }).IsUnique();
         modelBuilder.Entity<PurchaseOrder>().HasIndex(x => new { x.CompanyId, x.OrderNumber }).IsUnique();
         modelBuilder.Entity<Employee>().HasIndex(x => new { x.CompanyId, x.EmployeeNumber }).IsUnique();

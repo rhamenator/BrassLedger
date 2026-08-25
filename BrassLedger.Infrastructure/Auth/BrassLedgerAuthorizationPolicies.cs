@@ -12,6 +12,7 @@ public static class BrassLedgerAuthorizationPolicies
     public const string ReverseJournals = "ReverseJournals";
     public const string ManageReceivables = "ManageReceivables";
     public const string ManagePayables = "ManagePayables";
+    public const string ReversePayments = "ReversePayments";
     public const string ManageOperations = "ManageOperations";
     public const string ManagePayroll = "ManagePayroll";
     public const string ManageProjects = "ManageProjects";

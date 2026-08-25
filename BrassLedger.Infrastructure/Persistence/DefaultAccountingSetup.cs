@@ -11,8 +11,10 @@ internal static class DefaultAccountingSetup
         Account(companyId, "1010", "Payroll Clearing", AccountType.Asset),
         Account(companyId, "1100", "Accounts Receivable", AccountType.Asset, true),
         Account(companyId, "1200", "Inventory Asset", AccountType.Asset, true),
+        Account(companyId, "1300", "Vendor Advances", AccountType.Asset, true),
         Account(companyId, "2000", "Accounts Payable", AccountType.Liability, true),
         Account(companyId, "2100", "Sales Tax Payable", AccountType.Liability, true),
+        Account(companyId, "2150", "Customer Deposits", AccountType.Liability, true),
         Account(companyId, "2200", "Payroll Liabilities", AccountType.Liability, true),
         Account(companyId, "3000", "Owner Equity", AccountType.Equity),
         Account(companyId, "4000", "Product Revenue", AccountType.Revenue),
@@ -45,6 +47,10 @@ internal static class DefaultAccountingSetup
                     await dbContext.Accounts.AddAsync(Account(companyId, "2100", "Sales Tax Payable", AccountType.Liability, true), cancellationToken);
                 if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "2200", cancellationToken))
                     await dbContext.Accounts.AddAsync(Account(companyId, "2200", "Payroll Liabilities", AccountType.Liability, true), cancellationToken);
+                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "1300", cancellationToken))
+                    await dbContext.Accounts.AddAsync(Account(companyId, "1300", "Vendor Advances", AccountType.Asset, true), cancellationToken);
+                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "2150", cancellationToken))
+                    await dbContext.Accounts.AddAsync(Account(companyId, "2150", "Customer Deposits", AccountType.Liability, true), cancellationToken);
                 if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "4300", cancellationToken))
                     await dbContext.Accounts.AddAsync(Account(companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue), cancellationToken);
                 if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "6300", cancellationToken))

@@ -301,6 +301,38 @@ public sealed class VendorBillLine
     public decimal LineTotal { get; set; }
 }
 
+public sealed class SubledgerPayment
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string Direction { get; set; } = string.Empty;
+    public Guid CounterpartyId { get; set; }
+    public Guid BankAccountId { get; set; }
+    public DateOnly PaymentDate { get; set; }
+    public decimal Amount { get; set; }
+    public decimal AppliedAmount { get; set; }
+    public decimal UnappliedAmount { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Method { get; set; } = string.Empty;
+    public string Status { get; set; } = "Posted";
+    public Guid JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class SubledgerPaymentApplication
+{
+    public Guid Id { get; set; }
+    public Guid SubledgerPaymentId { get; set; }
+    public Guid DocumentId { get; set; }
+    public decimal Amount { get; set; }
+}
+
 public sealed class InventoryItem
 {
     public Guid Id { get; set; }

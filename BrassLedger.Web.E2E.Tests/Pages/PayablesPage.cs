@@ -47,4 +47,27 @@ public sealed class PayablesPage
         await Assertions.Expect(row).ToContainTextAsync("$90.00");
         await Assertions.Expect(row).ToContainTextAsync("2");
     }
+
+    public async Task RecordAndVoidVendorPaymentAsync(string billNumber, string paymentReference)
+    {
+        await _session.Page.GetByLabel("Payment vendor").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Payment account").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Vendor payment total").FillAsync("100");
+        await _session.Page.GetByLabel("Vendor payment method").SelectOptionAsync("Check");
+        await _session.Page.GetByLabel("Payment reference").FillAsync(paymentReference);
+        await _session.Page.GetByLabel($"Apply to {billNumber}").CheckAsync();
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Record vendor payment" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor payment recorded.");
+
+        var historyRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference });
+        await Assertions.Expect(historyRow).ToContainTextAsync("$100.00");
+        await Assertions.Expect(historyRow).ToContainTextAsync("$90.00");
+        await Assertions.Expect(historyRow).ToContainTextAsync("$10.00");
+        await Assertions.Expect(historyRow).ToContainTextAsync("Posted");
+
+        await _session.Page.GetByLabel("Vendor payment reversal reason").FillAsync("E2E voided check");
+        await historyRow.GetByRole(AriaRole.Button, new() { Name = "Record voided" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor payment marked voided.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference })).ToContainTextAsync("Voided");
+    }
 }
