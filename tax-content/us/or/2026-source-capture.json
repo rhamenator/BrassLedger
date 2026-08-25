@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-or",
+  "capturedAtUtc": "2026-08-25T05:00:46Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.oregon.gov/dor/forms/FormsPubs/withholding-tax-formulas_206-436_2026.pdf", "title": "Oregon Withholding Tax Formulas, 150-206-436", "revision": "12-31-25", "mediaType": "application/pdf", "sha256": "5beea1190b4072da8fb027d211665a4899ffd43d4488ab9e910bde57261ed37d", "bytes": 261358 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "OR-W-4", "dataType": "enum", "values": ["Single", "HeadOfHousehold", "Married", "MarriedWithholdAtHigherSingleRate"] },
+    { "code": "allowances", "source": "OR-W-4", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "OR-W-4", "dataType": "money", "minimum": 0 },
+    { "code": "exempt", "source": "OR-W-4", "dataType": "boolean" },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" }
+  ],
+  "calculation": {
+    "method": "AnnualizedBaseWageFormula",
+    "baseFormula": "annualWages - min(annualFederalIncomeTaxWithheld, applicableFederalSubtractionCap) - applicableStandardDeduction",
+    "standardDeductions": { "SingleOrHeadOfHouseholdWithFewerThanThreeAllowances": 2910, "SingleWithAtLeastThreeAllowancesOrMarried": 5820 },
+    "annualPersonalExemptionCreditPerAllowance": 263,
+    "annualWagesUpTo50000Schedules": {
+      "SingleWithFewerThanThreeAllowances": [
+        { "baseAtLeast": 0, "baseUnder": 4550, "baseTax": 263, "bracketFloor": 0, "rate": 0.0475 },
+        { "baseAtLeast": 4550, "baseUnder": 11400, "baseTax": 479, "bracketFloor": 4550, "rate": 0.0675 },
+        { "baseAtLeast": 11400, "baseUnder": 50000, "baseTax": 941, "bracketFloor": 11400, "rate": 0.0875 }
+      ],
+      "SingleWithAtLeastThreeAllowancesOrMarried": [
+        { "baseAtLeast": 0, "baseUnder": 9100, "baseTax": 263, "bracketFloor": 0, "rate": 0.0475 },
+        { "baseAtLeast": 9100, "baseUnder": 22800, "baseTax": 695, "bracketFloor": 9100, "rate": 0.0675 },
+        { "baseAtLeast": 22800, "baseUnder": 50000, "baseTax": 1620, "bracketFloor": 22800, "rate": 0.0875 }
+      ]
+    },
+    "annualWagesAtLeast50000Schedules": {
+      "SingleWithFewerThanThreeAllowances": [
+        { "baseAtLeast": 38340, "baseUnder": 125000, "baseTax": 678, "bracketFloor": 11400, "rate": 0.0875 },
+        { "baseAtLeast": 125000, "baseTax": 10618, "bracketFloor": 125000, "rate": 0.099 }
+      ],
+      "SingleWithAtLeastThreeAllowancesOrMarried": [
+        { "baseAtLeast": 35430, "baseUnder": 250000, "baseTax": 1357, "bracketFloor": 22800, "rate": 0.0875 },
+        { "baseAtLeast": 250000, "baseTax": 21237, "bracketFloor": 250000, "rate": 0.099 }
+      ]
+    },
+    "federalSubtractionCaps": {
+      "ordinaryAnnualMaximum": 8750,
+      "Single": [{ "wagesAtLeast": 50000, "wagesUnder": 125000, "cap": 8750 }, { "wagesAtLeast": 125000, "wagesUnder": 130000, "cap": 7000 }, { "wagesAtLeast": 130000, "wagesUnder": 135000, "cap": 5250 }, { "wagesAtLeast": 135000, "wagesUnder": 140000, "cap": 3500 }, { "wagesAtLeast": 140000, "wagesUnder": 145000, "cap": 1750 }, { "wagesAtLeast": 145000, "cap": 0 }],
+      "Married": [{ "wagesAtLeast": 50000, "wagesUnder": 250000, "cap": 8750 }, { "wagesAtLeast": 250000, "wagesUnder": 260000, "cap": 7000 }, { "wagesAtLeast": 260000, "wagesUnder": 270000, "cap": 5250 }, { "wagesAtLeast": 270000, "wagesUnder": 280000, "cap": 3500 }, { "wagesAtLeast": 280000, "wagesUnder": 290000, "cap": 1750 }, { "wagesAtLeast": 290000, "cap": 0 }]
+    },
+    "allowancePhaseOut": [{ "status": "Single", "wagesOver": 100000, "allowances": 0 }, { "status": "Married", "wagesOver": 200000, "allowances": 0 }],
+    "periodDivisors": { "Monthly": 12, "Semimonthly": 24, "Biweekly": 26, "Weekly": 52, "Daily": 260 },
+    "floor": 0,
+    "rounding": { "percentageMethod": "MayRoundToNearestDollar", "required": false },
+    "supplementalWages": { "separatelyPaidAtDifferentTimeOptionalFlatRate": 0.08, "items": ["Bonuses", "Overtime", "Commissions", "Other payment in addition to regular pay"] },
+    "missingCertificate": { "flatRate": 0.08, "condition": "No withholding statement or exemption certificate" },
+    "exemptionCertificate": { "expires": "February 15 of following calendar year", "renewalRequired": true, "lateRenewalAppliesProspectivelyOnly": true },
+    "officialExamples": [{ "status": "Single", "annualWages": 25000, "allowances": 0, "federalWithholding": 1000, "standardDeduction": 2910, "base": 21090, "annualWithholding": 1789 }, { "status": "Single", "annualWages": 132000, "federalWithholding": 21098, "federalSubtractionCap": 5250 }]
+  },
+  "residencyAndWorkRules": {
+    "nonresidentRule": "Wages for work performed in Oregon are subject to withholding unless expected annual Oregon wages are below the nonresident's standard deduction for filing status.",
+    "residentOutsideOregonRuleLocated": false,
+    "reciprocalStates": [],
+    "multiStateWorkLocationRequired": true,
+    "interstateCommerceExceptionsRequireSeparateClassification": true
+  },
+  "filing": {
+    "depositScheduleFollowsFederalLiabilitySchedule": true,
+    "depositSchedules": [
+      { "federalQuarterlyLiability": "Less than $2,500", "frequency": "Quarterly", "due": "Quarterly report due date" },
+      { "federalLookbackLiability": "$50,000 or less", "frequency": "Monthly", "due": "15th of month following payroll" },
+      { "federalLookbackLiability": "More than $50,000", "frequency": "Semiweekly", "due": "Wednesday for Wed-Fri payroll; Friday for Sat-Tue payroll" },
+      { "singlePayPeriodLiability": "$100,000", "frequency": "NextBankingDay", "due": "Within one banking day" }
+    ],
+    "generalReturn": { "form": "OQ", "frequency": "Quarterly", "zeroReturnsRequiredWhileRegistered": true },
+    "annualExceptions": ["Form WA for qualifying agricultural employers", "Form OA for household employers"],
+    "electronicFundsTransferRequiredWhenFederalEFTPSRequired": true
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false, "separatePayrollTaxes": ["Statewide Transit Tax", "TriMet Transit District tax", "Lane Transit District tax", "Paid Leave Oregon", "Workers Benefit Fund"] },
+  "captureWarnings": [
+    "The 2026 formula tables and examples use an $8,750 federal subtraction maximum, but FAQ items 3 and 11 still say $8,500; $8,750 is captured for calculation and the official internal conflict blocks activation.",
+    "Example 1's introductory sentence says BASE $21,165 and annual withholding $1,798, while its detailed arithmetic correctly uses BASE $21,090 and $1,789; the detailed values are captured.",
+    "The unusual high-wage table base floors and base-tax constants are transcribed exactly and require independent boundary verification.",
+    "Resident work outside Oregon and interstate-commerce exceptions need controlling-source completion."
+  ],
+  "review": { "exact2026PublicationCaptured": true, "formulaTranscribed": true, "phaseOutsTranscribed": true, "supplementalMethodTranscribed": true, "roundingTranscribed": true, "officialExamplesTranscribed": true, "rawSourcesChecksummed": true, "publicationConflictsResolved": false, "residencyAndWorkRulesComplete": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Obtain agency confirmation for the $8,750/$8,500 and example conflicts, verify high-wage boundaries and out-of-state resident rules, and add executable formula, exemption-expiry, and deposit-frequency tests." }
+}

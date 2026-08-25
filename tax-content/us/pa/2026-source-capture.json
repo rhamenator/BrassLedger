@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-pa",
+  "capturedAtUtc": "2026-08-25T05:00:46Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.pa.gov/agencies/revenue/resources/tax-types-and-information/employer-withholding", "title": "Pennsylvania Department of Revenue — Employer Withholding", "retrievedAtUtc": "2026-08-25T05:00:46Z", "mediaType": "text/html", "sha256": "7bd99d266bf9acc6cea7cf307cec3576e476bf3f1af5f5b0c698139b608efb2f", "bytes": 397792 },
+    { "url": "https://www.pa.gov/agencies/revenue/forms-and-publications/pa-personal-income-tax-guide/income-subject-withholding-estimated-payments-penalties-interest-other-additions", "title": "Pennsylvania Personal Income Tax Guide — Income Subject to Withholding", "retrievedAtUtc": "2026-08-25T05:00:46Z", "mediaType": "text/html", "sha256": "15a1b058c69f8c4dbe6a3fa60af2cee4f3196bafdec3528dbd91193f60051b07", "bytes": 648101 },
+    { "url": "https://dced.pa.gov/local-government/local-income-tax-information/act32-faq/", "title": "Pennsylvania DCED — Act 32 Earned Income Tax FAQ", "retrievedAtUtc": "2026-08-25T05:00:46Z", "mediaType": "text/html", "sha256": "83ced8a46103fb832951886f26be3643effb8239dffcf94cd3a79cdff9cb42bd", "bytes": 165353 },
+    { "url": "https://dced.pa.gov/local-government/local-income-tax-information/local-services-tax/", "title": "Pennsylvania DCED — Local Services Tax", "retrievedAtUtc": "2026-08-25T05:00:46Z", "mediaType": "text/html", "sha256": "d3225a81f52b7f7142c24b06f11eef3842a233220787c8affe2b5f2fda0db2d3", "bytes": 170187 }
+  ],
+  "employeeInputs": [
+    { "code": "residenceJurisdictionId", "source": "Residency Certification Form", "dataType": "jurisdiction-reference" },
+    { "code": "residencePsdCode", "source": "Residency Certification Form", "dataType": "string", "pattern": "^[0-9]{6}$" },
+    { "code": "workJurisdictionId", "source": "Worksite and Official Tax Register", "dataType": "jurisdiction-reference" },
+    { "code": "workPsdCode", "source": "Worksite and Official Tax Register", "dataType": "string", "pattern": "^[0-9]{6}$" },
+    { "code": "reciprocityCertificate", "source": "REV-419", "dataType": "boolean" },
+    { "code": "principalEmployerExemption", "source": "LST Exemption Certificate and pay stub", "dataType": "boolean" },
+    { "code": "lstLowIncomeExemption", "source": "Annual LST Exemption Certificate", "dataType": "boolean" }
+  ],
+  "calculation": {
+    "method": "FlatRateOnPennsylvaniaTaxableCompensation",
+    "rate": 0.0307,
+    "formula": "pennsylvaniaTaxableCompensation * 0.0307",
+    "allowances": false,
+    "payrollPeriods": ["Daily", "Weekly", "Biweekly", "Semimonthly", "Monthly", "Quarterly", "Semiannual", "Annual"],
+    "supplementalWages": { "method": "AggregateWithCurrentPayrollPeriod", "formula": "(regularCompensation + supplementalCompensation) * 0.0307", "separateFlatRate": false },
+    "taxableCompensationWarning": "Pennsylvania taxable compensation is not always federal W-2 Box 1; apply the official additions and subtractions before multiplying by the rate.",
+    "rounding": { "specialRuleLocated": false, "preserveCurrencyCents": true }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Withhold from resident compensation for services within or outside Pennsylvania when the employer is subject to Pennsylvania withholding requirements.",
+    "residentOutsideStateAdjustment": "If the resident works wholly in another income-tax state and the employer withholds that state's tax, Pennsylvania withholding is not required on that wholly out-of-state compensation; mixed-location compensation retains Pennsylvania withholding on Pennsylvania services.",
+    "nonresidentRule": "Withhold from Pennsylvania-source services unless the employee qualifies under a reciprocal agreement or another controlling exemption.",
+    "mixedNonresidentAllocation": "Only compensation for services within Pennsylvania is subject to Pennsylvania withholding.",
+    "reciprocalStates": ["IN", "MD", "NJ", "OH", "VA", "WV"],
+    "reciprocityRequirements": ["Employee files REV-419", "Employer withholds and remits the reciprocal resident state's income tax"],
+    "reciprocityOhioException": "A Pennsylvania-resident 20-percent shareholder-employee of an Ohio S corporation is outside the Ohio agreement for remuneration for Ohio services.",
+    "multiStateWorkLocationRequired": true,
+    "specialExclusions": ["Qualifying agricultural and H-2A remuneration", "Qualifying clergy", "Domestic servants outside federal employee treatment", "Qualifying casual employees", "Foreign government and international-organization employees", "Specified nonresident aliens", "Newspaper carriers and vendors under 18 and federal statutory employees", "Federally protected interstate transportation workers and seamen"]
+  },
+  "filing": {
+    "paymentSchedules": [
+      { "quarterlyWithholding": "Under $300", "frequency": "Quarterly", "due": "Last day of April, July, October, and January" },
+      { "quarterlyWithholding": "$300 through $999.99", "frequency": "Monthly", "due": "15th day of following month" },
+      { "quarterlyWithholding": "$1,000 through $4,999.99", "frequency": "Semimonthly", "due": "Within three banking days after semimonthly period closes" },
+      { "quarterlyWithholding": "$5,000 or more", "frequency": "Semiweekly", "due": "Wednesday after Wed-Fri pay dates; Friday after Sat-Tue pay dates" }
+    ],
+    "quarterlyReturn": { "form": "W-3", "due": "Last day of April, July, October, and January", "electronicOnly": true },
+    "annualReconciliation": { "form": "REV-1667R", "due": "Last day of January" },
+    "employeeStatements": { "form": "W-2", "due": "Last day of January" }
+  },
+  "localWithholding": {
+    "stateFormulaDependsOnLocalJurisdiction": false,
+    "localIncomeTaxCaptureRequiredForBusinessPayroll": true,
+    "officialRateRegisterRequired": true,
+    "rateDataNotEmbedded": true,
+    "earnedIncomeTax": {
+      "applicability": "Employers with Pennsylvania worksites, including homes of home-based employees, must withhold local EIT.",
+      "formula": "localTaxableEarnedIncome * max(totalResidentEitRate, municipalNonresidentEitRateAtWorksite)",
+      "jurisdictionInputs": ["Six-digit residence PSD code", "Six-digit work PSD code", "Resident EIT rate", "Worksite nonresident EIT rate"],
+      "temporaryAssignment": { "under90ConsecutiveDays": "Use permanent home-office work location", "atLeast90ConsecutiveDays": "Use temporary job location" },
+      "philadelphiaException": "Employees subject to the Sterling Act wage tax are outside the ordinary Act 32 branch to that extent.",
+      "remittance": "Workplace tax collector within 30 days after quarter unless an approved multi-location monthly electronic consolidation applies.",
+      "officialExamples": [{ "residentRate": 0.005, "workNonresidentRate": 0.01, "withholdingRate": 0.01 }, { "residentRate": 0.016, "workNonresidentRate": 0.013, "withholdingRate": 0.016 }]
+    },
+    "localServicesTax": {
+      "worksiteSelected": true,
+      "annualCombinedCap": 52,
+      "rateSource": "Official Tax Register",
+      "rateOver10": "Prorate across employer payroll periods and round each share down to cents.",
+      "rateAtMost10": "May collect as a lump sum.",
+      "mandatoryLowIncomeExemptionWhenRateOver10": 12000,
+      "upfrontAnnualExemptionCertificate": true,
+      "restartAtEmployerPaidWagesOver": 12000,
+      "restartIncludesCatchUp": true,
+      "concurrentEmploymentPriority": ["Principal office or principal employment", "Place employee resides and works", "Employment nearest in miles to home"],
+      "oneWorkplacePerPayrollPeriod": true,
+      "examples": [{ "annualRate": 52, "frequency": "Weekly", "periodicWithholding": 1.00 }, { "annualRate": 52, "frequency": "Monthly", "periodicWithholding": 4.33 }, { "annualRate": 36, "frequency": "Weekly", "periodicWithholding": 0.69 }]
+    }
+  },
+  "captureWarnings": [
+    "Current EIT, LST, municipality, school-district, PSD-code, collector, Philadelphia, and Pittsburgh rate/boundary data are not embedded; production payroll must import and effective-date the Official Tax Register.",
+    "Pennsylvania taxable compensation differs from federal taxable wages and requires item-level classification.",
+    "No special state rounding instruction was located."
+  ],
+  "review": { "currentOfficialRuleCaptured": true, "stateFormulaTranscribed": true, "supplementalMethodTranscribed": true, "residencyAndWorkRulesTranscribed": true, "filingSchedulesTranscribed": true, "act32SelectionRuleTranscribed": true, "localServicesTaxStructureTranscribed": true, "rawSourcesChecksummed": true, "completeOfficialLocalRateRegisterImported": false, "philadelphiaAndPittsburghRulesTranscribed": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import and effective-date DCED's official PSD/EIT/LST register, capture Philadelphia and Pittsburgh exceptions, implement Pennsylvania-compensation classification and stateful local selection, and add boundary and filing regressions." }
+}
