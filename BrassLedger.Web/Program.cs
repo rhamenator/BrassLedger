@@ -104,7 +104,14 @@ app.MapGet("/payroll/filings/{filingId:guid}/data.json", async (Guid filingId, B
 app.MapGet("/payroll/filing-corrections/{correctionId:guid}/data.json", async (Guid correctionId, BrassLedger.Application.Accounting.IPayrollFilingService service, CancellationToken cancellationToken) =>
 {
     var correction = await service.GetCorrectionAsync(correctionId, cancellationToken);
-    return correction is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(correction.Data.GetRawText()), "application/json", $"payroll-941x-{correction.TaxYear}-q{correction.Quarter}-correction-{correction.Sequence}.json");
+    var fileName = correction?.FormCode == "W-2c/W-3c" ? $"payroll-w2c-w3c-{correction.TaxYear}-correction-{correction.Sequence}.json" : $"payroll-941x-{correction?.TaxYear}-q{correction?.Quarter}-correction-{correction?.Sequence}.json";
+    return correction is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(correction.Data.GetRawText()), "application/json", fileName);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+
+app.MapGet("/payroll/ssa-wage-files/{fileId:guid}/download", async (Guid fileId, BrassLedger.Application.Accounting.ISsaWageFileService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.DownloadAsync(fileId, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file.Content, "text/plain; charset=us-ascii", file.FileName);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 
 app.MapGet("/payroll/payment-files/{paymentFileId:guid}/download", async (Guid paymentFileId, BrassLedger.Application.Accounting.IPayrollPaymentFileService service, CancellationToken cancellationToken) =>

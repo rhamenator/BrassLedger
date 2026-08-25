@@ -21,6 +21,14 @@ public sealed class PayrollWorkflowTests
         await session.GotoAsync("/payroll");
         await session.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
 
+        var ssaWorkflow = session.Page.GetByText("SSA EFW2C specification and AccuWage workflow", new() { Exact = true });
+        await ssaWorkflow.ClickAsync();
+        await session.Page.GetByText("Tax year 2026 remains blocked until SSA publishes its 2026 EFW2C specification and BrassLedger verifies that layout.", new() { Exact = false }).WaitForAsync();
+        await Assertions.Expect(session.Page.GetByLabel("SSA specification tax year")).ToHaveValueAsync("2026");
+        await Assertions.Expect(session.Page.GetByLabel("SSA layout compatibility code")).ToHaveValueAsync("EFW2C-1024-RCA-RCE-RCW-RCT-RCF");
+        await Assertions.Expect(session.Page.GetByRole(AriaRole.Button, new() { Name = "Generate immutable file for AccuWage", Exact = true })).ToBeDisabledAsync();
+        await ssaWorkflow.ClickAsync();
+
         await session.Page.GetByText("Configure a Form 941 deposit schedule", new() { Exact = true }).ClickAsync();
         var depositScheduleSection = session.Page.GetByRole(AriaRole.Heading, new() { Name = "Federal payroll deposit schedule", Exact = true }).Locator("..");
         await depositScheduleSection.GetByRole(AriaRole.Button, new() { Name = "Load official 2026 defaults", Exact = true }).ClickAsync();
