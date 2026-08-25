@@ -1,5 +1,15 @@
 namespace BrassLedger.Application.Accounting;
 
+public sealed record SsaEfw2Submitter(
+    int SpecificationTaxYear, string SpecificationVersion, string OfficialSpecificationUrl,
+    string SubmitterEin, string BsoUserId, string SubmitterName,
+    string LocationAddress, string DeliveryAddress, string City, string State, string PostalCode,
+    string ContactName, string ContactPhone, string ContactEmail, string PreparerCode,
+    string EmployerLocationAddress, string EmployerDeliveryAddress, string EmployerCity,
+    string EmployerState, string EmployerPostalCode, string EmployerContactName,
+    string EmployerContactPhone, string EmployerContactEmail,
+    string KindOfEmployer = "N", string EmploymentCode = "R", string EmployerSignaturePin = "");
+
 public sealed record SsaEfw2cSubmitter(
     int SpecificationTaxYear, string SpecificationVersion, string OfficialSpecificationUrl,
     string SubmitterEin, string BsoUserId, string SubmitterName,

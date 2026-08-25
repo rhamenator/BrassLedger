@@ -1437,6 +1437,27 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public void SsaEfw2Builder_UsesExact2026RecordPositionsZeroFillAndTotals()
+    {
+        var employee = new W2EmployeeData(Guid.NewGuid(), "E-001", "Jane Employee", "123-45-6789", "10 Home St", "Unit 2", "48201-1234", 1100m, 110m, 1000m, 62m, 1100m, 15.95m, [], "Jane", "Q", "Employee", "Detroit", "MI");
+        var package = new W2PackageData(TaxYear: 2026, EmployerLegalName: "Brass Ledger Test Company", EmployerEin: "12-3456789", Employees: [employee], W3Box1Total: 1100m, W3Box2Total: 110m, W3Box3Total: 1000m, W3Box4Total: 62m, W3Box5Total: 1100m, W3Box6Total: 15.95m);
+        var submitter = new SsaEfw2Submitter(2026, "EFW2 TY2026 initial publication (2026-07-07)", "https://www.ssa.gov/employer/efw/26efw2.pdf", "12-3456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com");
+
+        var result = SsaEfw2FileBuilder.Build(package, submitter);
+
+        Assert.True(result.Succeeded, string.Join("; ", result.Errors)); Assert.Equal(5, result.RecordCount); Assert.Equal(1, result.EmployeeRecordCount);
+        var records = System.Text.Encoding.ASCII.GetString(result.Content).Split("\r\n"); Assert.All(records, record => Assert.Equal(512, record.Length));
+        Assert.Equal("RA", records[0][..2]); Assert.Equal("123456789", records[0][2..11]); Assert.Equal("AB123456", records[0][11..19]); Assert.Equal("98", records[0][35..37]); Assert.Equal("L", records[0][499..500]);
+        Assert.Equal("RE", records[1][..2]); Assert.Equal("2026", records[1][2..6]); Assert.Equal("123456789", records[1][7..16]); Assert.Equal("N", records[1][173..174]); Assert.Equal("R", records[1][218..219]); Assert.Equal(new string(' ', 10), records[1][318..328]);
+        Assert.Equal("RW", records[2][..2]); Assert.Equal("123456789", records[2][2..11]); Assert.Equal("JANE", records[2][11..26].Trim()); Assert.Equal("EMPLOYEE", records[2][41..61].Trim()); Assert.Equal("00000110000", records[2][187..198]); Assert.Equal("00000011000", records[2][198..209]); Assert.Equal("00000000000", records[2][253..264]); Assert.Equal(new string(' ', 6), records[2][489..495]);
+        Assert.Equal("RT", records[3][..2]); Assert.Equal("0000001", records[3][2..9]); Assert.Equal("000000000110000", records[3][9..24]); Assert.Equal("000000000011000", records[3][24..39]); Assert.Equal("000000000000000", records[3][99..114]);
+        Assert.Equal("RF", records[4][..2]); Assert.Equal("000000001", records[4][7..16]);
+        Assert.False(SsaEfw2FileBuilder.Build(package with { W3Box1Total = 1099m }, submitter).Succeeded);
+        Assert.False(SsaEfw2FileBuilder.Build(package with { Employees = [employee with { SocialSecurityNumber = "900000000" }] }, submitter).Succeeded);
+        Assert.False(SsaEfw2FileBuilder.Build(package with { TaxYear = 2025 }, submitter).Succeeded);
+    }
+
+    [Fact]
     public void SsaEfw2cBuilder_UsesExactRecordPositionsTotalsAndTaxYearGate()
     {
         var previous = new W2EmployeeData(Guid.NewGuid(), "E-001", "Jane Old", "123-45-6789", "1 Main St", "", "48201", 1000m, 100m, 1000m, 62m, 1000m, 14.50m, [], "Jane", "", "Old", "Detroit", "MI");
@@ -1490,6 +1511,33 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     private static SaveSsaWageFileConfigurationRequest SsaConfigurationRequest(int year, bool approved) => new(null, year, $"EFW2C TY{year} reviewed", SsaWageFileService.SupportedLayoutCode, $"https://www.ssa.gov/employer/efw/{year % 100:00}efw2c.pdf", new string('c', 64), year >= 2026 ? new DateOnly(2026, 7, 10) : new DateOnly(2026, 1, 20), "Reviewer compared every implemented record and field position with the official SSA publication.", "123456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", approved, approved);
+
+    [Fact]
+    public async Task SsaOriginalWageFileWorkflow_AllowsSeparateExactSpecEncryptsAndRecordsAccuWageOnce()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); Guid filingId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var companyId = await db.Companies.Select(item => item.Id).FirstAsync(); filingId = Guid.NewGuid();
+            var employee = new W2EmployeeData(Guid.NewGuid(), "E-001", "Jane Employee", "123456789", "10 Home St", "", "48201", 1100m, 110m, 1000m, 62m, 1100m, 15.95m, [], "Jane", "", "Employee", "Detroit", "MI");
+            var package = new W2PackageData(TaxYear: 2026, EmployerLegalName: "Brass Ledger Test Company", EmployerEin: "123456789", Employees: [employee], W3Box1Total: 1100m, W3Box2Total: 110m, W3Box3Total: 1000m, W3Box4Total: 62m, W3Box5Total: 1100m, W3Box6Total: 15.95m);
+            db.PayrollFilings.Add(new PayrollFiling { Id = filingId, CompanyId = companyId, FormCode = "W2", TaxYear = 2026, PeriodKey = "2026-YEAR", PeriodStart = new DateOnly(2026, 1, 1), PeriodEnd = new DateOnly(2026, 12, 31), Status = "Approved", DataJson = System.Text.Json.JsonSerializer.Serialize(package), SummaryJson = "{}", SourcePayrollRunIdsJson = "[]", SourceDigestSha256 = new string('a', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/iw2w3", ContentVersion = "2026", PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedAtUtc = DateTimeOffset.UtcNow, ApprovedDataJson = System.Text.Json.JsonSerializer.Serialize(package), ApprovedSourceDigestSha256 = new string('a', 64), ApprovedBaselineAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }); await db.SaveChangesAsync();
+        }
+        var workflow = scope.ServiceProvider.GetRequiredService<ISsaOriginalWageFileService>();
+        Assert.False((await workflow.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2025, true))).Succeeded);
+        Assert.False((await workflow.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2026, true) with { SourceRetrievedOn = new DateOnly(2026, 7, 6) })).Succeeded);
+        var configured = await workflow.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2026, true)); Assert.True(configured.Succeeded, configured.ErrorMessage);
+        var correctionConfiguration = await scope.ServiceProvider.GetRequiredService<ISsaWageFileService>().SaveConfigurationAsync(SsaConfigurationRequest(2026, true)); Assert.True(correctionConfiguration.Succeeded, correctionConfiguration.ErrorMessage);
+        var generated = await workflow.GenerateAsync(new(filingId)); Assert.True(generated.Succeeded, generated.ErrorMessage);
+        var workspace = await workflow.GetAsync(); var file = Assert.Single(workspace.Files); Assert.Equal("GeneratedForAccuWage", file.Status); Assert.Equal(5, file.RecordCount);
+        var download = await workflow.DownloadAsync(file.Id); Assert.NotNull(download); var records = System.Text.Encoding.ASCII.GetString(download!.Content).Split("\r\n"); Assert.All(records, record => Assert.Equal(512, record.Length)); Assert.Equal(file.ContentSha256, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(download.Content)).ToLowerInvariant());
+        var validation = await workflow.RecordValidationAsync(new(file.Id, true, "ACCUWAGE-EFW2-20260825", "AccuWage Online reported no structural errors for this immutable original file.", file.ConcurrencyToken)); Assert.True(validation.Succeeded, validation.ErrorMessage);
+        file = Assert.Single((await workflow.GetAsync()).Files); Assert.Equal("AccuWageValidated", file.Status); Assert.False((await workflow.RecordValidationAsync(new(file.Id, false, "SECOND", "A second result must not rewrite the original evidence.", file.ConcurrencyToken))).Succeeded);
+        await using var verify = await factory.CreateDbContextAsync(); await verify.Database.OpenConnectionAsync(); await using var command = verify.Database.GetDbConnection().CreateCommand(); command.CommandText = "SELECT f.ContentBase64 || '|' || c.SubmitterEin || '|' || c.BsoUserId || '|' || c.EmployerSignaturePin FROM PayrollSsaOriginalWageFiles f JOIN PayrollSsaWageFileConfigurations c ON c.Id = f.PayrollSsaWageFileConfigurationId WHERE f.Id = $id"; var parameter = command.CreateParameter(); parameter.ParameterName = "$id"; parameter.Value = file.Id; command.Parameters.Add(parameter); Assert.All(((await command.ExecuteScalarAsync())?.ToString() ?? "").Split('|'), item => Assert.StartsWith("enc::", item));
+    }
+
+    private static SaveSsaOriginalWageFileConfigurationRequest SsaOriginalConfigurationRequest(int year, bool approved) => new(null, year, $"EFW2 TY{year} reviewed", SsaOriginalWageFileService.SupportedLayoutCode, $"https://www.ssa.gov/employer/efw/{year % 100:00}efw2.pdf", new string('d', 64), new DateOnly(2026, 7, 7), "Reviewer compared every implemented record and field position with the official SSA EFW2 publication.", "123456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "N", "R", "1234567890", approved, approved);
 
     [Fact]
     public async Task PayrollTimecards_RequireValidAuditableWorkflowAndPreventOverlappingHours()

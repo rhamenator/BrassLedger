@@ -114,6 +114,12 @@ app.MapGet("/payroll/ssa-wage-files/{fileId:guid}/download", async (Guid fileId,
     return file is null ? Results.NotFound() : Results.File(file.Content, "text/plain; charset=us-ascii", file.FileName);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 
+app.MapGet("/payroll/ssa-original-wage-files/{fileId:guid}/download", async (Guid fileId, BrassLedger.Application.Accounting.ISsaOriginalWageFileService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.DownloadAsync(fileId, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file.Content, "text/plain; charset=us-ascii", file.FileName);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+
 app.MapGet("/payroll/payment-files/{paymentFileId:guid}/download", async (Guid paymentFileId, BrassLedger.Application.Accounting.IPayrollPaymentFileService service, CancellationToken cancellationToken) =>
 {
     var file = await service.DownloadAsync(paymentFileId, cancellationToken);

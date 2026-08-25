@@ -1046,6 +1046,7 @@ public sealed class PayrollSsaWageFileConfiguration
 {
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
+    public string FileKind { get; set; } = "EFW2C";
     public int SpecificationTaxYear { get; set; }
     public string SpecificationVersion { get; set; } = string.Empty;
     public string LayoutCompatibilityCode { get; set; } = string.Empty;
@@ -1073,10 +1074,37 @@ public sealed class PayrollSsaWageFileConfiguration
     public string EmployerContactName { get; set; } = string.Empty;
     public string EmployerContactPhone { get; set; } = string.Empty;
     public string EmployerContactEmail { get; set; } = string.Empty;
+    public string KindOfEmployer { get; set; } = "N";
+    public string EmploymentCode { get; set; } = "R";
+    public string EmployerSignaturePin { get; set; } = string.Empty;
     public bool IsApproved { get; set; }
     public Guid? ApprovedByUserId { get; set; }
     public DateTimeOffset? ApprovedAtUtc { get; set; }
     public bool IsActive { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollSsaOriginalWageFile
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid PayrollFilingId { get; set; }
+    public Guid PayrollSsaWageFileConfigurationId { get; set; }
+    public int TaxYear { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string ContentBase64 { get; set; } = string.Empty;
+    public string ContentSha256 { get; set; } = string.Empty;
+    public string SourceDigestSha256 { get; set; } = string.Empty;
+    public string SpecificationVersion { get; set; } = string.Empty;
+    public string Status { get; set; } = "GeneratedForAccuWage";
+    public int RecordCount { get; set; }
+    public int EmployeeRecordCount { get; set; }
+    public Guid? GeneratedByUserId { get; set; }
+    public DateTimeOffset GeneratedAtUtc { get; set; }
+    public Guid? ValidatedByUserId { get; set; }
+    public DateTimeOffset? ValidatedAtUtc { get; set; }
+    public string AccuWageEvidenceReference { get; set; } = string.Empty;
+    public string ValidationNotes { get; set; } = string.Empty;
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 

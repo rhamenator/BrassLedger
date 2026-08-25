@@ -557,6 +557,28 @@ api.MapGet("/ssa-wage-files/{fileId:guid}/download", async (Guid fileId, ISsaWag
     var file = await service.DownloadAsync(fileId, cancellationToken);
     return file is null ? Results.NotFound() : Results.File(file.Content, "text/plain; charset=us-ascii", file.FileName);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapGet("/ssa-original-wage-files", async (ISsaOriginalWageFileService service, CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(cancellationToken)))
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPut("/ssa-original-wage-files/configuration", async (SaveSsaOriginalWageFileConfigurationRequest request, ISsaOriginalWageFileService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveConfigurationAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ssaOriginalWageFile"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/ssa-original-wage-files/generate", async (GenerateSsaOriginalWageFileRequest request, ISsaOriginalWageFileService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.GenerateAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/ssa-original-wage-files/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ssaOriginalWageFile"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/ssa-original-wage-files/validation", async (RecordSsaWageFileValidationRequest request, ISsaOriginalWageFileService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.RecordValidationAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ssaOriginalWageFile"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApprovePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapGet("/ssa-original-wage-files/{fileId:guid}/download", async (Guid fileId, ISsaOriginalWageFileService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.DownloadAsync(fileId, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file.Content, "text/plain; charset=us-ascii", file.FileName);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 api.MapGet("/payroll-close-periods", async (IPayrollFilingService service, CancellationToken cancellationToken) => Results.Ok(await service.GetClosePeriodsAsync(cancellationToken)))
     .RequireAuthorization(BrassLedgerAuthorizationPolicies.AccessPayroll);
 api.MapPost("/payroll-close-periods", async (ClosePayrollPeriodRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
