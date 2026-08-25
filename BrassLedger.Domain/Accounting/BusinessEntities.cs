@@ -701,6 +701,27 @@ public sealed class PayrollDepositScheduleConfiguration
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
+public sealed class PayrollDisasterReliefConfiguration
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string AnnouncementCode { get; set; } = string.Empty;
+    public string DisasterName { get; set; } = string.Empty;
+    public string FemaDeclarationNumber { get; set; } = string.Empty;
+    public string CoveredAreasJson { get; set; } = "[]";
+    public string AffectedTaxpayerBasis { get; set; } = string.Empty;
+    public string EligibilityEvidenceReference { get; set; } = string.Empty;
+    public string ReliefActionsJson { get; set; } = "[]";
+    public string OfficialSourceUrl { get; set; } = string.Empty;
+    public DateOnly SourceRetrievedOn { get; set; }
+    public string ReviewNotes { get; set; } = string.Empty;
+    public bool IsApproved { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public bool IsActive { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
 public sealed class PayrollDeductionPlan
 {
     public Guid Id { get; set; }

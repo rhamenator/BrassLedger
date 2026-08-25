@@ -2110,6 +2110,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
         var schedules = scope.ServiceProvider.GetRequiredService<IPayrollDepositScheduleService>();
+        var disasterRelief = scope.ServiceProvider.GetRequiredService<IPayrollDisasterReliefService>();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         var invalidLookback = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2025, "Semiweekly", 60000m, new DateOnly(2024, 1, 1), new DateOnly(2024, 12, 31), 50000m, 100000m, 2500m, "[]", "[\"2025-01-01\"]", "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2025, 1, 1), "", true, true));
@@ -2133,6 +2134,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var shortfall = Assert.Single((await schedules.GetAsync()).Shortfalls!);
         Assert.Equal(1000m, shortfall.RequiredAmount); Assert.Equal(950m, shortfall.PaidByDueDate); Assert.Equal(50m, shortfall.ShortfallAtDueDate);
         Assert.Equal(100m, shortfall.SafeHarborTolerance); Assert.Equal(new DateOnly(2025, 7, 16), shortfall.MakeupDueDate); Assert.Equal(1000m, shortfall.PaidByMakeupDate); Assert.Equal("MadeUpWithinTolerance", shortfall.Status);
+        const string reliefActions = "[{\"ActionType\":\"DepositPenaltyAbatement\",\"OriginalDueOnOrAfter\":\"2025-06-01\",\"OriginalDueBefore\":\"2025-06-05\",\"ReliefDeadline\":\"2025-07-16\",\"Notes\":\"Deposit penalties abated only when deposited by the announcement deadline.\"},{\"ActionType\":\"ReturnFilingPostponement\",\"OriginalDueOnOrAfter\":\"2025-04-01\",\"OriginalDueBefore\":\"2025-08-01\",\"ReliefDeadline\":\"2025-08-15\",\"Notes\":\"Return deadline relief is tracked separately from deposits.\"}]";
+        const string futureAction = "[{\"ActionType\":\"FutureReliefNotYetSupported\",\"OriginalDueOnOrAfter\":\"2025-06-01\",\"OriginalDueBefore\":\"2025-06-05\",\"ReliefDeadline\":\"2025-07-16\"}]";
+        var unsupportedApproval = await disasterRelief.SaveAsync(new SavePayrollDisasterReliefRequest(null, "ZZ-2025-FUTURE", "Future relief example", "DR-9998", "[\"Test County, ZZ\"]", "PrincipalPlaceOfBusiness", "Eligibility proof", futureAction, "https://www.irs.gov/newsroom/tax-relief-in-disaster-situations", new DateOnly(2025, 6, 1), "Reviewer captured a new relief action that the runtime does not execute yet.", true, true));
+        Assert.False(unsupportedApproval.Succeeded); Assert.Contains("unsupported action", unsupportedApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var relief = await disasterRelief.SaveAsync(new SavePayrollDisasterReliefRequest(null, "ZZ-2025-01", "Test severe storms", "DR-9999", "[\"Test County, ZZ\"]", "PrincipalPlaceOfBusiness", "IRS address-of-record confirmation 2025-06-01", reliefActions, "https://www.irs.gov/newsroom/tax-relief-in-disaster-situations", new DateOnly(2025, 6, 1), "Controller compared the exact covered area and separate deposit penalty window to the IRS announcement.", true, true));
+        Assert.True(relief.Succeeded, relief.ErrorMessage);
+        var reliefWorkspace = await disasterRelief.GetAsync(); var impact = Assert.Single(reliefWorkspace.DepositImpacts);
+        Assert.Equal(new DateOnly(2025, 6, 4), impact.OriginalDueDate); Assert.Equal(new DateOnly(2025, 7, 16), impact.PenaltyReliefDeadline);
+        Assert.Equal(950m, impact.PaidByOriginalDueDate); Assert.Equal(1000m, impact.PaidByReliefDeadline); Assert.Equal("PenaltyReliefConditionsMet", impact.Status);
+        await verifiedDb.Entry(liability).ReloadAsync(); Assert.Equal(new DateOnly(2025, 6, 4), liability.DueDate);
     }
 
     [Fact]

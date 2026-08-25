@@ -34,6 +34,7 @@ public sealed class BrassLedgerDbContext(
     public DbSet<PayrollRun> PayrollRuns => Set<PayrollRun>();
     public DbSet<PayrollJurisdictionRule> PayrollJurisdictionRules => Set<PayrollJurisdictionRule>();
     public DbSet<PayrollDepositScheduleConfiguration> PayrollDepositScheduleConfigurations => Set<PayrollDepositScheduleConfiguration>();
+    public DbSet<PayrollDisasterReliefConfiguration> PayrollDisasterReliefConfigurations => Set<PayrollDisasterReliefConfiguration>();
     public DbSet<PayrollDeductionPlan> PayrollDeductionPlans => Set<PayrollDeductionPlan>();
     public DbSet<EmployeePayrollDeductionElection> EmployeePayrollDeductionElections => Set<EmployeePayrollDeductionElection>();
     public DbSet<PayrollRunEmployeeLine> PayrollRunEmployeeLines => Set<PayrollRunEmployeeLine>();
@@ -123,6 +124,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollRun>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollJurisdictionRule>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollDepositScheduleConfiguration>().HasKey(x => x.Id);
+        modelBuilder.Entity<PayrollDisasterReliefConfiguration>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollDeductionPlan>().HasKey(x => x.Id);
         modelBuilder.Entity<EmployeePayrollDeductionElection>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollRunEmployeeLine>().HasKey(x => x.Id);
@@ -221,6 +223,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollFilingCorrection>().Property(x => x.DataJson).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Employee>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<PayrollDisasterReliefConfiguration>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollDeductionPlan>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<EmployeePayrollDeductionElection>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollTimecard>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
@@ -420,6 +423,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollTimeEntry>().HasIndex(x => new { x.PayrollTimecardId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PayrollJurisdictionRule>().HasIndex(x => new { x.CompanyId, x.ResidenceJurisdiction, x.WorkJurisdiction }).IsUnique();
         modelBuilder.Entity<PayrollDepositScheduleConfiguration>().HasIndex(x => new { x.CompanyId, x.JurisdictionCode, x.ReturnFormCode, x.TaxYear }).IsUnique();
+        modelBuilder.Entity<PayrollDisasterReliefConfiguration>().HasIndex(x => new { x.CompanyId, x.AnnouncementCode }).IsUnique();
         modelBuilder.Entity<PayrollFilingCorrection>().HasOne<PayrollFiling>().WithMany().HasForeignKey(x => x.OriginalPayrollFilingId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollLiability>().HasOne<PayrollDepositScheduleConfiguration>().WithMany().HasForeignKey(x => x.DepositScheduleConfigurationId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollRunEmployeeLine>().HasIndex(x => new { x.PayrollRunId, x.EmployeeId }).IsUnique();
