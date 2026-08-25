@@ -1,0 +1,81 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ma",
+  "capturedAtUtc": "2026-08-25T07:20:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.mass.gov/doc/massachusetts-circular-m-income-tax-withholding-tables-at-50-effective-january-1-2026/download", "title": "Massachusetts Circular M — Income Tax Withholding Tables at 5.0%, effective January 1, 2026", "revision": "December 2025", "mediaType": "application/pdf", "retrievalStatus": "Official content indexed and reviewed; direct byte retrieval returned HTTP 403", "sha256": null, "bytes": null },
+    { "url": "https://www.mass.gov/guides/withholding-taxes-on-wages", "title": "Massachusetts Withholding Taxes on Wages", "updated": "2026-04-23", "mediaType": "text/html", "retrievalStatus": "Official content indexed and reviewed; direct byte retrieval returned HTTP 403", "sha256": null, "bytes": null }
+  ],
+  "employeeInputs": [
+    { "code": "exemptions", "source": "Form M-4", "dataType": "integer", "minimum": 0 },
+    { "code": "headOfHousehold", "source": "Form M-4", "dataType": "boolean" },
+    { "code": "blindPersons", "source": "Form M-4", "dataType": "integer", "minimum": 0, "maximum": 2 },
+    { "code": "additionalPeriodicWithholding", "source": "Form M-4", "dataType": "money", "minimum": 0 },
+    { "code": "retirementContributionsYearToDate", "dataType": "money", "minimum": 0 },
+    { "code": "massachusettsSourceWages", "dataType": "money", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["AnnualizedPercentage", "WageBracket"],
+    "baseRate": 0.05,
+    "surtaxRate": 0.04,
+    "combinedRateAboveThreshold": 0.09,
+    "annualSurtaxThreshold": 1107750,
+    "annualRetirementContributionDeductionCap": 2000,
+    "steps": [
+      "Subtract eligible Social Security, Medicare, Massachusetts, United States, or railroad retirement deductions until the annual $2,000 cap is reached.",
+      "Subtract the frequency-specific exemption factor unless zero exemptions are claimed.",
+      "Annualize the result using the actual number of payroll periods, including 26 or 27 for biweekly payroll.",
+      "Apply 5% through $1,107,750 and 9% above that threshold.",
+      "Divide annual tax by payroll periods, subtract head-of-household and blindness tax values, and add requested periodic withholding."
+    ],
+    "exemptionFactors": [
+      { "frequency": "Daily", "claimingOne": 12, "moreThanOneFormula": "3 * exemptions + 9" },
+      { "frequency": "Weekly", "claimingOne": 85, "moreThanOneFormula": "19 * exemptions + 66" },
+      { "frequency": "Biweekly", "claimingOne": 169, "moreThanOneFormula": "38 * exemptions + 131" },
+      { "frequency": "Semimonthly", "claimingOne": 183, "moreThanOneFormula": "42 * exemptions + 141" },
+      { "frequency": "Monthly", "claimingOne": 367, "moreThanOneFormula": "83 * exemptions + 284" },
+      { "frequency": "Annual", "claimingOne": 4400, "moreThanOneFormula": "1000 * exemptions + 3400" }
+    ],
+    "headOfHouseholdTaxValues": { "Daily": 0.33, "Weekly": 2.31, "Biweekly": 4.62, "Semimonthly": 5, "Monthly": 10, "Annual": 120 },
+    "blindnessTaxValuePerPerson": { "Daily": 0.30, "Weekly": 2.12, "Biweekly": 4.23, "Semimonthly": 4.58, "Monthly": 9.17, "Annual": 110 },
+    "minimumGrossWagesWhenClaimingExemptions": { "Daily": 22, "Weekly": 154, "Biweekly": 308, "Semimonthly": 333, "Monthly": 667, "Annual": 8000 },
+    "supplementalWages": {
+      "aggregation": "Combine adjusted supplemental payment, prior supplemental payments from the payer in the year, and annualized regular wages from that payer.",
+      "atOrBelowThreshold": "Withhold 5% of adjusted supplemental wages.",
+      "aboveThreshold": "Withhold the lesser of 9% of adjusted supplemental wages, or 9% of the aggregate excess over the threshold plus 5% of the remainder.",
+      "appliesWhetherCombinedOrSeparate": true,
+      "officialExample": { "annualizedSalary": 948000, "bonus": 350000, "retirementDeduction": 2000, "exemptionFactors": 4400, "aggregate": 1298000, "withholding": 25010 }
+    }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Withhold from all Massachusetts resident wages for services inside or outside Massachusetts.",
+    "nonresidentRule": "Withhold only on Massachusetts-source wages for services performed in Massachusetts.",
+    "allocation": "Use exact Massachusetts pay when determinable; otherwise multiply gross income by Massachusetts workdays divided by total workdays.",
+    "partialDay": "Treat as a Massachusetts workday unless the employee proves more than half the day was worked outside Massachusetts.",
+    "multiStateWorkdayTrackingRequired": true,
+    "reciprocalStates": []
+  },
+  "filing": {
+    "frequencies": [
+      { "frequency": "Annual", "projectedAnnualWithholdingThrough": 100, "due": "January 31" },
+      { "frequency": "Quarterly", "projectedAnnualWithholdingFrom": 101, "projectedAnnualWithholdingThrough": 1200, "due": "Last day after quarter" },
+      { "frequency": "Monthly", "projectedAnnualWithholdingFrom": 1201, "projectedAnnualWithholdingThrough": 25000, "due": "15th after month, except quarter-end months due last day after month" },
+      { "frequency": "QuarterMonthlyPayments", "projectedAnnualWithholdingMoreThan": 25000, "triggerAccumulatedWithholdingAtLeast": 500, "due": "Within three business days after days 7, 15, 22, and month end; quarterly return remains required" }
+    ],
+    "form": "M-941",
+    "portal": "MassTaxConnect",
+    "zeroReturnsRequired": true
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "Mass.gov returned HTTP 403 for direct retrieval of the final Circular M and guidance page; official indexed content was reviewed, but raw bytes and checksums remain unavailable on this machine.",
+    "The full wage-bracket matrices are not transcribed.",
+    "No generalized final or intermediate rounding instruction was located in the reviewed material.",
+    "The $2,000 retirement-contribution deduction is a year-to-date stateful cap and cannot be implemented as a stateless per-check deduction."
+  ],
+  "review": { "annualizedFormulaTranscribed": true, "surtaxThresholdTranscribed": true, "exemptionFactorsTranscribed": true, "supplementalMethodTranscribed": true, "officialExampleTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": false, "completeWageBracketTablesTranscribed": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Obtain and checksum final official bytes, import wage-bracket matrices, implement year-to-date retirement-cap and workday state, verify rounding, and add threshold and supplemental regression tests before activation." }
+}

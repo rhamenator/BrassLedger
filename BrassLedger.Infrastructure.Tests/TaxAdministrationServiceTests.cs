@@ -658,6 +658,56 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task LouisianaSourceCapture_PreservesOfficialRateDeductionChoicesAndNoTaxStateRule()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/la/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(0.0309m, calculation.GetProperty("rate").GetDecimal());
+        Assert.Equal(12500, calculation.GetProperty("annualStandardDeductions").GetProperty("SingleOrMarriedSeparate").GetInt32());
+        Assert.Equal(25000, calculation.GetProperty("annualStandardDeductions").GetProperty("MarriedJointHeadOrQualifyingSurvivingSpouse").GetInt32());
+        Assert.Equal(112.432m, calculation.GetProperty("officialExamples")[1].GetProperty("publishedWithholding").GetDecimal());
+        Assert.Contains("no-tax state", root.GetProperty("residencyAndWorkRules").GetProperty("residentOtherStateWithoutIncomeTax").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task MarylandSourceCapture_LinksLocalSchedulesAndPreservesCombinedMethod()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/md/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(7, calculation.GetProperty("periodicDeductions").GetArrayLength());
+        Assert.Equal(10, calculation.GetProperty("stateAnnualBrackets").GetProperty("SingleMarriedSeparateOrDependent").GetArrayLength());
+        Assert.Equal(0.065m, calculation.GetProperty("lumpSumAnnualBonus").GetProperty("stateRate").GetDecimal());
+        Assert.Equal(4, root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates").GetArrayLength());
+        Assert.Equal("2026-local-source-capture.json", root.GetProperty("localWithholding").GetProperty("sourceCapture").GetString());
+        Assert.True(root.GetProperty("localWithholding").GetProperty("stateFormulaDependsOnLocalJurisdiction").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task MassachusettsSourceCapture_PreservesSurtaxStatefulCapAndSupplementalMethod()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ma/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(1107750, calculation.GetProperty("annualSurtaxThreshold").GetInt32());
+        Assert.Equal(2000, calculation.GetProperty("annualRetirementContributionDeductionCap").GetInt32());
+        Assert.Equal(6, calculation.GetProperty("exemptionFactors").GetArrayLength());
+        Assert.Equal(25010, calculation.GetProperty("supplementalWages").GetProperty("officialExample").GetProperty("withholding").GetInt32());
+        Assert.Equal(4, root.GetProperty("filing").GetProperty("frequencies").GetArrayLength());
+        Assert.False(root.GetProperty("review").GetProperty("rawSourcesChecksummed").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();
