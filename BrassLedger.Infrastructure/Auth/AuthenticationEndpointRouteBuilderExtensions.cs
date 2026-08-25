@@ -13,17 +13,17 @@ public static class AuthenticationEndpointRouteBuilderExtensions
 {
     public static IEndpointRouteBuilder MapBrassLedgerAuthenticationEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        Delegate formLoginHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleFormLoginAsync;
-        Delegate formLogoutHandler = (Func<HttpContext, IAntiforgery, Task<IResult>>)HandleFormLogoutAsync;
+        Delegate formLoginHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, IAntiforgery, Task<IResult>>)HandleFormLoginAsync;
+        Delegate formLogoutHandler = (Func<HttpContext, IUserSessionService, IAntiforgery, Task<IResult>>)HandleFormLogoutAsync;
         Delegate formSwitchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleFormSwitchCompanyAsync;
-        Delegate bootstrapHandler = (Func<HttpContext, IBootstrapWorkspaceService, IAntiforgery, Task<IResult>>)HandleBootstrapAsync;
-        Delegate changePasswordHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleChangePasswordAsync;
-        Delegate revokeOtherSessionsHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleRevokeOtherSessionsAsync;
-        Delegate formMfaHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleFormMfaAsync;
-        Delegate disableMfaHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleDisableMfaAsync;
-        Delegate apiLoginHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleApiLoginAsync;
-        Delegate apiMfaHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleApiMfaAsync;
-        Delegate apiLogoutHandler = (Func<HttpContext, Task<IResult>>)HandleApiLogoutAsync;
+        Delegate bootstrapHandler = (Func<HttpContext, IBootstrapWorkspaceService, IUserSessionService, IAntiforgery, Task<IResult>>)HandleBootstrapAsync;
+        Delegate changePasswordHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, IAntiforgery, Task<IResult>>)HandleChangePasswordAsync;
+        Delegate revokeOtherSessionsHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, IAntiforgery, Task<IResult>>)HandleRevokeOtherSessionsAsync;
+        Delegate formMfaHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, IAntiforgery, Task<IResult>>)HandleFormMfaAsync;
+        Delegate disableMfaHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, IAntiforgery, Task<IResult>>)HandleDisableMfaAsync;
+        Delegate apiLoginHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, Task<IResult>>)HandleApiLoginAsync;
+        Delegate apiMfaHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, Task<IResult>>)HandleApiMfaAsync;
+        Delegate apiLogoutHandler = (Func<HttpContext, IUserSessionService, Task<IResult>>)HandleApiLogoutAsync;
         Delegate switchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleSwitchCompanyAsync;
         Delegate passwordResetRequestHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandlePasswordResetRequestAsync;
         Delegate accountActionStartHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleAccountActionStartAsync;
@@ -246,7 +246,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         return Results.Accepted(value: new { Message = "The replacement address is pending verification; prior sessions were invalidated." });
     }
 
-    private static async Task<IResult> HandleChangePasswordAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    private static async Task<IResult> HandleChangePasswordAsync(HttpContext context, IUserAuthenticationService authenticationService, IUserSessionService sessionService, IAntiforgery antiforgery)
     {
         if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         if (!TryGetSessionIdentity(context.User, out var userId, out var companyId)) return Results.Unauthorized();
@@ -272,7 +272,10 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             return Results.LocalRedirect($"/account/security?error={error}");
         }
 
-        var reissuedUser = result.User with { MfaAuthenticated = HasMfaClaim(context.User) };
+        var reissuedUser = await sessionService.IssueAsync(
+            result.User with { MfaAuthenticated = HasMfaClaim(context.User) },
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
             CreatePrincipal(reissuedUser),
@@ -280,7 +283,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         return Results.LocalRedirect("/account/security?status=password-changed");
     }
 
-    private static async Task<IResult> HandleRevokeOtherSessionsAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    private static async Task<IResult> HandleRevokeOtherSessionsAsync(HttpContext context, IUserAuthenticationService authenticationService, IUserSessionService sessionService, IAntiforgery antiforgery)
     {
         if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         if (!TryGetSessionIdentity(context.User, out var userId, out var companyId)) return Results.Unauthorized();
@@ -291,7 +294,10 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             context.Request.Headers.UserAgent.ToString(),
             context.RequestAborted);
         if (result.Outcome != AccountSecurityOutcome.Succeeded || result.User is null) return Results.Unauthorized();
-        var reissuedUser = result.User with { MfaAuthenticated = HasMfaClaim(context.User) };
+        var reissuedUser = await sessionService.IssueAsync(
+            result.User with { MfaAuthenticated = HasMfaClaim(context.User) },
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
             CreatePrincipal(reissuedUser),
@@ -299,7 +305,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         return Results.LocalRedirect("/account/security?status=sessions-revoked");
     }
 
-    private static async Task<IResult> HandleFormLoginAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    private static async Task<IResult> HandleFormLoginAsync(HttpContext context, IUserAuthenticationService authenticationService, IUserSessionService sessionService, IAntiforgery antiforgery)
     {
         if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         var form = await context.Request.ReadFormAsync();
@@ -326,15 +332,16 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             return Results.LocalRedirect($"/login?error={errorCode}&returnUrl={Uri.EscapeDataString(returnUrl)}");
         }
 
+        var signedInUser = await sessionService.IssueAsync(authenticationResult.User, ipAddress, userAgent, context.RequestAborted);
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(authenticationResult.User),
+            CreatePrincipal(signedInUser),
             CreateAuthenticationProperties());
 
-        return Results.LocalRedirect(authenticationResult.User.MfaEnrollmentRequired ? "/account/security?status=mfa-required" : returnUrl);
+        return Results.LocalRedirect(signedInUser.MfaEnrollmentRequired ? "/account/security?status=mfa-required" : returnUrl);
     }
 
-    private static async Task<IResult> HandleApiLoginAsync(HttpContext context, IUserAuthenticationService authenticationService)
+    private static async Task<IResult> HandleApiLoginAsync(HttpContext context, IUserAuthenticationService authenticationService, IUserSessionService sessionService)
     {
         var loginRequest = await context.Request.ReadFromJsonAsync<LoginRequest>(cancellationToken: context.RequestAborted);
         if (loginRequest is null)
@@ -369,15 +376,16 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             return Results.Unauthorized();
         }
 
+        var signedInUser = await sessionService.IssueAsync(authenticationResult.User, ipAddress, userAgent, context.RequestAborted);
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(authenticationResult.User),
+            CreatePrincipal(signedInUser),
             CreateAuthenticationProperties());
 
-        return Results.Ok(ToResponse(authenticationResult.User));
+        return Results.Ok(ToResponse(signedInUser));
     }
 
-    private static async Task<IResult> HandleFormMfaAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    private static async Task<IResult> HandleFormMfaAsync(HttpContext context, IUserAuthenticationService authenticationService, IUserSessionService sessionService, IAntiforgery antiforgery)
     {
         if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         ApplyNoStoreHeaders(context.Response);
@@ -407,14 +415,18 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         }
 
         DeleteMfaChallengeCookie(context);
+        var signedInUser = await sessionService.IssueAsync(
+            result.User,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(result.User),
+            CreatePrincipal(signedInUser),
             CreateAuthenticationProperties());
         return Results.LocalRedirect(returnUrl);
     }
 
-    private static async Task<IResult> HandleApiMfaAsync(HttpContext context, IUserAuthenticationService authenticationService)
+    private static async Task<IResult> HandleApiMfaAsync(HttpContext context, IUserAuthenticationService authenticationService, IUserSessionService sessionService)
     {
         var request = await context.Request.ReadFromJsonAsync<MfaLoginRequest>(cancellationToken: context.RequestAborted);
         if (request is null) return Results.BadRequest();
@@ -428,14 +440,18 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         if (result.Outcome == MfaOperationOutcome.LockedOut)
             return Results.Json(new { Error = "mfa_locked", LockedUntilUtc = result.LockoutEndUtc }, statusCode: StatusCodes.Status423Locked);
         if (result.Outcome != MfaOperationOutcome.Succeeded || result.User is null) return Results.Unauthorized();
+        var signedInUser = await sessionService.IssueAsync(
+            result.User,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(result.User),
+            CreatePrincipal(signedInUser),
             CreateAuthenticationProperties());
-        return Results.Ok(ToResponse(result.User));
+        return Results.Ok(ToResponse(signedInUser));
     }
 
-    private static async Task<IResult> HandleDisableMfaAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    private static async Task<IResult> HandleDisableMfaAsync(HttpContext context, IUserAuthenticationService authenticationService, IUserSessionService sessionService, IAntiforgery antiforgery)
     {
         if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         if (!TryGetSessionIdentity(context.User, out var userId, out var companyId)) return Results.Unauthorized();
@@ -450,14 +466,18 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             context.RequestAborted);
         if (result.Outcome != AccountSecurityOutcome.Succeeded || result.User is null)
             return Results.LocalRedirect("/account/security?error=mfa-disable-rejected");
+        var signedInUser = await sessionService.IssueAsync(
+            result.User,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(result.User),
+            CreatePrincipal(signedInUser),
             CreateAuthenticationProperties());
         return Results.LocalRedirect("/account/security?status=mfa-disabled");
     }
 
-    private static async Task<IResult> HandleBootstrapAsync(HttpContext context, IBootstrapWorkspaceService bootstrapWorkspaceService, IAntiforgery antiforgery)
+    private static async Task<IResult> HandleBootstrapAsync(HttpContext context, IBootstrapWorkspaceService bootstrapWorkspaceService, IUserSessionService sessionService, IAntiforgery antiforgery)
     {
         if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         var form = await context.Request.ReadFormAsync();
@@ -485,17 +505,24 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             return Results.LocalRedirect($"/setup?error={message}");
         }
 
+        var signedInUser = await sessionService.IssueAsync(
+            result.User,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(result.User),
+            CreatePrincipal(signedInUser),
             CreateAuthenticationProperties());
 
-        return Results.LocalRedirect(result.User.MfaEnrollmentRequired ? "/account/security?status=mfa-required" : "/");
+        return Results.LocalRedirect(signedInUser.MfaEnrollmentRequired ? "/account/security?status=mfa-required" : "/");
     }
 
-    private static async Task<IResult> HandleFormLogoutAsync(HttpContext context, IAntiforgery antiforgery)
+    private static async Task<IResult> HandleFormLogoutAsync(HttpContext context, IUserSessionService sessionService, IAntiforgery antiforgery)
     {
         if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            && Guid.TryParse(context.User.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId))
+            await sessionService.RevokeCurrentAsync(userId, TryGetCompanyId(context.User), sessionId, context.Connection.RemoteIpAddress?.ToString() ?? string.Empty, context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
         await context.SignOutAsync(BrassLedgerAuthenticationDefaults.Scheme);
         return Results.LocalRedirect("/login");
     }
@@ -508,13 +535,17 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || !Guid.TryParse(form["companyId"].ToString(), out var companyId)) return Results.BadRequest();
         var user = await authenticationService.SwitchCompanyAsync(userId, companyId, context.RequestAborted);
         if (user is null) return Results.Forbid();
-        user = user with { MfaAuthenticated = HasMfaClaim(context.User) };
+        if (!Guid.TryParse(context.User.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId)) return Results.Unauthorized();
+        user = user with { MfaAuthenticated = HasMfaClaim(context.User), SessionId = sessionId };
         await context.SignInAsync(BrassLedgerAuthenticationDefaults.Scheme, CreatePrincipal(user), CreateAuthenticationProperties());
         return Results.LocalRedirect(user.MfaEnrollmentRequired ? "/account/security?status=mfa-required" : returnUrl);
     }
 
-    private static async Task<IResult> HandleApiLogoutAsync(HttpContext context)
+    private static async Task<IResult> HandleApiLogoutAsync(HttpContext context, IUserSessionService sessionService)
     {
+        if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            && Guid.TryParse(context.User.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId))
+            await sessionService.RevokeCurrentAsync(userId, TryGetCompanyId(context.User), sessionId, context.Connection.RemoteIpAddress?.ToString() ?? string.Empty, context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
         await context.SignOutAsync(BrassLedgerAuthenticationDefaults.Scheme);
         return Results.NoContent();
     }
@@ -532,13 +563,16 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         if (request is null || !Guid.TryParse(userId, out var parsedUserId) || request.CompanyId == Guid.Empty) return Results.BadRequest();
         var user = await authenticationService.SwitchCompanyAsync(parsedUserId, request.CompanyId, context.RequestAborted);
         if (user is null) return Results.Forbid();
-        user = user with { MfaAuthenticated = HasMfaClaim(context.User) };
+        if (!Guid.TryParse(context.User.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId)) return Results.Unauthorized();
+        user = user with { MfaAuthenticated = HasMfaClaim(context.User), SessionId = sessionId };
         await context.SignInAsync(BrassLedgerAuthenticationDefaults.Scheme, CreatePrincipal(user), CreateAuthenticationProperties());
         return Results.Ok(ToResponse(user));
     }
 
     private static ClaimsPrincipal CreatePrincipal(AuthenticatedUser authenticatedUser)
     {
+        if (!authenticatedUser.SessionId.HasValue || authenticatedUser.SessionId == Guid.Empty)
+            throw new InvalidOperationException("A durable user session must be issued before creating an authentication cookie.");
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, authenticatedUser.UserId.ToString()),
@@ -548,6 +582,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             new(BrassLedgerAuthenticationDefaults.DisplayNameClaimType, authenticatedUser.DisplayName),
             new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, authenticatedUser.CompanyId.ToString()),
             new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, authenticatedUser.SecurityStamp),
+            new(BrassLedgerAuthenticationDefaults.SessionIdClaimType, authenticatedUser.SessionId.Value.ToString()),
             new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, authenticatedUser.MfaAuthenticated ? "mfa" : "pwd")
         };
 
@@ -627,6 +662,11 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         var hasCompanyId = Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out companyId);
         return hasUserId && hasCompanyId;
     }
+
+    private static Guid? TryGetCompanyId(ClaimsPrincipal principal) =>
+        Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId)
+            ? companyId
+            : null;
 
     private static bool HasMfaClaim(ClaimsPrincipal principal) =>
         principal.HasClaim(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "mfa");

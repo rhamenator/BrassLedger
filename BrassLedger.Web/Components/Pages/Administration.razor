@@ -198,6 +198,39 @@ else
                     </div>
                 </EditForm>
             </article>
+
+            <article class="panel">
+                <h2>Administrator MFA recovery</h2>
+                <p class="page-intro">Use only from an MFA-authenticated administrator session after following the company’s identity-verification procedure. You cannot reset yourself; owner accounts require another owner. The reset invalidates every session, authenticator secret, recovery code, pending MFA challenge, and account-action link.</p>
+                <EditForm Model="MfaRecoveryForm" OnValidSubmit="ResetOperatorMfaAsync">
+                    <div class="auth-form">
+                        <div class="field-group">
+                            <label class="field-label" for="mfaRecoveryOperator">MFA-enabled operator</label>
+                            <InputSelect id="mfaRecoveryOperator" class="field-input" @bind-Value="MfaRecoveryForm.TargetUserId">
+                                <option value="@Guid.Empty">Select an operator</option>
+                                @foreach (var user in Snapshot.Operators.Where(user => user.IsActive && user.MfaEnabled))
+                                {
+                                    <option value="@user.UserId">@user.DisplayName — @user.UserName</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="field-group"><label class="field-label" for="mfaRecoveryConfirm">Type the exact username</label><InputText id="mfaRecoveryConfirm" class="field-input" autocomplete="off" @bind-Value="MfaRecoveryForm.ConfirmUserName" /></div>
+                        <div class="field-group"><label class="field-label" for="mfaRecoveryPassword">Your current password</label><InputText id="mfaRecoveryPassword" class="field-input" type="password" autocomplete="current-password" maxlength="1024" @bind-Value="MfaRecoveryForm.CurrentAdministratorPassword" /></div>
+                        <div class="field-group">
+                            <label class="field-label" for="mfaRecoveryMethod">Identity-verification method</label>
+                            <InputSelect id="mfaRecoveryMethod" class="field-input" @bind-Value="MfaRecoveryForm.VerificationMethod">
+                                <option value="">Select the documented method</option>
+                                <option>In-person identity verification</option>
+                                <option>Video verification with known employee</option>
+                                <option>Manager and HR attestation</option>
+                                <option>Company-approved recovery procedure</option>
+                            </InputSelect>
+                        </div>
+                        <div class="field-group"><label class="field-label" for="mfaRecoveryCase">Case or incident reference</label><InputText id="mfaRecoveryCase" class="field-input" maxlength="200" aria-describedby="mfaRecoveryCaseHelp" @bind-Value="MfaRecoveryForm.CaseReference" /><small id="mfaRecoveryCaseHelp" class="muted-copy">Enter only an internal reference; do not enter identity documents or other sensitive evidence.</small></div>
+                        <button class="action-secondary" type="submit">Clear MFA and revoke access</button>
+                    </div>
+                </EditForm>
+            </article>
             </AuthorizeView>
         </section>
 
@@ -274,6 +307,7 @@ else
     private string? StatusMessage;
     private CreateRoleForm RoleForm { get; set; } = new();
     private CreateOperatorForm OperatorForm { get; set; } = new();
+    private AdministratorMfaRecoveryForm MfaRecoveryForm { get; set; } = new();
     private Dictionary<string, string> PermissionLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<IntegrationProviderSnapshot> Providers { get; set; } = [];
     private IReadOnlyList<IntegrationConnectionSnapshot> Connections { get; set; } = [];
@@ -338,6 +372,23 @@ else
     {
         var result = await SecurityAdministrationService.RetrySecurityEmailAsync(messageId);
         StatusMessage = result.Succeeded ? "The security-email delivery was queued for another bounded attempt." : result.ErrorMessage;
+        await ReloadSnapshotAsync();
+    }
+
+    private async Task ResetOperatorMfaAsync()
+    {
+        var result = await SecurityAdministrationService.ResetOperatorMfaAsync(new AdministratorMfaRecoveryRequest(
+            MfaRecoveryForm.TargetUserId,
+            MfaRecoveryForm.ConfirmUserName,
+            MfaRecoveryForm.CurrentAdministratorPassword,
+            MfaRecoveryForm.VerificationMethod,
+            MfaRecoveryForm.CaseReference));
+        StatusMessage = result.Succeeded
+            ? Snapshot?.SecurityEmailDeliveryConfigured == true
+                ? "MFA recovery completed, all target sessions were revoked, and a security notice was queued to the registered email address."
+                : "MFA recovery completed and all target sessions were revoked. Notify the operator through the company’s verified out-of-band procedure."
+            : result.ErrorMessage;
+        if (result.Succeeded) MfaRecoveryForm = new AdministratorMfaRecoveryForm();
         await ReloadSnapshotAsync();
     }
 
@@ -477,6 +528,14 @@ else
         public string DisplayName { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string RoleName { get; set; } = string.Empty;
+    }
+    private sealed class AdministratorMfaRecoveryForm
+    {
+        public Guid TargetUserId { get; set; }
+        public string ConfirmUserName { get; set; } = string.Empty;
+        public string CurrentAdministratorPassword { get; set; } = string.Empty;
+        public string VerificationMethod { get; set; } = string.Empty;
+        public string CaseReference { get; set; } = string.Empty;
     }
     private sealed class CreateCompanyForm { public string Name { get; set; } = string.Empty; public string LegalName { get; set; } = string.Empty; public string TaxId { get; set; } = string.Empty; public string BaseCurrency { get; set; } = "USD"; public int FiscalYearStartMonth { get; set; } = 1; }
     private sealed class ExchangeRateEditor { public string BaseCurrency { get; set; } = "USD"; public string QuoteCurrency { get; set; } = "CAD"; public decimal Rate { get; set; } = 1m; public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Source { get; set; } = string.Empty; }

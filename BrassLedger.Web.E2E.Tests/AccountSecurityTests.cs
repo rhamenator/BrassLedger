@@ -62,6 +62,31 @@ public sealed class AccountSecurityTests
         await session.AssertNoUiFailuresAsync("authenticator MFA lifecycle");
     }
 
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task Operator_CanReviewAndIndividuallyRevokeNamedBrowserSessions(BrowserKind browserKind)
+    {
+        await using var currentSession = await _fixture.CreateSessionAsync(browserKind);
+        await using var otherSession = await _fixture.CreateSessionAsync(browserKind);
+        await currentSession.SignInAsync("operations");
+        await otherSession.SignInAsync("operations");
+        await currentSession.GotoAsync("/account/security");
+        await currentSession.WaitForHeadingAsync("Protect your operator account and review recent access.");
+
+        var body = await currentSession.Page.Locator("body").InnerTextAsync();
+        Assert.Contains("Signed-in browsers", body);
+        Assert.Contains("This browser", body);
+        var signOutButtons = currentSession.Page.Locator("table.data-table button").GetByText("Sign out", new() { Exact = true });
+        Assert.True(await signOutButtons.CountAsync() >= 1);
+        await signOutButtons.First.EvaluateAsync("element => element.click()");
+        await currentSession.Page.GetByText("The selected browser session was signed out.").WaitForAsync();
+
+        await otherSession.GotoAsync("/");
+        await otherSession.WaitForHeadingAsync("Sign in to BrassLedger.");
+        await currentSession.AssertNoUiFailuresAsync("named browser-session revocation");
+        await otherSession.AssertNoUiFailuresAsync("revoked browser-session rejection");
+    }
+
     private static string ComputeCurrentTotp(string secret)
     {
         var secretBytes = DecodeBase32(secret);

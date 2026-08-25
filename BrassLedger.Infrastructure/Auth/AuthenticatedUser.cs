@@ -10,4 +10,5 @@ public sealed record AuthenticatedUser(
     string SecurityStamp,
     IReadOnlyList<string> Permissions,
     bool MfaAuthenticated = false,
-    bool MfaEnrollmentRequired = false);
+    bool MfaEnrollmentRequired = false,
+    Guid? SessionId = null);

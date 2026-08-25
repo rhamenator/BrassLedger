@@ -213,6 +213,34 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await currentClient.GetAsync("/api/dashboard")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await otherClient.GetAsync("/api/dashboard")).StatusCode);
+
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(candidate => candidate.UserName == "controller");
+        var sessions = await db.UserSessions.Where(session => session.UserId == user.Id).ToListAsync();
+        Assert.Single(sessions, session => session.RevokedAtUtc is null && session.SecurityStamp == user.SecurityStamp);
+        Assert.Equal(2, sessions.Count(session => session.RevokedAtUtc is not null));
+    }
+
+    [Fact]
+    public async Task Logout_RevokesCurrentNamedSessionAndRecordsCompanyAudit()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+
+        var response = await client.PostAsync("/api/auth/logout", null);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/dashboard")).StatusCode);
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(candidate => candidate.UserName == "controller");
+        var session = Assert.Single(await db.UserSessions.Where(candidate => candidate.UserId == user.Id).ToListAsync());
+        Assert.NotNull(session.RevokedAtUtc);
+        Assert.Contains(await db.AuthenticationAuditEntries.Where(entry => entry.UserId == user.Id).ToListAsync(),
+            entry => entry.EventType == "logout" && entry.CompanyId == user.CompanyId && entry.Succeeded);
     }
 
     [Fact]

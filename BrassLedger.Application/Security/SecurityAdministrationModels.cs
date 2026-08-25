@@ -7,6 +7,7 @@ public interface ISecurityAdministrationService
     Task<SecurityOperationResult> SetRoleMfaRequirementAsync(string roleName, bool requiresMfa, CancellationToken cancellationToken = default);
     Task<SecurityOperationResult> InviteOperatorAsync(CreateOperatorInvitationRequest request, CancellationToken cancellationToken = default);
     Task<SecurityOperationResult> RetrySecurityEmailAsync(Guid messageId, CancellationToken cancellationToken = default);
+    Task<SecurityOperationResult> ResetOperatorMfaAsync(AdministratorMfaRecoveryRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed record SecurityAdministrationSnapshot(
@@ -42,6 +43,7 @@ public sealed record AccessRoleSnapshot(
     IReadOnlyList<string> Permissions);
 
 public sealed record OperatorAccountSnapshot(
+    Guid UserId,
     string UserName,
     string DisplayName,
     string Email,
@@ -62,6 +64,13 @@ public sealed record CreateOperatorInvitationRequest(
     string DisplayName,
     string Email,
     string RoleName);
+
+public sealed record AdministratorMfaRecoveryRequest(
+    Guid TargetUserId,
+    string ConfirmUserName,
+    string CurrentAdministratorPassword,
+    string VerificationMethod,
+    string CaseReference);
 
 public sealed record SecurityOperationResult(
     bool Succeeded,

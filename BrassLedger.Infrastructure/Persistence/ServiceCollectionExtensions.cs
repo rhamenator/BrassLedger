@@ -30,8 +30,9 @@ public static class ServiceCollectionExtensions
     internal const string PrivilegedRoleMfaSchemaVersion = "2026082505-privileged-role-mfa";
     internal const string AccountRecoverySchemaVersion = "2026082506-account-invitations-and-recovery";
     internal const string AccountEmailLookupSchemaVersion = "2026082507-account-email-lookup";
-    internal const string CurrentSchemaVersion = "2026082508-security-email-action-validity";
-    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, CurrentSchemaVersion];
+    internal const string SecurityEmailActionValiditySchemaVersion = "2026082508-security-email-action-validity";
+    internal const string CurrentSchemaVersion = "2026082509-named-user-sessions";
+    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, SecurityEmailActionValiditySchemaVersion, CurrentSchemaVersion];
 
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
@@ -100,6 +101,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISecurityEmailOutboxDispatcher, SecurityEmailOutboxDispatcher>();
         services.AddHostedService<SecurityEmailOutboxWorker>();
         services.AddScoped<IUserAuthenticationService, UserAuthenticationService>();
+        services.AddScoped<IUserSessionService, UserSessionService>();
         services.AddScoped<IAccountActionService, AccountActionService>();
         services.AddScoped<IBootstrapWorkspaceService, BootstrapWorkspaceService>();
         services.AddScoped<IBusinessWorkspaceService, BusinessWorkspaceService>();
@@ -254,8 +256,10 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {AccountRecoverySchemaVersion} is recorded without prerequisite {PrivilegedRoleMfaSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (applied.Contains(AccountEmailLookupSchemaVersion) && !applied.Contains(AccountRecoverySchemaVersion))
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {AccountEmailLookupSchemaVersion} is recorded without prerequisite {AccountRecoverySchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
-        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(AccountEmailLookupSchemaVersion))
-            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {AccountEmailLookupSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(SecurityEmailActionValiditySchemaVersion) && !applied.Contains(AccountEmailLookupSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {SecurityEmailActionValiditySchemaVersion} is recorded without prerequisite {AccountEmailLookupSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(SecurityEmailActionValiditySchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {SecurityEmailActionValiditySchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (!applied.Contains(BaselineSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
             {
@@ -283,8 +287,11 @@ public static class ServiceCollectionExtensions
         if (!applied.Contains(AccountEmailLookupSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, AccountEmailLookupSchemaVersion, "Added deterministic unique account-email lookup hashes without weakening encrypted email storage.", () => EnsureAccountEmailLookupSchemaAsync(dbContext, cancellationToken), cancellationToken);
 
+        if (!applied.Contains(SecurityEmailActionValiditySchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, SecurityEmailActionValiditySchemaVersion, "Prevented delivery of links whose one-use account action expired or was invalidated.", () => EnsureSecurityEmailActionValiditySchemaAsync(dbContext, cancellationToken), cancellationToken);
+
         if (!applied.Contains(CurrentSchemaVersion))
-            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Prevented delivery of links whose one-use account action expired or was invalidated.", () => EnsureSecurityEmailActionValiditySchemaAsync(dbContext, cancellationToken), cancellationToken);
+            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added durable, individually revocable named user sessions.", () => EnsureNamedUserSessionSchemaAsync(dbContext, cancellationToken), cancellationToken);
     }
 
     private static async Task ApplySchemaVersionAsync(BrassLedgerDbContext dbContext, string version, string description, Func<Task> apply, CancellationToken cancellationToken)
@@ -444,6 +451,22 @@ public static class ServiceCollectionExtensions
         {
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "SecurityEmailOutboxMessages" ADD COLUMN IF NOT EXISTS "RequiresUsableAction" boolean NOT NULL DEFAULT true;""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""UPDATE "SecurityEmailOutboxMessages" SET "RequiresUsableAction" = false WHERE "Subject" = 'Your BrassLedger password was changed';""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureNamedUserSessionSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "UserSessions" ("Id" TEXT NOT NULL PRIMARY KEY, "UserId" TEXT NOT NULL, "SecurityStamp" TEXT NOT NULL, "AuthenticationMethod" TEXT NOT NULL, "CreatedAtUtc" TEXT NOT NULL, "LastSeenAtUtc" TEXT NOT NULL, "ExpiresAtUtc" TEXT NOT NULL, "RevokedAtUtc" TEXT NULL, "IpAddress" TEXT NOT NULL, "UserAgent" TEXT NOT NULL, CONSTRAINT "FK_UserSessions_Users_UserId" FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE CASCADE);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_UserSessions_UserId_RevokedAtUtc_ExpiresAtUtc" ON "UserSessions" ("UserId", "RevokedAtUtc", "ExpiresAtUtc");""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "UserSessions" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "SecurityStamp" text NOT NULL, "AuthenticationMethod" text NOT NULL, "CreatedAtUtc" timestamptz NOT NULL, "LastSeenAtUtc" timestamptz NOT NULL, "ExpiresAtUtc" timestamptz NOT NULL, "RevokedAtUtc" timestamptz NULL, "IpAddress" text NOT NULL, "UserAgent" text NOT NULL, CONSTRAINT "FK_UserSessions_Users_UserId" FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE CASCADE);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_UserSessions_UserId_RevokedAtUtc_ExpiresAtUtc" ON "UserSessions" ("UserId", "RevokedAtUtc", "ExpiresAtUtc");""", cancellationToken);
         }
     }
 

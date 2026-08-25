@@ -8,6 +8,7 @@ public static class BrassLedgerAuthenticationDefaults
     public const string AccountActionCookieName = "BrassLedger.AccountAction";
     public const string SeededPassword = "BrassLedger!2026";
     public const string SecurityStampClaimType = "security_stamp";
+    public const string SessionIdClaimType = "session_id";
     public const string CompanyIdClaimType = "company_id";
     public const string DisplayNameClaimType = "display_name";
     public const string PermissionClaimType = "permission";

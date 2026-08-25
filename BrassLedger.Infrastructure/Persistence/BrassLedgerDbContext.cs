@@ -12,6 +12,7 @@ public sealed class BrassLedgerDbContext(
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
     public DbSet<MfaSignInChallenge> MfaSignInChallenges => Set<MfaSignInChallenge>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<AccountActionToken> AccountActionTokens => Set<AccountActionToken>();
     public DbSet<SecurityEmailOutboxMessage> SecurityEmailOutboxMessages => Set<SecurityEmailOutboxMessage>();
     public DbSet<CompanyMembership> CompanyMemberships => Set<CompanyMembership>();
@@ -96,6 +97,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<AppUser>().HasKey(x => x.Id);
         modelBuilder.Entity<MfaRecoveryCode>().HasKey(x => x.Id);
         modelBuilder.Entity<MfaSignInChallenge>().HasKey(x => x.Id);
+        modelBuilder.Entity<UserSession>().HasKey(x => x.Id);
         modelBuilder.Entity<AccountActionToken>().HasKey(x => x.Id);
         modelBuilder.Entity<SecurityEmailOutboxMessage>().HasKey(x => x.Id);
         modelBuilder.Entity<CompanyMembership>().HasKey(x => x.Id);
@@ -170,6 +172,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<LabelTemplate>().HasKey(x => x.Id);
 
         modelBuilder.Entity<SalesInvoiceLine>().HasOne<SalesInvoice>().WithMany().HasForeignKey(line => line.SalesInvoiceId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<UserSession>().HasOne<AppUser>().WithMany().HasForeignKey(session => session.UserId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<SalesInvoiceLine>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(line => line.RevenueAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<VendorBillLine>().HasOne<VendorBill>().WithMany().HasForeignKey(line => line.VendorBillId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<VendorBillLine>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(line => line.ExpenseAccountId).OnDelete(DeleteBehavior.Restrict);
@@ -275,6 +278,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<AppUser>().Property(x => x.DisplayName).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<AppUser>().Property(x => x.Email).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<AppUser>().Property(x => x.MfaSecret).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<UserSession>().Property(x => x.IpAddress).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<UserSession>().Property(x => x.UserAgent).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<SecurityEmailOutboxMessage>().Property(x => x.RecipientEmail).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<SecurityEmailOutboxMessage>().Property(x => x.Body).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<IntegrationConnection>().Property(x => x.CredentialsJson).HasConversion(encryptedStringConverter);
@@ -425,6 +430,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<MfaRecoveryCode>().HasIndex(x => x.CodeHash).IsUnique();
         modelBuilder.Entity<MfaSignInChallenge>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<MfaSignInChallenge>().HasIndex(x => new { x.UserId, x.ExpiresAtUtc });
+        modelBuilder.Entity<UserSession>().HasIndex(x => new { x.UserId, x.RevokedAtUtc, x.ExpiresAtUtc });
         modelBuilder.Entity<AccountActionToken>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<AccountActionToken>().HasIndex(x => new { x.UserId, x.Purpose, x.ExpiresAtUtc });
         modelBuilder.Entity<SecurityEmailOutboxMessage>().HasIndex(x => new { x.Status, x.NextAttemptAtUtc, x.LeaseExpiresAtUtc });

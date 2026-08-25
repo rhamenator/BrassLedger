@@ -383,6 +383,58 @@ public sealed class AccountActionServiceTests : IDisposable
             Assert.Single(results, result => result.Outcome == AccountActionCompletionOutcome.InvalidOrExpired);
             Assert.True(await dispatcher.DispatchNextAsync());
             Assert.Single(transport.Messages, message => message.Subject.Contains("password was changed", StringComparison.Ordinal));
+
+            var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+            var controller = (await authentication.AuthenticateAsync(
+                "controller", BrassLedgerAuthenticationDefaults.SeededPassword, "192.0.2.10", "postgres-session-test")).User!;
+            var target = (await authentication.AuthenticateAsync(
+                "operations", BrassLedgerAuthenticationDefaults.SeededPassword, "192.0.2.11", "postgres-session-test")).User!;
+            var sessions = scope.ServiceProvider.GetRequiredService<IUserSessionService>();
+            var firstSession = await sessions.IssueAsync(target, "192.0.2.11", "Chrome/128 Linux");
+            var secondSession = await sessions.IssueAsync(target, "198.51.100.12", "Firefox/129 Windows");
+            var accessor = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>();
+            accessor.HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, target.UserId.ToString()),
+                    new Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, target.CompanyId.ToString()),
+                    new Claim(BrassLedgerAuthenticationDefaults.SessionIdClaimType, secondSession.SessionId!.Value.ToString())
+                ], "test"))
+            };
+            Assert.Equal(2, (await sessions.GetActiveAsync(target.UserId, secondSession.SessionId.Value, accessor.HttpContext.User)).Count);
+            Assert.True(await sessions.RevokeAsync(
+                target.UserId, target.CompanyId, firstSession.SessionId!.Value, secondSession.SessionId.Value,
+                accessor.HttpContext.User, "203.0.113.7", "postgres-session-test"));
+
+            await using (var db = await dbFactory.CreateDbContextAsync())
+            {
+                var controllerRecord = await db.Users.SingleAsync(user => user.Id == controller.UserId);
+                controllerRecord.MfaEnabled = true;
+                controllerRecord.MfaSecret = "POSTGRES-CONTROLLER-SECRET";
+                var targetRecord = await db.Users.SingleAsync(user => user.Id == target.UserId);
+                targetRecord.MfaEnabled = true;
+                targetRecord.MfaSecret = "POSTGRES-TARGET-SECRET";
+                targetRecord.MfaEnrolledAtUtc = clock.GetUtcNow();
+                db.MfaRecoveryCodes.Add(new MfaRecoveryCode
+                {
+                    Id = Guid.NewGuid(), UserId = target.UserId, CodeHash = "postgres-recovery-hash", CreatedAtUtc = clock.GetUtcNow()
+                });
+                await db.SaveChangesAsync();
+            }
+            accessor.HttpContext = CreateAdministratorContext(controller, includeMfa: true);
+            var administration = scope.ServiceProvider.GetRequiredService<ISecurityAdministrationService>();
+            var recovered = await administration.ResetOperatorMfaAsync(new AdministratorMfaRecoveryRequest(
+                target.UserId, target.UserName, BrassLedgerAuthenticationDefaults.SeededPassword,
+                "Manager and HR attestation", "PG-CASE-2026-0042"));
+            Assert.True(recovered.Succeeded, recovered.ErrorMessage);
+            await using (var db = await dbFactory.CreateDbContextAsync())
+            {
+                Assert.False((await db.Users.SingleAsync(user => user.Id == target.UserId)).MfaEnabled);
+                Assert.False(await db.MfaRecoveryCodes.AnyAsync(code => code.UserId == target.UserId));
+                Assert.All(await db.UserSessions.Where(session => session.UserId == target.UserId).ToListAsync(), session => Assert.NotNull(session.RevokedAtUtc));
+                Assert.True(await db.AccountActionTokens.AnyAsync(action => action.UserId == target.UserId && action.Purpose == "MfaAdministratorRecoveryNotice" && action.ConsumedAtUtc != null));
+            }
         }
         finally
         {
@@ -462,6 +514,157 @@ public sealed class AccountActionServiceTests : IDisposable
         }
         clock.Advance(TimeSpan.FromHours(2));
         Assert.Null(await actions.GetActionAsync(token));
+    }
+
+    [Fact]
+    public async Task AdministratorMfaRecovery_RequiresMfaReauthenticationOwnerAuthorityAndQueuesNotice()
+    {
+        var clock = new MutableTimeProvider(DateTimeOffset.Parse("2026-08-25T12:00:00Z"));
+        var transport = new RecordingSecurityEmailTransport();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["AccountEmail:Enabled"] = "true",
+            ["AccountEmail:PublicBaseUrl"] = "https://ledger.example.test",
+            ["AccountEmail:Host"] = "smtp.example.test",
+            ["AccountEmail:FromAddress"] = "security@example.test"
+        }).Build();
+        var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(clock);
+        services.AddSingleton<ISecurityEmailTransport>(transport);
+        services.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: true);
+        using var provider = services.BuildServiceProvider();
+        await provider.InitializeBrassLedgerAsync();
+        using var scope = provider.CreateScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var controllerSignIn = await authentication.AuthenticateAsync(
+            "controller", BrassLedgerAuthenticationDefaults.SeededPassword, "192.0.2.10", "xunit");
+        var targetSignIn = await authentication.AuthenticateAsync(
+            "operations", BrassLedgerAuthenticationDefaults.SeededPassword, "192.0.2.11", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, controllerSignIn.Outcome);
+        Assert.Equal(AuthenticationOutcome.Succeeded, targetSignIn.Outcome);
+        var controller = controllerSignIn.User!;
+        var target = targetSignIn.User!;
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        Guid priorSessionId;
+        string priorStamp;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var controllerRecord = await db.Users.SingleAsync(user => user.Id == controller.UserId);
+            controllerRecord.MfaEnabled = true;
+            controllerRecord.MfaSecret = "CONTROLLER-SECRET";
+            var targetRecord = await db.Users.SingleAsync(user => user.Id == target.UserId);
+            targetRecord.MfaEnabled = true;
+            targetRecord.MfaSecret = "TARGET-SECRET";
+            targetRecord.MfaEnrolledAtUtc = clock.GetUtcNow().AddDays(-30);
+            priorStamp = targetRecord.SecurityStamp;
+            var controllerMembership = await db.CompanyMemberships.SingleAsync(membership => membership.UserId == controller.UserId && membership.CompanyId == controller.CompanyId);
+            var targetMembership = await db.CompanyMemberships.SingleAsync(membership => membership.UserId == target.UserId && membership.CompanyId == controller.CompanyId);
+            controllerMembership.IsOwner = false;
+            targetMembership.IsOwner = true;
+            db.MfaRecoveryCodes.Add(new MfaRecoveryCode
+            {
+                Id = Guid.NewGuid(), UserId = target.UserId, CodeHash = "recovery-hash", CreatedAtUtc = clock.GetUtcNow()
+            });
+            db.MfaSignInChallenges.Add(new MfaSignInChallenge
+            {
+                Id = Guid.NewGuid(), UserId = target.UserId, CompanyId = target.CompanyId,
+                TokenHash = "challenge-hash", SecurityStamp = priorStamp,
+                CreatedAtUtc = clock.GetUtcNow(), ExpiresAtUtc = clock.GetUtcNow().AddMinutes(5),
+                IpAddress = "192.0.2.11", UserAgent = "xunit"
+            });
+            db.AccountActionTokens.Add(new AccountActionToken
+            {
+                Id = Guid.NewGuid(), UserId = target.UserId, CompanyId = target.CompanyId,
+                Purpose = "PasswordReset", TokenHash = "outstanding-action-hash", SecurityStamp = priorStamp,
+                CreatedAtUtc = clock.GetUtcNow(), ExpiresAtUtc = clock.GetUtcNow().AddHours(1),
+                RequestedIpAddress = "192.0.2.11"
+            });
+            priorSessionId = Guid.NewGuid();
+            db.UserSessions.Add(new UserSession
+            {
+                Id = priorSessionId, UserId = target.UserId, SecurityStamp = priorStamp,
+                AuthenticationMethod = "Password + MFA", CreatedAtUtc = clock.GetUtcNow(),
+                LastSeenAtUtc = clock.GetUtcNow(), ExpiresAtUtc = clock.GetUtcNow().AddMinutes(20),
+                IpAddress = "192.0.2.11", UserAgent = "xunit"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var accessor = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>();
+        accessor.HttpContext = CreateAdministratorContext(controller, includeMfa: false);
+        var administration = scope.ServiceProvider.GetRequiredService<ISecurityAdministrationService>();
+        var request = new AdministratorMfaRecoveryRequest(
+            target.UserId, target.UserName, BrassLedgerAuthenticationDefaults.SeededPassword,
+            "In-person identity verification", "CASE-2026-0042");
+        var withoutMfa = await administration.ResetOperatorMfaAsync(request);
+        Assert.False(withoutMfa.Succeeded);
+        Assert.Contains("multi-factor", withoutMfa.ErrorMessage);
+
+        accessor.HttpContext = CreateAdministratorContext(controller, includeMfa: true);
+        var wrongPassword = await administration.ResetOperatorMfaAsync(request with { CurrentAdministratorPassword = "incorrect" });
+        Assert.False(wrongPassword.Succeeded);
+        Assert.Contains("password", wrongPassword.ErrorMessage);
+        var unsupportedEvidence = await administration.ResetOperatorMfaAsync(request with { VerificationMethod = "Unreviewed custom method" });
+        Assert.False(unsupportedEvidence.Succeeded);
+        Assert.Contains("verification method", unsupportedEvidence.ErrorMessage);
+        var wrongUserName = await administration.ResetOperatorMfaAsync(request with { ConfirmUserName = "Operations" });
+        Assert.False(wrongUserName.Succeeded);
+        Assert.Contains("username", wrongUserName.ErrorMessage);
+        var ownerDenied = await administration.ResetOperatorMfaAsync(request);
+        Assert.False(ownerDenied.Succeeded);
+        Assert.Contains("owner", ownerDenied.ErrorMessage);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.CompanyMemberships.SingleAsync(membership => membership.UserId == controller.UserId && membership.CompanyId == controller.CompanyId)).IsOwner = true;
+            await db.SaveChangesAsync();
+        }
+        var recovered = await administration.ResetOperatorMfaAsync(request);
+        Assert.True(recovered.Succeeded, recovered.ErrorMessage);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var recoveredTarget = await db.Users.SingleAsync(user => user.Id == target.UserId);
+            Assert.False(recoveredTarget.MfaEnabled);
+            Assert.Empty(recoveredTarget.MfaSecret);
+            Assert.Null(recoveredTarget.MfaEnrolledAtUtc);
+            Assert.NotEqual(priorStamp, recoveredTarget.SecurityStamp);
+            Assert.False(await db.MfaRecoveryCodes.AnyAsync(code => code.UserId == target.UserId));
+            Assert.False(await db.MfaSignInChallenges.AnyAsync(challenge => challenge.UserId == target.UserId));
+            Assert.True((await db.UserSessions.SingleAsync(session => session.Id == priorSessionId)).RevokedAtUtc.HasValue);
+            Assert.All(await db.AccountActionTokens.Where(action => action.UserId == target.UserId).ToListAsync(), action => Assert.NotNull(action.ConsumedAtUtc));
+            Assert.Contains(await db.AuthenticationAuditEntries.ToListAsync(), entry => entry.UserId == controller.UserId && entry.EventType == "mfa_administrator_recovery_reauthentication_failed" && !entry.Succeeded);
+            Assert.Contains(await db.AuthenticationAuditEntries.ToListAsync(), entry => entry.UserId == target.UserId && entry.EventType == "mfa_administrator_recovery" && entry.Succeeded);
+            var audit = Assert.Single(await db.BusinessAuditEntries.Where(entry => entry.Action == "security.operator.mfa-recovered" && entry.EntityId == target.UserId).ToListAsync());
+            Assert.Contains("CASE-2026-0042", audit.DetailJson);
+            Assert.Contains("SecurityNotificationQueued", audit.DetailJson);
+            var notice = Assert.Single(await db.SecurityEmailOutboxMessages.ToListAsync());
+            Assert.False(notice.RequiresUsableAction);
+            Assert.Equal("Pending", notice.Status);
+        }
+
+        var dispatcher = scope.ServiceProvider.GetRequiredService<ISecurityEmailOutboxDispatcher>();
+        Assert.True(await dispatcher.DispatchNextAsync());
+        var message = Assert.Single(transport.Messages);
+        Assert.Contains("multi-factor authentication was reset", message.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CASE-2026-0042", message.Body);
+        Assert.DoesNotContain("TARGET-SECRET", message.Body, StringComparison.Ordinal);
+    }
+
+    private static DefaultHttpContext CreateAdministratorContext(AuthenticatedUser administrator, bool includeMfa)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, administrator.UserId.ToString()),
+            new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, administrator.CompanyId.ToString()),
+            new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)
+        };
+        if (includeMfa) claims.Add(new Claim(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "mfa"));
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.7");
+        context.Request.Headers.UserAgent = "xunit-administrator";
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+        return context;
     }
 
     private static string ExtractToken(string body)

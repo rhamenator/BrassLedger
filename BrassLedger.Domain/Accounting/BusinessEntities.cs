@@ -69,6 +69,20 @@ public sealed class MfaSignInChallenge
     public string UserAgent { get; set; } = string.Empty;
 }
 
+public sealed class UserSession
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public string SecurityStamp { get; set; } = string.Empty;
+    public string AuthenticationMethod { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset LastSeenAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? RevokedAtUtc { get; set; }
+    public string IpAddress { get; set; } = string.Empty;
+    public string UserAgent { get; set; } = string.Empty;
+}
+
 public sealed class AccountActionToken
 {
     public Guid Id { get; set; }

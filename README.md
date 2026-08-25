@@ -82,17 +82,17 @@ The current application includes:
 
 - authenticated access before accounting data loads in the web app or API
 - password hashing through ASP.NET Core Identity primitives
-- self-service password changes and all-other-session revocation with immutable authentication audit events
+- durable named browser sessions, individual and all-other-session revocation, and immutable authentication audit events
 - temporary lockout plus per-network login throttling for browser and API sign-in
 - membership-aware session validation for company-specific roles and permissions
-- RFC 6238 authenticator MFA, hashed one-use recovery codes, bounded login challenges, replay prevention, MFA lockout, and configurable privileged-role enforcement
+- RFC 6238 authenticator MFA, hashed one-use recovery codes, bounded login challenges, replay prevention, MFA lockout, configurable privileged-role enforcement, and controlled administrator-assisted recovery
 - expiring one-use operator invitations, verified-email enrollment, enumeration-resistant password recovery, protected SMTP outbox delivery, and administrative retry visibility
 - protection of sensitive fields at rest with ASP.NET Core Data Protection
 - persisted application key material under `App_Data\keys`
 - security headers in the web application and API
 - first-run administrator setup through the built-in setup flow for non-development installs
 
-Before live production use, administrator-controlled MFA recovery and named device/session inventory remain required security work. Passkeys are a desirable future phishing-resistant factor. Each deployment must configure and operationally verify its own HTTPS public URL, SMTP provider, mailbox delivery, DNS authentication, secret management, backup and recovery, access control, and deployment procedures.
+Passkeys remain desirable future phishing-resistant authentication. Before live production use, each deployment must configure and operationally verify its own HTTPS public URL, SMTP provider, mailbox delivery, DNS authentication, secret management, backup and recovery, access control, administrator identity-verification procedure, and deployment procedures.
 
 ## Build, test, and publish
 

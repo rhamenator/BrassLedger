@@ -45,6 +45,7 @@ Restart BrassLedger after changing configuration. The Administration page report
 - Redemption is transactional and concurrency-safe. Exactly one request can claim a token, and the account update must still match the security stamp observed when the token was issued.
 - Email addresses and queued message bodies are protected at rest. A normalized SHA-256 lookup value enforces email uniqueness without making encrypted addresses queryable.
 - Successful password recovery rotates the security stamp and invalidates existing sessions. A separate notification is queued after the change.
+- Administrator-assisted MFA recovery queues a non-actionable security notice to the target's registered address when delivery is configured. The notice contains the internal case reference, never an authenticator secret, recovery code, password, or identity-verification evidence.
 - The action token is removed from the browser address bar and retained only in a short-lived, HTTP-only, same-site cookie. Action pages and API responses use `no-store` caching headers.
 
 ## Monitoring and retry
@@ -59,7 +60,7 @@ After SMTP acceptance BrassLedger clears the protected message body. It retains 
 
 Before production use:
 
-1. Use a non-production operator and mailbox to complete invitation, verification, reset, replay rejection, and reset-notification tests.
+1. Use a non-production operator and mailbox to complete invitation, verification, password reset, replay rejection, password-reset notification, and administrator MFA-recovery notification tests.
 2. Confirm the public URL is HTTPS and resolves to the intended deployment through the normal reverse proxy.
 3. Confirm SMTP certificate validation and authentication succeed without allowing a TLS downgrade.
 4. Confirm provider logs correlate with the message identifier and that failures appear in Administration without exposing the link.

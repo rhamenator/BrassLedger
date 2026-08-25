@@ -53,14 +53,15 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
         await using (var connection = new NpgsqlConnection(connectionString))
         {
             await connection.OpenAsync();
-            Assert.Equal(8L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
+            Assert.Equal(9L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"Companies\" WHERE \"Name\" = 'Brass Ledger Manufacturing';"));
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082508-%' OR "VersionId" LIKE '2026082507-%' OR "VersionId" LIKE '2026082506-%' OR "VersionId" LIKE '2026082505-%' OR "VersionId" LIKE '2026082504-%' OR "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082509-%' OR "VersionId" LIKE '2026082508-%' OR "VersionId" LIKE '2026082507-%' OR "VersionId" LIKE '2026082506-%' OR "VersionId" LIKE '2026082505-%' OR "VersionId" LIKE '2026082504-%' OR "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
                 ALTER TABLE "PayrollEarningLines" DROP COLUMN "W2ReportingJson";
                 DROP TABLE "MfaRecoveryCodes";
                 DROP TABLE "MfaSignInChallenges";
+                DROP TABLE "UserSessions";
                 ALTER TABLE "Users" DROP COLUMN "MfaEnabled", DROP COLUMN "MfaSecret", DROP COLUMN "MfaEnrolledAtUtc", DROP COLUMN "MfaLastAcceptedTimeStep", DROP COLUMN "MfaFailedAttemptCount", DROP COLUMN "MfaLockoutEndUtc";
                 ALTER TABLE "AccessRoles" DROP COLUMN "RequiresMfa";
                 DROP TABLE "SecurityEmailOutboxMessages";
@@ -75,7 +76,7 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
 
         await using var verified = new NpgsqlConnection(connectionString);
         await verified.OpenAsync();
-        Assert.Equal(8L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
+        Assert.Equal(9L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'PayrollEarningLines' AND column_name = 'W2ReportingJson';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'AccountingInterchangeBatches';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'MfaRecoveryCodes';"));
@@ -83,6 +84,7 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'AccessRoles' AND column_name = 'RequiresMfa';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"AccessRoles\" WHERE \"Name\" = 'Administrator' AND \"RequiresMfa\" = true;"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'AccountActionTokens';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'UserSessions';"));
         Assert.Equal(64L, await ScalarLongAsync(verified, "SELECT length(\"EmailLookupHash\") FROM \"Users\" WHERE \"UserName\" = 'controller';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"Companies\" WHERE \"Name\" = 'Brass Ledger Manufacturing';"));
     }

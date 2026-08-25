@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageAccountSecurity)]
 @inject IUserAuthenticationService AuthenticationService
 @inject IAccountActionService AccountActionService
+@inject IUserSessionService UserSessionService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IHttpContextAccessor HttpContextAccessor
 
@@ -181,8 +182,34 @@
             </article>
 
             <article class="panel">
-                <h2>Other signed-in browsers</h2>
-                <p class="page-intro">Use this after losing a device, using a shared computer, or noticing activity you do not recognize. All other sessions are signed out immediately.</p>
+                <h2>Signed-in browsers</h2>
+                <p class="page-intro">Each browser session is individually tracked. Network addresses are masked here and browser names are inferred from the user-agent string, so they may be approximate.</p>
+                @if (Sessions.Count == 0)
+                {
+                    <p class="page-intro">No active named sessions were found. Sign in again if this browser stops responding.</p>
+                }
+                else
+                {
+                    <div class="table-scroll">
+                        <table class="data-table">
+                            <thead><tr><th>Browser</th><th>Network</th><th>Authentication</th><th>Signed in</th><th>Last used</th><th>Action</th></tr></thead>
+                            <tbody>
+                            @foreach (var session in Sessions)
+                            {
+                                <tr>
+                                    <td><strong>@session.Device</strong>@if (session.IsCurrent) { <div class="muted-copy">This browser</div> }</td>
+                                    <td>@session.MaskedNetwork</td>
+                                    <td>@session.AuthenticationMethod</td>
+                                    <td>@FormatTimestamp(session.CreatedAtUtc)</td>
+                                    <td>@FormatTimestamp(session.LastSeenAtUtc)</td>
+                                    <td>@if (!session.IsCurrent) { <button class="action-secondary" type="button" @onclick="() => RevokeSessionAsync(session.Id)">Sign out</button> }</td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                <p class="page-intro">Use the broad action after losing a device or noticing activity you do not recognize. It rotates account security and signs out every other session immediately.</p>
                 <form method="post" action="/account/revoke-other-sessions">
                     <AntiforgeryToken />
                     <button class="action-secondary" type="submit">Sign out other sessions</button>
@@ -230,6 +257,9 @@
     private AccountSecuritySnapshot? Snapshot { get; set; }
     private Guid UserId { get; set; }
     private Guid CompanyId { get; set; }
+    private Guid SessionId { get; set; }
+    private System.Security.Claims.ClaimsPrincipal Principal { get; set; } = new();
+    private IReadOnlyList<UserSessionSnapshot> Sessions { get; set; } = [];
     private MfaEnrollmentResult? Enrollment { get; set; }
     private bool EnrollmentComplete { get; set; }
     private MfaEnrollmentForm EnrollmentForm { get; set; } = new();
@@ -269,13 +299,28 @@
         RequestIpAddress = requestContext?.Connection.RemoteIpAddress?.ToString() ?? string.Empty;
         RequestUserAgent = requestContext?.Request.Headers.UserAgent.ToString() ?? string.Empty;
         var principal = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+        Principal = principal;
         if (Guid.TryParse(principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var userId)
-            && Guid.TryParse(principal.FindFirst(BrassLedgerAuthenticationDefaults.CompanyIdClaimType)?.Value, out var companyId))
+            && Guid.TryParse(principal.FindFirst(BrassLedgerAuthenticationDefaults.CompanyIdClaimType)?.Value, out var companyId)
+            && Guid.TryParse(principal.FindFirst(BrassLedgerAuthenticationDefaults.SessionIdClaimType)?.Value, out var sessionId))
         {
             UserId = userId;
             CompanyId = companyId;
+            SessionId = sessionId;
             Snapshot = await AuthenticationService.GetAccountSecurityAsync(UserId);
+            Sessions = await UserSessionService.GetActiveAsync(UserId, SessionId, Principal);
         }
+    }
+
+    private async Task RevokeSessionAsync(Guid sessionId)
+    {
+        var revoked = await UserSessionService.RevokeAsync(
+            UserId, CompanyId, sessionId, SessionId, Principal, RequestIpAddress, RequestUserAgent);
+        LocalError = !revoked;
+        LocalMessage = revoked
+            ? "The selected browser session was signed out."
+            : "That session was already inactive, expired, or could not be revoked.";
+        Sessions = await UserSessionService.GetActiveAsync(UserId, SessionId, Principal);
     }
 
     private async Task BeginMfaEnrollmentAsync()

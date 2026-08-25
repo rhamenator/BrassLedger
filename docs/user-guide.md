@@ -180,6 +180,9 @@ Current expectations:
 - invitations require a one-use email link; operators choose their own password and activate their company membership
 - verify the account email from **Account security** before relying on self-service password recovery
 - password-reset requests use the same response for eligible and unknown identifiers and invalidate prior sessions after a successful reset
+- review **Signed-in browsers** under **Account security** and individually revoke a browser you no longer control; network values are masked and browser names are approximate
+- use **Sign out other sessions** after suspected compromise; this rotates account security and preserves only a newly issued session for the current browser
+- if every MFA factor is lost, follow the company's documented identity-verification process and ask an authorized MFA-authenticated administrator to perform controlled recovery
 - confidential data should live in the database, not copied publish folders
 - local fallback data directories should not be committed to Git
 - static site assets should come from `BrassLedger.Web/wwwroot`

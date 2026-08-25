@@ -12,7 +12,7 @@ The current application baseline already assumes:
 - temporary account lockout after repeated invalid credentials
 - per-network login throttling in both the web application and API
 - self-service password changes that invalidate previously issued sessions
-- a self-service control to sign out every other browser session
+- durable named browser-session inventory with individual and all-other-session revocation
 - RFC 6238 authenticator MFA with a mandatory password-plus-code enrollment ceremony and configurable role enforcement
 - ten high-entropy, hashed, one-use recovery codes with controlled replacement and disablement
 - five-minute, hashed MFA login challenges with strict attempt limits, TOTP replay prevention, and security-stamp invalidation
@@ -21,8 +21,11 @@ The current application baseline already assumes:
 - data-protection key storage for application cryptography
 - security headers in the web application and API
 - expiring, hashed, one-use invitations, email verification, and password-reset actions delivered through a protected SMTP outbox
+- controlled administrator-assisted MFA recovery after password reauthentication and documented identity verification
 
-Every operator can open **Account security** from the signed-in header. Changing a password requires the current password, matching new-password confirmation, and at least 12 characters. A successful change rotates the account security stamp, signs out other browsers, records an audit event, and reissues the current browser's short-lived cookie. **Sign out other sessions** performs the same rotation without changing the password. Use it after a lost device or suspicious activity.
+Every operator can open **Account security** from the signed-in header. The **Signed-in browsers** table identifies the inferred browser and platform, masked network, authentication strength, last activity, and current browser. Network and user-agent values are protected at rest. An operator can revoke any other row individually; the current row cannot be revoked from that table. Normal sign-out revokes the current durable session. Revoked named-session metadata is retained for 90 days and then removed during a later successful sign-in; immutable authentication audit events remain subject to the deployment's separate audit-retention policy.
+
+Changing a password requires the current password, matching new-password confirmation, and at least 12 characters. A successful change rotates the account security stamp, signs out other browsers, records an audit event, and reissues the current browser's short-lived cookie. **Sign out other sessions** performs the same rotation without changing the password. Use it after a lost device or suspicious activity. Session validation also rejects an inactive account, expired or revoked session, changed security stamp, inactive company membership, changed company role or permissions, or unsatisfied MFA requirement.
 
 ### Authenticator MFA
 
@@ -38,7 +41,11 @@ An MFA-enabled password login creates a random five-minute challenge whose beare
 
 Password and MFA endpoints share a network-address ceiling of 60 requests per minute. This complements, rather than replaces, the stricter five-failure per-account lockout and avoids treating a modest office behind one NAT address as a single operator. A rejected API request receives HTTP 429, a one-minute `Retry-After`, and a machine-readable error; the browser receives the same wait instruction on the sign-in page.
 
-Recovery codes are one use. **Replace recovery codes** requires the current password plus a valid authenticator or remaining recovery code, deletes every prior code, creates a new set, audits the action, and invalidates other sessions. **Disable authenticator MFA** has the same two-factor reauthentication requirement and deletes all remaining codes. If an operator loses both the authenticator and every recovery code, do not bypass MFA informally; use a documented administrator identity-verification and recovery process. That administrator recovery workflow is still pending implementation.
+Recovery codes are one use. **Replace recovery codes** requires the current password plus a valid authenticator or remaining recovery code, deletes every prior code, creates a new set, audits the action, and invalidates other sessions. **Disable authenticator MFA** has the same two-factor reauthentication requirement and deletes all remaining codes.
+
+If an operator loses both the authenticator and every recovery code, an authorized user manager may use **Administrator MFA recovery** only from an MFA-authenticated session. The administrator must select an active MFA-enabled operator in the current company, type the exact username, re-enter the administrator's own password, select the documented identity-verification procedure, and enter a non-sensitive internal case reference. Self-recovery is prohibited, and only another company owner may recover an owner account. Rejected administrator passwords count toward normal lockout and create a failed authentication audit event.
+
+A successful administrator recovery atomically clears the authenticator secret, recovery codes, pending MFA challenges, and unused account-action links; revokes every target session; rotates the target security stamp; and writes target and acting-administrator audit records. If security email is configured, BrassLedger queues a notice to the registered address. Otherwise the administrator must notify the operator through the company's verified out-of-band procedure. The operator signs in again and must enroll a new factor before receiving business permissions when the role requires MFA. Never put identity documents, answers to verification questions, or other sensitive evidence in the case-reference field.
 
 Each company role has a **Require MFA** control in **Administration**. Administrator and Owner/CEO roles require MFA by default; custom roles can require it at creation, and an authorized role manager can change any active role later. Changing the requirement is audited and rotates every assigned operator's security stamp. A password-only operator assigned to a required role receives an authenticated but deliberately restricted session with no business permissions and is directed to **Account security** for enrollment. Company switching applies the destination company's role requirement. Once an account is assigned any active MFA-required role, self-service MFA disablement is unavailable until an authorized role manager removes every such requirement. This prevents a role assignment in a second company from being silently weakened.
 
@@ -54,9 +61,7 @@ Recovery responses are intentionally identical for eligible and unknown identifi
 
 Before using live confidential books in production, the remaining security work includes:
 
-- a controlled administrator MFA reset after documented identity verification
 - phishing-resistant passkeys where deployment requirements justify them
-- named device/session inventory instead of stamp-based all-other-session revocation
 - externalized key management where appropriate
 - operational backup and restore procedures
 - release approval discipline
@@ -85,6 +90,8 @@ Before upgrading a production installation:
 4. Start the new release and retain its startup/migration log.
 5. Confirm sign-in, company counts, ledger balances, open subledgers, and the latest payroll after startup.
 6. Keep the pre-upgrade backup until business-owner reconciliation is complete.
+
+Schema version `2026082509-named-user-sessions` introduces mandatory durable session identifiers. Cookies issued by an older application version do not contain those identifiers and are intentionally rejected after the upgraded application starts; plan for every operator to sign in again.
 
 The automated infrastructure suite exercises fresh creation, pre-ledger adoption, an independently missing ordered migration, refusal of a future version, and business-data retention on SQLite. CI also provisions an isolated PostgreSQL database and runs the creation and incremental-migration scenario there. Maintainers can run the PostgreSQL test locally by setting `BRASSLEDGER_TEST_POSTGRES` to an isolated database whose name contains `brassledger_test`; the test deliberately recreates that database's `public` schema.
 
