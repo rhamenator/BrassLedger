@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ri",
+  "capturedAtUtc": "2026-08-25T05:14:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://tax.ri.gov/sites/g/files/xkgbur541/files/2025-12/2026%20Withholding%20Tax%20Booklet.pdf", "title": "2026 Rhode Island Withholding Tax Booklet", "revision": "Updated 11/04/2025", "mediaType": "application/pdf", "sha256": "1e6883fa1a02cc03eaa0be3a62a8e8bf34b2a02ed5246fc8bcc7c54b0bab37c1", "bytes": 601205 }
+  ],
+  "employeeInputs": [
+    { "code": "withholdingAllowances", "source": "RI W-4", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "RI W-4", "dataType": "money", "minimum": 0 },
+    { "code": "exempt", "source": "RI W-4", "dataType": "boolean" },
+    { "code": "militarySpouseExempt", "source": "RI W-4", "dataType": "boolean" },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" }
+  ],
+  "calculation": {
+    "methods": ["PercentageMethod", "PublishedWageBracketTables"],
+    "filingStatusAffectsSchedule": false,
+    "periodicAllowanceValues": { "Weekly": 19.23, "Biweekly": 38.46, "Semimonthly": 41.67, "Monthly": 83.33, "Quarterly": 250, "Semiannual": 500, "Annual": 1000, "DailyOrMiscellaneous": 3.85 },
+    "allowanceZeroThresholds": { "WeeklyWagesOver": 5592.31, "BiweeklyWagesOver": 11184.62, "SemimonthlyWagesOver": 12116.67, "MonthlyWagesOver": 24233.33, "QuarterlyWagesOver": 72700, "SemiannualWagesOver": 145400, "AnnualWagesOver": 290800, "DailyWagesOver": 1118.46 },
+    "annualScheduleAllFilingStatuses": [
+      { "over": 0, "through": 82050, "baseTax": 0, "rate": 0.0375 },
+      { "over": 82050, "through": 186450, "baseTax": 3076.88, "rate": 0.0475 },
+      { "over": 186450, "baseTax": 8035.88, "rate": 0.0599 }
+    ],
+    "formula": "Apply allowance deduction unless gross wages exceed the period threshold; then apply the all-status period schedule and add any requested extra withholding.",
+    "supplementalWages": { "flatRate": 0.0599, "paidWithRegularWages": "Treat total as one regular payroll payment", "paidSeparatelyAlternative": "Add supplemental wages to preceding regular wages, calculate on aggregate, subtract tax withheld from preceding payroll", "items": ["Bonuses", "Commissions", "Overtime", "Accumulated sick leave", "Severance", "Awards", "Prizes", "Back pay", "Retroactive raises", "Nondeductible moving expenses", "Taxable fringe benefits", "Nonaccountable-plan expense allowances"] },
+    "rounding": { "generalInstructionLocated": false, "percentageTablesAndExampleUseCents": true },
+    "officialExample": { "frequency": "Weekly", "grossWages": 2195, "allowances": 1, "allowanceValue": 19.23, "taxableWages": 2175.77, "firstBracketTax": 59.18, "secondBracketExcess": 597.77, "secondBracketTax": 28.39, "withholding": 87.57 }
+  },
+  "residencyAndWorkRules": {
+    "mandatoryRule": "A Rhode Island employer withholds when wages are subject to federal withholding and any part is for services performed in Rhode Island.",
+    "nonresidentRule": "Rhode Island employment compensation remains subject to Rhode Island withholding regardless of employee residence.",
+    "residentOutsideRhodeIsland": "An out-of-state employer may voluntarily withhold Rhode Island tax as a convenience for a Rhode Island resident; the booklet does not impose mandatory resident-state withholding on wholly out-of-state services.",
+    "voluntaryWhenNotFederallySubject": true,
+    "reciprocalStates": [],
+    "militarySpouseExemptionAvailable": true,
+    "multiStateWorkLocationRequired": true,
+    "mixedLocationAllocationMethodLocated": false
+  },
+  "filing": {
+    "paymentFrequencies": [
+      { "condition": "Withholding at least $600 in any calendar month", "frequency": "Weekly", "due": "Next banking day after Sunday-Saturday week", "electronicRequired": true },
+      { "condition": "Withholding at least $50 but under $600 in a calendar month", "frequency": "Monthly", "due": "20 days after non-quarter-ending month; RI-941 due last day after quarter-ending month" },
+      { "condition": "Withholding under $50 in every calendar month", "frequency": "Quarterly", "due": "Last day of month after quarter" }
+    ],
+    "monthlyElectronicThreshold": 200,
+    "otherElectronicTriggers": ["Combined annual liability for all Division taxes at least $5,000", "Annual entity gross income over $100,000"],
+    "quarterlyReconciliation": { "form": "RI-941", "due": "Last day of month after quarter", "zeroQuarterEndReturnRequired": true },
+    "annualReconciliation": { "form": "RI W-3", "due": "January 31" },
+    "employeeStatements": "Federal W-2 compliance satisfies state statement requirement."
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": ["The complete payroll-period tables are checksummed but only the annual percentage schedule is transcribed.", "No general rounding rule or mixed-location allocation formula was located.", "The booklet's Part 4 aggregation method and Part 12 flat supplemental rate are both preserved; their precedence for separately identified payments requires executable review."],
+  "review": { "exact2026PublicationCaptured": true, "annualScheduleTranscribed": true, "allowancePhaseOutTranscribed": true, "supplementalMethodsTranscribed": true, "officialExampleTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "mixedLocationAllocationVerified": false, "roundingIndependentlyVerified": false, "supplementalPrecedenceVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import direct tables and test exemption phase-out, supplemental-method selection, filing-frequency transitions, and mixed-location treatment before activation." }
+}

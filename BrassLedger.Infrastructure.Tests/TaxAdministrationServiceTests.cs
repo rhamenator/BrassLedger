@@ -895,6 +895,54 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task RhodeIslandSourceCapture_PreservesExemptionPhaseOutAndAllStatusSchedule()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ri/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var calculation = capture.RootElement.GetProperty("calculation");
+
+        Assert.False(calculation.GetProperty("filingStatusAffectsSchedule").GetBoolean());
+        Assert.Equal(290800, calculation.GetProperty("allowanceZeroThresholds").GetProperty("AnnualWagesOver").GetInt32());
+        Assert.Equal(3, calculation.GetProperty("annualScheduleAllFilingStatuses").GetArrayLength());
+        Assert.Equal(0.0599m, calculation.GetProperty("supplementalWages").GetProperty("flatRate").GetDecimal());
+        Assert.Equal(87.57m, calculation.GetProperty("officialExample").GetProperty("withholding").GetDecimal());
+        Assert.False(capture.RootElement.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task SouthCarolinaSourceCapture_PreservesEquivalentMethodsAndNoTaxStateBranch()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/sc/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(5000, calculation.GetProperty("annualPersonalAllowance").GetInt32());
+        Assert.Equal(7500, calculation.GetProperty("standardDeduction").GetProperty("annualMaximum").GetInt32());
+        Assert.Equal(3, calculation.GetProperty("annualSubtractionMethod").GetArrayLength());
+        Assert.Equal(549.90m, calculation.GetProperty("officialExample").GetProperty("annualWithholding").GetDecimal());
+        Assert.Contains("without", root.GetProperty("residencyAndWorkRules").GetProperty("residentNoTaxStateRule").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task VermontSourceCapture_PreservesHourAllocationAndChildCareContribution()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/vt/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(5400, calculation.GetProperty("annualAllowanceValue").GetInt32());
+        Assert.Equal(5, calculation.GetProperty("annualSchedules").GetProperty("Married").GetArrayLength());
+        Assert.Equal(19.20m, root.GetProperty("residencyAndWorkRules").GetProperty("nonresidentOfficialExample").GetProperty("vermontWithholding").GetDecimal());
+        Assert.Equal(0.06m, calculation.GetProperty("supplementalAndNonwage").GetProperty("nonqualifiedDeferredCompensationRate").GetDecimal());
+        Assert.Equal(0.0044m, root.GetProperty("otherPayrollTaxes").GetProperty("childCareContribution").GetProperty("rate").GetDecimal());
+        Assert.Equal(0.0011m, root.GetProperty("otherPayrollTaxes").GetProperty("childCareContribution").GetProperty("maximumEmployeeWageRate").GetDecimal());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();
