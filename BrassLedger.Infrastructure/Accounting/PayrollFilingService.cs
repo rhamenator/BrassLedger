@@ -19,6 +19,7 @@ public sealed class PayrollFilingService(
     private const string Form941XSource = "https://www.irs.gov/instructions/i941x";
     private const string Form940Source = "https://www.irs.gov/forms-pubs/about-form-940";
     private const string W2Source = "https://www.irs.gov/instructions/iw2w3";
+    private const string W2cSource = "https://www.irs.gov/instructions/iw2w3";
 
     public async Task<IReadOnlyList<PayrollFilingSnapshot>> GetFilingsAsync(CancellationToken cancellationToken = default)
     {
@@ -163,6 +164,104 @@ public sealed class PayrollFilingService(
         AddAudit(db, companyId, "payroll-filing-correction.approved", nameof(PayrollFilingCorrection), correction.Id, new { correction.OriginalPayrollFilingId, correction.Sequence, correction.Process, correction.TaxYear, correction.Quarter, correction.CorrectedSourceDigestSha256 });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The Form 941-X correction changed while it was being approved. Refresh and try again."); }
+        return TransactionResult.Success(correction.Id);
+    }
+
+    public async Task<TransactionResult> SaveW2CorrectionDraftAsync(SaveW2CorrectionDraftRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollPrepare) || !HasPermission(BrassLedgerPermissions.PayrollSensitiveData)) return TransactionResult.Failure("You are not authorized to prepare protected payroll filing corrections.");
+        var explanation = request.Explanation?.Trim() ?? string.Empty;
+        var evidence = request.EmployeeStatementEvidenceReference?.Trim() ?? string.Empty;
+        if (explanation.Length < 20) return TransactionResult.Failure("Forms W-2c/W-3c require a detailed correction explanation of at least 20 characters.");
+        if (request.DiscoveredOn == default || request.DiscoveredOn > DateOnly.FromDateTime(DateTime.Today)) return TransactionResult.Failure("Enter the actual correction discovery date; it cannot be in the future.");
+        if (!request.EmployeeStatementsFurnished || evidence.Length < 5) return TransactionResult.Failure("Certify that corrected employee statements were or will be furnished and enter the retained evidence reference.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var original = await db.PayrollFilings.AsNoTracking().SingleOrDefaultAsync(item => item.Id == request.OriginalPayrollFilingId && item.CompanyId == companyId && item.FormCode == "W2" && item.ApprovedSourceDigestSha256 != "", cancellationToken);
+        if (original is null) return TransactionResult.Failure("Select a Form W-2/W-3 filing with an approved immutable baseline from this company.");
+        var source = await LoadSourceAsync(db, companyId, original.PeriodStart, original.PeriodEnd, cancellationToken);
+        if (source.Runs.Count == 0) return TransactionResult.Failure("Corrected posted payroll does not contain any runs for this filing year.");
+        var current = BuildW2(source, original.TaxYear);
+        var priorApproved = await db.PayrollFilingCorrections.AsNoTracking().Where(item => item.CompanyId == companyId && item.OriginalPayrollFilingId == original.Id && item.FormCode == "W-2c/W-3c" && item.Status == "Approved").OrderBy(item => item.Sequence).ToListAsync(cancellationToken);
+        var originalPackage = JsonSerializer.Deserialize<W2PackageData>(original.ApprovedDataJson) ?? new W2PackageData();
+        var baselineEmployees = (originalPackage.Employees ?? []).ToDictionary(item => item.EmployeeId);
+        foreach (var prior in priorApproved)
+            foreach (var employee in JsonSerializer.Deserialize<W2cPackageData>(prior.DataJson)?.Employees ?? [])
+                baselineEmployees[employee.CorrectInformation.EmployeeId] = employee.CorrectInformation;
+        var currentEmployees = (current.Employees ?? []).ToDictionary(item => item.EmployeeId);
+        var changes = baselineEmployees.Keys.Union(currentEmployees.Keys).OrderBy(id => id).Select(id =>
+        {
+            var previous = baselineEmployees.GetValueOrDefault(id) ?? ZeroW2Amounts(currentEmployees[id]);
+            var correct = currentEmployees.GetValueOrDefault(id) ?? ZeroW2Amounts(previous);
+            var federalOrIdentityChanged = FederalOrIdentityChanged(previous, correct);
+            var stateLocalChanged = CanonicalW2Jurisdictions(previous) != CanonicalW2Jurisdictions(correct);
+            var addressChanged = previous.AddressLine1 != correct.AddressLine1 || previous.AddressLine2 != correct.AddressLine2 || previous.PostalCode != correct.PostalCode;
+            var submit = federalOrIdentityChanged;
+            var reason = submit ? "Federal wage/tax or employee identity correction" : stateLocalChanged ? "State/local-only correction; do not submit Copy A to SSA" : "Employee-address-only correction; do not submit Copy A to SSA";
+            return new { Changed = federalOrIdentityChanged || stateLocalChanged || addressChanged, Item = new W2cEmployeeData(previous, correct, submit, reason) };
+        }).Where(item => item.Changed).Select(item => item.Item).ToArray();
+        if (changes.Length == 0) return TransactionResult.Failure("Corrected posted payroll matches the latest approved wage statement values; there is no W-2c/W-3c difference to prepare.");
+        PayrollFilingCorrection correction;
+        if (request.CorrectionId.HasValue)
+        {
+            correction = await db.PayrollFilingCorrections.SingleOrDefaultAsync(item => item.Id == request.CorrectionId && item.CompanyId == companyId && item.FormCode == "W-2c/W-3c", cancellationToken) ?? new PayrollFilingCorrection();
+            if (correction.Id == Guid.Empty) return TransactionResult.Failure("W-2c/W-3c draft not found.");
+            if (correction.Status != "Draft" || correction.OriginalPayrollFilingId != original.Id) return TransactionResult.Failure("Only the selected W-2c/W-3c draft can be regenerated.");
+            if (!string.Equals(correction.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The W-2c/W-3c draft changed after it was opened. Refresh and try again.");
+        }
+        else
+        {
+            if (await db.PayrollFilingCorrections.AnyAsync(item => item.CompanyId == companyId && item.OriginalPayrollFilingId == original.Id && item.FormCode == "W-2c/W-3c" && item.Status == "Draft", cancellationToken)) return TransactionResult.Failure("A W-2c/W-3c draft already exists for this filing. Regenerate that draft instead.");
+            var latestSequence = await db.PayrollFilingCorrections.Where(item => item.CompanyId == companyId && item.OriginalPayrollFilingId == original.Id && item.FormCode == "W-2c/W-3c").Select(item => (int?)item.Sequence).MaxAsync(cancellationToken) ?? 0;
+            correction = new PayrollFilingCorrection { Id = Guid.NewGuid(), CompanyId = companyId, OriginalPayrollFilingId = original.Id, Sequence = latestSequence + 1, TaxYear = original.TaxYear, Quarter = 0, FormCode = "W-2c/W-3c" };
+            db.PayrollFilingCorrections.Add(correction);
+        }
+        var previousTotals = SumW2(changes.Select(item => item.PreviouslyReported));
+        var correctTotals = SumW2(changes.Select(item => item.CorrectInformation));
+        var data = new W2cPackageData(TaxYear: original.TaxYear, CorrectionSequence: correction.Sequence, DiscoveredOn: request.DiscoveredOn,
+            EmployerLegalName: current.EmployerLegalName, EmployerEin: current.EmployerEin, Employees: changes,
+            W3cPreviousBox1Total: previousTotals[0], W3cCorrectBox1Total: correctTotals[0], W3cPreviousBox2Total: previousTotals[1], W3cCorrectBox2Total: correctTotals[1],
+            W3cPreviousBox3Total: previousTotals[2], W3cCorrectBox3Total: correctTotals[2], W3cPreviousBox4Total: previousTotals[3], W3cCorrectBox4Total: correctTotals[3],
+            W3cPreviousBox5Total: previousTotals[4], W3cCorrectBox5Total: correctTotals[4], W3cPreviousBox6Total: previousTotals[5], W3cCorrectBox6Total: correctTotals[5],
+            Explanation: explanation, EmployeeStatementsFurnished: true, EmployeeStatementEvidenceReference: evidence);
+        correction.Process = "Correction"; correction.DiscoveredOn = request.DiscoveredOn; correction.Explanation = explanation;
+        correction.WageStatementsCorrected = true; correction.WageStatementEvidenceReference = evidence; correction.Status = "Draft";
+        correction.DataJson = JsonSerializer.Serialize(data); correction.CorrectedSourceDigestSha256 = BuildSourceDigest(source); correction.OfficialSourceUrl = W2cSource; correction.ContentVersion = "2026-W2C-W3C-1";
+        correction.PreparedByUserId = ResolveUserId(); correction.PreparedAtUtc = DateTimeOffset.UtcNow; correction.ApprovedByUserId = null; correction.ApprovedAtUtc = null; correction.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAudit(db, companyId, "payroll-w2c-correction.draft.generated", nameof(PayrollFilingCorrection), correction.Id, new { correction.OriginalPayrollFilingId, correction.Sequence, correction.TaxYear, employeeCount = changes.Length, ssaSubmissionCount = changes.Count(item => item.SubmitToSsa), correction.CorrectedSourceDigestSha256 });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The W-2c/W-3c draft changed while it was being regenerated. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("A conflicting W-2c/W-3c draft or sequence already exists for this filing."); }
+        return TransactionResult.Success(correction.Id);
+    }
+
+    public Task<TransactionResult> ApproveW2CorrectionAsync(ApproveW2CorrectionRequest request, CancellationToken cancellationToken = default) => ChangeW2CorrectionStatusAsync(request.CorrectionId, request.ConcurrencyToken, true, "", cancellationToken);
+    public Task<TransactionResult> VoidW2CorrectionAsync(VoidW2CorrectionRequest request, CancellationToken cancellationToken = default) => ChangeW2CorrectionStatusAsync(request.CorrectionId, request.ConcurrencyToken, false, request.Reason, cancellationToken);
+
+    private async Task<TransactionResult> ChangeW2CorrectionStatusAsync(Guid id, string token, bool approve, string reason, CancellationToken cancellationToken)
+    {
+        var permission = approve ? BrassLedgerPermissions.PayrollApprove : BrassLedgerPermissions.PayrollReverse;
+        if (!HasPermission(permission) || !HasPermission(BrassLedgerPermissions.PayrollSensitiveData)) return TransactionResult.Failure($"You are not authorized to {(approve ? "approve" : "void")} protected wage statement corrections.");
+        reason = reason?.Trim() ?? string.Empty;
+        if (!approve && reason.Length < 10) return TransactionResult.Failure("A meaningful W-2c/W-3c void reason of at least 10 characters is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var correction = await db.PayrollFilingCorrections.SingleOrDefaultAsync(item => item.Id == id && item.CompanyId == companyId && item.FormCode == "W-2c/W-3c", cancellationToken);
+        if (correction is null) return TransactionResult.Failure("W-2c/W-3c correction not found.");
+        if (correction.Status != "Draft") return TransactionResult.Failure("Only a draft W-2c/W-3c correction can be changed.");
+        if (!string.Equals(correction.ConcurrencyToken, token, StringComparison.Ordinal)) return TransactionResult.Failure("The W-2c/W-3c correction changed after it was opened. Refresh and try again.");
+        if (approve)
+        {
+            var original = await db.PayrollFilings.AsNoTracking().SingleAsync(item => item.Id == correction.OriginalPayrollFilingId && item.CompanyId == companyId, cancellationToken);
+            var source = await LoadSourceAsync(db, companyId, original.PeriodStart, original.PeriodEnd, cancellationToken);
+            if (!string.Equals(BuildSourceDigest(source), correction.CorrectedSourceDigestSha256, StringComparison.Ordinal)) return TransactionResult.Failure("Posted payroll changed after this W-2c/W-3c draft was generated. Regenerate and review it before approval.");
+            correction.Status = "Approved"; correction.ApprovedByUserId = ResolveUserId(); correction.ApprovedAtUtc = DateTimeOffset.UtcNow;
+        }
+        else { correction.Status = "Voided"; correction.VoidedByUserId = ResolveUserId(); correction.VoidedAtUtc = DateTimeOffset.UtcNow; correction.VoidReason = reason; }
+        correction.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAudit(db, companyId, approve ? "payroll-w2c-correction.approved" : "payroll-w2c-correction.voided", nameof(PayrollFilingCorrection), correction.Id, new { correction.OriginalPayrollFilingId, correction.Sequence, correction.CorrectedSourceDigestSha256, correction.VoidReason });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The W-2c/W-3c correction changed while it was being saved. Refresh and try again."); }
         return TransactionResult.Success(correction.Id);
     }
 
@@ -354,6 +453,33 @@ public sealed class PayrollFilingService(
             W3Box1Total: Round(employees.Sum(item => item.Box1WagesTipsOtherCompensation)), W3Box2Total: Round(employees.Sum(item => item.Box2FederalIncomeTaxWithheld)),
             W3Box3Total: Round(employees.Sum(item => item.Box3SocialSecurityWages)), W3Box4Total: Round(employees.Sum(item => item.Box4SocialSecurityTaxWithheld)),
             W3Box5Total: Round(employees.Sum(item => item.Box5MedicareWagesAndTips)), W3Box6Total: Round(employees.Sum(item => item.Box6MedicareTaxWithheld)));
+    }
+
+    private static W2EmployeeData ZeroW2Amounts(W2EmployeeData source) => source with
+    {
+        Box1WagesTipsOtherCompensation = 0, Box2FederalIncomeTaxWithheld = 0,
+        Box3SocialSecurityWages = 0, Box4SocialSecurityTaxWithheld = 0,
+        Box5MedicareWagesAndTips = 0, Box6MedicareTaxWithheld = 0,
+        StateAndLocalAmounts = []
+    };
+
+    private static bool FederalOrIdentityChanged(W2EmployeeData previous, W2EmployeeData correct) =>
+        previous.EmployeeNumber != correct.EmployeeNumber || previous.EmployeeName != correct.EmployeeName ||
+        Digits(previous.SocialSecurityNumber) != Digits(correct.SocialSecurityNumber) ||
+        previous.Box1WagesTipsOtherCompensation != correct.Box1WagesTipsOtherCompensation ||
+        previous.Box2FederalIncomeTaxWithheld != correct.Box2FederalIncomeTaxWithheld ||
+        previous.Box3SocialSecurityWages != correct.Box3SocialSecurityWages ||
+        previous.Box4SocialSecurityTaxWithheld != correct.Box4SocialSecurityTaxWithheld ||
+        previous.Box5MedicareWagesAndTips != correct.Box5MedicareWagesAndTips ||
+        previous.Box6MedicareTaxWithheld != correct.Box6MedicareTaxWithheld;
+
+    private static string CanonicalW2Jurisdictions(W2EmployeeData value) => JsonSerializer.Serialize(value.StateAndLocalAmounts.OrderBy(item => item.JurisdictionCode).ThenBy(item => item.JurisdictionName));
+    private static decimal[] SumW2(IEnumerable<W2EmployeeData> employees)
+    {
+        var values = employees.ToArray();
+        return [Round(values.Sum(item => item.Box1WagesTipsOtherCompensation)), Round(values.Sum(item => item.Box2FederalIncomeTaxWithheld)),
+            Round(values.Sum(item => item.Box3SocialSecurityWages)), Round(values.Sum(item => item.Box4SocialSecurityTaxWithheld)),
+            Round(values.Sum(item => item.Box5MedicareWagesAndTips)), Round(values.Sum(item => item.Box6MedicareTaxWithheld))];
     }
 
     private static bool Is941Obligation(string code) => code is "US-FIT" or "FEDERAL-ADDITIONAL-WITHHOLDING" or "US-OASDI-EMPLOYEE" or "US-OASDI-EMPLOYER" or "US-MEDICARE-EMPLOYEE" or "US-MEDICARE-EMPLOYER" or "US-ADDITIONAL-MEDICARE";

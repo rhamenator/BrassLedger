@@ -1338,6 +1338,40 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.NotEmpty(w2Employees.EnumerateArray());
         Assert.Equal("123456789", w2Employees.EnumerateArray().First().GetProperty("SocialSecurityNumber").GetString());
         Assert.Equal(w2Filing.Data.GetProperty("W3Box1Total").GetDecimal(), w2Employees.EnumerateArray().Sum(item => item.GetProperty("Box1WagesTipsOtherCompensation").GetDecimal()));
+        Assert.True((await filings.ApproveAsync(new ApprovePayrollFilingRequest(w2Filing.Id, w2Filing.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var changedEmployee = await db.Employees.SingleAsync(item => item.Id == employee.Id);
+            changedEmployee.LastName = "Corrected";
+            changedEmployee.AddressLine2 = "Suite 300";
+            changedEmployee.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            await db.SaveChangesAsync();
+        }
+        var w2cRequest = new SaveW2CorrectionDraftRequest(null, w2Filing.Id, new DateOnly(2026, 8, 25), "Correct the employee name and address retained in the approved wage statement baseline.", true, "EMPLOYEE-W2C-DELIVERY-20260825");
+        var w2cDraft = await filings.SaveW2CorrectionDraftAsync(w2cRequest);
+        Assert.True(w2cDraft.Succeeded, w2cDraft.ErrorMessage);
+        var w2c = await filings.GetCorrectionAsync(w2cDraft.Id!.Value);
+        Assert.NotNull(w2c); Assert.Equal("W-2c/W-3c", w2c!.FormCode); Assert.Equal(0, w2c.Quarter); Assert.Equal("Draft", w2c.Status);
+        var correctedEmployee = Assert.Single(w2c.Data.GetProperty("Employees").EnumerateArray());
+        Assert.True(correctedEmployee.GetProperty("SubmitToSsa").GetBoolean());
+        Assert.Equal("Corrected", correctedEmployee.GetProperty("CorrectInformation").GetProperty("EmployeeName").GetString()!.Split(' ').Last());
+        Assert.Equal(w2c.Data.GetProperty("W3cCorrectBox1Total").GetDecimal(), correctedEmployee.GetProperty("CorrectInformation").GetProperty("Box1WagesTipsOtherCompensation").GetDecimal());
+        Assert.True((await filings.ApproveW2CorrectionAsync(new ApproveW2CorrectionRequest(w2c.Id, w2c.ConcurrencyToken))).Succeeded);
+        Assert.False((await filings.SaveW2CorrectionDraftAsync(w2cRequest)).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var addressCorrection = await db.Employees.SingleAsync(item => item.Id == employee.Id);
+            addressCorrection.AddressLine2 = "Suite 301";
+            addressCorrection.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            await db.SaveChangesAsync();
+        }
+        var addressOnlyDraft = await filings.SaveW2CorrectionDraftAsync(w2cRequest with { Explanation = "Correct only the employee delivery address after the prior identity correction." });
+        Assert.True(addressOnlyDraft.Succeeded, addressOnlyDraft.ErrorMessage);
+        var addressOnly = await filings.GetCorrectionAsync(addressOnlyDraft.Id!.Value);
+        Assert.Equal(2, addressOnly!.Sequence);
+        var addressOnlyEmployee = Assert.Single(addressOnly.Data.GetProperty("Employees").EnumerateArray());
+        Assert.False(addressOnlyEmployee.GetProperty("SubmitToSsa").GetBoolean());
+        Assert.Contains("address-only", addressOnlyEmployee.GetProperty("SubmissionReason").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

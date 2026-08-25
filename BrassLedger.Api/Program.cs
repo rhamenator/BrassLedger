@@ -502,7 +502,8 @@ api.MapGet("/payroll-filing-corrections/{correctionId:guid}", async (Guid correc
 api.MapGet("/payroll-filing-corrections/{correctionId:guid}/data.json", async (Guid correctionId, IPayrollFilingService service, CancellationToken cancellationToken) =>
 {
     var correction = await service.GetCorrectionAsync(correctionId, cancellationToken);
-    return correction is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(correction.Data.GetRawText()), "application/json", $"payroll-941x-{correction.TaxYear}-q{correction.Quarter}-correction-{correction.Sequence}.json");
+    var fileName = correction?.FormCode == "W-2c/W-3c" ? $"payroll-w2c-w3c-{correction.TaxYear}-correction-{correction.Sequence}.json" : $"payroll-941x-{correction?.TaxYear}-q{correction?.Quarter}-correction-{correction?.Sequence}.json";
+    return correction is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(correction.Data.GetRawText()), "application/json", fileName);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 api.MapPost("/payroll-filing-corrections/941x/drafts", async (SaveForm941CorrectionDraftRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
 {
@@ -517,6 +518,21 @@ api.MapPost("/payroll-filing-corrections/941x/approve", async (ApproveForm941Cor
 api.MapPost("/payroll-filing-corrections/941x/void", async (VoidForm941CorrectionRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
 {
     var result = await service.VoidForm941CorrectionAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollFilingCorrection"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/payroll-filing-corrections/w2c/drafts", async (SaveW2CorrectionDraftRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveW2CorrectionDraftAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/payroll-filing-corrections/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollFilingCorrection"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/payroll-filing-corrections/w2c/approve", async (ApproveW2CorrectionRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ApproveW2CorrectionAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollFilingCorrection"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApprovePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/payroll-filing-corrections/w2c/void", async (VoidW2CorrectionRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.VoidW2CorrectionAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollFilingCorrection"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 api.MapGet("/payroll-close-periods", async (IPayrollFilingService service, CancellationToken cancellationToken) => Results.Ok(await service.GetClosePeriodsAsync(cancellationToken)))

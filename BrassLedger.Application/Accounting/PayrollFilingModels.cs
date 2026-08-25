@@ -14,6 +14,12 @@ public sealed record SaveForm941CorrectionDraftRequest(
     string WageStatementEvidenceReference, string ConcurrencyToken = "");
 public sealed record ApproveForm941CorrectionRequest(Guid CorrectionId, string ConcurrencyToken);
 public sealed record VoidForm941CorrectionRequest(Guid CorrectionId, string Reason, string ConcurrencyToken);
+public sealed record SaveW2CorrectionDraftRequest(
+    Guid? CorrectionId, Guid OriginalPayrollFilingId, DateOnly DiscoveredOn,
+    string Explanation, bool EmployeeStatementsFurnished,
+    string EmployeeStatementEvidenceReference, string ConcurrencyToken = "");
+public sealed record ApproveW2CorrectionRequest(Guid CorrectionId, string ConcurrencyToken);
+public sealed record VoidW2CorrectionRequest(Guid CorrectionId, string Reason, string ConcurrencyToken);
 
 public sealed record PayrollFilingSnapshot(
     Guid Id, string FormCode, int TaxYear, int? Quarter, DateOnly PeriodStart, DateOnly PeriodEnd,
@@ -79,6 +85,24 @@ public sealed record W2PackageData(
     decimal W3Box4Total = 0, decimal W3Box5Total = 0, decimal W3Box6Total = 0,
     bool SsaEFileTransmissionImplemented = false, bool RequiresProfessionalReview = true);
 
+public sealed record W2cEmployeeData(
+    W2EmployeeData PreviouslyReported, W2EmployeeData CorrectInformation,
+    bool SubmitToSsa, string SubmissionReason);
+public sealed record W2cPackageData(
+    string Form = "W-2c/W-3c", string Revision = "2026-01", int TaxYear = 0,
+    int CorrectionSequence = 0, DateOnly DiscoveredOn = default,
+    string EmployerLegalName = "", string EmployerEin = "",
+    IReadOnlyList<W2cEmployeeData>? Employees = null,
+    decimal W3cPreviousBox1Total = 0, decimal W3cCorrectBox1Total = 0,
+    decimal W3cPreviousBox2Total = 0, decimal W3cCorrectBox2Total = 0,
+    decimal W3cPreviousBox3Total = 0, decimal W3cCorrectBox3Total = 0,
+    decimal W3cPreviousBox4Total = 0, decimal W3cCorrectBox4Total = 0,
+    decimal W3cPreviousBox5Total = 0, decimal W3cCorrectBox5Total = 0,
+    decimal W3cPreviousBox6Total = 0, decimal W3cCorrectBox6Total = 0,
+    string Explanation = "", bool EmployeeStatementsFurnished = false,
+    string EmployeeStatementEvidenceReference = "",
+    bool SsaEfw2cTransmissionImplemented = false, bool RequiresProfessionalReview = true);
+
 public interface IPayrollFilingService
 {
     Task<IReadOnlyList<PayrollFilingSnapshot>> GetFilingsAsync(CancellationToken cancellationToken = default);
@@ -94,4 +118,7 @@ public interface IPayrollFilingService
     Task<TransactionResult> SaveForm941CorrectionDraftAsync(SaveForm941CorrectionDraftRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApproveForm941CorrectionAsync(ApproveForm941CorrectionRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> VoidForm941CorrectionAsync(VoidForm941CorrectionRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveW2CorrectionDraftAsync(SaveW2CorrectionDraftRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ApproveW2CorrectionAsync(ApproveW2CorrectionRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> VoidW2CorrectionAsync(VoidW2CorrectionRequest request, CancellationToken cancellationToken = default);
 }
