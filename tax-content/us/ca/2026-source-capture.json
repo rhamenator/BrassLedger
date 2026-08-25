@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0",
+  "jurisdictionId": "jurisdiction-us-ca",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "capturedAtUtc": "2026-08-25T03:00:00Z",
+  "sources": [
+    {
+      "url": "https://edd.ca.gov/siteassets/files/pdf_pub_ctr/26methb.pdf",
+      "title": "California 2026 Withholding Schedules, Method B — Exact Calculation Method",
+      "sha256": "145b570a333f22ff0b4c230ef8ee04bd6f5dc89f8351eb134754b4820f6c7047"
+    },
+    {
+      "url": "https://edd.ca.gov/en/payroll_taxes/rates_and_withholding/",
+      "title": "California contribution rates and withholding schedules"
+    }
+  ],
+  "capturedRules": {
+    "methods": ["Method A wage-bracket tables", "Method B exact calculation"],
+    "computerMethod": "Method B",
+    "requiredInputs": ["payrollFrequency", "filingStatus", "regularAllowances", "estimatedDeductionAllowances", "additionalWithholding"],
+    "separatePayrollTaxes": [
+      { "tax": "UI", "2026Schedule": "F+", "wageBase": 7000, "employerSpecificRate": true },
+      { "tax": "ETT", "rate": 0.001, "wageBase": 7000 },
+      { "tax": "SDI", "rate": 0.013, "wageBase": null, "employeeWithholding": true }
+    ],
+    "specialRules": [
+      "Method A is limited to wages below $1 million and is not the computer calculation method.",
+      "Estimated-deduction allowances reduce wages separately when DE 4 treatment applies.",
+      "Married employees with employed spouses may elect single treatment or additional withholding."
+    ]
+  },
+  "review": { "formulaTranscribed": false, "tablesTranscribed": false, "activationAllowed": false }
+}

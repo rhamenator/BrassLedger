@@ -328,6 +328,7 @@ public sealed class Employee
     public string PayType { get; set; } = string.Empty;
     public decimal MonthlyBasePay { get; set; }
     public string FilingStatus { get; set; } = "Single";
+    public string PayrollFrequency { get; set; } = "Biweekly";
     public int Allowances { get; set; }
     public decimal AdditionalWithholding { get; set; }
     public decimal PreTaxBenefitDeductions { get; set; }
@@ -399,6 +400,7 @@ public sealed class PayrollRunEmployeeLine
     public string ResidenceState { get; set; } = string.Empty;
     public string ResidenceCity { get; set; } = string.Empty;
     public string FilingStatus { get; set; } = string.Empty;
+    public string PayrollFrequency { get; set; } = string.Empty;
     public decimal GrossPay { get; set; }
     public decimal PreTaxDeductions { get; set; }
     public decimal EmployeeWithholdings { get; set; }

@@ -129,6 +129,78 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.True(validation.Succeeded, string.Join("; ", validation.Errors));
     }
 
+    [Fact]
+    public async Task ImportTaxContentDocumentAsync_ImportsUtahPackageAsInactiveDraft()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<ITaxAdministrationService>();
+        var packagePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ut/2026-04-01.json"));
+
+        var result = await service.ImportTaxContentDocumentAsync(await File.ReadAllTextAsync(packagePath));
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        var snapshot = await service.GetSnapshotAsync();
+        var package = Assert.Single(snapshot.Packages, item => item.Id == result.SavedId);
+        var rule = Assert.Single(snapshot.RuleSets, item => item.TaxContentPackageId == package.Id);
+        Assert.Equal("Draft", package.Status);
+        Assert.Equal("allowance-phaseout", rule.CalculationMethod);
+        Assert.False(rule.IsActive);
+        Assert.Equal(4, rule.FieldDefinitions.Count);
+        Assert.Equal(2, rule.FormRequirements.Count);
+        Assert.Equal(6, rule.TestCases.Count);
+        Assert.Contains(rule.Parameters, parameter => parameter.ParameterCode == "daily-married-threshold" && parameter.NumericValue == 72m);
+        var validation = await service.ValidateContentPackageAsync(package.Id);
+        Assert.True(validation.Succeeded, string.Join("; ", validation.Errors));
+    }
+
+    [Fact]
+    public async Task StateReferenceCatalog_CoversEveryStateAndDcWithStableRelationships()
+    {
+        var catalogPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/state-reference-2026.json"));
+        using var catalog = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(catalogPath));
+        var jurisdictions = catalog.RootElement.GetProperty("jurisdictions").EnumerateArray().ToArray();
+
+        Assert.Equal(51, jurisdictions.Length);
+        Assert.Equal(51, jurisdictions.Select(item => item.GetProperty("id").GetString()).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(51, jurisdictions.Select(item => item.GetProperty("code").GetString()).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(15, jurisdictions.Count(item => item.GetProperty("pit").GetProperty("type").GetString() == "flat"));
+        Assert.Equal(27, jurisdictions.Count(item => item.GetProperty("pit").GetProperty("type").GetString() == "progressive"));
+        Assert.Equal(9, jurisdictions.Count(item => item.GetProperty("pit").GetProperty("type").GetString() == "none"));
+        Assert.All(jurisdictions, item => Assert.Contains(item.GetProperty("relationships").EnumerateArray(), relationship => relationship.GetProperty("type").GetString() == "ContainedBy" && relationship.GetProperty("targetJurisdictionId").GetString() == "jurisdiction-us"));
+        Assert.Equal("DraftCaptured", jurisdictions.Single(item => item.GetProperty("code").GetString() == "UT").GetProperty("formulaCoverage").GetString());
+        Assert.Equal("OfficialSourceCaptured", jurisdictions.Single(item => item.GetProperty("code").GetString() == "ME").GetProperty("formulaCoverage").GetString());
+
+        foreach (var jurisdiction in jurisdictions.Where(item => item.GetProperty("formulaCoverage").GetString() == "OfficialSourceCaptured"))
+        {
+            var relativePath = jurisdiction.GetProperty("sourceCapture").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(relativePath));
+            var sourceCapturePath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(catalogPath)!, relativePath!));
+            Assert.True(File.Exists(sourceCapturePath), $"Missing source capture for {jurisdiction.GetProperty("code").GetString()}: {sourceCapturePath}");
+            using var sourceCapture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(sourceCapturePath));
+            Assert.Equal(jurisdiction.GetProperty("id").GetString(), sourceCapture.RootElement.GetProperty("jurisdictionId").GetString());
+            Assert.False(sourceCapture.RootElement.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public async Task MaineSourceCapture_PreservesOfficialFormulaAndActivationBlockers()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/me/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var rules = root.GetProperty("capturedRules");
+
+        Assert.Equal("OfficialSourceCaptured", root.GetProperty("status").GetString());
+        Assert.Equal(5300, rules.GetProperty("allowanceDeduction").GetInt32());
+        Assert.Equal(3, rules.GetProperty("annualWithholdingSchedules").GetProperty("single").GetArrayLength());
+        Assert.Equal(3, rules.GetProperty("annualWithholdingSchedules").GetProperty("married").GetArrayLength());
+        Assert.Equal(3, rules.GetProperty("officialExamples").GetArrayLength());
+        Assert.True(root.GetProperty("review").GetProperty("formulaTranscribed").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brassledger.local/schemas/tax-content-package-v1.schema.json",
+  "title": "BrassLedger Tax Content Package",
+  "type": "object",
+  "required": ["schemaVersion", "packageCode", "version", "effectiveOn", "jurisdiction", "sources", "rules"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "packageCode": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "effectiveOn": { "type": "string", "format": "date" },
+    "effectiveThrough": { "type": ["string", "null"], "format": "date" },
+    "source": { "type": "string", "format": "uri" },
+    "changeSummary": { "type": "string" },
+    "jurisdiction": {
+      "type": "object",
+      "required": ["code", "name", "type", "countryCode"],
+      "properties": {
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "enum": ["Federal", "State", "County", "City", "SchoolDistrict", "SpecialDistrict", "Tribal"] },
+        "countryCode": { "type": "string" },
+        "parentCode": { "type": ["string", "null"] },
+        "geoid": { "type": ["string", "null"] },
+        "aliases": { "type": "array", "items": { "type": "string" } }
+        ,"lifecycle": {
+          "type": "object",
+          "properties": {
+            "status": { "enum": ["Active", "Proposed", "Historic", "Disputed", "Dissolved"] },
+            "validFrom": { "type": ["string", "null"], "format": "date" },
+            "validThrough": { "type": ["string", "null"], "format": "date" }
+          },
+          "additionalProperties": true
+        },
+        "relationships": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type", "targetJurisdictionId", "validFrom"],
+            "properties": {
+              "type": { "enum": ["ContainedBy", "TaxAdministeredBy", "Overlaps", "SuccessorTo", "PredecessorTo", "DisputedBy"] },
+              "targetJurisdictionId": { "type": "string" },
+              "validFrom": { "type": "string", "format": "date" },
+              "validThrough": { "type": ["string", "null"], "format": "date" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["url", "title", "capturedAtUtc", "sha256"],
+        "properties": {
+          "url": { "type": "string", "format": "uri" },
+          "title": { "type": "string" },
+          "publishedOrRevisedOn": { "type": ["string", "null"], "format": "date" },
+          "capturedAtUtc": { "type": "string", "format": "date-time" },
+          "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "businessRules": { "type": "array", "items": { "type": "object", "required": ["code", "description"], "additionalProperties": true } },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["code", "jurisdictionCode", "jurisdictionName", "jurisdictionType", "taxType", "calculationMethod", "withholdingFrequency", "parameters", "tests"],
+        "properties": {
+          "code": { "type": "string" },
+          "jurisdictionCode": { "type": "string" },
+          "jurisdictionName": { "type": "string" },
+          "jurisdictionType": { "type": "string" },
+          "taxType": { "type": "string" },
+          "calculationMethod": { "type": "string" },
+          "withholdingFrequency": { "type": "string" },
+          "isEmployerSpecific": { "type": "boolean" },
+          "applicability": { "type": "object", "additionalProperties": true },
+          "fields": { "type": "array", "items": { "type": "object", "required": ["code", "label", "dataType"], "additionalProperties": true } },
+          "parameters": { "type": "array", "items": { "type": "object", "required": ["code", "label"], "additionalProperties": true } },
+          "brackets": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+          "forms": { "type": "array", "items": { "type": "object", "required": ["code", "name"], "additionalProperties": true } },
+          "tests": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["name", "inputJson", "expectedOutputJson"] } }
+        },
+        "additionalProperties": true
+      }
+    },
+    "extensions": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": true
+}

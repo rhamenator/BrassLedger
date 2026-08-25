@@ -186,7 +186,8 @@ public sealed class BusinessWorkspaceService(
                     x.PostTaxBenefitDeductions,
                     string.IsNullOrWhiteSpace(x.ResidenceState) ? x.State : x.ResidenceState,
                     x.ResidenceCity,
-                    x.WorkCity)).ToArray(),
+                    x.WorkCity,
+                    x.PayrollFrequency)).ToArray(),
                 JurisdictionRules: payrollJurisdictionRules.Select(rule => new PayrollJurisdictionRuleSnapshot(rule.Id, rule.ResidenceJurisdiction, rule.WorkJurisdiction, rule.ExemptWorkWithholding, rule.ResidentCreditRate, rule.IsActive, rule.Notes)).ToArray()),
             Projects: new ProjectsWorkspace(
                 OpenJobs: projectJobs.Count(x => x.Status is "Open" or "Billing"),

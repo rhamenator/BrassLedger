@@ -1,0 +1,123 @@
+{
+  "$schema": "../../../schema/tax-content-package-v1.schema.json",
+  "schemaVersion": "1.0",
+  "packageCode": "UT-WITHHOLDING",
+  "version": "2026.04.01-draft.1",
+  "effectiveOn": "2026-04-01",
+  "effectiveThrough": "2026-12-31",
+  "source": "https://tax.utah.gov/forms-pubs/pub-14/",
+  "changeSummary": "Captured Utah Publication 14 revision 04/26. Draft transcription requiring human verification before activation.",
+  "jurisdiction": {
+    "code": "UT",
+    "name": "Utah",
+    "type": "State",
+    "countryCode": "US",
+    "parentCode": "US",
+    "geoid": "49",
+    "aliases": ["State of Utah"]
+  },
+  "sources": [
+    {
+      "url": "https://tax.utah.gov/forms-pubs/pub-14/",
+      "title": "Utah Withholding Tax Guide, Publication 14",
+      "publishedOrRevisedOn": "2026-04-01",
+      "capturedAtUtc": "2026-08-25T02:12:00Z",
+      "sha256": "c35e32f6d95f433b9f4d7830bb8e53d9c13e5e9dd1ea37ef36aecf00a2fd0e19"
+    },
+    {
+      "url": "https://files.tax.utah.gov/tax/forms/pubs/pub-14.pdf",
+      "title": "Utah Publication 14 PDF",
+      "publishedOrRevisedOn": "2026-04-01",
+      "capturedAtUtc": "2026-08-25T02:12:00Z",
+      "sha256": "a7662517232b93b21774666e703123d398916a0a1dd1f1791eccca10f4a8d56f"
+    }
+  ],
+  "businessRules": [
+    { "code": "UT-WORK-IN-STATE", "description": "Withhold for wages paid for work performed in Utah unless an employee exclusion applies." },
+    { "code": "UT-RESIDENT-OUT-OF-STATE", "description": "Withhold for a Utah resident working outside Utah; reduce Utah withholding by tax withheld by the other state, not below zero." },
+    { "code": "UT-NONRESIDENT-20-DAY", "description": "A qualifying nonresident with no other Utah income who works in Utah for 20 days or fewer may be excluded when the residence-state conditions are satisfied." },
+    { "code": "UT-INTERSTATE-TRANSPORT", "description": "Qualifying interstate transportation wages are taxable only by the employee's residence state and require the specified W-4 annotation." },
+    { "code": "UT-MILITARY-SPOUSE", "description": "Qualifying nonresident military-spouse wages are exempt when the required W-4 annotation and eligibility conditions are present." },
+    { "code": "UT-ZERO-RETURN", "description": "An open withholding account must file a return even when withholding is zero." },
+    { "code": "UT-EFILE", "description": "Withholding returns, annual reconciliation, W-2s, and Utah-reportable 1099s must be filed electronically." }
+  ],
+  "rules": [
+    {
+      "code": "UT-WH-2026",
+      "jurisdictionCode": "UT",
+      "jurisdictionName": "Utah",
+      "jurisdictionType": "State",
+      "taxType": "Employee withholding",
+      "calculationMethod": "allowance-phaseout",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "applicability": {
+        "residenceOrWorkRule": "work-state-or-resident-state",
+        "headOfHouseholdUses": "Single",
+        "otherStateCreditParameter": "otherStateWithholding",
+        "exemptionField": "utahExemptionReason"
+      },
+      "fields": [
+        { "code": "payrollFrequency", "label": "Payroll frequency", "dataType": "text", "required": true, "validation": { "enum": ["Weekly", "Biweekly", "Semimonthly", "Monthly", "Quarterly", "Semiannual", "Annual", "Daily"] } },
+        { "code": "filingStatus", "label": "Federal W-4 filing status", "dataType": "text", "required": true, "validation": { "enum": ["Single", "Married filing jointly", "Head of household"] } },
+        { "code": "otherStateWithholding", "label": "Other-state withholding for this pay period", "dataType": "number", "required": false, "default": 0 },
+        { "code": "utahExemptionReason", "label": "Utah withholding exclusion", "dataType": "text", "required": false, "validation": { "enum": ["None", "Nonresident 20-day", "Interstate transportation", "Military spouse", "Employer approved 60-day"] } }
+      ],
+      "parameters": [
+        { "code": "withholding-rate", "label": "Utah withholding rate", "number": 0.0445, "notes": "Line 2." },
+        { "code": "allowance-phaseout-rate", "label": "Allowance phaseout rate", "number": 0.013, "notes": "Line 5." },
+        { "code": "rounding-digits", "label": "Intermediate rounding decimal places", "number": 0, "notes": "Publication 14 schedules and examples round calculated lines to whole dollars." },
+        { "code": "weekly-single-base", "label": "Weekly single base allowance", "number": 9 },
+        { "code": "weekly-single-threshold", "label": "Weekly single phaseout threshold", "number": 180 },
+        { "code": "weekly-married-base", "label": "Weekly married base allowance", "number": 19 },
+        { "code": "weekly-married-threshold", "label": "Weekly married phaseout threshold", "number": 360 },
+        { "code": "biweekly-single-base", "label": "Biweekly single base allowance", "number": 19 },
+        { "code": "biweekly-single-threshold", "label": "Biweekly single phaseout threshold", "number": 360 },
+        { "code": "biweekly-married-base", "label": "Biweekly married base allowance", "number": 37 },
+        { "code": "biweekly-married-threshold", "label": "Biweekly married phaseout threshold", "number": 719 },
+        { "code": "semimonthly-single-base", "label": "Semimonthly single base allowance", "number": 20 },
+        { "code": "semimonthly-single-threshold", "label": "Semimonthly single phaseout threshold", "number": 390 },
+        { "code": "semimonthly-married-base", "label": "Semimonthly married base allowance", "number": 40 },
+        { "code": "semimonthly-married-threshold", "label": "Semimonthly married phaseout threshold", "number": 779 },
+        { "code": "monthly-single-base", "label": "Monthly single base allowance", "number": 40 },
+        { "code": "monthly-single-threshold", "label": "Monthly single phaseout threshold", "number": 779 },
+        { "code": "monthly-married-base", "label": "Monthly married base allowance", "number": 81 },
+        { "code": "monthly-married-threshold", "label": "Monthly married phaseout threshold", "number": 1558 },
+        { "code": "quarterly-single-base", "label": "Quarterly single base allowance", "number": 121 },
+        { "code": "quarterly-single-threshold", "label": "Quarterly single phaseout threshold", "number": 2337 },
+        { "code": "quarterly-married-base", "label": "Quarterly married base allowance", "number": 243 },
+        { "code": "quarterly-married-threshold", "label": "Quarterly married phaseout threshold", "number": 4674 },
+        { "code": "semiannual-single-base", "label": "Semiannual single base allowance", "number": 243 },
+        { "code": "semiannual-single-threshold", "label": "Semiannual single phaseout threshold", "number": 4674 },
+        { "code": "semiannual-married-base", "label": "Semiannual married base allowance", "number": 485 },
+        { "code": "semiannual-married-threshold", "label": "Semiannual married phaseout threshold", "number": 9348 },
+        { "code": "annual-single-base", "label": "Annual single base allowance", "number": 485 },
+        { "code": "annual-single-threshold", "label": "Annual single phaseout threshold", "number": 9348 },
+        { "code": "annual-married-base", "label": "Annual married base allowance", "number": 970 },
+        { "code": "annual-married-threshold", "label": "Annual married phaseout threshold", "number": 18696 },
+        { "code": "daily-single-base", "label": "Daily single base allowance", "number": 2 },
+        { "code": "daily-single-threshold", "label": "Daily single phaseout threshold", "number": 36 },
+        { "code": "daily-married-base", "label": "Daily married base allowance", "number": 4 },
+        { "code": "daily-married-threshold", "label": "Daily married phaseout threshold", "number": 72 }
+      ],
+      "brackets": [],
+      "forms": [
+        { "code": "UT-WTH-RETURN", "name": "Utah withholding return", "filingFrequency": "Assigned annual or quarterly return with monthly payment rules", "deliveryChannel": "Electronic", "dueRule": "Publication 14 calendar; next-business-day adjustment applies" },
+        { "code": "UT-ANNUAL-RECON", "name": "Utah annual reconciliation with W-2/1099 records", "filingFrequency": "Annual", "deliveryChannel": "Electronic", "dueRule": "January 31" }
+      ],
+      "tests": [
+        { "name": "Weekly single example", "inputJson": "{\"grossPay\":400,\"payrollFrequency\":\"Weekly\",\"filingStatus\":\"Single\",\"otherStateWithholding\":0}", "expectedOutputJson": "{\"withholding\":12}" },
+        { "name": "Biweekly single example", "inputJson": "{\"grossPay\":2600,\"payrollFrequency\":\"Biweekly\",\"filingStatus\":\"Single\",\"otherStateWithholding\":0}", "expectedOutputJson": "{\"withholding\":116}" },
+        { "name": "Semimonthly married example", "inputJson": "{\"grossPay\":1200,\"payrollFrequency\":\"Semimonthly\",\"filingStatus\":\"Married filing jointly\",\"otherStateWithholding\":0}", "expectedOutputJson": "{\"withholding\":18}" },
+        { "name": "Monthly married example", "inputJson": "{\"grossPay\":7800,\"payrollFrequency\":\"Monthly\",\"filingStatus\":\"Married filing jointly\",\"otherStateWithholding\":0}", "expectedOutputJson": "{\"withholding\":347}" },
+        { "name": "Quarterly single example", "inputJson": "{\"grossPay\":9000,\"payrollFrequency\":\"Quarterly\",\"filingStatus\":\"Single\",\"otherStateWithholding\":0}", "expectedOutputJson": "{\"withholding\":367}" },
+        { "name": "Daily married example", "inputJson": "{\"grossPay\":175,\"payrollFrequency\":\"Daily\",\"filingStatus\":\"Married filing jointly\",\"otherStateWithholding\":0}", "expectedOutputJson": "{\"withholding\":5}" }
+      ]
+    }
+  ],
+  "extensions": {
+    "reviewStatus": "Needs independent transcription review",
+    "activationAllowed": false,
+    "rounding": "Official examples round intermediate displayed amounts to whole dollars; engine rounding policy must be verified before activation."
+  }
+}

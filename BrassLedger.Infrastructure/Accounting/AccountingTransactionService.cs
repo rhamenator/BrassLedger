@@ -224,7 +224,7 @@ public sealed class AccountingTransactionService(
         if (!posting.Succeeded) return posting;
         db.PayrollRuns.Add(run);
         var runEmployees = await db.Employees.Where(employee => employee.CompanyId == companyId && estimate.Employees.Select(line => line.EmployeeId).Contains(employee.Id)).ToDictionaryAsync(employee => employee.Id, cancellationToken);
-        db.PayrollRunEmployeeLines.AddRange(estimate.Employees.Select(line => { var employee = runEmployees[line.EmployeeId]; return new PayrollRunEmployeeLine { Id = Guid.NewGuid(), PayrollRunId = run.Id, EmployeeId = line.EmployeeId, WorkState = line.WorkState, WorkCity = employee.WorkCity, ResidenceState = string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState, ResidenceCity = employee.ResidenceCity, FilingStatus = line.FilingStatus, GrossPay = line.GrossPay, PreTaxDeductions = line.PreTaxDeductions, EmployeeWithholdings = line.EmployeeWithholdings, PostTaxDeductions = line.PostTaxDeductions, EmployerPayrollTaxes = line.EmployerPayrollTaxes, NetPay = line.NetPay }; }));
+        db.PayrollRunEmployeeLines.AddRange(estimate.Employees.Select(line => { var employee = runEmployees[line.EmployeeId]; return new PayrollRunEmployeeLine { Id = Guid.NewGuid(), PayrollRunId = run.Id, EmployeeId = line.EmployeeId, WorkState = line.WorkState, WorkCity = employee.WorkCity, ResidenceState = string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState, ResidenceCity = employee.ResidenceCity, FilingStatus = line.FilingStatus, PayrollFrequency = employee.PayrollFrequency, GrossPay = line.GrossPay, PreTaxDeductions = line.PreTaxDeductions, EmployeeWithholdings = line.EmployeeWithholdings, PostTaxDeductions = line.PostTaxDeductions, EmployerPayrollTaxes = line.EmployerPayrollTaxes, NetPay = line.NetPay }; }));
         bank.CurrentBalance -= estimate.NetPay;
         bank.UnreconciledAmount += estimate.NetPay;
         bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
@@ -240,11 +240,14 @@ public sealed class AccountingTransactionService(
             return TransactionResult.Failure("Payroll elections and benefit deductions must be non-negative.");
         var filingStatus = request.FilingStatus.Trim();
         if (filingStatus is not ("Single" or "Married filing jointly" or "Head of household")) return TransactionResult.Failure("Select a supported filing status.");
+        var payrollFrequency = request.PayrollFrequency.Trim();
+        if (payrollFrequency is not ("Weekly" or "Biweekly" or "Semimonthly" or "Monthly" or "Quarterly" or "Semiannual" or "Annual" or "Daily")) return TransactionResult.Failure("Select a supported payroll frequency.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var employee = await db.Employees.SingleOrDefaultAsync(candidate => candidate.CompanyId == companyId && candidate.Id == request.EmployeeId, cancellationToken);
         if (employee is null) return TransactionResult.Failure("Employee not found.");
         employee.FilingStatus = filingStatus;
+        employee.PayrollFrequency = payrollFrequency;
         employee.Allowances = request.Allowances;
         employee.AdditionalWithholding = request.AdditionalWithholding;
         employee.PreTaxBenefitDeductions = request.PreTaxBenefitDeductions;
@@ -324,7 +327,7 @@ public sealed class AccountingTransactionService(
             {
                 foreach (var rule in applicableRules)
                 {
-                    var amount = CalculateTaxRuleAmount(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), contentBrackets.Where(bracket => bracket.TaxRuleSetId == rule.Id), taxable, employee.Allowances);
+                    var amount = CalculateTaxRuleAmount(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), contentBrackets.Where(bracket => bracket.TaxRuleSetId == rule.Id), taxable, employee.Allowances, employee.FilingStatus, employee.PayrollFrequency);
                     if (rule.TaxType.Contains("withholding", StringComparison.OrdinalIgnoreCase) || rule.TaxType.Contains("employee", StringComparison.OrdinalIgnoreCase)) { employeeTaxes += amount; if (residenceJurisdictions.Contains(rule.JurisdictionCode, StringComparer.OrdinalIgnoreCase) || residenceJurisdictions.Contains(rule.JurisdictionName, StringComparer.OrdinalIgnoreCase)) residentEmployeeTaxes += amount; }
                     else employerTaxes += amount;
                 }
@@ -348,13 +351,24 @@ public sealed class AccountingTransactionService(
 
     private static string StateJurisdiction(string state) => TaxRuleCatalog.StateJurisdictions.FirstOrDefault(jurisdiction => string.Equals(jurisdiction.Code, state.Trim(), StringComparison.OrdinalIgnoreCase))?.Name ?? state.Trim();
 
-    private static decimal CalculateTaxRuleAmount(TaxRuleSet rule, IEnumerable<TaxRuleParameter> parameters, IEnumerable<TaxRuleBracket> brackets, decimal taxablePay, int allowances)
+    private static decimal CalculateTaxRuleAmount(TaxRuleSet rule, IEnumerable<TaxRuleParameter> parameters, IEnumerable<TaxRuleBracket> brackets, decimal taxablePay, int allowances, string filingStatus, string payrollFrequency)
     {
         var values = parameters.Where(parameter => parameter.NumericValue.HasValue).ToDictionary(parameter => parameter.ParameterCode, parameter => parameter.NumericValue!.Value, StringComparer.OrdinalIgnoreCase);
         var annualization = values.GetValueOrDefault("annualization-factor", 1m);
         var adjustedPay = Math.Max(0, taxablePay - (allowances * values.GetValueOrDefault("allowance-per-pay", 0m)));
         decimal amount;
-        if (string.Equals(rule.CalculationMethod, "progressive-annualized", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(rule.CalculationMethod, "allowance-phaseout", StringComparison.OrdinalIgnoreCase))
+        {
+            var statusKey = string.Equals(filingStatus, "Married filing jointly", StringComparison.OrdinalIgnoreCase) ? "married" : "single";
+            var frequencyKey = payrollFrequency.Trim().ToLowerInvariant();
+            var baseAllowance = values.GetValueOrDefault($"{frequencyKey}-{statusKey}-base");
+            var threshold = values.GetValueOrDefault($"{frequencyKey}-{statusKey}-threshold");
+            var roundingDigits = (int)values.GetValueOrDefault("rounding-digits", 2m);
+            var tentative = decimal.Round(taxablePay * values.GetValueOrDefault("withholding-rate"), roundingDigits, MidpointRounding.AwayFromZero);
+            var phaseout = decimal.Round(Math.Max(0, taxablePay - threshold) * values.GetValueOrDefault("allowance-phaseout-rate"), roundingDigits, MidpointRounding.AwayFromZero);
+            amount = Math.Max(0, tentative - Math.Max(0, baseAllowance - phaseout));
+        }
+        else if (string.Equals(rule.CalculationMethod, "progressive-annualized", StringComparison.OrdinalIgnoreCase))
         {
             var annualPay = adjustedPay * annualization; var previous = 0m; amount = 0m;
             foreach (var bracket in brackets.OrderBy(bracket => bracket.Sequence)) { var ceiling = bracket.UpperBoundAmount <= 0 ? annualPay : bracket.UpperBoundAmount; if (annualPay > previous) amount += Math.Max(0, Math.Min(annualPay, ceiling) - previous) * bracket.Rate; previous = ceiling; if (annualPay <= ceiling) break; }

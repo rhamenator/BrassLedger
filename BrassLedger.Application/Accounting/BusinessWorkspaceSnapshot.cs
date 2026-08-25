@@ -193,7 +193,8 @@ public sealed record EmployeeSnapshot(
     decimal PostTaxBenefitDeductions = 0m,
     string ResidenceState = "",
     string ResidenceCity = "",
-    string WorkCity = "");
+    string WorkCity = "",
+    string PayrollFrequency = "Biweekly");
 
 public sealed record ProjectsWorkspace(
     int OpenJobs,

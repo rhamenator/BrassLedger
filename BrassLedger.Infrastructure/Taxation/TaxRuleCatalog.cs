@@ -18,6 +18,7 @@ internal static class TaxRuleCatalog
         new("wage-bracket", "Wage bracket", "Use bracket thresholds and fixed amounts from the editable tax tables."),
         new("employer-rate-wage-base", "Employer rate with wage base", "Apply an employer rate until a wage-base ceiling is reached."),
         new("exemption-credit", "Exemption credit", "Apply a flat rate and reduce tax through per-exemption credits or allowances."),
+        new("allowance-phaseout", "Allowance phaseout", "Apply a rate, then subtract a filing-status and payroll-frequency allowance reduced by an income phaseout."),
         new("hourly-assessment", "Hourly assessment", "Calculate the assessment per hour worked instead of by wages."),
         new("local-code-a", "Local code A", "Local percentage with ceiling support, matching the archived local code A behavior."),
         new("local-code-e", "Local code E", "Standard allowance plus dependent allowance before local tax is applied."),
