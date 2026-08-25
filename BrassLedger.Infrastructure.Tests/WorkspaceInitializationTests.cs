@@ -1420,6 +1420,47 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task EmployeePayroll_AllocatesWorkTaxesByDetailedEarningLocationButTaxesResidentWagesAsAWhole()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var employee = workspace.Payroll.Employees.Single(item => item.State == "NV");
+        Assert.True((await transactions.SaveEmployeePayrollSetupAsync(new SaveEmployeePayrollSetupRequest(employee.Id, "Single", 0, 0m, 0m, 0m, "OH", "Residenceville", "NV", "Worktown"))).Succeeded);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.TaxProfiles.AddRange(
+                new TaxProfile { Id = Guid.NewGuid(), CompanyId = companyId, Jurisdiction = "Worktown", TaxType = "Local withholding", Rate = .01m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "Allocation test", IsActive = true, IsVerified = true },
+                new TaxProfile { Id = Guid.NewGuid(), CompanyId = companyId, Jurisdiction = "Othercity", TaxType = "Local withholding", Rate = .03m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "Allocation test", IsActive = true, IsVerified = true },
+                new TaxProfile { Id = Guid.NewGuid(), CompanyId = companyId, Jurisdiction = "Residenceville", TaxType = "Local withholding", Rate = .02m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "Allocation test", IsActive = true, IsVerified = true });
+            await db.SaveChangesAsync();
+        }
+
+        var request = new PostEmployeePayrollRunRequest(workspace.Treasury.BankAccounts.First().Id, new DateOnly(2026, 5, 15), "MULTI-LOCATION-PREVIEW",
+        [
+            new EmployeePayrollInput(employee.Id, 0,
+            [
+                new PayrollEarningInput("REG-WORKTOWN", "Regular", 24m, 25m, 600m, WorkState: "NV", WorkCity: "Worktown"),
+                new PayrollEarningInput("REG-OTHER", "Regular", 16m, 25m, 400m, WorkState: "NV", WorkCity: "Othercity")
+            ])
+        ]);
+        var preview = await transactions.PreviewEmployeePayrollRunAsync(request);
+        Assert.NotNull(preview);
+        var taxes = Assert.Single(preview!.Employees).Taxes!;
+        var worktown = taxes.Single(tax => tax.JurisdictionCode == "Worktown");
+        var othercity = taxes.Single(tax => tax.JurisdictionCode == "Othercity");
+        var residence = taxes.Single(tax => tax.JurisdictionCode == "Residenceville");
+        Assert.Equal((600m, 6m), (worktown.TaxableWages, worktown.EmployeeAmount));
+        Assert.Equal((400m, 12m), (othercity.TaxableWages, othercity.EmployeeAmount));
+        Assert.Equal((1_000m, 20m), (residence.TaxableWages, residence.EmployeeAmount));
+        Assert.Equal(152.58m, Assert.Single(preview.Employees).EmployeeWithholdings);
+    }
+
+    [Fact]
     public async Task EmployeePayroll_ExecutesApprovedTaxContentRuleInsteadOfStaticProfileFallback()
     {
         using var services = CreateServiceProvider();
@@ -1481,6 +1522,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
         preview = await transactions.PreviewEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(workspace.Treasury.BankAccounts.First().Id, new DateOnly(2026, 5, 15), "YONKERS-NONRESIDENT-PREVIEW", [new EmployeePayrollInput(employee.Id, 200m)]));
         Assert.NotNull(preview);
         Assert.Equal(18.36m, Assert.Single(preview!.Employees).EmployeeWithholdings); // Employee FICA $15.30 + NY State $2.25 + Yonkers nonresident earnings tax $0.81; FIT is $0 at this weekly wage.
+
+        preview = await transactions.PreviewEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(workspace.Treasury.BankAccounts.First().Id, new DateOnly(2026, 5, 15), "YONKERS-ALLOCATED-PREVIEW",
+            [new EmployeePayrollInput(employee.Id, 0, [new PayrollEarningInput("YON", "Regular", 4m, 25m, 100m, WorkState: "NY", WorkCity: "Yonkers"), new PayrollEarningInput("ALB", "Regular", 4m, 25m, 100m, WorkState: "NY", WorkCity: "Albany")])]));
+        Assert.NotNull(preview);
+        var yonkers = Assert.Single(preview!.Employees).Taxes!.Single(tax => tax.ObligationCode == "YONKERS-NONRESIDENT-EARNINGS");
+        Assert.Equal(100m, yonkers.TaxableWages);
+        Assert.Equal(.21m, yonkers.EmployeeAmount); // The verified annualized exclusion applies to the $100 earned in Yonkers, not the $200 total check.
     }
 
     [Fact]

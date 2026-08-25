@@ -1469,13 +1469,6 @@ public sealed class AccountingTransactionService(
         foreach (var input in request.Employees)
         {
             var employee = employees.Single(candidate => candidate.Id == input.EmployeeId);
-            var workJurisdictions = new[] { StateJurisdiction(employee.State), employee.WorkCity }.Where(jurisdiction => !string.IsNullOrWhiteSpace(jurisdiction)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            var residenceJurisdictions = new[] { StateJurisdiction(string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState), employee.ResidenceCity }.Where(jurisdiction => !string.IsNullOrWhiteSpace(jurisdiction)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            var rules = jurisdictionRules.Where(rule => residenceJurisdictions.Contains(rule.ResidenceJurisdiction, StringComparer.OrdinalIgnoreCase) && workJurisdictions.Contains(rule.WorkJurisdiction, StringComparer.OrdinalIgnoreCase)).ToArray();
-            var jurisdictions = new[] { "Federal" }.Concat(workJurisdictions).Concat(residenceJurisdictions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            var applicable = profiles.Where(profile => jurisdictions.Contains(profile.Jurisdiction, StringComparer.OrdinalIgnoreCase)).ToArray();
-            if (rules.Any(rule => rule.ExemptWorkWithholding))
-                applicable = applicable.Where(profile => !profile.TaxType.Contains("withholding", StringComparison.OrdinalIgnoreCase) || !workJurisdictions.Contains(profile.Jurisdiction, StringComparer.OrdinalIgnoreCase) || residenceJurisdictions.Contains(profile.Jurisdiction, StringComparer.OrdinalIgnoreCase)).ToArray();
             var grossPay = ResolveGrossPay(input);
             var requestedDeductions = input.Deductions ?? [];
             var requestedPreTax = requestedDeductions.Where(deduction => deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount);
@@ -1483,44 +1476,61 @@ public sealed class AccountingTransactionService(
             var taxableEarnings = input.Earnings is { Count: > 0 } ? input.Earnings.Where(earning => earning.IsTaxable).Sum(earning => earning.Amount) : grossPay;
             var preTax = Math.Min(grossPay, Math.Max(0, employee.PreTaxBenefitDeductions + requestedPreTax));
             var taxable = Math.Max(0, taxableEarnings - preTax);
-            var evaluationContext = new TaxRuleEvaluationContext(taxable, employee.Allowances, employee.FilingStatus, employee.PayrollFrequency, string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState, employee.ResidenceCity, employee.State, employee.WorkCity);
-            var matchedRules = contentRules.Where(rule => jurisdictions.Contains(rule.JurisdictionCode, StringComparer.OrdinalIgnoreCase) || jurisdictions.Contains(rule.JurisdictionName, StringComparer.OrdinalIgnoreCase) || (string.Equals(rule.JurisdictionCode, "US", StringComparison.OrdinalIgnoreCase) && jurisdictions.Contains("Federal", StringComparer.OrdinalIgnoreCase)))
-                .Where(rule => TaxRuleEvaluator.IsApplicable(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), evaluationContext))
+            var allocations = BuildPayrollWorkAllocations(input, employee, taxableEarnings, taxable);
+            var residenceJurisdictions = ResidenceJurisdictions(employee);
+            var workJurisdictions = allocations.SelectMany(AllocationJurisdictions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var rules = jurisdictionRules.Where(rule => residenceJurisdictions.Any(jurisdiction => JurisdictionEquals(jurisdiction, rule.ResidenceJurisdiction)) && workJurisdictions.Any(jurisdiction => JurisdictionEquals(jurisdiction, rule.WorkJurisdiction))).ToArray();
+            var employeePriorLineIds = priorLines.Where(line => line.EmployeeId == employee.Id).Select(line => line.Id).ToHashSet();
+            var employeePriorTaxLines = priorTaxLines.Where(line => employeePriorLineIds.Contains(line.PayrollRunEmployeeLineId)).ToArray();
+
+            var matchedRules = contentRules.Select(rule =>
+                {
+                    var isEmployeeTax = IsEmployeeTax(rule.TaxType);
+                    var scope = ResolvePayrollTaxScope(rule.JurisdictionCode, rule.JurisdictionName, isEmployeeTax, taxable, employee, allocations);
+                    if (scope is null || IsWorkWithholdingExempt(rule.JurisdictionCode, rule.JurisdictionName, isEmployeeTax, scope, rules)) return null;
+                    var context = PayrollTaxContext(scope, employee);
+                    return TaxRuleEvaluator.IsApplicable(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), context) ? new ScopedTaxRule(rule, scope, context) : null;
+                })
+                .Where(candidate => candidate is not null)
+                .Select(candidate => candidate!)
                 .ToArray();
             var applicableRules = matchedRules
-                .GroupBy(rule => string.IsNullOrWhiteSpace(rule.ExclusiveGroup) ? $"rule:{rule.Id}" : $"exclusive:{rule.ExclusiveGroup}", StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.OrderByDescending(rule => rule.VariantPriority).ThenBy(rule => rule.Code).First())
+                .GroupBy(candidate => string.IsNullOrWhiteSpace(candidate.Rule.ExclusiveGroup) ? $"rule:{candidate.Rule.Id}" : $"exclusive:{candidate.Rule.ExclusiveGroup}", StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderByDescending(candidate => candidate.Rule.VariantPriority).ThenBy(candidate => candidate.Rule.Code).First())
                 .ToArray();
             if (employee.FederalFormW4Year <= 0 || request.PayDate.Year != 2026) return null;
             decimal employeeTaxes = 0, residentEmployeeTaxes = 0, employerTaxes = 0;
             var taxLines = new List<PayrollTaxEstimate>();
             var selectedObligations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var rule in applicableRules)
+            foreach (var candidate in applicableRules)
             {
-                var amount = TaxRuleEvaluator.Evaluate(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), contentBrackets.Where(bracket => bracket.TaxRuleSetId == rule.Id), evaluationContext);
+                var rule = candidate.Rule;
+                var amount = TaxRuleEvaluator.Evaluate(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), contentBrackets.Where(bracket => bracket.TaxRuleSetId == rule.Id), candidate.Context);
                 var isEmployeeTax = IsEmployeeTax(rule.TaxType);
-                if (isEmployeeTax) { employeeTaxes += amount; if (residenceJurisdictions.Contains(rule.JurisdictionCode, StringComparer.OrdinalIgnoreCase) || residenceJurisdictions.Contains(rule.JurisdictionName, StringComparer.OrdinalIgnoreCase)) residentEmployeeTaxes += amount; }
+                if (isEmployeeTax) { employeeTaxes += amount; if (candidate.Scope.IsResidence) residentEmployeeTaxes += amount; }
                 else employerTaxes += amount;
                 var obligation = NormalizeObligation(rule.ObligationCode, rule.TaxType, rule.JurisdictionCode);
                 selectedObligations.Add(obligation);
-                taxLines.Add(new PayrollTaxEstimate(obligation, rule.JurisdictionCode, rule.JurisdictionName, rule.TaxType, taxable, priorLines.Where(line => line.EmployeeId == employee.Id).Sum(line => line.TaxableWages), isEmployeeTax ? amount : 0, isEmployeeTax ? 0 : amount, rule.Id, rule.TaxContentPackageId, rule.ContentVersion, rule.Source, System.Text.Json.JsonSerializer.Serialize(new { rule.CalculationMethod, rule.CalculationVariant, grossPay = taxable, amount })));
+                var priorTaxable = employeePriorTaxLines.Where(line => line.ObligationCode == obligation).Sum(line => line.TaxableWages);
+                taxLines.Add(new PayrollTaxEstimate(obligation, rule.JurisdictionCode, rule.JurisdictionName, rule.TaxType, candidate.Scope.TaxableWages, priorTaxable, isEmployeeTax ? amount : 0, isEmployeeTax ? 0 : amount, rule.Id, rule.TaxContentPackageId, rule.ContentVersion, rule.Source, System.Text.Json.JsonSerializer.Serialize(new { rule.CalculationMethod, rule.CalculationVariant, taxableWages = candidate.Scope.TaxableWages, candidate.Scope.IsResidence, candidate.Scope.WorkState, candidate.Scope.WorkCounty, candidate.Scope.WorkCity, candidate.Scope.WorkSchoolDistrict, amount })));
             }
-            foreach (var profile in applicable)
+            foreach (var profile in profiles)
             {
                 var obligation = NormalizeObligation(string.Empty, profile.TaxType, profile.Jurisdiction);
                 if (selectedObligations.Contains(obligation)) continue;
-                selectedObligations.Add(obligation);
-                var priorGross = priorLines.Where(line => line.EmployeeId == employee.Id).Sum(line => line.GrossPay - line.PreTaxDeductions);
-                var cappedTaxable = profile.AnnualWageBase is { } wageBase ? Math.Max(0, Math.Min(taxable, wageBase - priorGross)) : taxable;
-                var amount = RoundCurrency(cappedTaxable * profile.Rate);
                 var isEmployeeTax = IsEmployeeTax(profile.TaxType);
-                if (isEmployeeTax) { employeeTaxes += amount; if (residenceJurisdictions.Contains(profile.Jurisdiction, StringComparer.OrdinalIgnoreCase) && !string.Equals(profile.Jurisdiction, "Federal", StringComparison.OrdinalIgnoreCase)) residentEmployeeTaxes += amount; }
+                var scope = ResolvePayrollTaxScope(profile.Jurisdiction, profile.Jurisdiction, isEmployeeTax, taxable, employee, allocations);
+                if (scope is null || IsWorkWithholdingExempt(profile.Jurisdiction, profile.Jurisdiction, isEmployeeTax, scope, rules)) continue;
+                selectedObligations.Add(obligation);
+                var priorGross = employeePriorTaxLines.Where(line => line.ObligationCode == obligation).Sum(line => line.TaxableWages);
+                var cappedTaxable = profile.AnnualWageBase is { } wageBase ? Math.Max(0, Math.Min(scope.TaxableWages, wageBase - priorGross)) : scope.TaxableWages;
+                var amount = RoundCurrency(cappedTaxable * profile.Rate);
+                if (isEmployeeTax) { employeeTaxes += amount; if (scope.IsResidence) residentEmployeeTaxes += amount; }
                 else employerTaxes += amount;
-                taxLines.Add(new PayrollTaxEstimate(obligation, profile.Jurisdiction, profile.Jurisdiction, profile.TaxType, cappedTaxable, priorGross, isEmployeeTax ? amount : 0, isEmployeeTax ? 0 : amount, null, null, string.Empty, profile.Source, System.Text.Json.JsonSerializer.Serialize(new { method = "profile-rate", profile.Rate, profile.AnnualWageBase, taxableWages = cappedTaxable, amount })));
+                taxLines.Add(new PayrollTaxEstimate(obligation, profile.Jurisdiction, profile.Jurisdiction, profile.TaxType, cappedTaxable, priorGross, isEmployeeTax ? amount : 0, isEmployeeTax ? 0 : amount, null, null, string.Empty, profile.Source, System.Text.Json.JsonSerializer.Serialize(new { method = "profile-rate", profile.Rate, profile.AnnualWageBase, taxableWages = cappedTaxable, scope.IsResidence, scope.WorkState, scope.WorkCounty, scope.WorkCity, scope.WorkSchoolDistrict, amount })));
             }
             var federalIncomeTaxable = Math.Max(0, taxableEarnings - employee.PreTaxBenefitDeductions - requestedDeductions.Where(deduction => deduction.ExemptFromFederalIncomeTax).Sum(deduction => deduction.EmployeeAmount));
             var ficaTaxable = Math.Max(0, taxableEarnings - requestedDeductions.Where(deduction => deduction.ExemptFromFica).Sum(deduction => deduction.EmployeeAmount));
-            var employeePriorTaxLines = priorTaxLines.Where(line => priorLines.Where(prior => prior.EmployeeId == employee.Id).Select(prior => prior.Id).Contains(line.PayrollRunEmployeeLineId)).ToArray();
             var priorSocialSecurityWages = employeePriorTaxLines.Where(line => line.ObligationCode == "US-OASDI-EMPLOYEE").Sum(line => line.TaxableWages);
             var priorMedicareWages = employeePriorTaxLines.Where(line => line.ObligationCode == "US-MEDICARE-EMPLOYEE").Sum(line => line.TaxableWages);
             foreach (var federal in FederalPayrollTaxCalculator.Calculate2026(employee, federalIncomeTaxable, ficaTaxable, priorSocialSecurityWages, priorMedicareWages))
@@ -1541,6 +1551,103 @@ public sealed class AccountingTransactionService(
         }
         return new PayrollRunEstimate(estimates.Sum(line => line.GrossPay), estimates.Sum(line => line.PreTaxDeductions), estimates.Sum(line => line.EmployeeWithholdings), estimates.Sum(line => line.PostTaxDeductions), estimates.Sum(line => line.EmployerPayrollTaxes), estimates.Sum(line => line.NetPay), estimates);
     }
+
+    private sealed record PayrollWorkLocationKey(string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict);
+    private sealed record PayrollWorkAllocation(string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict, decimal TaxableWages);
+    private sealed record PayrollTaxScope(decimal TaxableWages, bool IsResidence, string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict);
+    private sealed record ScopedTaxRule(TaxRuleSet Rule, PayrollTaxScope Scope, TaxRuleEvaluationContext Context);
+
+    private static IReadOnlyList<PayrollWorkAllocation> BuildPayrollWorkAllocations(EmployeePayrollInput input, Employee employee, decimal taxableEarnings, decimal taxableWages)
+    {
+        if (input.Earnings is not { Count: > 0 })
+            return [new PayrollWorkAllocation(employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict, taxableWages)];
+
+        var grouped = input.Earnings.Where(earning => earning.IsTaxable && earning.Amount > 0)
+            .GroupBy(earning => new PayrollWorkLocationKey(
+                NormalizeLocation(earning.WorkState, employee.State),
+                NormalizeLocation(earning.WorkCounty, employee.WorkCounty),
+                NormalizeLocation(earning.WorkCity, employee.WorkCity),
+                NormalizeLocation(earning.WorkSchoolDistrict, employee.WorkSchoolDistrict)))
+            .Select(group => new
+            {
+                Location = group.Key,
+                Amount = group.Sum(earning => earning.Amount)
+            })
+            .OrderBy(group => group.Location.WorkState, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.Location.WorkCity, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (grouped.Length == 0 || taxableEarnings <= 0)
+            return [new PayrollWorkAllocation(employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict, taxableWages)];
+
+        var allocations = new List<PayrollWorkAllocation>(grouped.Length);
+        decimal allocated = 0;
+        for (var index = 0; index < grouped.Length; index++)
+        {
+            var wages = index == grouped.Length - 1 ? taxableWages - allocated : RoundCurrency(taxableWages * grouped[index].Amount / taxableEarnings);
+            allocated += wages;
+            allocations.Add(new PayrollWorkAllocation(grouped[index].Location.WorkState, grouped[index].Location.WorkCounty, grouped[index].Location.WorkCity, grouped[index].Location.WorkSchoolDistrict, Math.Max(0, wages)));
+        }
+        return allocations;
+    }
+
+    private static PayrollTaxScope? ResolvePayrollTaxScope(string jurisdictionCode, string jurisdictionName, bool isEmployeeTax, decimal totalTaxableWages, Employee employee, IReadOnlyList<PayrollWorkAllocation> allocations)
+    {
+        if (IsFederalJurisdiction(jurisdictionCode, jurisdictionName))
+            return new PayrollTaxScope(totalTaxableWages, false, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict);
+
+        var residenceJurisdictions = ResidenceJurisdictions(employee);
+        if (isEmployeeTax && TargetMatchesJurisdictions(jurisdictionCode, jurisdictionName, residenceJurisdictions))
+            return new PayrollTaxScope(totalTaxableWages, true, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict);
+
+        var matchingAllocations = allocations.Where(allocation => TargetMatchesJurisdictions(jurisdictionCode, jurisdictionName, AllocationJurisdictions(allocation))).ToArray();
+        if (matchingAllocations.Length == 0) return null;
+        var representative = matchingAllocations[0];
+        return new PayrollTaxScope(matchingAllocations.Sum(allocation => allocation.TaxableWages), false, representative.WorkState, representative.WorkCounty, representative.WorkCity, representative.WorkSchoolDistrict);
+    }
+
+    private static TaxRuleEvaluationContext PayrollTaxContext(PayrollTaxScope scope, Employee employee) => new(
+        scope.TaxableWages,
+        employee.Allowances,
+        employee.FilingStatus,
+        employee.PayrollFrequency,
+        string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState,
+        employee.ResidenceCity,
+        scope.WorkState,
+        scope.WorkCity);
+
+    private static bool IsWorkWithholdingExempt(string jurisdictionCode, string jurisdictionName, bool isEmployeeTax, PayrollTaxScope scope, IEnumerable<PayrollJurisdictionRule> rules) =>
+        isEmployeeTax && !scope.IsResidence && rules.Any(rule => rule.ExemptWorkWithholding && TargetMatchesJurisdictions(jurisdictionCode, jurisdictionName, [rule.WorkJurisdiction]));
+
+    private static string[] ResidenceJurisdictions(Employee employee) =>
+        new[]
+        {
+            string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState,
+            StateJurisdiction(string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState),
+            employee.ResidenceCounty,
+            employee.ResidenceCity,
+            employee.ResidenceSchoolDistrict
+        }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+    private static string[] AllocationJurisdictions(PayrollWorkAllocation allocation) =>
+        new[] { allocation.WorkState, StateJurisdiction(allocation.WorkState), allocation.WorkCounty, allocation.WorkCity, allocation.WorkSchoolDistrict }
+            .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+    private static bool TargetMatchesJurisdictions(string jurisdictionCode, string jurisdictionName, IEnumerable<string> jurisdictions) =>
+        jurisdictions.Any(jurisdiction => JurisdictionEquals(jurisdictionCode, jurisdiction) || JurisdictionEquals(jurisdictionName, jurisdiction));
+
+    private static bool JurisdictionEquals(string left, string right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right)) return false;
+        if (left.Trim().Equals(right.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+        var leftState = TaxRuleCatalog.StateJurisdictions.FirstOrDefault(state => state.Code.Equals(left.Trim(), StringComparison.OrdinalIgnoreCase) || state.Name.Equals(left.Trim(), StringComparison.OrdinalIgnoreCase));
+        var rightState = TaxRuleCatalog.StateJurisdictions.FirstOrDefault(state => state.Code.Equals(right.Trim(), StringComparison.OrdinalIgnoreCase) || state.Name.Equals(right.Trim(), StringComparison.OrdinalIgnoreCase));
+        return leftState is not null && rightState is not null && leftState.Code.Equals(rightState.Code, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFederalJurisdiction(string jurisdictionCode, string jurisdictionName) =>
+        jurisdictionCode.Trim().Equals("US", StringComparison.OrdinalIgnoreCase) || jurisdictionCode.Trim().Equals("Federal", StringComparison.OrdinalIgnoreCase) || jurisdictionName.Trim().Equals("Federal", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeLocation(string value, string fallback) => (string.IsNullOrWhiteSpace(value) ? fallback : value).Trim().ToUpperInvariant();
 
     private static string StateJurisdiction(string state) => TaxRuleCatalog.StateJurisdictions.FirstOrDefault(jurisdiction => string.Equals(jurisdiction.Code, state.Trim(), StringComparison.OrdinalIgnoreCase))?.Name ?? state.Trim();
 
