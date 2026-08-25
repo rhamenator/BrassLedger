@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-nm",
+  "capturedAtUtc": "2026-08-25T15:00:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://realfile.tax.newmexico.gov/FYI-104.pdf", "title": "FYI-104 New Mexico State Wage Withholding Tables for Percentage Method of Withholding", "revision": "11/2025", "mediaType": "application/pdf", "sha256": "400f141e3cc28d352712cd0cb94f80d7c2dc1c40463fcdcf31561247b5889a82", "bytes": 780041 },
+    { "url": "https://realfile.tax.newmexico.gov/trd-41414ins.pdf", "title": "Instructions for Wage Withholding Tax Return TRD-41414", "revision": "01/01/2026", "mediaType": "application/pdf", "sha256": "f49b8320e5a0fc262573da816e4d2d3bce20e91863d71b4325809b69419cdc06", "bytes": 392395 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "Duplicate federal Form W-4 marked For New Mexico State Withholding Only", "dataType": "enum", "values": ["Single", "Married", "HeadOfHousehold"] },
+    { "code": "additionalPeriodicWithholding", "source": "Duplicate federal Form W-4", "dataType": "money", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "newMexicoWorkDaysYearToDate", "dataType": "integer", "minimum": 0 },
+    { "code": "tribalEnrollmentJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "tribalDomicileJurisdictionId", "dataType": "jurisdiction-reference" }
+  ],
+  "calculation": {
+    "method": "DirectPayrollPeriodPercentageTable",
+    "allowanceDeduction": 0,
+    "annualSchedules": {
+      "Single": [
+        { "over": 0, "through": 8050, "baseTax": 0, "rate": 0 }, { "over": 8050, "through": 13550, "baseTax": 0, "rate": 0.015 }, { "over": 13550, "through": 20550, "baseTax": 82.50, "rate": 0.032 }, { "over": 20550, "through": 24550, "baseTax": 306.50, "rate": 0.032 }, { "over": 24550, "through": 33550, "baseTax": 434.50, "rate": 0.043 }, { "over": 33550, "through": 41550, "baseTax": 821.50, "rate": 0.043 }, { "over": 41550, "through": 58550, "baseTax": 1165.50, "rate": 0.047 }, { "over": 58550, "through": 74550, "baseTax": 1964.50, "rate": 0.047 }, { "over": 74550, "through": 218050, "baseTax": 2716.50, "rate": 0.049 }, { "over": 218050, "baseTax": 9748, "rate": 0.059 }
+      ],
+      "Married": [
+        { "over": 0, "through": 16100, "baseTax": 0, "rate": 0 }, { "over": 16100, "through": 24100, "baseTax": 0, "rate": 0.015 }, { "over": 24100, "through": 32100, "baseTax": 120, "rate": 0.032 }, { "over": 32100, "through": 41100, "baseTax": 376, "rate": 0.032 }, { "over": 41100, "through": 57100, "baseTax": 664, "rate": 0.043 }, { "over": 57100, "through": 66100, "baseTax": 1352, "rate": 0.043 }, { "over": 66100, "through": 102100, "baseTax": 1739, "rate": 0.047 }, { "over": 102100, "through": 116100, "baseTax": 3431, "rate": 0.047 }, { "over": 116100, "through": 331100, "baseTax": 4089, "rate": 0.049 }, { "over": 331100, "baseTax": 14624, "rate": 0.059 }
+      ],
+      "HeadOfHousehold": [
+        { "over": 0, "through": 12075, "baseTax": 0, "rate": 0 }, { "over": 12075, "through": 20075, "baseTax": 0, "rate": 0.015 }, { "over": 20075, "through": 28075, "baseTax": 120, "rate": 0.032 }, { "over": 28075, "through": 37075, "baseTax": 376, "rate": 0.032 }, { "over": 37075, "through": 53075, "baseTax": 664, "rate": 0.043 }, { "over": 53075, "through": 62075, "baseTax": 1352, "rate": 0.043 }, { "over": 62075, "through": 98075, "baseTax": 1739, "rate": 0.047 }, { "over": 98075, "through": 112075, "baseTax": 3431, "rate": 0.047 }, { "over": 112075, "through": 327075, "baseTax": 4089, "rate": 0.049 }, { "over": 327075, "baseTax": 14624, "rate": 0.059 }
+      ]
+    },
+    "publishedPayrollPeriods": ["Weekly", "Biweekly", "Semimonthly", "Monthly", "Quarterly", "Semiannual", "Annual", "DailyOrMiscellaneous"],
+    "monthlyDeMinimis": { "withholdingLessThan": 1, "effect": "No withholding is required for the employee for that month." },
+    "rounding": { "generalInstructionLocated": false, "tablesAndExampleUseCents": true },
+    "supplementalWages": { "method": "Use the same method used for federal supplemental withholding.", "federalFlatPercentageMapsToStateRate": 0.059, "federalCumulativeMethodMayBeUsedForState": true, "fringeBenefitsFollowFederalMethod": true },
+    "officialExample": { "filingStatus": "Married", "frequency": "Weekly", "wages": 1000, "bracketFloor": 790, "baseTax": 12.77, "rate": 0.043, "calculatedWithholding": 21.80, "additionalWithholding": 20, "totalWithholding": 41.80 }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Withhold New Mexico income tax from all wages of a New Mexico resident regardless of work location.",
+    "residentOtherStateAdjustment": "The employee may reduce or eliminate New Mexico withholding on wages taxed by another state using the New Mexico-only W-4; the return-level credit is claimed later.",
+    "nonresidentRule": "Withhold only from wages earned within New Mexico.",
+    "shortTermNonresidentException": { "maximumNewMexicoWorkDays": 15, "period": "CalendarYear", "effect": "Employer is not required to withhold." },
+    "tribalExemption": "Income must be wholly earned on the lands of the New Mexico federally recognized nation, tribe, or pueblo in which the worker is enrolled while the worker is domiciled there.",
+    "militaryExemptions": ["Active-duty military service income", "Qualifying military spouse electing the servicemember's or retained out-of-state residence"],
+    "reciprocalStates": [],
+    "multiStateWorkLocationRequired": true
+  },
+  "filing": {
+    "form": "TRD-41414",
+    "assignedFrequencies": [
+      { "frequency": "Monthly", "due": "25th day after month" },
+      { "frequency": "Quarterly", "due": "25th day after quarter" },
+      { "frequency": "Semiannual", "due": "July 25 and January 25" }
+    ],
+    "electronicFilingAndPaymentRequiredBeginning": "2026-01-01",
+    "zeroReturnsRequired": true,
+    "quarterlyEmployeeWageReport": { "form": "TRD-41431", "due": "25th day after quarter", "electronicRequired": true, "includesWorkersCompensationFee": true },
+    "annualInformationReturns": { "due": "Last day of January", "electronicRequired": true },
+    "annualReconciliation": { "form": "RPD-41072", "required": false }
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "FYI-104 is guidance and expressly yields to statutes, regulations, case law, and rulings if they conflict.",
+    "The duplicate New Mexico-only federal W-4 is described as a convenience rather than mandatory, so missing-certificate default behavior remains unverified.",
+    "The complete direct tables are checksummed but only annual schedules are transcribed; no generalized rounding rule was located."
+  ],
+  "review": { "exact2026PublicationCaptured": true, "annualSchedulesTranscribed": true, "supplementalMethodTranscribed": true, "officialExampleTranscribed": true, "residencyAndWorkRulesTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "completeDirectPeriodTablesTranscribed": false, "missingCertificateRuleVerified": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import all direct period tables, verify missing-certificate and rounding behavior plus the 15-day transition, and add example, bracket, residency, tribal, and filing-frequency regressions." }
+}

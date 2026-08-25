@@ -810,6 +810,40 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task NewMexicoSourceCapture_PreservesExact2026SchedulesAndFifteenDayRule()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/nm/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(10, calculation.GetProperty("annualSchedules").GetProperty("Single").GetArrayLength());
+        Assert.Equal(0.059m, calculation.GetProperty("annualSchedules").GetProperty("HeadOfHousehold")[9].GetProperty("rate").GetDecimal());
+        Assert.Equal(41.80m, calculation.GetProperty("officialExample").GetProperty("totalWithholding").GetDecimal());
+        Assert.Equal(15, root.GetProperty("residencyAndWorkRules").GetProperty("shortTermNonresidentException").GetProperty("maximumNewMexicoWorkDays").GetInt32());
+        Assert.Equal("2026-01-01", root.GetProperty("filing").GetProperty("electronicFilingAndPaymentRequiredBeginning").GetString());
+        Assert.All(root.GetProperty("sources").EnumerateArray(), source => Assert.Matches("^[a-f0-9]{64}$", source.GetProperty("sha256").GetString()));
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task NewYorkSourceCapture_PreservesWholeWageTopMethodAndLocalLink()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ny/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(1000, calculation.GetProperty("annualExemptionAmount").GetInt32());
+        Assert.Equal(10, calculation.GetProperty("annualExactSchedules").GetProperty("Single").GetArrayLength());
+        Assert.Equal(12, calculation.GetProperty("annualExactSchedules").GetProperty("Married").GetArrayLength());
+        Assert.Equal(0.1045m, calculation.GetProperty("topIncomeWholeWageRates").GetProperty("bands")[0].GetProperty("rateOnAllAnnualizedNetWages").GetDecimal());
+        Assert.Contains("not an ordinary marginal", calculation.GetProperty("topIncomeWholeWageRates").GetProperty("warning").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("2026-local-source-capture.json", root.GetProperty("localWithholding").GetProperty("sourceCapture").GetString());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();

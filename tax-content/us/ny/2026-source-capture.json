@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ny",
+  "capturedAtUtc": "2026-08-25T15:00:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nys.pdf", "title": "NYS-50-T-NYS New York State Withholding Tax Tables and Methods", "revision": "1/26", "mediaType": "application/pdf", "sha256": "e1c2b3440572a10019efe8d8e4d727474c55afb37dd5d18a6a73b94463baf3e8", "bytes": 384460 },
+    { "url": "https://www.tax.ny.gov/forms/publications/wt/nys50.htm", "title": "NYS-50 Employer's Guide to Unemployment Insurance, Wage Reporting, and Withholding Tax", "revision": "12/25", "mediaType": "text/html", "sha256": null, "bytes": null },
+    { "url": "https://www.tax.ny.gov/bus/wt/duedates.htm", "title": "New York withholding tax due dates", "mediaType": "text/html", "sha256": null, "bytes": null }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "Form IT-2104", "dataType": "enum", "values": ["Single", "Married"] },
+    { "code": "exemptions", "source": "Form IT-2104", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Form IT-2104", "dataType": "money", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "assignedPrimaryOfficeJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "newYorkAllocationPercentage", "source": "Form IT-2104.1 or employer records", "dataType": "decimal", "minimum": 0, "maximum": 1 },
+    { "code": "otherJurisdictionRequiredWithholding", "dataType": "money", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["WageBracket", "ExactCalculation", "DollarToDollarWeekly", "TopIncomeWholeWageRate", "ConvertedPayrollPeriod"],
+    "annualDeductionAmounts": { "Single": 7400, "Married": 7950 },
+    "annualExemptionAmount": 1000,
+    "deductionAndExemptionRule": "Subtract the filing-status deduction plus $1,000 for each exemption before Method II or III. Published direct amounts exist for daily, weekly, biweekly, semimonthly, monthly, and annual periods.",
+    "federalAllowanceCompatibility": { "publishedFederalAllowanceReference": 4300, "publishedReferenceYear": 2025, "annualAdjustmentPerFederalAllowance": 3300, "dynamicRule": "Recalculate as current federal allowance minus $1,000 rather than freezing $3,300." },
+    "annualExactSchedules": {
+      "Single": [
+        { "over": 0, "through": 8500, "baseTax": 0, "rate": 0.039 }, { "over": 8500, "through": 11700, "baseTax": 332, "rate": 0.044 }, { "over": 11700, "through": 13900, "baseTax": 472, "rate": 0.0515 }, { "over": 13900, "through": 80650, "baseTax": 586, "rate": 0.054 }, { "over": 80650, "through": 96800, "baseTax": 4190, "rate": 0.059 }, { "over": 96800, "through": 107650, "baseTax": 5143, "rate": 0.0703 }, { "over": 107650, "through": 157650, "baseTax": 5906, "rate": 0.0753 }, { "over": 157650, "through": 215400, "baseTax": 9673, "rate": 0.064 }, { "over": 215400, "through": 265400, "baseTax": 13369, "rate": 0.1144 }, { "over": 265400, "through": 1077550, "baseTax": 19091, "rate": 0.0735 }
+      ],
+      "Married": [
+        { "over": 0, "through": 8500, "baseTax": 0, "rate": 0.039 }, { "over": 8500, "through": 11700, "baseTax": 332, "rate": 0.044 }, { "over": 11700, "through": 13900, "baseTax": 472, "rate": 0.0515 }, { "over": 13900, "through": 80650, "baseTax": 586, "rate": 0.054 }, { "over": 80650, "through": 96800, "baseTax": 4190, "rate": 0.059 }, { "over": 96800, "through": 107650, "baseTax": 5143, "rate": 0.0657 }, { "over": 107650, "through": 157650, "baseTax": 5855, "rate": 0.0707 }, { "over": 157650, "through": 211550, "baseTax": 9388, "rate": 0.0801 }, { "over": 211550, "through": 323200, "baseTax": 13708, "rate": 0.064 }, { "over": 323200, "through": 373200, "baseTax": 20854, "rate": 0.1349 }, { "over": 373200, "through": 1077550, "baseTax": 27600, "rate": 0.0735 }, { "over": 1077550, "through": 2155350, "baseTax": 79369, "rate": 0.0765 }
+      ]
+    },
+    "topIncomeWholeWageRates": {
+      "SingleStartsAt": 1077550,
+      "MarriedStartsAt": 2155350,
+      "bands": [{ "atLeast": "Status-specific start", "through": 5000000, "rateOnAllAnnualizedNetWages": 0.1045 }, { "atLeast": 5000000, "through": 25000000, "rateOnAllAnnualizedNetWages": 0.111 }, { "atLeast": 25000000, "rateOnAllAnnualizedNetWages": 0.117 }],
+      "warning": "Method III applies its rate to all annualized net wages; it is not an ordinary marginal continuation of Method II."
+    },
+    "supplementalWages": { "notSeparatelyIdentified": "Apply the ordinary method to the combined payment.", "separatelyPaidOrIdentifiedMethods": ["Withhold 11.70%", "Aggregate with the most recent regular payroll this year and subtract regular withholding"], "flatRate": 0.117 },
+    "officialExamples": [
+      { "filingStatus": "Single", "frequency": "Weekly", "grossWages": 400, "exemptions": 3, "deductionAndExemptions": 200.05, "netWages": 199.95, "withholding": 8.01 },
+      { "filingStatus": "Married", "frequency": "Semimonthly", "grossWages": 5000, "exemptions": 3, "deductionAndExemptions": 456.20, "netWages": 4543.80, "withholding": 248.11 },
+      { "filingStatus": "Married", "frequency": "QuarterlyConverted", "grossWages": 6750, "exemptions": 2, "monthlyEquivalentWages": 2250, "monthlyWithholding": 63.50, "withholding": 190.50 }
+    ],
+    "rounding": { "generalInstructionLocated": false, "officialExamplesUseCents": true }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "All wages paid to a New York resident are subject to New York withholding regardless of work location or assignment duration.",
+    "residentOtherJurisdictionCredit": "Reduce otherwise-required New York withholding by income tax required to be withheld by other states, their political subdivisions, or DC; do not reduce below zero.",
+    "nonresidentPhysicalWork": "Withhold on New York work wages; allocate by New York workdays over total workdays, or by New York sales volume for compensation entirely dependent on business volume.",
+    "missingNonresidentAllocationCertificate": "Withhold on all wages unless Form IT-2104.1 is filed or adequate current source-wage records are maintained.",
+    "shortTermPolicy": { "maximumExpectedNewYorkDays": 14, "requiresPrimaryWorkLocationOutsideNewYork": true, "authority": "TSB-M-12(5)I", "completeConditionsTranscribed": false },
+    "convenienceRule": { "authority": "TSB-M-06(5)I", "appliesWhen": "A nonresident or part-year resident has an assigned or primary New York work location and works from an out-of-state home office", "employerNecessityFactRequired": true },
+    "interstateRailAndMotorCarrierRule": "Regular multistate carrier duties are taxed only by residence.",
+    "airCarrierRule": "A nonresident is subject only if more than 50% of scheduled flight time is in New York; then withholding applies to compensation.",
+    "sailorRule": "Do not withhold for covered foreign, coastwise, intercoastal, interstate, noncontiguous, fishing-vessel, or fish-processing-vessel trade unless voluntarily requested.",
+    "multiStateWorkLocationRequired": true
+  },
+  "filing": {
+    "quarterlyReturn": { "form": "NYS-45", "due": "April 30, July 31, October 31, and January 31", "electronicRequired": true },
+    "accumulatedWithholdingReturn": { "form": "NYS-1", "triggerAccumulatedWithholdingAtLeast": 700, "fiveDayFiler": "Prior comparison-year withholding below $15,000", "threeDayFiler": "Prior comparison-year withholding at least $15,000", "departmentAssignsStatus": true, "lessThanTriggerPaidWithQuarterlyReturn": true }
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false, "sourceCapture": "2026-local-source-capture.json", "separateEngines": ["NewYorkCityResident", "YonkersResident", "YonkersNonresident"] },
+  "captureWarnings": [
+    "Method III uses whole-wage average rates rather than marginal brackets; representing it as a normal bracket would materially over- or under-withhold.",
+    "The federal-allowance compatibility adjustment is explicitly inflation-sensitive and must not be frozen at the publication's 2025 federal amount.",
+    "The full 14-day policy conditions and complete direct wage-bracket, dollar-to-dollar, and exact period matrices remain untranscribed."
+  ],
+  "review": { "exact2026PublicationCaptured": true, "deductionsAndAnnualSchedulesTranscribed": true, "topIncomeMethodTranscribed": true, "supplementalMethodTranscribed": true, "officialExamplesTranscribed": true, "residencyAndWorkRulesTranscribed": true, "localCaptureLinked": true, "filingSchedulesTranscribed": true, "rawCalculationSourceChecksummed": true, "completeDirectTablesTranscribed": false, "shortTermPolicyFullyTranscribed": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import all direct tables, fully transcribe TSB-M-12(5)I and convenience necessity tests, implement state/local selection and whole-wage Method III, then add examples and every threshold/allocation boundary." }
+}
