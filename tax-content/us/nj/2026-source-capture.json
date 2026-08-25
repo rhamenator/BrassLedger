@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-nj",
+  "capturedAtUtc": "2026-08-25T13:30:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.nj.gov/treasury/taxation/pdf/current/njwt.pdf", "title": "NJ-WT New Jersey Gross Income Tax Instructions", "revision": "September 2025", "mediaType": "application/pdf", "sha256": "0fbd45b2c7e9f5d8858ed4008c1436739e7a3ba655a823516ca4be8041cf01e9", "bytes": 2317231 },
+    { "url": "https://www.nj.gov/treasury/taxation/pdf/withholdingtables.pdf", "title": "New Jersey Tables for Percentage Method of Withholding", "revision": "Applicable on and after October 1, 2020; linked as current for 2026", "mediaType": "application/pdf", "sha256": "e7480d096b6126f49181c9f5e9b04a15b1542ca79e7480d01e4a3d6bb359f3f8", "bytes": 480199 },
+    { "url": "https://www.nj.gov/treasury/taxation/pdf/current/njwtsp.pdf", "title": "Supplemental NJ-WT Gross Income Tax Supplemental Withholding Tables", "revision": "Effective on and after January 1, 2005; linked as current for 2026", "mediaType": "application/pdf", "sha256": "194cb84f0f9fced771d14dfe61692c2e917de6b2e013155526fb2da685e2438e", "bytes": 740495 },
+    { "url": "https://www.nj.gov/treasury/taxation/conveniencerulefaq.shtml", "title": "Convenience of the Employer Sourcing Rule FAQ", "updated": "2025-10-30", "mediaType": "text/html", "sha256": null, "bytes": null }
+  ],
+  "employeeInputs": [
+    { "code": "rateTable", "source": "Form NJ-W4 lines 2 and 3", "dataType": "enum", "values": ["A", "B", "C", "D", "E"] },
+    { "code": "exemptions", "source": "Form NJ-W4", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Form NJ-W4 line 5", "dataType": "money", "minimum": 0 },
+    { "code": "exempt", "source": "Form NJ-W4 line 6", "dataType": "boolean" },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "assignedPrimaryOfficeJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "remoteWorkNecessity", "dataType": "boolean" },
+    { "code": "newJerseyWorkDays", "dataType": "integer", "minimum": 0 },
+    { "code": "totalWorkDays", "dataType": "integer", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["PercentageRateTable", "SupplementalWageBracket"],
+    "defaultTableSelection": { "A": "NJ-W4 filing-status box 1 or 3", "B": "NJ-W4 filing-status box 2, 4, or 5 when line 3 is blank", "EmployeeSelected": "Rate C, D, or E when selected on NJ-W4 line 3" },
+    "allowanceValues": { "Weekly": 19.20, "Biweekly": 38.40, "Semimonthly": 41.60, "Monthly": 83.30, "Quarterly": 250, "Semiannual": 500, "Annual": 1000, "DailyOrMiscellaneous": 2.70 },
+    "steps": ["Subtract payroll-period allowance value multiplied by NJ-W4 exemptions from wages.", "Apply the selected A-E percentage schedule.", "Add the periodic amount requested on NJ-W4 line 5."],
+    "annualRateTables": {
+      "A": [
+        { "over": 0, "through": 20000, "baseTax": 0, "rate": 0.015 }, { "over": 20000, "through": 35000, "baseTax": 300, "rate": 0.02 }, { "over": 35000, "through": 40000, "baseTax": 600, "rate": 0.039 }, { "over": 40000, "through": 75000, "baseTax": 795, "rate": 0.061 }, { "over": 75000, "through": 500000, "baseTax": 2930, "rate": 0.07 }, { "over": 500000, "through": 1000000, "baseTax": 32680, "rate": 0.099 }, { "over": 1000000, "baseTax": 82180, "rate": 0.118 }
+      ],
+      "B": [
+        { "over": 0, "through": 20000, "baseTax": 0, "rate": 0.015 }, { "over": 20000, "through": 50000, "baseTax": 300, "rate": 0.02 }, { "over": 50000, "through": 70000, "baseTax": 900, "rate": 0.027 }, { "over": 70000, "through": 80000, "baseTax": 1440, "rate": 0.039 }, { "over": 80000, "through": 150000, "baseTax": 1830, "rate": 0.061 }, { "over": 150000, "through": 500000, "baseTax": 6100, "rate": 0.07 }, { "over": 500000, "through": 1000000, "baseTax": 30600, "rate": 0.099 }, { "over": 1000000, "baseTax": 80100, "rate": 0.118 }
+      ],
+      "C": [
+        { "over": 0, "through": 20000, "baseTax": 0, "rate": 0.015 }, { "over": 20000, "through": 40000, "baseTax": 300, "rate": 0.023 }, { "over": 40000, "through": 50000, "baseTax": 760, "rate": 0.028 }, { "over": 50000, "through": 60000, "baseTax": 1040, "rate": 0.035 }, { "over": 60000, "through": 150000, "baseTax": 1390, "rate": 0.056 }, { "over": 150000, "through": 500000, "baseTax": 6430, "rate": 0.066 }, { "over": 500000, "through": 1000000, "baseTax": 29530, "rate": 0.099 }, { "over": 1000000, "baseTax": 79030, "rate": 0.118 }
+      ],
+      "D": [
+        { "over": 0, "through": 20000, "baseTax": 0, "rate": 0.015 }, { "over": 20000, "through": 40000, "baseTax": 300, "rate": 0.027 }, { "over": 40000, "through": 50000, "baseTax": 840, "rate": 0.034 }, { "over": 50000, "through": 60000, "baseTax": 1180, "rate": 0.043 }, { "over": 60000, "through": 150000, "baseTax": 1610, "rate": 0.056 }, { "over": 150000, "through": 500000, "baseTax": 6650, "rate": 0.065 }, { "over": 500000, "through": 1000000, "baseTax": 29400, "rate": 0.099 }, { "over": 1000000, "baseTax": 78900, "rate": 0.118 }
+      ],
+      "E": [
+        { "over": 0, "through": 20000, "baseTax": 0, "rate": 0.015 }, { "over": 20000, "through": 35000, "baseTax": 300, "rate": 0.02 }, { "over": 35000, "through": 100000, "baseTax": 600, "rate": 0.058 }, { "over": 100000, "through": 500000, "baseTax": 4370, "rate": 0.065 }, { "over": 500000, "through": 1000000, "baseTax": 30370, "rate": 0.099 }, { "over": 1000000, "baseTax": 79870, "rate": 0.118 }
+      ]
+    },
+    "rounding": { "wagesMayBeRounded": true, "method": "NearestWholeDollar", "taxRoundingInstructionLocated": false },
+    "supplementalWages": { "paidWithRegular": "Apply the appropriate rate to the combined payment.", "paidSeparately": "Calculate from supplemental wages without subtracting any NJ-W4 exemption allowances.", "unusedBenefitTimeIsSupplemental": true, "officialSupplementalMatricesCaptured": true }
+  },
+  "residencyAndWorkRules": {
+    "residentOutsideStateNoWithholding": ["Employed totally outside New Jersey", "Subject to that state's withholding", "Other state's required withholding equals or exceeds New Jersey withholding"],
+    "residentOtherStateCredit": "If work is partly outside New Jersey or other-state withholding is lower, withhold New Jersey tax reduced by tax withheld for other states, their political subdivisions, or DC.",
+    "nonresidentPhysicalWork": "Withhold only on New Jersey work compensation, using exact records or New Jersey workdays divided by total workdays.",
+    "reciprocalStates": ["PA"],
+    "reciprocityForm": "NJ-165",
+    "pennsylvaniaLocalTaxStillApplies": true,
+    "convenienceRule": { "effectiveOn": "2023-01-01", "dynamicTrigger": "Employee is resident of a state that imposes a similar convenience test", "examplesCurrentlyNamedByAgency": ["DE", "NE", "NY"], "currentlyExcluded": ["CT", "PA"], "requiresSomeNewJerseyConnection": true, "assignedPrimaryOfficeRequired": true, "employeeConvenienceSourcesRemoteWagesToNewJersey": true, "employerNecessityException": true, "warning": "Agency states the state list may change; implement capability-based jurisdiction metadata, not a fixed enumeration." },
+    "multiStateWorkLocationRequired": true
+  },
+  "filing": {
+    "quarterlyReturn": { "forms": ["NJ-927", "NJ-927-W"], "due": "30th day after quarter", "electronicRequired": true, "zeroReturnsRequired": true },
+    "monthlyPayment": { "form": "NJ-500", "trigger": "More than $500 collected in the first or second month of a quarter", "due": "15th of following month", "thirdMonthPaidWithQuarterlyReturn": true },
+    "weeklyPayer": { "priorYearLiabilityAtLeast": 10000, "paymentDue": "Wednesday after the pay week", "paymentFrequencyFollowsActualPayrollFrequency": true, "quarterlyReconciliationRequired": true },
+    "domesticEmployer": { "form": "NJ-927-H", "frequency": "Annual", "due": "January 31" },
+    "yearEndReconciliation": { "form": "NJ-W-3", "due": "February 15", "electronicRequired": true }
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false, "crossBorderPennsylvaniaLocalTaxDependency": true },
+  "captureWarnings": [
+    "The official percentage schedules are still labeled effective October 1, 2020 and supplemental matrices effective January 1, 2005, although the 2026 official form index continues to link them as current.",
+    "The convenience-rule state set is expressly dynamic and current agency pages have differed over whether Alabama is listed; activation must use effective-dated capability metadata rather than a hard-coded list.",
+    "Complete payroll-period and supplemental matrices are checksummed but only the annual A-E schedules are transcribed."
+  ],
+  "review": { "annualRateTablesTranscribed": true, "employeeSelectionTranscribed": true, "supplementalMethodTranscribed": true, "residencyAndWorkRulesTranscribed": true, "dynamicConvenienceRulePreserved": true, "filingSchedulesTranscribed": true, "rawPdfSourcesChecksummed": true, "completePayrollPeriodTablesTranscribed": false, "completeSupplementalTablesTranscribed": false, "taxRoundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import direct period and supplemental matrices, implement effective-dated convenience-state capabilities plus NJ/PA local interaction and resident credits, verify rounding, and add selection/allocation/boundary regressions." }
+}

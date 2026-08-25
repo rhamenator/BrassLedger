@@ -759,6 +759,57 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task NebraskaSourceCapture_PreservesMinimumAndRetroactiveSevenDayRule()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ne/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(2440, calculation.GetProperty("allowanceValues").GetProperty("Annual").GetInt32());
+        Assert.Equal(7, calculation.GetProperty("annualSchedules").GetProperty("SingleOrHeadOfHousehold").GetArrayLength());
+        Assert.Equal(0.015m, calculation.GetProperty("specialMinimumWithholding").GetProperty("nominalMinimumRate").GetDecimal());
+        Assert.True(calculation.GetProperty("specialMinimumWithholding").GetProperty("lowerAmountAllowedWithDocumentation").GetBoolean());
+        Assert.Equal(7, root.GetProperty("residencyAndWorkRules").GetProperty("conferenceOrTrainingExemption").GetProperty("maximumNebraskaDutyDays").GetInt32());
+        Assert.Contains("retroactive", root.GetProperty("residencyAndWorkRules").GetProperty("convenienceRule").GetProperty("moreThanSevenDays").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task NewJerseySourceCapture_PreservesFiveTablesDynamicConvenienceAndPaLocalDependency()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/nj/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(5, calculation.GetProperty("annualRateTables").EnumerateObject().Count());
+        Assert.Equal(0.118m, calculation.GetProperty("annualRateTables").GetProperty("A")[6].GetProperty("rate").GetDecimal());
+        Assert.Equal(1000, calculation.GetProperty("allowanceValues").GetProperty("Annual").GetInt32());
+        Assert.Equal(3, root.GetProperty("residencyAndWorkRules").GetProperty("convenienceRule").GetProperty("examplesCurrentlyNamedByAgency").GetArrayLength());
+        Assert.Contains("fixed enumeration", root.GetProperty("residencyAndWorkRules").GetProperty("convenienceRule").GetProperty("warning").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.True(root.GetProperty("localWithholding").GetProperty("crossBorderPennsylvaniaLocalTaxDependency").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task NorthDakotaSourceCapture_PreservesW4GenerationsAndConditionalReciprocity()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/nd/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(4, calculation.GetProperty("methods").GetArrayLength());
+        Assert.Equal(5050, calculation.GetProperty("legacyAllowanceValues").GetProperty("Annual").GetInt32());
+        Assert.Equal(0.025m, calculation.GetProperty("annualSchedules").GetProperty("HeadOfHousehold")[2].GetProperty("rate").GetDecimal());
+        Assert.Equal(14, calculation.GetProperty("officialModernExample").GetProperty("roundedPeriodicWithholding").GetInt32());
+        Assert.Equal(2, root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates").GetArrayLength());
+        Assert.Contains("month", root.GetProperty("residencyAndWorkRules").GetProperty("minnesotaAdditionalCondition").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();
