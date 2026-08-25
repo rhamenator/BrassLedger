@@ -189,6 +189,15 @@ public sealed class TaxAdministrationServiceTests : IDisposable
                     string.Equals(expectedJurisdictionId, item.GetProperty("jurisdictionId").GetString(), StringComparison.OrdinalIgnoreCase));
             Assert.True(captureContainsJurisdiction, $"Source capture does not contain {expectedJurisdictionId}: {sourceCapturePath}");
             Assert.False(sourceCapture.RootElement.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+
+            if (jurisdiction.TryGetProperty("localSourceCapture", out var localSourceCaptureProperty))
+            {
+                var localRelativePath = localSourceCaptureProperty.GetString();
+                var localSourceCapturePath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(catalogPath)!, localRelativePath!));
+                Assert.True(File.Exists(localSourceCapturePath), $"Missing local source capture for {jurisdiction.GetProperty("code").GetString()}: {localSourceCapturePath}");
+                using var localSourceCapture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(localSourceCapturePath));
+                Assert.False(localSourceCapture.RootElement.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+            }
         }
     }
 
@@ -218,6 +227,57 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.Equal("ContainedBy", root.GetProperty("sharedRelationship").GetProperty("type").GetString());
         Assert.Equal("jurisdiction-us-md", root.GetProperty("sharedRelationship").GetProperty("targetJurisdictionId").GetString());
         Assert.Equal(0.0225m, root.GetProperty("specialRules").GetProperty("nonresidentSpecialTaxRate").GetDecimal());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task IndianaSourceCapture_CoversStateFormulaCountyPrecedenceAndAllCountyRates()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/in/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+        var counties = root.GetProperty("localJurisdictions").EnumerateArray().ToArray();
+
+        Assert.Equal("jurisdiction-us-in", root.GetProperty("jurisdictionId").GetString());
+        Assert.Equal(0.0295m, calculation.GetProperty("stateRate").GetDecimal());
+        Assert.Equal(1000, calculation.GetProperty("annualDeductions").GetProperty("personalExemption").GetInt32());
+        Assert.Equal(1500, calculation.GetProperty("annualDeductions").GetProperty("additionalDependentExemption").GetInt32());
+        Assert.Equal(3000, calculation.GetProperty("annualDeductions").GetProperty("adoptedChildDependentExemption").GetInt32());
+        Assert.Equal("residenceCounty", root.GetProperty("selection").GetProperty("precedence")[0].GetProperty("jurisdictionBasis").GetString());
+        Assert.Equal("principalWorkCounty", root.GetProperty("selection").GetProperty("precedence")[1].GetProperty("jurisdictionBasis").GetString());
+        Assert.True(root.GetProperty("selection").GetProperty("midyearMoveDoesNotChangeSelectedCounty").GetBoolean());
+
+        Assert.Equal(92, counties.Length);
+        Assert.Equal(92, counties.Select(item => item.GetProperty("jurisdictionId").GetString()).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(Enumerable.Range(1, 92).Select(value => $"IN-{value:00}"), counties.Select(item => item.GetProperty("code").GetString()));
+        Assert.All(counties, item => Assert.Equal("County", item.GetProperty("type").GetString()));
+        Assert.Equal(6, counties.Count(item => item.TryGetProperty("changedAfterOctober2025Publication", out var changed) && changed.GetBoolean()));
+
+        var example = root.GetProperty("officialExample");
+        Assert.Equal(473.08m, example.GetProperty("taxableWages").GetDecimal());
+        Assert.Equal(13.96m, example.GetProperty("stateWithholding").GetDecimal());
+        Assert.Equal(4.73m, example.GetProperty("countyWithholding").GetDecimal());
+        Assert.Equal(30, root.GetProperty("specialRules").GetProperty("qualifyingNonresidentThirtyDayRule").GetProperty("thresholdDays").GetInt32());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task NewYorkLocalSourceCapture_KeepsCityAndYonkersResidentAndNonresidentEnginesSeparate()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ny/2026-local-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var rules = root.GetProperty("localRules").EnumerateArray().ToArray();
+
+        Assert.Equal(3, rules.Length);
+        Assert.Contains(rules, item => item.GetProperty("code").GetString() == "NYC" && item.GetProperty("supplementalWageRate").GetDecimal() == 0.0425m);
+        Assert.Contains(rules, item => item.GetProperty("code").GetString() == "YONKERS-RESIDENT" && item.GetProperty("topIncomeMethodStateTaxMultiplier").GetDecimal() == 0.1675m);
+        Assert.Contains(rules, item => item.GetProperty("code").GetString() == "YONKERS-NONRESIDENT" && item.GetProperty("rate").GetDecimal() == 0.005m);
+        Assert.Equal(6, rules.SelectMany(item => item.GetProperty("officialExamples").EnumerateArray()).Count());
+        Assert.All(root.GetProperty("sources").EnumerateArray().Where(item => item.GetProperty("url").GetString()!.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)), source =>
+            Assert.Matches("^[a-f0-9]{64}$", source.GetProperty("sha256").GetString()));
+        Assert.False(root.GetProperty("review").GetProperty("completeExactCalculationTablesTranscribed").GetBoolean());
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 

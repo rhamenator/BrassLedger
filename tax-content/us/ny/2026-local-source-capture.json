@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "parentJurisdictionId": "jurisdiction-us-ny",
+  "capturedAtUtc": "2026-08-25T05:05:00Z",
+  "effectiveOn": "2026-01-01",
+  "sources": [
+    {
+      "url": "https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nyc.pdf",
+      "title": "NYS-50-T-NYC (1/26), New York City Withholding Tax Tables and Methods",
+      "sha256": "c380ffaf226332451b4f1609cdf0e0e10dfbf9b976d3961e3e23b09da92a2f4c",
+      "bytes": 510603,
+      "pages": 32
+    },
+    {
+      "url": "https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_y.pdf",
+      "title": "NYS-50-T-Y (1/26), Yonkers Withholding Tax Tables and Methods",
+      "sha256": "2fb609e46fbd1a7cc481b85558f0c3543aa7c982b6ac4c4402320234d6307858",
+      "bytes": 400873,
+      "pages": 27
+    },
+    {
+      "url": "https://www.tax.ny.gov/pubs_and_bulls/publications/withholding/wt_pubs_and_bulls_by_number.htm",
+      "title": "New York withholding publications and jurisdiction lookup"
+    }
+  ],
+  "employeeInputs": [
+    { "code": "newYorkCityResident", "dataType": "boolean", "source": "Form IT-2104 and employee residence" },
+    { "code": "yonkersResident", "dataType": "boolean", "source": "Form IT-2104 and jurisdiction lookup" },
+    { "code": "yonkersWorkAllocation", "dataType": "number", "source": "Work-location allocation for a nonresident earning wages in Yonkers" },
+    { "code": "filingStatus", "dataType": "text", "values": ["Single", "Married"] },
+    { "code": "withholdingExemptions", "dataType": "integer" },
+    { "code": "payrollFrequency", "dataType": "text", "values": ["Daily", "Weekly", "Biweekly", "Semimonthly", "Monthly", "Other"] }
+  ],
+  "localRules": [
+    {
+      "jurisdictionId": "jurisdiction-us-ny-new-york-city",
+      "code": "NYC",
+      "name": "New York City",
+      "type": "City",
+      "taxType": "Resident income tax withholding",
+      "appliesWhen": "Employee is a New York City resident",
+      "methods": ["Wage bracket", "Exact calculation", "Dollar-to-dollar weekly table", "Annualized or converted payroll-period method"],
+      "supplementalWageRate": 0.0425,
+      "officialExamples": [
+        { "frequency": "Weekly", "filingStatus": "Single", "grossWages": 400, "exemptions": 3, "allowance": 153.90, "netWages": 246.10, "withholding": 6.11 },
+        { "frequency": "Semimonthly", "filingStatus": "Married", "grossWages": 5000, "exemptions": 3, "allowance": 354.10, "netWages": 4645.90, "withholding": 184.37 }
+      ]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ny-yonkers",
+      "code": "YONKERS-RESIDENT",
+      "name": "Yonkers",
+      "type": "City",
+      "taxType": "Resident income tax surcharge withholding",
+      "appliesWhen": "Employee is a Yonkers resident",
+      "methods": ["Wage bracket", "Exact calculation", "Dollar-to-dollar table", "Top-income-rate method", "Payroll-period conversion"],
+      "topIncomeMethodStateTaxMultiplier": 0.1675,
+      "supplementalWageRate": 0.0195975,
+      "officialExamples": [
+        { "method": "Quarterly converted to monthly", "filingStatus": "Married", "grossWages": 6750, "exemptions": 2, "monthlyEquivalentWages": 2250, "monthlyWithholding": 10.65, "withholding": 31.95 }
+      ]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ny-yonkers",
+      "code": "YONKERS-NONRESIDENT",
+      "name": "Yonkers",
+      "type": "City",
+      "taxType": "Nonresident earnings tax withholding",
+      "appliesWhen": "Employee resides outside Yonkers, earns wages in Yonkers, and the employer maintains an office or transacts business in New York State",
+      "methods": ["Wage bracket", "Exact calculation", "Annualized tax"],
+      "rate": 0.005,
+      "annualizedNoWithholdingBelow": 4000,
+      "annualizedExclusions": [
+        { "over": 3999.99, "notOver": 10000, "amount": 3000 },
+        { "over": 10000, "notOver": 20000, "amount": 2000 },
+        { "over": 20000, "notOver": 30000, "amount": 1000 },
+        { "over": 30000, "notOver": null, "amount": 0 }
+      ],
+      "supplementalWageRate": 0.005,
+      "officialExamples": [
+        { "method": "Exact calculation", "frequency": "Weekly", "grossWages": 75, "withholding": 0 },
+        { "method": "Exact calculation", "frequency": "Weekly", "grossWages": 200, "exclusion": 38, "withholding": 0.81 },
+        { "method": "Exact calculation", "frequency": "Semimonthly", "grossWages": 400, "exclusion": 125, "withholding": 1.38 }
+      ]
+    }
+  ],
+  "sharedRelationship": { "type": "ContainedBy", "targetJurisdictionId": "jurisdiction-us-ny", "validFrom": "2026-01-01", "validThrough": null },
+  "review": {
+    "applicabilityTranscribed": true,
+    "headlineRatesTranscribed": true,
+    "officialExamplesTranscribed": true,
+    "completeWageTablesTranscribed": false,
+    "completeExactCalculationTablesTranscribed": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Transcribe every NYC and Yonkers allowance and exact-calculation table, implement residence/work allocation and payroll-period conversion, and validate all official examples before activation."
+  }
+}
