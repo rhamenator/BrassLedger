@@ -2033,7 +2033,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var schedules = scope.ServiceProvider.GetRequiredService<IPayrollDepositScheduleService>();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         const string holidays = "[\"2026-01-01\",\"2026-01-19\",\"2026-02-16\",\"2026-04-16\",\"2026-05-25\",\"2026-06-19\",\"2026-07-03\",\"2026-09-07\",\"2026-10-12\",\"2026-11-11\",\"2026-11-26\",\"2026-12-25\"]";
-        var saved = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2026, "Monthly", 40000m, new DateOnly(2024, 7, 1), new DateOnly(2025, 6, 30), 50000m, 100000m, holidays, "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2026, 8, 25), "Controller verified the 2026 lookback and official calendar.", true, true));
+        var saved = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2026, "Monthly", 40000m, new DateOnly(2024, 7, 1), new DateOnly(2025, 6, 30), 50000m, 100000m, 2500m, "[]", holidays, "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2026, 8, 25), "Controller verified the 2026 lookback and official calendar.", true, true));
         Assert.True(saved.Succeeded, saved.ErrorMessage);
 
         await using (var db = await factory.CreateDbContextAsync())
@@ -2046,7 +2046,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
 
         var current = Assert.Single((await schedules.GetAsync()).Configurations);
-        var recalculated = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(current.Id, current.TaxYear, current.ScheduleType, current.LookbackLiability, current.LookbackPeriodStart, current.LookbackPeriodEnd, current.MonthlyThreshold, current.NextDayThreshold, holidays, current.OfficialRulesUrl, current.OfficialCalendarUrl, current.SourceRetrievedOn, current.ReviewNotes, true, true, current.ConcurrencyToken));
+        var recalculated = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(current.Id, current.TaxYear, current.ScheduleType, current.LookbackLiability, current.LookbackPeriodStart, current.LookbackPeriodEnd, current.MonthlyThreshold, current.NextDayThreshold, current.SmallLiabilityThreshold, "[]", holidays, current.OfficialRulesUrl, current.OfficialCalendarUrl, current.SourceRetrievedOn, current.ReviewNotes, true, true, current.ConcurrencyToken));
         Assert.True(recalculated.Succeeded, recalculated.ErrorMessage);
 
         await using var verifiedDb = await factory.CreateDbContextAsync();
@@ -2061,7 +2061,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         byReference["PR-DEP-MONTHLY"].Status = "Paid";
         await verifiedDb.SaveChangesAsync();
         var refreshed = Assert.Single((await schedules.GetAsync()).Configurations);
-        var deactivated = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(refreshed.Id, refreshed.TaxYear, refreshed.ScheduleType, refreshed.LookbackLiability, refreshed.LookbackPeriodStart, refreshed.LookbackPeriodEnd, refreshed.MonthlyThreshold, refreshed.NextDayThreshold, holidays, refreshed.OfficialRulesUrl, refreshed.OfficialCalendarUrl, refreshed.SourceRetrievedOn, "Schedule deactivated for immutability test", false, false, refreshed.ConcurrencyToken));
+        var deactivated = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(refreshed.Id, refreshed.TaxYear, refreshed.ScheduleType, refreshed.LookbackLiability, refreshed.LookbackPeriodStart, refreshed.LookbackPeriodEnd, refreshed.MonthlyThreshold, refreshed.NextDayThreshold, refreshed.SmallLiabilityThreshold, "[]", holidays, refreshed.OfficialRulesUrl, refreshed.OfficialCalendarUrl, refreshed.SourceRetrievedOn, "Schedule deactivated for immutability test", false, false, refreshed.ConcurrencyToken));
         Assert.True(deactivated.Succeeded, deactivated.ErrorMessage);
         await verifiedDb.Entry(byReference["PR-DEP-MONTHLY"]).ReloadAsync(); await verifiedDb.Entry(byReference["PR-DEP-NEXT-1"]).ReloadAsync();
         Assert.Equal(new DateOnly(2026, 2, 17), byReference["PR-DEP-MONTHLY"].DueDate);
@@ -2073,21 +2073,83 @@ public sealed class WorkspaceInitializationTests : IDisposable
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
         var schedules = scope.ServiceProvider.GetRequiredService<IPayrollDepositScheduleService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
-        var invalidLookback = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2025, "Semiweekly", 60000m, new DateOnly(2024, 1, 1), new DateOnly(2024, 12, 31), 50000m, 100000m, "[\"2025-01-01\"]", "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2025, 1, 1), "", true, true));
+        var invalidLookback = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2025, "Semiweekly", 60000m, new DateOnly(2024, 1, 1), new DateOnly(2024, 12, 31), 50000m, 100000m, 2500m, "[]", "[\"2025-01-01\"]", "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2025, 1, 1), "", true, true));
         Assert.False(invalidLookback.Succeeded);
         Assert.Contains("lookback", invalidLookback.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        var spoofedSource = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2025, "Semiweekly", 60000m, new DateOnly(2023, 7, 1), new DateOnly(2024, 6, 30), 50000m, 100000m, "[\"2025-01-01\"]", "https://notirs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2025, 1, 1), "", true, true));
+        var spoofedSource = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2025, "Semiweekly", 60000m, new DateOnly(2023, 7, 1), new DateOnly(2024, 6, 30), 50000m, 100000m, 2500m, "[]", "[\"2025-01-01\"]", "https://notirs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2025, 1, 1), "", true, true));
         Assert.False(spoofedSource.Succeeded);
         Assert.Contains("official", spoofedSource.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        var saved = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2025, "Semiweekly", 60000m, new DateOnly(2023, 7, 1), new DateOnly(2024, 6, 30), 50000m, 100000m, "[\"2025-01-01\"]", "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2025, 1, 1), "", true, true));
+        var saved = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2025, "Semiweekly", 60000m, new DateOnly(2023, 7, 1), new DateOnly(2024, 6, 30), 50000m, 100000m, 2500m, "[]", "[\"2025-01-01\"]", "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2025, 1, 1), "", true, true));
         Assert.True(saved.Succeeded, saved.ErrorMessage);
         await using (var db = await factory.CreateDbContextAsync()) { AddFederalLiability(db, await db.Employees.FirstAsync(), new DateOnly(2025, 5, 30), "PR-DEP-SEMI", 1000m); await db.SaveChangesAsync(); }
         var current = Assert.Single((await schedules.GetAsync()).Configurations);
-        Assert.True((await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(current.Id, current.TaxYear, current.ScheduleType, current.LookbackLiability, current.LookbackPeriodStart, current.LookbackPeriodEnd, current.MonthlyThreshold, current.NextDayThreshold, "[\"2025-01-01\"]", current.OfficialRulesUrl, current.OfficialCalendarUrl, current.SourceRetrievedOn, current.ReviewNotes, true, true, current.ConcurrencyToken))).Succeeded);
+        Assert.True((await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(current.Id, current.TaxYear, current.ScheduleType, current.LookbackLiability, current.LookbackPeriodStart, current.LookbackPeriodEnd, current.MonthlyThreshold, current.NextDayThreshold, current.SmallLiabilityThreshold, "[]", "[\"2025-01-01\"]", current.OfficialRulesUrl, current.OfficialCalendarUrl, current.SourceRetrievedOn, current.ReviewNotes, true, true, current.ConcurrencyToken))).Succeeded);
         await using var verifiedDb = await factory.CreateDbContextAsync();
-        var dueDate = await verifiedDb.PayrollLiabilities.Join(verifiedDb.PayrollRuns, liability => liability.PayrollRunId, run => run.Id, (liability, run) => new { run.Reference, liability.DueDate }).Where(item => item.Reference == "PR-DEP-SEMI").Select(item => item.DueDate).SingleAsync();
-        Assert.Equal(new DateOnly(2025, 6, 4), dueDate);
+        var liability = await verifiedDb.PayrollLiabilities.Join(verifiedDb.PayrollRuns, liability => liability.PayrollRunId, run => run.Id, (liability, run) => new { run.Reference, Liability = liability }).Where(item => item.Reference == "PR-DEP-SEMI").Select(item => item.Liability).SingleAsync();
+        Assert.Equal(new DateOnly(2025, 6, 4), liability.DueDate);
+        Assert.Equal("Semiweekly", liability.DepositScheduleType); Assert.Equal("Semiweekly", liability.DepositRuleCode); Assert.Equal(saved.Id, liability.DepositScheduleConfigurationId);
+        var bankId = await verifiedDb.BankAccounts.Select(item => item.Id).FirstAsync();
+        Assert.True((await transactions.RecordPayrollLiabilityPaymentAsync(new RecordPayrollLiabilityPaymentRequest(bankId, new DateOnly(2025, 6, 4), "DEP-SHORTFALL-INITIAL", "United States Treasury", "EFT", [new PayrollLiabilityPaymentApplicationInput(liability.Id, 950m)]))).Succeeded);
+        Assert.True((await transactions.RecordPayrollLiabilityPaymentAsync(new RecordPayrollLiabilityPaymentRequest(bankId, new DateOnly(2025, 7, 16), "DEP-SHORTFALL-MAKEUP", "United States Treasury", "EFT", [new PayrollLiabilityPaymentApplicationInput(liability.Id, 50m)]))).Succeeded);
+        var shortfall = Assert.Single((await schedules.GetAsync()).Shortfalls!);
+        Assert.Equal(1000m, shortfall.RequiredAmount); Assert.Equal(950m, shortfall.PaidByDueDate); Assert.Equal(50m, shortfall.ShortfallAtDueDate);
+        Assert.Equal(100m, shortfall.SafeHarborTolerance); Assert.Equal(new DateOnly(2025, 7, 16), shortfall.MakeupDueDate); Assert.Equal(1000m, shortfall.PaidByMakeupDate); Assert.Equal("MadeUpWithinTolerance", shortfall.Status);
+    }
+
+    [Fact]
+    public async Task FederalDepositSchedule_AppliesOnlyEligibleSmallLiabilityReturnPaymentElections()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var schedules = scope.ServiceProvider.GetRequiredService<IPayrollDepositScheduleService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        const string holidays = "[\"2026-01-01\",\"2026-01-19\",\"2026-02-16\",\"2026-04-16\",\"2026-05-25\",\"2026-06-19\",\"2026-07-03\",\"2026-09-07\",\"2026-10-12\",\"2026-11-11\",\"2026-11-26\",\"2026-12-25\"]";
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var employee = await db.Employees.FirstAsync();
+            AddFederalLiability(db, employee, new DateOnly(2025, 12, 15), "PR-DEP-PRIOR-SMALL", 1000m);
+            AddFederalLiability(db, employee, new DateOnly(2026, 2, 13), "PR-DEP-RETURN-Q1", 10000m);
+            await db.SaveChangesAsync();
+        }
+        var saved = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2026, "Monthly", 40000m, new DateOnly(2024, 7, 1), new DateOnly(2025, 6, 30), 50000m, 100000m, 2500m, "[1]", holidays, "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2026, 8, 25), "Prior-quarter Form 941 liability verified below $2,500.", true, true));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var dueDate = await db.PayrollLiabilities.Join(db.PayrollRuns, liability => liability.PayrollRunId, run => run.Id, (liability, run) => new { run.Reference, liability.DueDate }).Where(item => item.Reference == "PR-DEP-RETURN-Q1").Select(item => item.DueDate).SingleAsync();
+            Assert.Equal(new DateOnly(2026, 4, 30), dueDate);
+            var employee = await db.Employees.FirstAsync();
+            AddFederalLiability(db, employee, new DateOnly(2026, 5, 8), "PR-DEP-RETURN-Q2-A", 60000m);
+            AddFederalLiability(db, employee, new DateOnly(2026, 5, 12), "PR-DEP-RETURN-Q2-B", 40000m);
+            await db.SaveChangesAsync();
+        }
+        var current = Assert.Single((await schedules.GetAsync()).Configurations);
+        var blocked = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(current.Id, current.TaxYear, current.ScheduleType, current.LookbackLiability, current.LookbackPeriodStart, current.LookbackPeriodEnd, current.MonthlyThreshold, current.NextDayThreshold, current.SmallLiabilityThreshold, "[1,2]", holidays, current.OfficialRulesUrl, current.OfficialCalendarUrl, current.SourceRetrievedOn, "Attempted Q2 election", true, true, current.ConcurrencyToken));
+        Assert.False(blocked.Succeeded);
+        Assert.Contains("next-day", blocked.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty((await schedules.GetAsync()).Shortfalls!);
+    }
+
+    [Fact]
+    public async Task FederalDepositSchedule_DoesNotCombineSemiweeklyLiabilityAcrossQuarterBoundary()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var schedules = scope.ServiceProvider.GetRequiredService<IPayrollDepositScheduleService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var employee = await db.Employees.FirstAsync();
+            AddFederalLiability(db, employee, new DateOnly(2026, 9, 30), "PR-DEP-Q3-END", 60000m);
+            AddFederalLiability(db, employee, new DateOnly(2026, 10, 2), "PR-DEP-Q4-START", 60000m);
+            await db.SaveChangesAsync();
+        }
+        const string holidays = "[\"2026-01-01\",\"2026-01-19\",\"2026-02-16\",\"2026-04-16\",\"2026-05-25\",\"2026-06-19\",\"2026-07-03\",\"2026-09-07\",\"2026-10-12\",\"2026-11-11\",\"2026-11-26\",\"2026-12-25\"]";
+        var saved = await schedules.SaveAsync(new SavePayrollDepositScheduleRequest(null, 2026, "Semiweekly", 60000m, new DateOnly(2024, 7, 1), new DateOnly(2025, 6, 30), 50000m, 100000m, 2500m, "[]", holidays, "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2026, 8, 25), "IRS cross-quarter semiweekly example.", true, true));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        await using var verifiedDb = await factory.CreateDbContextAsync();
+        var dueDates = await verifiedDb.PayrollLiabilities.Join(verifiedDb.PayrollRuns, liability => liability.PayrollRunId, run => run.Id, (liability, run) => new { run.Reference, liability.DueDate }).Where(item => item.Reference == "PR-DEP-Q3-END" || item.Reference == "PR-DEP-Q4-START").ToDictionaryAsync(item => item.Reference, item => item.DueDate);
+        Assert.Equal(new DateOnly(2026, 10, 7), dueDates["PR-DEP-Q3-END"]); Assert.Equal(new DateOnly(2026, 10, 7), dueDates["PR-DEP-Q4-START"]);
+        Assert.False(Assert.Single((await schedules.GetAsync()).Summaries).NextDayRuleTriggered);
     }
 
     private static void AddFederalLiability(BrassLedgerDbContext db, Employee employee, DateOnly payDate, string reference, decimal amount)

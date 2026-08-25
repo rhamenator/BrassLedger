@@ -687,6 +687,8 @@ public sealed class PayrollDepositScheduleConfiguration
     public DateOnly LookbackPeriodEnd { get; set; }
     public decimal MonthlyThreshold { get; set; } = 50000m;
     public decimal NextDayThreshold { get; set; } = 100000m;
+    public decimal SmallLiabilityThreshold { get; set; } = 2500m;
+    public string SmallLiabilityElectionQuartersJson { get; set; } = "[]";
     public string LegalHolidaysJson { get; set; } = "[]";
     public string OfficialRulesUrl { get; set; } = string.Empty;
     public string OfficialCalendarUrl { get; set; } = string.Empty;
@@ -847,6 +849,10 @@ public sealed class PayrollLiability
     public decimal OutstandingAmount { get; set; }
     public string Status { get; set; } = "Open";
     public DateOnly? DueDate { get; set; }
+    public string DepositScheduleType { get; set; } = string.Empty;
+    public string DepositRuleCode { get; set; } = string.Empty;
+    public string DepositRuleSource { get; set; } = string.Empty;
+    public Guid? DepositScheduleConfigurationId { get; set; }
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 

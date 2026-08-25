@@ -361,6 +361,7 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.LookbackLiability));
         ConfigureMoney(modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.MonthlyThreshold));
         ConfigureMoney(modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.NextDayThreshold));
+        ConfigureMoney(modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.SmallLiabilityThreshold));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.HourlyRate), 18, 4);
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.OvertimeRate), 18, 4);
         ConfigureMoney(modelBuilder.Entity<PayrollTimeEntry>().Property(x => x.Hours), 18, 4);
@@ -414,6 +415,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollTimeEntry>().HasIndex(x => new { x.PayrollTimecardId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PayrollJurisdictionRule>().HasIndex(x => new { x.CompanyId, x.ResidenceJurisdiction, x.WorkJurisdiction }).IsUnique();
         modelBuilder.Entity<PayrollDepositScheduleConfiguration>().HasIndex(x => new { x.CompanyId, x.JurisdictionCode, x.ReturnFormCode, x.TaxYear }).IsUnique();
+        modelBuilder.Entity<PayrollLiability>().HasOne<PayrollDepositScheduleConfiguration>().WithMany().HasForeignKey(x => x.DepositScheduleConfigurationId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollRunEmployeeLine>().HasIndex(x => new { x.PayrollRunId, x.EmployeeId }).IsUnique();
         modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => x.PayrollTimeEntryId);
