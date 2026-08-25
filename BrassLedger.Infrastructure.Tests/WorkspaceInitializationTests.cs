@@ -58,8 +58,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(File.Exists(databasePath));
         await using var connection = new SqliteConnection($"Data Source={databasePath}");
         await connection.OpenAsync();
-        Assert.Equal("3", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.StartsWith("2026082503-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
+        Assert.Equal("4", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.StartsWith("2026082504-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
     }
 
     [Fact]
@@ -83,8 +83,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("3", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("4", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
         Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
     }
@@ -100,7 +101,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082504-%' OR "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
                 ALTER TABLE "PayrollEarningLines" DROP COLUMN "W2ReportingJson";
                 """;
             await command.ExecuteNonQueryAsync();
@@ -110,10 +111,45 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("3", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("4", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollEarningLines') WHERE name = 'W2ReportingJson';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaRecoveryCodes';"));
         Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
+    }
+
+    [Fact]
+    public async Task InitializeBrassLedgerAsync_UpgradesPreMfaSchemaWithoutLosingOperators()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082504-%';
+                DROP TABLE "MfaRecoveryCodes";
+                DROP TABLE "MfaSignInChallenges";
+                ALTER TABLE "Users" DROP COLUMN "MfaEnabled";
+                ALTER TABLE "Users" DROP COLUMN "MfaSecret";
+                ALTER TABLE "Users" DROP COLUMN "MfaEnrolledAtUtc";
+                ALTER TABLE "Users" DROP COLUMN "MfaLastAcceptedTimeStep";
+                ALTER TABLE "Users" DROP COLUMN "MfaFailedAttemptCount";
+                ALTER TABLE "Users" DROP COLUMN "MfaLockoutEndUtc";
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await services.InitializeBrassLedgerAsync();
+
+        await using var verified = new SqliteConnection($"Data Source={databasePath}");
+        await verified.OpenAsync();
+        Assert.Equal("4", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('Users') WHERE name = 'MfaSecret';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
+        Assert.Equal("controller", await ReadScalarAsync(verified, "SELECT UserName FROM Users WHERE UserName = 'controller';"));
     }
 
     [Fact]
@@ -494,6 +530,157 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(user.LockoutEndUtc > DateTimeOffset.UtcNow);
         Assert.Equal(BrassLedgerAuthenticationDefaults.MaxFailedSignInAttempts, user.FailedSignInCount);
         Assert.True(await dbContext.AuthenticationAuditEntries.CountAsync(x => x.UserName == "controller") >= BrassLedgerAuthenticationDefaults.MaxFailedSignInAttempts);
+    }
+
+    [Fact]
+    public async Task MultiFactorAuthentication_EnrollsChallengesUsesRecoveryOnceAndCanBeDisabled()
+    {
+        var clock = new MutableTimeProvider(DateTimeOffset.FromUnixTimeSeconds(1_800_000_000));
+        var configuration = new ConfigurationBuilder().Build();
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddSingleton<TimeProvider>(clock);
+        serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: true);
+        using var services = serviceCollection.BuildServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var initial = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test");
+        Assert.Equal(AuthenticationOutcome.Succeeded, initial.Outcome);
+
+        var rejectedEnrollment = await authentication.BeginMfaEnrollmentAsync(
+            initial.User!.UserId, initial.User.CompanyId, "wrong-password", "127.0.0.1", "mfa-test");
+        Assert.Equal(MfaOperationOutcome.InvalidPassword, rejectedEnrollment.Outcome);
+        var enrollment = await authentication.BeginMfaEnrollmentAsync(
+            initial.User.UserId, initial.User.CompanyId, BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test");
+        Assert.Equal(MfaOperationOutcome.Succeeded, enrollment.Outcome);
+        Assert.Equal(32, enrollment.Secret.Length);
+        Assert.Equal(BrassLedgerAuthenticationDefaults.RecoveryCodeCount, enrollment.RecoveryCodes!.Count);
+        Assert.All(enrollment.RecoveryCodes, code => Assert.Matches("^[0-9A-F]{8}(-[0-9A-F]{8}){3}$", code));
+
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            Assert.StartsWith("enc::", await ReadScalarAsync(connection, "SELECT MfaSecret FROM Users WHERE UserName = 'controller';"));
+            Assert.DoesNotContain(enrollment.Secret, await ReadScalarAsync(connection, "SELECT MfaSecret FROM Users WHERE UserName = 'controller';"), StringComparison.Ordinal);
+            var storedRecoveryHash = await ReadScalarAsync(connection, "SELECT CodeHash FROM MfaRecoveryCodes LIMIT 1;");
+            Assert.Equal(64, storedRecoveryHash.Length);
+            Assert.DoesNotContain(enrollment.RecoveryCodes[0].Replace("-", string.Empty, StringComparison.Ordinal), storedRecoveryHash, StringComparison.Ordinal);
+        }
+
+        var enrollmentStep = clock.GetUtcNow().ToUnixTimeSeconds() / TotpService.TimeStepSeconds;
+        var enrollmentCode = TotpService.ComputeCode(TotpService.DecodeBase32(enrollment.Secret), enrollmentStep);
+        var enabled = await authentication.EnableMfaAsync(
+            initial.User.UserId, initial.User.CompanyId, enrollmentCode, "127.0.0.1", "mfa-test");
+        Assert.Equal(MfaOperationOutcome.Succeeded, enabled.Outcome);
+
+        var expiredPasswordStage = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test");
+        clock.Advance(TimeSpan.FromMinutes(BrassLedgerAuthenticationDefaults.MfaChallengeMinutes + 1));
+        Assert.Equal(MfaOperationOutcome.Expired, (await authentication.CompleteMfaChallengeAsync(
+            expiredPasswordStage.MfaChallengeToken, enrollment.RecoveryCodes[0], "127.0.0.1", "mfa-test")).Outcome);
+
+        var passwordStage = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test");
+        Assert.Equal(AuthenticationOutcome.MfaRequired, passwordStage.Outcome);
+        Assert.Null(passwordStage.User);
+        Assert.NotEmpty(passwordStage.MfaChallengeToken);
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            var storedChallengeHash = await ReadScalarAsync(connection, "SELECT TokenHash FROM MfaSignInChallenges ORDER BY CreatedAtUtc DESC LIMIT 1;");
+            Assert.Equal(64, storedChallengeHash.Length);
+            Assert.NotEqual(passwordStage.MfaChallengeToken, storedChallengeHash);
+        }
+        var completed = await authentication.CompleteMfaChallengeAsync(
+            passwordStage.MfaChallengeToken, enrollment.RecoveryCodes[0], "127.0.0.1", "mfa-test");
+        Assert.Equal(MfaOperationOutcome.Succeeded, completed.Outcome);
+        Assert.True(completed.UsedRecoveryCode);
+        Assert.True(completed.User!.MfaAuthenticated);
+        Assert.Equal(MfaOperationOutcome.InvalidCode, (await authentication.CompleteMfaChallengeAsync(
+            passwordStage.MfaChallengeToken, enrollment.RecoveryCodes[0], "127.0.0.1", "mfa-test")).Outcome);
+
+        var secondPasswordStage = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test");
+        Assert.Equal(AuthenticationOutcome.MfaRequired, secondPasswordStage.Outcome);
+        Assert.Equal(MfaOperationOutcome.InvalidCode, (await authentication.CompleteMfaChallengeAsync(
+            secondPasswordStage.MfaChallengeToken, enrollment.RecoveryCodes[0], "127.0.0.1", "mfa-test")).Outcome);
+        clock.Advance(TimeSpan.FromSeconds(TotpService.TimeStepSeconds));
+        var freshStep = clock.GetUtcNow().ToUnixTimeSeconds() / TotpService.TimeStepSeconds;
+        var freshCode = TotpService.ComputeCode(TotpService.DecodeBase32(enrollment.Secret), freshStep);
+        var secondCompleted = await authentication.CompleteMfaChallengeAsync(
+            secondPasswordStage.MfaChallengeToken, freshCode, "127.0.0.1", "mfa-test");
+        Assert.Equal(MfaOperationOutcome.Succeeded, secondCompleted.Outcome);
+        Assert.False(secondCompleted.UsedRecoveryCode);
+
+        var snapshot = await authentication.GetAccountSecurityAsync(initial.User.UserId);
+        Assert.True(snapshot!.MfaEnabled);
+        Assert.Equal(BrassLedgerAuthenticationDefaults.RecoveryCodeCount - 1, snapshot.RecoveryCodesRemaining);
+
+        var replacement = await authentication.RegenerateMfaRecoveryCodesAsync(
+            initial.User.UserId,
+            initial.User.CompanyId,
+            BrassLedgerAuthenticationDefaults.SeededPassword,
+            enrollment.RecoveryCodes[2],
+            "127.0.0.1",
+            "mfa-test");
+        Assert.Equal(MfaOperationOutcome.Succeeded, replacement.Outcome);
+        Assert.Equal(BrassLedgerAuthenticationDefaults.RecoveryCodeCount, replacement.RecoveryCodes!.Count);
+        var replacementChallenge = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test");
+        Assert.Equal(MfaOperationOutcome.InvalidCode, (await authentication.CompleteMfaChallengeAsync(
+            replacementChallenge.MfaChallengeToken, enrollment.RecoveryCodes[3], "127.0.0.1", "mfa-test")).Outcome);
+        var concurrentChallenge = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test");
+        var concurrentCompletions = await Task.WhenAll(
+            authentication.CompleteMfaChallengeAsync(replacementChallenge.MfaChallengeToken, replacement.RecoveryCodes[0], "127.0.0.1", "mfa-test"),
+            authentication.CompleteMfaChallengeAsync(concurrentChallenge.MfaChallengeToken, replacement.RecoveryCodes[0], "127.0.0.1", "mfa-test"));
+        Assert.Single(concurrentCompletions, result => result.Outcome == MfaOperationOutcome.Succeeded);
+        Assert.Single(concurrentCompletions, result => result.Outcome == MfaOperationOutcome.InvalidCode);
+
+        var staleChallenge = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test");
+        Assert.Equal(AuthenticationOutcome.MfaRequired, staleChallenge.Outcome);
+        Assert.Equal(AccountSecurityOutcome.Succeeded, (await authentication.RevokeOtherSessionsAsync(
+            initial.User.UserId, initial.User.CompanyId, "127.0.0.1", "mfa-test")).Outcome);
+        Assert.Equal(MfaOperationOutcome.Unauthorized, (await authentication.CompleteMfaChallengeAsync(
+            staleChallenge.MfaChallengeToken, replacement.RecoveryCodes[2], "127.0.0.1", "mfa-test")).Outcome);
+
+        var lockoutChallenge = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test");
+        Assert.Equal(AuthenticationOutcome.MfaRequired, lockoutChallenge.Outcome);
+        MfaChallengeResult? lockoutResult = null;
+        for (var attempt = 0; attempt < BrassLedgerAuthenticationDefaults.MaxMfaAttempts; attempt++)
+        {
+            lockoutResult = await authentication.CompleteMfaChallengeAsync(
+                lockoutChallenge.MfaChallengeToken, "invalid-code", "127.0.0.1", "mfa-test");
+        }
+        Assert.Equal(MfaOperationOutcome.LockedOut, lockoutResult!.Outcome);
+        Assert.Equal(AuthenticationOutcome.LockedOut, (await authentication.AuthenticateAsync(
+            "controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test")).Outcome);
+
+        var replacementWhileLocked = await authentication.RegenerateMfaRecoveryCodesAsync(
+            initial.User.UserId,
+            initial.User.CompanyId,
+            BrassLedgerAuthenticationDefaults.SeededPassword,
+            replacement.RecoveryCodes[1],
+            "127.0.0.1",
+            "mfa-test");
+        Assert.Equal(MfaOperationOutcome.LockedOut, replacementWhileLocked.Outcome);
+        Assert.Equal(AccountSecurityOutcome.InvalidRequest, (await authentication.DisableMfaAsync(
+            initial.User.UserId,
+            initial.User.CompanyId,
+            BrassLedgerAuthenticationDefaults.SeededPassword,
+            replacement.RecoveryCodes[1],
+            "127.0.0.1",
+            "mfa-test")).Outcome);
+
+        clock.Advance(TimeSpan.FromMinutes(BrassLedgerAuthenticationDefaults.LockoutMinutes + 1));
+
+        var disabled = await authentication.DisableMfaAsync(
+            initial.User.UserId,
+            initial.User.CompanyId,
+            BrassLedgerAuthenticationDefaults.SeededPassword,
+            replacement.RecoveryCodes[1],
+            "127.0.0.1",
+            "mfa-test");
+        Assert.Equal(AccountSecurityOutcome.Succeeded, disabled.Outcome);
+        Assert.False(disabled.User!.MfaAuthenticated);
+        Assert.Equal(AuthenticationOutcome.Succeeded, (await authentication.AuthenticateAsync(
+            "controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mfa-test")).Outcome);
     }
 
     [Fact]
@@ -2600,6 +2787,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         return (await command.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+        public void Advance(TimeSpan amount) => _utcNow = _utcNow.Add(amount);
     }
 
     public void Dispose()

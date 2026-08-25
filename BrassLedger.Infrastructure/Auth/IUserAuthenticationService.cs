@@ -25,6 +25,42 @@ public interface IUserAuthenticationService
         string ipAddress,
         string userAgent,
         CancellationToken cancellationToken = default);
+    Task<MfaEnrollmentResult> BeginMfaEnrollmentAsync(
+        Guid userId,
+        Guid companyId,
+        string currentPassword,
+        string ipAddress,
+        string userAgent,
+        CancellationToken cancellationToken = default);
+    Task<MfaOperationResult> EnableMfaAsync(
+        Guid userId,
+        Guid companyId,
+        string verificationCode,
+        string ipAddress,
+        string userAgent,
+        CancellationToken cancellationToken = default);
+    Task<MfaEnrollmentResult> RegenerateMfaRecoveryCodesAsync(
+        Guid userId,
+        Guid companyId,
+        string currentPassword,
+        string verificationCode,
+        string ipAddress,
+        string userAgent,
+        CancellationToken cancellationToken = default);
+    Task<AccountSecurityResult> DisableMfaAsync(
+        Guid userId,
+        Guid companyId,
+        string currentPassword,
+        string verificationCode,
+        string ipAddress,
+        string userAgent,
+        CancellationToken cancellationToken = default);
+    Task<MfaChallengeResult> CompleteMfaChallengeAsync(
+        string challengeToken,
+        string verificationCode,
+        string ipAddress,
+        string userAgent,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record AccountSecuritySnapshot(
@@ -33,6 +69,9 @@ public sealed record AccountSecuritySnapshot(
     string Email,
     DateTimeOffset? LastPasswordChangedUtc,
     DateTimeOffset? LastSuccessfulSignInUtc,
+    bool MfaEnabled,
+    DateTimeOffset? MfaEnrolledAtUtc,
+    int RecoveryCodesRemaining,
     IReadOnlyList<AccountSecurityEventSnapshot> RecentEvents);
 
 public sealed record AccountSecurityEventSnapshot(
@@ -55,3 +94,33 @@ public enum AccountSecurityOutcome
 public sealed record AccountSecurityResult(
     AccountSecurityOutcome Outcome,
     AuthenticatedUser? User = null);
+
+public enum MfaOperationOutcome
+{
+    Succeeded,
+    InvalidRequest,
+    InvalidPassword,
+    InvalidCode,
+    Expired,
+    AlreadyEnabled,
+    NotEnabled,
+    LockedOut,
+    Unauthorized
+}
+
+public sealed record MfaEnrollmentResult(
+    MfaOperationOutcome Outcome,
+    string Secret = "",
+    string OtpAuthUri = "",
+    IReadOnlyList<string>? RecoveryCodes = null,
+    DateTimeOffset? LockoutEndUtc = null);
+
+public sealed record MfaOperationResult(
+    MfaOperationOutcome Outcome,
+    DateTimeOffset? LockoutEndUtc = null);
+
+public sealed record MfaChallengeResult(
+    MfaOperationOutcome Outcome,
+    AuthenticatedUser? User = null,
+    DateTimeOffset? LockoutEndUtc = null,
+    bool UsedRecoveryCode = false);

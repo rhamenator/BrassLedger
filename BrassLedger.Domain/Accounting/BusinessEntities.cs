@@ -35,6 +35,36 @@ public sealed class AppUser
     public DateTimeOffset? LockoutEndUtc { get; set; }
     public DateTimeOffset? LastSuccessfulSignInUtc { get; set; }
     public DateTimeOffset? LastPasswordChangedUtc { get; set; }
+    public bool MfaEnabled { get; set; }
+    public string MfaSecret { get; set; } = string.Empty;
+    public DateTimeOffset? MfaEnrolledAtUtc { get; set; }
+    public long? MfaLastAcceptedTimeStep { get; set; }
+    public int MfaFailedAttemptCount { get; set; }
+    public DateTimeOffset? MfaLockoutEndUtc { get; set; }
+}
+
+public sealed class MfaRecoveryCode
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public string CodeHash { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? UsedAtUtc { get; set; }
+}
+
+public sealed class MfaSignInChallenge
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid CompanyId { get; set; }
+    public string TokenHash { get; set; } = string.Empty;
+    public string SecurityStamp { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? ConsumedAtUtc { get; set; }
+    public int FailedAttemptCount { get; set; }
+    public string IpAddress { get; set; } = string.Empty;
+    public string UserAgent { get; set; } = string.Empty;
 }
 
 public sealed class CompanyMembership

@@ -53,12 +53,15 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
         await using (var connection = new NpgsqlConnection(connectionString))
         {
             await connection.OpenAsync();
-            Assert.Equal(3L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
+            Assert.Equal(4L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"Companies\" WHERE \"Name\" = 'Brass Ledger Manufacturing';"));
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082504-%' OR "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
                 ALTER TABLE "PayrollEarningLines" DROP COLUMN "W2ReportingJson";
+                DROP TABLE "MfaRecoveryCodes";
+                DROP TABLE "MfaSignInChallenges";
+                ALTER TABLE "Users" DROP COLUMN "MfaEnabled", DROP COLUMN "MfaSecret", DROP COLUMN "MfaEnrolledAtUtc", DROP COLUMN "MfaLastAcceptedTimeStep", DROP COLUMN "MfaFailedAttemptCount", DROP COLUMN "MfaLockoutEndUtc";
                 """;
             await command.ExecuteNonQueryAsync();
         }
@@ -67,9 +70,11 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
 
         await using var verified = new NpgsqlConnection(connectionString);
         await verified.OpenAsync();
-        Assert.Equal(3L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
+        Assert.Equal(4L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'PayrollEarningLines' AND column_name = 'W2ReportingJson';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'AccountingInterchangeBatches';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'MfaRecoveryCodes';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Users' AND column_name = 'MfaSecret';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"Companies\" WHERE \"Name\" = 'Brass Ledger Manufacturing';"));
     }
 

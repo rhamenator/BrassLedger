@@ -281,6 +281,57 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task ApiLogin_RequiresAndCompletesMfa_AndConsumesRecoveryCodeOnce()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        var recoveryCodes = await EnrollMfaAsync(isolatedFactory, "controller");
+        using var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var passwordResponse = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = BrassLedgerAuthenticationDefaults.SeededPassword
+        });
+        Assert.Equal(HttpStatusCode.Accepted, passwordResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/dashboard")).StatusCode);
+        var challenge = await passwordResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.True(challenge.GetProperty("mfaRequired").GetBoolean());
+        var challengeToken = challenge.GetProperty("challengeToken").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(challengeToken));
+
+        var mfaResponse = await client.PostAsJsonAsync("/api/auth/mfa", new
+        {
+            ChallengeToken = challengeToken,
+            VerificationCode = recoveryCodes[0]
+        });
+        Assert.Equal(HttpStatusCode.OK, mfaResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/dashboard")).StatusCode);
+        var me = await client.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/auth/me");
+        Assert.True(me.GetProperty("mfaAuthenticated").GetBoolean());
+
+        using var replayClient = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var replayResponse = await replayClient.PostAsJsonAsync("/api/auth/mfa", new
+        {
+            ChallengeToken = challengeToken,
+            VerificationCode = recoveryCodes[0]
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, replayResponse.StatusCode);
+
+        var nextPasswordResponse = await replayClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = BrassLedgerAuthenticationDefaults.SeededPassword
+        });
+        var nextChallenge = await nextPasswordResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var reusedRecoveryResponse = await replayClient.PostAsJsonAsync("/api/auth/mfa", new
+        {
+            ChallengeToken = nextChallenge.GetProperty("challengeToken").GetString(),
+            VerificationCode = recoveryCodes[0]
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, reusedRecoveryResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task TrialBalanceReport_ReturnsCsvForReportingUser()
     {
         using var client = await CreateAuthenticatedClientAsync();
@@ -730,6 +781,35 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     {
         var token = await client.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/antiforgery/token");
         return token.GetProperty("requestToken").GetString()!;
+    }
+
+    private static async Task<IReadOnlyList<string>> EnrollMfaAsync(BrassLedgerApiFactory factory, string userName)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedIn = await authentication.AuthenticateAsync(
+            userName,
+            BrassLedgerAuthenticationDefaults.SeededPassword,
+            "127.0.0.1",
+            "api-mfa-setup");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var enrollment = await authentication.BeginMfaEnrollmentAsync(
+            signedIn.User!.UserId,
+            signedIn.User.CompanyId,
+            BrassLedgerAuthenticationDefaults.SeededPassword,
+            "127.0.0.1",
+            "api-mfa-setup");
+        Assert.Equal(MfaOperationOutcome.Succeeded, enrollment.Outcome);
+        var step = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / TotpService.TimeStepSeconds;
+        var code = TotpService.ComputeCode(TotpService.DecodeBase32(enrollment.Secret), step);
+        var enabled = await authentication.EnableMfaAsync(
+            signedIn.User.UserId,
+            signedIn.User.CompanyId,
+            code,
+            "127.0.0.1",
+            "api-mfa-setup");
+        Assert.Equal(MfaOperationOutcome.Succeeded, enabled.Outcome);
+        return enrollment.RecoveryCodes!;
     }
 }
 

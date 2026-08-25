@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IUserAuthenticationService AuthenticationService
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IHttpContextAccessor HttpContextAccessor
 
 <PageTitle>Account Security</PageTitle>
 
@@ -14,9 +15,9 @@
         </div>
     </section>
 
-    @if (!string.IsNullOrWhiteSpace(Message))
+    @if (!string.IsNullOrWhiteSpace(DisplayMessage))
     {
-        <div class="@(IsError ? "auth-error" : "status-banner")" role="@(IsError ? "alert" : "status")">@Message</div>
+        <div class="@(IsError ? "auth-error" : "status-banner")" role="@(IsError ? "alert" : "status")">@DisplayMessage</div>
     }
 
     @if (Snapshot is null)
@@ -32,7 +33,86 @@
                 <div><span class="field-label">Email</span><strong>@Snapshot.Email</strong></div>
                 <div><span class="field-label">Last successful sign-in</span><strong>@FormatTimestamp(Snapshot.LastSuccessfulSignInUtc)</strong></div>
                 <div><span class="field-label">Password last changed</span><strong>@FormatTimestamp(Snapshot.LastPasswordChangedUtc)</strong></div>
+                <div><span class="field-label">Authenticator MFA</span><strong>@(Snapshot.MfaEnabled ? "Enabled" : "Not enabled")</strong></div>
+                <div><span class="field-label">MFA enrolled</span><strong>@FormatTimestamp(Snapshot.MfaEnrolledAtUtc)</strong></div>
             </div>
+        </section>
+
+        <section class="panel">
+            <h2>Authenticator MFA</h2>
+            @if (EnrollmentComplete)
+            {
+                <div class="status-banner" role="status">
+                    @(ReplacementRecoveryCodes is null ? "Authenticator MFA is enabled" : "Recovery codes were replaced") and prior sessions are invalid. Keep the recovery codes below in a secure offline location, then sign in again.
+                </div>
+                <div class="field-group">
+                    <span class="field-label">New one-use recovery codes</span>
+                    <div class="recovery-code-grid">
+                        @foreach (var recoveryCode in ReplacementRecoveryCodes ?? Enrollment?.RecoveryCodes ?? [])
+                        {
+                            <code>@recoveryCode</code>
+                        }
+                    </div>
+                </div>
+                <a class="action-primary" href="/login">Sign in again</a>
+            }
+            else if (Snapshot.MfaEnabled)
+            {
+                <p class="page-intro">A password and a fresh authenticator or one-use recovery code are required at sign-in. @Snapshot.RecoveryCodesRemaining recovery code(s) remain.</p>
+                <details>
+                    <summary>Replace recovery codes</summary>
+                    <p class="page-intro">This immediately invalidates every prior recovery code and other signed-in session. Enter the current password plus an authenticator or remaining recovery code.</p>
+                    <EditForm Model="RecoveryReplacementForm" OnValidSubmit="ReplaceRecoveryCodesAsync">
+                        <div class="auth-form">
+                            <div class="field-group"><label class="field-label" for="replacementPassword">Current password</label><InputText id="replacementPassword" class="field-input" type="password" autocomplete="current-password" @bind-Value="RecoveryReplacementForm.CurrentPassword" /></div>
+                            <div class="field-group"><label class="field-label" for="replacementCode">Authenticator or recovery code</label><InputText id="replacementCode" class="field-input" autocomplete="one-time-code" @bind-Value="RecoveryReplacementForm.VerificationCode" /></div>
+                            <button class="action-secondary" type="submit">Invalidate and replace recovery codes</button>
+                        </div>
+                    </EditForm>
+                </details>
+                <details>
+                    <summary>Disable authenticator MFA</summary>
+                    <p class="page-intro">Disabling MFA requires both the current password and a current authenticator or recovery code. All sessions and unused recovery codes will be invalidated.</p>
+                    <form class="auth-form" method="post" action="/account/disable-mfa">
+                        <AntiforgeryToken />
+                        <div class="field-group"><label class="field-label" for="disableMfaPassword">Current password</label><input id="disableMfaPassword" class="field-input" name="currentPassword" type="password" autocomplete="current-password" required /></div>
+                        <div class="field-group"><label class="field-label" for="disableMfaCode">Authenticator or recovery code</label><input id="disableMfaCode" class="field-input" name="verificationCode" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required /></div>
+                        <button class="action-secondary" type="submit">Disable MFA and revoke sessions</button>
+                    </form>
+                </details>
+            }
+            else if (Enrollment is null)
+            {
+                <p class="page-intro">Use any RFC 6238-compatible authenticator app. Re-enter your password before BrassLedger creates a protected secret and ten one-use recovery codes.</p>
+                <EditForm Model="EnrollmentForm" OnValidSubmit="BeginMfaEnrollmentAsync">
+                    <div class="auth-form">
+                        <div class="field-group"><label class="field-label" for="enrollmentPassword">Current password</label><InputText id="enrollmentPassword" class="field-input" type="password" autocomplete="current-password" @bind-Value="EnrollmentForm.CurrentPassword" /></div>
+                        <button class="action-primary" type="submit">Set up authenticator</button>
+                    </div>
+                </EditForm>
+            }
+            else
+            {
+                <p class="page-intro">Add this account to the authenticator by opening the setup link on the device or entering the key manually. Then save every recovery code before verification.</p>
+                <div class="field-group"><span class="field-label">Manual setup key</span><code class="security-secret">@Enrollment.Secret</code></div>
+                <p><a href="@Enrollment.OtpAuthUri">Open authenticator setup link</a></p>
+                <div class="field-group">
+                    <span class="field-label">One-use recovery codes — shown only during this enrollment</span>
+                    <div class="recovery-code-grid">
+                        @foreach (var recoveryCode in Enrollment.RecoveryCodes ?? [])
+                        {
+                            <code>@recoveryCode</code>
+                        }
+                    </div>
+                </div>
+                <EditForm Model="EnrollmentVerificationForm" OnValidSubmit="EnableMfaAsync">
+                    <div class="auth-form">
+                        <div class="field-group"><label class="field-label" for="enrollmentCode">Current six-digit authenticator code</label><InputText id="enrollmentCode" class="field-input" autocomplete="one-time-code" inputmode="numeric" @bind-Value="EnrollmentVerificationForm.VerificationCode" /></div>
+                        <label><InputCheckbox @bind-Value="EnrollmentVerificationForm.RecoveryCodesSaved" /> I saved the recovery codes in a secure location.</label>
+                        <button class="action-primary" type="submit">Verify and enable MFA</button>
+                    </div>
+                </EditForm>
+            }
         </section>
 
         <section class="content-grid">
@@ -105,32 +185,125 @@
     public string? Error { get; set; }
 
     private AccountSecuritySnapshot? Snapshot { get; set; }
-    private bool IsError => !string.IsNullOrWhiteSpace(Error);
+    private Guid UserId { get; set; }
+    private Guid CompanyId { get; set; }
+    private MfaEnrollmentResult? Enrollment { get; set; }
+    private bool EnrollmentComplete { get; set; }
+    private MfaEnrollmentForm EnrollmentForm { get; set; } = new();
+    private MfaEnrollmentVerificationForm EnrollmentVerificationForm { get; set; } = new();
+    private MfaRecoveryReplacementForm RecoveryReplacementForm { get; set; } = new();
+    private IReadOnlyList<string>? ReplacementRecoveryCodes { get; set; }
+    private string? LocalMessage { get; set; }
+    private bool LocalError { get; set; }
+    private string RequestIpAddress { get; set; } = string.Empty;
+    private string RequestUserAgent { get; set; } = string.Empty;
+    private bool IsError => LocalError || !string.IsNullOrWhiteSpace(Error);
+    private string? DisplayMessage => LocalMessage ?? Message;
 
     private string? Message => Error switch
     {
         "current-password" => "The current password was not correct. Your password was not changed.",
         "password-reused" => "Choose a password that differs from your current password.",
         "invalid-password" => "Enter matching new passwords containing at least 12 characters.",
+        "mfa-disable-rejected" => "MFA was not disabled. Check both the current password and the authenticator or recovery code.",
         _ => Status switch
         {
             "password-changed" => "Your password was changed and all other sessions were signed out.",
             "sessions-revoked" => "All other sessions were signed out. This browser remains signed in.",
+            "mfa-disabled" => "Authenticator MFA and all remaining recovery codes were disabled. Other sessions were signed out.",
             _ => null
         }
     };
 
     protected override async Task OnInitializedAsync()
     {
+        var requestContext = HttpContextAccessor.HttpContext;
+        RequestIpAddress = requestContext?.Connection.RemoteIpAddress?.ToString() ?? string.Empty;
+        RequestUserAgent = requestContext?.Request.Headers.UserAgent.ToString() ?? string.Empty;
         var principal = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
-        if (Guid.TryParse(principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var userId))
+        if (Guid.TryParse(principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var userId)
+            && Guid.TryParse(principal.FindFirst(BrassLedgerAuthenticationDefaults.CompanyIdClaimType)?.Value, out var companyId))
         {
-            Snapshot = await AuthenticationService.GetAccountSecurityAsync(userId);
+            UserId = userId;
+            CompanyId = companyId;
+            Snapshot = await AuthenticationService.GetAccountSecurityAsync(UserId);
         }
+    }
+
+    private async Task BeginMfaEnrollmentAsync()
+    {
+        LocalMessage = null;
+        Enrollment = await AuthenticationService.BeginMfaEnrollmentAsync(
+            UserId,
+            CompanyId,
+            EnrollmentForm.CurrentPassword,
+            RequestIpAddress,
+            RequestUserAgent);
+        LocalError = Enrollment.Outcome != MfaOperationOutcome.Succeeded;
+        if (LocalError)
+        {
+            LocalMessage = Enrollment.Outcome == MfaOperationOutcome.InvalidPassword
+                ? "The current password was not accepted. MFA setup did not begin."
+                : "MFA setup could not begin for this account.";
+            Enrollment = null;
+        }
+    }
+
+    private async Task EnableMfaAsync()
+    {
+        if (!EnrollmentVerificationForm.RecoveryCodesSaved)
+        {
+            LocalError = true;
+            LocalMessage = "Save the recovery codes and confirm that you have done so before enabling MFA.";
+            return;
+        }
+
+        var result = await AuthenticationService.EnableMfaAsync(
+            UserId,
+            CompanyId,
+            EnrollmentVerificationForm.VerificationCode,
+            RequestIpAddress,
+            RequestUserAgent);
+        LocalError = result.Outcome != MfaOperationOutcome.Succeeded;
+        if (LocalError)
+        {
+            LocalMessage = result.Outcome == MfaOperationOutcome.LockedOut
+                ? "Authenticator verification is temporarily locked after repeated failures."
+                : "The authenticator code was not accepted. Wait for a fresh code and try again.";
+            return;
+        }
+
+        EnrollmentComplete = true;
+        LocalMessage = null;
+    }
+
+    private async Task ReplaceRecoveryCodesAsync()
+    {
+        var result = await AuthenticationService.RegenerateMfaRecoveryCodesAsync(
+            UserId,
+            CompanyId,
+            RecoveryReplacementForm.CurrentPassword,
+            RecoveryReplacementForm.VerificationCode,
+            RequestIpAddress,
+            RequestUserAgent);
+        LocalError = result.Outcome != MfaOperationOutcome.Succeeded;
+        if (LocalError)
+        {
+            LocalMessage = "Recovery codes were not replaced. Check both the current password and second factor.";
+            return;
+        }
+
+        ReplacementRecoveryCodes = result.RecoveryCodes;
+        EnrollmentComplete = true;
+        LocalMessage = null;
     }
 
     private static string FormatTimestamp(DateTimeOffset? timestamp) =>
         timestamp is null ? "Not recorded" : timestamp.Value.LocalDateTime.ToString("g");
 
     private static string FormatEvent(string eventType) => eventType.Replace('_', ' ');
+
+    private sealed class MfaEnrollmentForm { public string CurrentPassword { get; set; } = string.Empty; }
+    private sealed class MfaEnrollmentVerificationForm { public string VerificationCode { get; set; } = string.Empty; public bool RecoveryCodesSaved { get; set; } }
+    private sealed class MfaRecoveryReplacementForm { public string CurrentPassword { get; set; } = string.Empty; public string VerificationCode { get; set; } = string.Empty; }
 }

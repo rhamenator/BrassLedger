@@ -19,7 +19,10 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         Delegate bootstrapHandler = (Func<HttpContext, IBootstrapWorkspaceService, IAntiforgery, Task<IResult>>)HandleBootstrapAsync;
         Delegate changePasswordHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleChangePasswordAsync;
         Delegate revokeOtherSessionsHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleRevokeOtherSessionsAsync;
+        Delegate formMfaHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleFormMfaAsync;
+        Delegate disableMfaHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleDisableMfaAsync;
         Delegate apiLoginHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleApiLoginAsync;
+        Delegate apiMfaHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleApiMfaAsync;
         Delegate apiLogoutHandler = (Func<HttpContext, Task<IResult>>)HandleApiLogoutAsync;
         Delegate switchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleSwitchCompanyAsync;
 
@@ -28,9 +31,12 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         endpoints.MapPost("/account/active-company", formSwitchCompanyHandler).RequireAuthorization();
         endpoints.MapPost("/account/change-password", changePasswordHandler).RequireAuthorization();
         endpoints.MapPost("/account/revoke-other-sessions", revokeOtherSessionsHandler).RequireAuthorization();
+        endpoints.MapPost("/account/mfa", formMfaHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
+        endpoints.MapPost("/account/disable-mfa", disableMfaHandler).RequireAuthorization();
         endpoints.MapPost("/account/bootstrap", bootstrapHandler).AllowAnonymous();
 
         endpoints.MapPost("/api/auth/login", apiLoginHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
+        endpoints.MapPost("/api/auth/mfa", apiMfaHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/api/auth/logout", apiLogoutHandler).RequireAuthorization();
         endpoints.MapGet("/api/auth/me", (ClaimsPrincipal principal) => Results.Ok(ToResponse(principal))).RequireAuthorization();
         endpoints.MapPost("/api/auth/active-company", switchCompanyHandler).RequireAuthorization();
@@ -64,9 +70,10 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             return Results.LocalRedirect($"/account/security?error={error}");
         }
 
+        var reissuedUser = result.User with { MfaAuthenticated = HasMfaClaim(context.User) };
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(result.User),
+            CreatePrincipal(reissuedUser),
             CreateAuthenticationProperties());
         return Results.LocalRedirect("/account/security?status=password-changed");
     }
@@ -82,9 +89,10 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             context.Request.Headers.UserAgent.ToString(),
             context.RequestAborted);
         if (result.Outcome != AccountSecurityOutcome.Succeeded || result.User is null) return Results.Unauthorized();
+        var reissuedUser = result.User with { MfaAuthenticated = HasMfaClaim(context.User) };
         await context.SignInAsync(
             BrassLedgerAuthenticationDefaults.Scheme,
-            CreatePrincipal(result.User),
+            CreatePrincipal(reissuedUser),
             CreateAuthenticationProperties());
         return Results.LocalRedirect("/account/security?status=sessions-revoked");
     }
@@ -102,6 +110,11 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         ApplyNoStoreHeaders(context.Response);
 
         var authenticationResult = await authenticationService.AuthenticateAsync(userName, password, ipAddress, userAgent, context.RequestAborted);
+        if (authenticationResult.Outcome == AuthenticationOutcome.MfaRequired && !string.IsNullOrWhiteSpace(authenticationResult.MfaChallengeToken))
+        {
+            SetMfaChallengeCookie(context, authenticationResult.MfaChallengeToken);
+            return Results.LocalRedirect($"/login/mfa?returnUrl={Uri.EscapeDataString(returnUrl)}");
+        }
         if (authenticationResult.Outcome != AuthenticationOutcome.Succeeded || authenticationResult.User is null)
         {
             var errorCode = authenticationResult.Outcome == AuthenticationOutcome.LockedOut
@@ -132,6 +145,12 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         ApplyNoStoreHeaders(context.Response);
 
         var authenticationResult = await authenticationService.AuthenticateAsync(loginRequest.UserName, loginRequest.Password, ipAddress, userAgent, context.RequestAborted);
+        if (authenticationResult.Outcome == AuthenticationOutcome.MfaRequired)
+        {
+            return Results.Json(
+                new { MfaRequired = true, ChallengeToken = authenticationResult.MfaChallengeToken, ExpiresInSeconds = BrassLedgerAuthenticationDefaults.MfaChallengeMinutes * 60 },
+                statusCode: StatusCodes.Status202Accepted);
+        }
         if (authenticationResult.Outcome != AuthenticationOutcome.Succeeded || authenticationResult.User is null)
         {
             if (authenticationResult.Outcome == AuthenticationOutcome.LockedOut)
@@ -154,6 +173,86 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             CreateAuthenticationProperties());
 
         return Results.Ok(ToResponse(authenticationResult.User));
+    }
+
+    private static async Task<IResult> HandleFormMfaAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        ApplyNoStoreHeaders(context.Response);
+        var form = await context.Request.ReadFormAsync();
+        var returnUrl = SanitizeReturnUrl(form["returnUrl"].ToString());
+        if (!context.Request.Cookies.TryGetValue(BrassLedgerAuthenticationDefaults.MfaChallengeCookieName, out var challengeToken))
+            return Results.LocalRedirect($"/login?error=mfa-expired&returnUrl={Uri.EscapeDataString(returnUrl)}");
+        var result = await authenticationService.CompleteMfaChallengeAsync(
+            challengeToken,
+            form["verificationCode"].ToString(),
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        if (result.Outcome != MfaOperationOutcome.Succeeded || result.User is null)
+        {
+            if (result.Outcome == MfaOperationOutcome.Expired)
+            {
+                DeleteMfaChallengeCookie(context);
+                return Results.LocalRedirect($"/login?error=mfa-expired&returnUrl={Uri.EscapeDataString(returnUrl)}");
+            }
+            if (result.Outcome is MfaOperationOutcome.LockedOut or MfaOperationOutcome.Unauthorized)
+            {
+                DeleteMfaChallengeCookie(context);
+                return Results.LocalRedirect($"/login?error=mfa-locked&returnUrl={Uri.EscapeDataString(returnUrl)}");
+            }
+            return Results.LocalRedirect($"/login/mfa?error=invalid-code&returnUrl={Uri.EscapeDataString(returnUrl)}");
+        }
+
+        DeleteMfaChallengeCookie(context);
+        await context.SignInAsync(
+            BrassLedgerAuthenticationDefaults.Scheme,
+            CreatePrincipal(result.User),
+            CreateAuthenticationProperties());
+        return Results.LocalRedirect(returnUrl);
+    }
+
+    private static async Task<IResult> HandleApiMfaAsync(HttpContext context, IUserAuthenticationService authenticationService)
+    {
+        var request = await context.Request.ReadFromJsonAsync<MfaLoginRequest>(cancellationToken: context.RequestAborted);
+        if (request is null) return Results.BadRequest();
+        ApplyNoStoreHeaders(context.Response);
+        var result = await authenticationService.CompleteMfaChallengeAsync(
+            request.ChallengeToken,
+            request.VerificationCode,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        if (result.Outcome == MfaOperationOutcome.LockedOut)
+            return Results.Json(new { Error = "mfa_locked", LockedUntilUtc = result.LockoutEndUtc }, statusCode: StatusCodes.Status423Locked);
+        if (result.Outcome != MfaOperationOutcome.Succeeded || result.User is null) return Results.Unauthorized();
+        await context.SignInAsync(
+            BrassLedgerAuthenticationDefaults.Scheme,
+            CreatePrincipal(result.User),
+            CreateAuthenticationProperties());
+        return Results.Ok(ToResponse(result.User));
+    }
+
+    private static async Task<IResult> HandleDisableMfaAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        if (!TryGetSessionIdentity(context.User, out var userId, out var companyId)) return Results.Unauthorized();
+        var form = await context.Request.ReadFormAsync();
+        var result = await authenticationService.DisableMfaAsync(
+            userId,
+            companyId,
+            form["currentPassword"].ToString(),
+            form["verificationCode"].ToString(),
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        if (result.Outcome != AccountSecurityOutcome.Succeeded || result.User is null)
+            return Results.LocalRedirect("/account/security?error=mfa-disable-rejected");
+        await context.SignInAsync(
+            BrassLedgerAuthenticationDefaults.Scheme,
+            CreatePrincipal(result.User),
+            CreateAuthenticationProperties());
+        return Results.LocalRedirect("/account/security?status=mfa-disabled");
     }
 
     private static async Task<IResult> HandleBootstrapAsync(HttpContext context, IBootstrapWorkspaceService bootstrapWorkspaceService, IAntiforgery antiforgery)
@@ -207,6 +306,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || !Guid.TryParse(form["companyId"].ToString(), out var companyId)) return Results.BadRequest();
         var user = await authenticationService.SwitchCompanyAsync(userId, companyId, context.RequestAborted);
         if (user is null) return Results.Forbid();
+        user = user with { MfaAuthenticated = HasMfaClaim(context.User) };
         await context.SignInAsync(BrassLedgerAuthenticationDefaults.Scheme, CreatePrincipal(user), CreateAuthenticationProperties());
         return Results.LocalRedirect(returnUrl);
     }
@@ -230,6 +330,7 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         if (request is null || !Guid.TryParse(userId, out var parsedUserId) || request.CompanyId == Guid.Empty) return Results.BadRequest();
         var user = await authenticationService.SwitchCompanyAsync(parsedUserId, request.CompanyId, context.RequestAborted);
         if (user is null) return Results.Forbid();
+        user = user with { MfaAuthenticated = HasMfaClaim(context.User) };
         await context.SignInAsync(BrassLedgerAuthenticationDefaults.Scheme, CreatePrincipal(user), CreateAuthenticationProperties());
         return Results.Ok(ToResponse(user));
     }
@@ -244,7 +345,8 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             new(ClaimTypes.Role, authenticatedUser.Role),
             new(BrassLedgerAuthenticationDefaults.DisplayNameClaimType, authenticatedUser.DisplayName),
             new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, authenticatedUser.CompanyId.ToString()),
-            new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, authenticatedUser.SecurityStamp)
+            new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, authenticatedUser.SecurityStamp),
+            new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, authenticatedUser.MfaAuthenticated ? "mfa" : "pwd")
         };
 
         claims.AddRange(authenticatedUser.Permissions.Select(permission => new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
@@ -273,7 +375,8 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             DisplayName = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.DisplayNameClaimType) ?? string.Empty,
             Email = principal.FindFirstValue(ClaimTypes.Email) ?? string.Empty,
             Role = principal.FindFirstValue(ClaimTypes.Role) ?? string.Empty,
-            CompanyId = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType) ?? string.Empty
+            CompanyId = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType) ?? string.Empty,
+            MfaAuthenticated = HasMfaClaim(principal)
         };
     }
 
@@ -285,7 +388,8 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             authenticatedUser.DisplayName,
             authenticatedUser.Email,
             authenticatedUser.Role,
-            CompanyId = authenticatedUser.CompanyId
+            CompanyId = authenticatedUser.CompanyId,
+            authenticatedUser.MfaAuthenticated
         };
     }
 
@@ -317,6 +421,33 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         return hasUserId && hasCompanyId;
     }
 
+    private static bool HasMfaClaim(ClaimsPrincipal principal) =>
+        principal.HasClaim(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "mfa");
+
+    private static void SetMfaChallengeCookie(HttpContext context, string token)
+    {
+        context.Response.Cookies.Append(
+            BrassLedgerAuthenticationDefaults.MfaChallengeCookieName,
+            token,
+            new CookieOptions
+            {
+                HttpOnly = true,
+                IsEssential = true,
+                SameSite = SameSiteMode.Strict,
+                Secure = context.Request.IsHttps,
+                MaxAge = TimeSpan.FromMinutes(BrassLedgerAuthenticationDefaults.MfaChallengeMinutes),
+                Path = "/account/mfa"
+            });
+    }
+
+    private static void DeleteMfaChallengeCookie(HttpContext context)
+    {
+        context.Response.Cookies.Delete(
+            BrassLedgerAuthenticationDefaults.MfaChallengeCookieName,
+            new CookieOptions { Path = "/account/mfa", SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps });
+    }
+
     private sealed record LoginRequest(string UserName, string Password);
+    private sealed record MfaLoginRequest(string ChallengeToken, string VerificationCode);
     private sealed record SwitchCompanyRequest(Guid CompanyId);
 }

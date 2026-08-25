@@ -3,6 +3,7 @@ namespace BrassLedger.Infrastructure.Auth;
 public enum AuthenticationOutcome
 {
     Succeeded,
+    MfaRequired,
     InvalidCredentials,
     LockedOut
 }
@@ -10,4 +11,5 @@ public enum AuthenticationOutcome
 public sealed record AuthenticationResult(
     AuthenticationOutcome Outcome,
     AuthenticatedUser? User = null,
-    DateTimeOffset? LockoutEndUtc = null);
+    DateTimeOffset? LockoutEndUtc = null,
+    string MfaChallengeToken = "");

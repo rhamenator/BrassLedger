@@ -13,6 +13,9 @@ The current application baseline already assumes:
 - per-network login throttling in both the web application and API
 - self-service password changes that invalidate previously issued sessions
 - a self-service control to sign out every other browser session
+- optional RFC 6238 authenticator MFA with a mandatory password-plus-code enrollment ceremony
+- ten high-entropy, hashed, one-use recovery codes with controlled replacement and disablement
+- five-minute, hashed MFA login challenges with strict attempt limits, TOTP replay prevention, and security-stamp invalidation
 - a recent account-activity view for successful, rejected, and revoked access events
 - protected sensitive fields at rest
 - data-protection key storage for application cryptography
@@ -20,12 +23,32 @@ The current application baseline already assumes:
 
 Every operator can open **Account security** from the signed-in header. Changing a password requires the current password, matching new-password confirmation, and at least 12 characters. A successful change rotates the account security stamp, signs out other browsers, records an audit event, and reissues the current browser's short-lived cookie. **Sign out other sessions** performs the same rotation without changing the password. Use it after a lost device or suspicious activity.
 
+### Authenticator MFA
+
+Each operator can enroll a standards-compatible authenticator from **Account security**:
+
+1. Re-enter the current password.
+2. Open the `otpauth://` setup link on the authenticator device or enter the Base32 key manually.
+3. Save all ten recovery codes in an offline password manager or similarly controlled location. BrassLedger displays the plaintext codes only during enrollment or replacement; the database retains only SHA-256 hashes of 128-bit random values.
+4. Enter a current six-digit authenticator code and affirm that the recovery codes were saved.
+5. Sign in again. Enabling MFA rotates the security stamp, so every prior browser session is rejected.
+
+An MFA-enabled password login creates a random five-minute challenge whose bearer token is returned only to the browser or API client and whose SHA-256 hash is stored. Password acceptance does not create an authenticated accounting session. The challenge must be completed with either a six-digit TOTP or an unused recovery code. TOTP accepts only the current 30-second step and one adjacent step for bounded clock skew; an accepted time step cannot be replayed. Challenge, time-step, and recovery-code claims are conditional database updates, so concurrent requests cannot redeem the same factor twice. Five failed second-factor attempts lock the account for 15 minutes. Changing the password or rotating the security stamp invalidates every pending MFA challenge.
+
+Password and MFA endpoints share a network-address ceiling of 60 requests per minute. This complements, rather than replaces, the stricter five-failure per-account lockout and avoids treating a modest office behind one NAT address as a single operator. A rejected API request receives HTTP 429, a one-minute `Retry-After`, and a machine-readable error; the browser receives the same wait instruction on the sign-in page.
+
+Recovery codes are one use. **Replace recovery codes** requires the current password plus a valid authenticator or remaining recovery code, deletes every prior code, creates a new set, audits the action, and invalidates other sessions. **Disable authenticator MFA** has the same two-factor reauthentication requirement and deletes all remaining codes. If an operator loses both the authenticator and every recovery code, do not bypass MFA informally; use a documented administrator identity-verification and recovery process. That administrator recovery workflow is still pending implementation.
+
+The implementation follows [RFC 6238](https://datatracker.ietf.org/doc/html/rfc6238.html), [Microsoft's ASP.NET Core MFA guidance](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/mfa?view=aspnetcore-8.0), and the [OWASP MFA Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html). TOTP materially improves password security but is not phishing-resistant; passkeys remain a future stronger factor.
+
 Company access is validated against the operator's active, company-specific membership on every cookie validation. A role in one company does not grant that role in another company, and disabling a membership invalidates a cookie issued for that company.
 
 Before using live confidential books in production, the remaining security work includes:
 
-- authenticator-based MFA or passkeys and recovery codes
 - verified password-reset and account-invitation delivery
+- a controlled administrator MFA reset after documented identity verification
+- configurable enforcement of MFA for privileged and sensitive-data roles
+- phishing-resistant passkeys where deployment requirements justify them
 - named device/session inventory instead of stamp-based all-other-session revocation
 - externalized key management where appropriate
 - operational backup and restore procedures

@@ -1,0 +1,42 @@
+@page "/login/mfa"
+@attribute [AllowAnonymous]
+
+<PageTitle>Verify Sign In</PageTitle>
+
+<section class="auth-shell">
+    <article class="auth-card">
+        <p class="eyebrow">Second-factor verification</p>
+        <h1>Verify your sign-in.</h1>
+        <p class="page-intro">Enter the current six-digit code from your authenticator app. If the authenticator is unavailable, enter one of the recovery codes saved during enrollment.</p>
+
+        @if (string.Equals(Error, "invalid-code", StringComparison.OrdinalIgnoreCase))
+        {
+            <div class="auth-error" role="alert">That code was not accepted, was already used, or the challenge expired. Check the authenticator clock and try again.</div>
+        }
+
+        <form class="auth-form" method="post" action="/account/mfa">
+            <AntiforgeryToken />
+            <input type="hidden" name="returnUrl" value="@TargetPath" />
+            <div class="field-group">
+                <label class="field-label" for="verificationCode">Authenticator or recovery code</label>
+                <input id="verificationCode" class="field-input" name="verificationCode" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus />
+            </div>
+            <button class="action-primary" type="submit">Verify and sign in</button>
+        </form>
+        <p class="auth-note"><a href="/login">Cancel and start over</a></p>
+    </article>
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private string TargetPath => string.IsNullOrWhiteSpace(ReturnUrl)
+        || !ReturnUrl.StartsWith("/", StringComparison.Ordinal)
+        || ReturnUrl.StartsWith("//", StringComparison.Ordinal)
+            ? "/"
+            : ReturnUrl;
+}

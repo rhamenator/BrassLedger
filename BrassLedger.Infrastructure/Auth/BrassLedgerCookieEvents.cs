@@ -26,6 +26,7 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
         var securityStamp = context.Principal?.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType);
         var companyIdValue = context.Principal?.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         var roleValue = context.Principal?.FindFirstValue(ClaimTypes.Role);
+        var authenticationMethod = context.Principal?.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType);
 
         if (!Guid.TryParse(userIdValue, out var userId) || string.IsNullOrWhiteSpace(securityStamp))
         {
@@ -60,6 +61,7 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
             && string.Equals(user.SecurityStamp, securityStamp, StringComparison.Ordinal)
             && membership is not null
             && string.Equals(membership.Role, roleValue, StringComparison.Ordinal)
+            && (!user.MfaEnabled || string.Equals(authenticationMethod, "mfa", StringComparison.Ordinal))
             && claimedPermissions.SetEquals(currentPermissions);
 
         if (isValid)

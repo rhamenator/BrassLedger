@@ -16,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace BrassLedger.Infrastructure.Persistence;
@@ -24,8 +25,9 @@ public static class ServiceCollectionExtensions
 {
     internal const string BaselineSchemaVersion = "2026082501-versioned-schema-baseline";
     internal const string W2ReportingSchemaVersion = "2026082502-w2-reporting-metadata";
-    internal const string CurrentSchemaVersion = "2026082503-accounting-interchange-batches";
-    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, CurrentSchemaVersion];
+    internal const string AccountingInterchangeSchemaVersion = "2026082503-accounting-interchange-batches";
+    internal const string CurrentSchemaVersion = "2026082504-multi-factor-authentication";
+    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, CurrentSchemaVersion];
 
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
@@ -75,6 +77,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(BuildBootstrapOptions(configuration, seedSampleData)));
         services.AddSingleton<ISensitiveDataProtector, SensitiveDataProtector>();
         services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<TotpService>();
         services.AddScoped<IUserAuthenticationService, UserAuthenticationService>();
         services.AddScoped<IBootstrapWorkspaceService, BootstrapWorkspaceService>();
         services.AddScoped<IBusinessWorkspaceService, BusinessWorkspaceService>();
@@ -218,8 +222,10 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"This database contains unsupported or newer BrassLedger schema version(s): {string.Join(", ", unsupported)}. Upgrade the application before opening this database; automatic downgrade is prohibited.");
         if (applied.Contains(W2ReportingSchemaVersion) && !applied.Contains(BaselineSchemaVersion))
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {W2ReportingSchemaVersion} is recorded without prerequisite {BaselineSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
-        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(W2ReportingSchemaVersion))
-            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {W2ReportingSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(AccountingInterchangeSchemaVersion) && !applied.Contains(W2ReportingSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {AccountingInterchangeSchemaVersion} is recorded without prerequisite {W2ReportingSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(AccountingInterchangeSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {AccountingInterchangeSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (!applied.Contains(BaselineSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
             {
@@ -232,8 +238,11 @@ public static class ServiceCollectionExtensions
         if (!applied.Contains(W2ReportingSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, W2ReportingSchemaVersion, "Added durable W-2 reporting metadata to time entries and posted earning lines.", () => EnsureW2ReportingMetadataSchemaAsync(dbContext, cancellationToken), cancellationToken);
 
+        if (!applied.Contains(AccountingInterchangeSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, AccountingInterchangeSchemaVersion, "Added durable accounting-interchange validation, import, duplicate, and rejection batch history.", () => EnsureAccountingInterchangeBatchSchemaAsync(dbContext, cancellationToken), cancellationToken);
+
         if (!applied.Contains(CurrentSchemaVersion))
-            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added durable accounting-interchange validation, import, duplicate, and rejection batch history.", () => EnsureAccountingInterchangeBatchSchemaAsync(dbContext, cancellationToken), cancellationToken);
+            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added protected TOTP enrollment, recovery codes, and bounded sign-in challenges.", () => EnsureMultiFactorAuthenticationSchemaAsync(dbContext, cancellationToken), cancellationToken);
     }
 
     private static async Task ApplySchemaVersionAsync(BrassLedgerDbContext dbContext, string version, string description, Func<Task> apply, CancellationToken cancellationToken)
@@ -285,6 +294,42 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "AccountingInterchangeBatches" ("Id" uuid NOT NULL PRIMARY KEY, "CompanyId" uuid NOT NULL, "ProviderCode" text NOT NULL, "EntityType" text NOT NULL, "FileName" text NOT NULL, "ContentSha256" text NOT NULL, "CommittedImportKey" text NULL, "Status" text NOT NULL, "IsDryRun" boolean NOT NULL, "RowCount" integer NOT NULL, "ImportedCount" integer NOT NULL, "DuplicateCount" integer NOT NULL, "RejectedCount" integer NOT NULL, "RejectionJson" text NOT NULL, "ProcessedByUserId" uuid NULL, "ProcessedAtUtc" timestamptz NOT NULL);""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_AccountingInterchangeBatches_CompanyId_ProviderCode_EntityType_ProcessedAtUtc" ON "AccountingInterchangeBatches" ("CompanyId", "ProviderCode", "EntityType", "ProcessedAtUtc");""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_AccountingInterchangeBatches_CompanyId_CommittedImportKey" ON "AccountingInterchangeBatches" ("CompanyId", "CommittedImportKey");""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureMultiFactorAuthenticationSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await EnsureSqliteColumnAsync(dbContext, "Users", "MfaEnabled", "ALTER TABLE \"Users\" ADD COLUMN \"MfaEnabled\" INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "MfaSecret", "ALTER TABLE \"Users\" ADD COLUMN \"MfaSecret\" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "MfaEnrolledAtUtc", "ALTER TABLE \"Users\" ADD COLUMN \"MfaEnrolledAtUtc\" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "MfaLastAcceptedTimeStep", "ALTER TABLE \"Users\" ADD COLUMN \"MfaLastAcceptedTimeStep\" INTEGER NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "MfaFailedAttemptCount", "ALTER TABLE \"Users\" ADD COLUMN \"MfaFailedAttemptCount\" INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Users", "MfaLockoutEndUtc", "ALTER TABLE \"Users\" ADD COLUMN \"MfaLockoutEndUtc\" TEXT NULL;", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "MfaRecoveryCodes" ("Id" TEXT NOT NULL PRIMARY KEY, "UserId" TEXT NOT NULL, "CodeHash" TEXT NOT NULL, "CreatedAtUtc" TEXT NOT NULL, "UsedAtUtc" TEXT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_MfaRecoveryCodes_CodeHash" ON "MfaRecoveryCodes" ("CodeHash");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_MfaRecoveryCodes_UserId_UsedAtUtc" ON "MfaRecoveryCodes" ("UserId", "UsedAtUtc");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "MfaSignInChallenges" ("Id" TEXT NOT NULL PRIMARY KEY, "UserId" TEXT NOT NULL, "CompanyId" TEXT NOT NULL, "TokenHash" TEXT NOT NULL, "SecurityStamp" TEXT NOT NULL, "CreatedAtUtc" TEXT NOT NULL, "ExpiresAtUtc" TEXT NOT NULL, "ConsumedAtUtc" TEXT NULL, "FailedAttemptCount" INTEGER NOT NULL, "IpAddress" TEXT NOT NULL, "UserAgent" TEXT NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_MfaSignInChallenges_TokenHash" ON "MfaSignInChallenges" ("TokenHash");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_MfaSignInChallenges_UserId_ExpiresAtUtc" ON "MfaSignInChallenges" ("UserId", "ExpiresAtUtc");""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "MfaEnabled" boolean NOT NULL DEFAULT false;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "MfaSecret" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "MfaEnrolledAtUtc" timestamptz NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "MfaLastAcceptedTimeStep" bigint NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "MfaFailedAttemptCount" integer NOT NULL DEFAULT 0;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "MfaLockoutEndUtc" timestamptz NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "MfaRecoveryCodes" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "CodeHash" text NOT NULL, "CreatedAtUtc" timestamptz NOT NULL, "UsedAtUtc" timestamptz NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_MfaRecoveryCodes_CodeHash" ON "MfaRecoveryCodes" ("CodeHash");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_MfaRecoveryCodes_UserId_UsedAtUtc" ON "MfaRecoveryCodes" ("UserId", "UsedAtUtc");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "MfaSignInChallenges" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "CompanyId" uuid NOT NULL, "TokenHash" text NOT NULL, "SecurityStamp" text NOT NULL, "CreatedAtUtc" timestamptz NOT NULL, "ExpiresAtUtc" timestamptz NOT NULL, "ConsumedAtUtc" timestamptz NULL, "FailedAttemptCount" integer NOT NULL, "IpAddress" text NOT NULL, "UserAgent" text NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_MfaSignInChallenges_TokenHash" ON "MfaSignInChallenges" ("TokenHash");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_MfaSignInChallenges_UserId_ExpiresAtUtc" ON "MfaSignInChallenges" ("UserId", "ExpiresAtUtc");""", cancellationToken);
         }
     }
 
