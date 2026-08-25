@@ -374,6 +374,58 @@ h1:focus {
     text-transform: uppercase;
 }
 
+.table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.payroll-employee-picker {
+    max-width: 28rem;
+    margin: 1rem 0;
+}
+
+.payroll-setup-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.payroll-setup-group {
+    min-width: 0;
+    margin: 0;
+    padding: 1rem;
+    border: 1px solid rgba(23, 60, 67, 0.14);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.5);
+    display: grid;
+    align-content: start;
+    gap: 0.75rem;
+}
+
+.payroll-setup-group legend {
+    padding: 0 0.35rem;
+    color: var(--ink-strong);
+    font-weight: 700;
+}
+
+.payroll-w4-group {
+    grid-column: span 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.payroll-w4-group legend,
+.payroll-w4-group .check-field {
+    grid-column: 1 / -1;
+}
+
+.check-field {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--ink-strong);
+}
+
 pre {
     margin: 1rem 0 0;
     padding: 1rem;
@@ -601,6 +653,15 @@ main {
 
     .tax-checkbox-grid {
         grid-template-columns: 1fr;
+    }
+
+    .payroll-setup-grid,
+    .payroll-w4-group {
+        grid-template-columns: 1fr;
+    }
+
+    .payroll-w4-group {
+        grid-column: auto;
     }
 }
 

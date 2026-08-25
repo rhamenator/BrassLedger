@@ -105,6 +105,8 @@ else
                             <th>Rate</th>
                             <th>Effective</th>
                             <th>Employer-specific</th>
+                            <th>Calculation status</th>
+                            <th>Source / review note</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -116,6 +118,8 @@ else
                                 <td>@profile.Rate.ToString("P3")</td>
                                 <td>@profile.EffectiveOn.ToString("MMM d, yyyy")</td>
                                 <td>@(profile.IsEmployerSpecific ? "Yes" : "No")</td>
+                                <td>@(profile.IsActive && profile.IsVerified ? "Active · verified" : profile.IsActive ? "Blocked · unverified" : "Inactive")</td>
+                                <td>@profile.Source@if (!string.IsNullOrWhiteSpace(profile.VerificationNotes)) { <span> — @profile.VerificationNotes</span> }</td>
                             </tr>
                         }
                     </tbody>

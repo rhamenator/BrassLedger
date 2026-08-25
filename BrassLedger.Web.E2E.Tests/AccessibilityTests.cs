@@ -31,7 +31,7 @@ public sealed class AccessibilityTests
         await using var payrollSession = await _fixture.CreateSessionAsync(browserKind);
         await payrollSession.SignInAsync("payroll");
         await payrollSession.GotoAsync("/payroll");
-        await payrollSession.WaitForHeadingAsync("Employees, labor cost, and tax-ready setup.");
+        await payrollSession.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
         await payrollSession.AssertSingleVisibleHeadingAsync();
         await payrollSession.AssertHeadingOrderAsync();
         await payrollSession.AssertInteractiveElementsHaveNamesAsync();

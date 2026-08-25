@@ -282,6 +282,50 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task PayrollApi_PreservesDraftApprovalPostingAndReversalWorkflow()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory, "payroll");
+        var before = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.NotNull(before);
+        var employee = before!.Payroll.Employees.First();
+        var bank = before.Treasury.BankAccounts.Single(account => account.LedgerAccountNumber == "1010");
+        var request = new PostEmployeePayrollRunRequest(bank.Id, new DateOnly(2026, 6, 12), "PR-API-LIFECYCLE-1", [new EmployeePayrollInput(employee.Id, 500m)], new DateOnly(2026, 5, 31), new DateOnly(2026, 6, 6));
+
+        var preview = await client.PostAsJsonAsync("/api/payroll-runs/employee-preview", request);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var draftResponse = await client.PostAsJsonAsync("/api/payroll-runs/drafts", request);
+        Assert.Equal(HttpStatusCode.Created, draftResponse.StatusCode);
+        var draftResult = await draftResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        Assert.NotNull(draftResult?.Id);
+
+        var workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == draftResult!.Id);
+        Assert.Equal("Draft", run.Status);
+        Assert.Equal(bank.CurrentBalance, workspace.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/payroll-runs/post", new PostApprovedPayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-runs/approve", new ApprovePayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
+        workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == run.Id);
+        Assert.Equal("Approved", run.Status);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-runs/post", new PostApprovedPayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
+
+        workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == run.Id);
+        Assert.Equal("Posted", run.Status);
+        Assert.NotNull(run.JournalEntryId);
+        Assert.Equal(bank.CurrentBalance - run.NetPay, workspace.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-runs/reverse", new ReversePayrollRunRequest(run.Id, new DateOnly(2026, 6, 13), "API payroll correction", run.ConcurrencyToken))).StatusCode);
+
+        workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == run.Id);
+        Assert.Equal("Reversed", run.Status);
+        Assert.NotNull(run.ReversalJournalEntryId);
+        Assert.Equal(bank.CurrentBalance, workspace.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
+    }
+
+    [Fact]
     public async Task QuickBooksOnlineInterchange_ExportsAndImportsCoreLists()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
@@ -319,7 +363,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains("QBO-JE-1", journalExport);
     }
 
-    private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null)
+    private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null, string userName = "controller")
     {
         var testFactory = factory ?? _factory;
         var client = testFactory.CreateClient(new WebApplicationFactoryClientOptions
@@ -329,7 +373,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
 
         var response = await client.PostAsJsonAsync("/api/auth/login", new
         {
-            UserName = "controller",
+            UserName = userName,
             Password = BrassLedgerAuthenticationDefaults.SeededPassword
         });
 

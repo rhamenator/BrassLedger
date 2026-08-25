@@ -60,6 +60,28 @@ public static class AuthenticationServiceCollectionExtensions
                     || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage)));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManagePayroll, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.AccessPayroll, policy =>
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPrepare)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollApprove)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPost)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollReverse)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.PreparePayroll, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPrepare));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ApprovePayroll, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollApprove));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.PostPayroll, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPost));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ReversePayroll, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollReverse));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.MaintainEmployeePayrollSetup, policy =>
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage)
+                    && context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageProjects, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectsManage));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageReporting, policy =>

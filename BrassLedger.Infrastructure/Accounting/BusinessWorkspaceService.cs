@@ -19,6 +19,9 @@ public sealed class BusinessWorkspaceService(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
         var httpContext = httpContextAccessor.HttpContext;
+        var canViewPayrollSensitiveData = httpContext is null || httpContext.User.HasClaim(
+            BrassLedgerAuthenticationDefaults.PermissionClaimType,
+            BrassLedgerPermissions.PayrollSensitiveData);
         var claimValue = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         if (httpContext is not null && !Guid.TryParse(claimValue, out _)) throw new UnauthorizedAccessException("An authenticated company context is required.");
         var companies = dbContext.Companies.AsNoTracking();
@@ -66,6 +69,7 @@ public sealed class BusinessWorkspaceService(
             : await dbContext.JournalEntryLines.AsNoTracking().Where(line => bankEntryIds.Contains(line.JournalEntryId)).ToListAsync(cancellationToken);
         var employees = await dbContext.Employees.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.EmployeeNumber).ToListAsync(cancellationToken);
         var payrollJurisdictionRules = await dbContext.PayrollJurisdictionRules.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.ResidenceJurisdiction).ThenBy(x => x.WorkJurisdiction).ToListAsync(cancellationToken);
+        var payrollRuns = (await dbContext.PayrollRuns.AsNoTracking().Where(x => x.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(x => x.PayDate).ThenByDescending(x => x.PreparedAtUtc).ToList();
         var projectJobs = await dbContext.ProjectJobs.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.JobNumber).ToListAsync(cancellationToken);
         var taxProfiles = await dbContext.TaxProfiles.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Jurisdiction).ThenBy(x => x.TaxType).ToListAsync(cancellationToken);
         var reports = await dbContext.ReportCatalogItems.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Category).ThenBy(x => x.Name).ToListAsync(cancellationToken);
@@ -228,8 +232,30 @@ public sealed class BusinessWorkspaceService(
                     string.IsNullOrWhiteSpace(x.ResidenceState) ? x.State : x.ResidenceState,
                     x.ResidenceCity,
                     x.WorkCity,
-                    x.PayrollFrequency)).ToArray(),
-                JurisdictionRules: payrollJurisdictionRules.Select(rule => new PayrollJurisdictionRuleSnapshot(rule.Id, rule.ResidenceJurisdiction, rule.WorkJurisdiction, rule.ExemptWorkWithholding, rule.ResidentCreditRate, rule.IsActive, rule.Notes)).ToArray()),
+                    x.PayrollFrequency,
+                    canViewPayrollSensitiveData ? x.ResidenceCounty : string.Empty,
+                    canViewPayrollSensitiveData ? x.ResidenceSchoolDistrict : string.Empty,
+                    canViewPayrollSensitiveData ? x.WorkCounty : string.Empty,
+                    canViewPayrollSensitiveData ? x.WorkSchoolDistrict : string.Empty,
+                    canViewPayrollSensitiveData ? x.EmploymentStartedOn : null,
+                    canViewPayrollSensitiveData ? x.EmploymentEndedOn : null,
+                    canViewPayrollSensitiveData ? x.HourlyRate : 0m,
+                    canViewPayrollSensitiveData ? x.OvertimeRate : 0m,
+                    canViewPayrollSensitiveData && x.DirectDepositEnabled,
+                    canViewPayrollSensitiveData && !string.IsNullOrWhiteSpace(x.SocialSecurityNumber),
+                    canViewPayrollSensitiveData && !string.IsNullOrWhiteSpace(x.BankAccountNumber),
+                    x.ConcurrencyToken,
+                    canViewPayrollSensitiveData ? x.AddressLine1 : string.Empty,
+                    canViewPayrollSensitiveData ? x.AddressLine2 : string.Empty,
+                    canViewPayrollSensitiveData ? x.PostalCode : string.Empty,
+                    canViewPayrollSensitiveData ? x.FederalFormW4Year : 0,
+                    canViewPayrollSensitiveData && x.FederalStep2MultipleJobs,
+                    canViewPayrollSensitiveData ? x.FederalStep3Credits : 0m,
+                    canViewPayrollSensitiveData ? x.FederalStep4OtherIncome : 0m,
+                    canViewPayrollSensitiveData ? x.FederalStep4Deductions : 0m,
+                    canViewPayrollSensitiveData && x.FederalWithholdingExempt)).ToArray(),
+                JurisdictionRules: payrollJurisdictionRules.Select(rule => new PayrollJurisdictionRuleSnapshot(rule.Id, rule.ResidenceJurisdiction, rule.WorkJurisdiction, rule.ExemptWorkWithholding, rule.ResidentCreditRate, rule.IsActive, rule.Notes)).ToArray(),
+                Runs: payrollRuns.Select(run => new PayrollRunSnapshot(run.Id, run.Reference, run.PeriodStart, run.PeriodEnd, run.PayDate, run.RunType, run.Status, run.GrossPayroll, run.EmployeeWithholdings, run.EmployerPayrollTaxes, run.NetPay, run.ConcurrencyToken, run.JournalEntryId, run.ReversalJournalEntryId, run.PreparedAtUtc, run.ApprovedAtUtc, run.PostedAtUtc, run.ReversedAtUtc, run.ReversalReason)).ToArray()),
             Projects: new ProjectsWorkspace(
                 OpenJobs: projectJobs.Count(x => x.Status is "Open" or "Billing"),
                 BudgetAmount: projectJobs.Sum(x => x.BudgetAmount),
@@ -245,7 +271,7 @@ public sealed class BusinessWorkspaceService(
             Taxes: new TaxWorkspace(
                 ProfileCount: taxProfiles.Count,
                 EmployerSpecificCount: taxProfiles.Count(x => x.IsEmployerSpecific),
-                Profiles: taxProfiles.Select(x => new TaxProfileSnapshot(x.Jurisdiction, x.TaxType, x.Rate, x.EffectiveOn, x.Source, x.IsEmployerSpecific)).ToArray()));
+                Profiles: taxProfiles.Select(x => new TaxProfileSnapshot(x.Jurisdiction, x.TaxType, x.Rate, x.EffectiveOn, x.Source, x.IsEmployerSpecific, x.IsActive, x.IsVerified, x.VerificationNotes)).ToArray()));
     }
 
     private static Dictionary<string, (string Status, string Summary, int RecordCount)> BuildModuleCounts(

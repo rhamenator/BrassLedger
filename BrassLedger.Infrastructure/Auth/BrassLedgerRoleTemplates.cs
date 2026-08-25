@@ -71,8 +71,32 @@ public static class BrassLedgerRoleTemplates
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.PayrollManage,
+            BrassLedgerPermissions.PayrollPrepare,
+            BrassLedgerPermissions.PayrollApprove,
+            BrassLedgerPermissions.PayrollPost,
+            BrassLedgerPermissions.PayrollReverse,
+            BrassLedgerPermissions.PayrollSensitiveData,
             BrassLedgerPermissions.ReportingManage,
             BrassLedgerPermissions.TaxManage
+        ]),
+        new("payroll-preparer", "Payroll Preparer", "Prepares payroll drafts without approval, posting, reversal, or protected-record authority.", false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayrollPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payroll-approver", "Payroll Approver", "Reviews and approves payroll drafts without preparation, posting, reversal, or protected-record authority.", false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayrollApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payroll-poster", "Payroll Poster", "Posts approved payroll and performs controlled reversals without changing employee setup.", false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayrollPost,
+            BrassLedgerPermissions.PayrollReverse,
+            BrassLedgerPermissions.ReportingManage
         ]),
         new("warehouse", "Warehouse Operator", "Maintains inventory and operational activity without payment authority.", false,
         [

@@ -17,7 +17,14 @@ public static class BrassLedgerAuthorizationPolicies
     public const string ApproveSubledgerDocuments = "ApproveSubledgerDocuments";
     public const string PostSubledgerDocuments = "PostSubledgerDocuments";
     public const string ManageOperations = "ManageOperations";
+    public const string AccessPayroll = "AccessPayroll";
     public const string ManagePayroll = "ManagePayroll";
+    public const string PreparePayroll = "PreparePayroll";
+    public const string ApprovePayroll = "ApprovePayroll";
+    public const string PostPayroll = "PostPayroll";
+    public const string ReversePayroll = "ReversePayroll";
+    public const string ManagePayrollSensitiveData = "ManagePayrollSensitiveData";
+    public const string MaintainEmployeePayrollSetup = "MaintainEmployeePayrollSetup";
     public const string ManageProjects = "ManageProjects";
     public const string ManageReporting = "ManageReporting";
     public const string ManagePublishing = "ManagePublishing";

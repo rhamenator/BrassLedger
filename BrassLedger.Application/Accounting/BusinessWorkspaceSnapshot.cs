@@ -207,9 +207,11 @@ public sealed record PayrollWorkspace(
     int ActiveEmployees,
     decimal MonthlyGross,
     IReadOnlyList<EmployeeSnapshot> Employees,
-    IReadOnlyList<PayrollJurisdictionRuleSnapshot>? JurisdictionRules = null);
+    IReadOnlyList<PayrollJurisdictionRuleSnapshot>? JurisdictionRules = null,
+    IReadOnlyList<PayrollRunSnapshot>? Runs = null);
 
 public sealed record PayrollJurisdictionRuleSnapshot(Guid Id, string ResidenceJurisdiction, string WorkJurisdiction, bool ExemptWorkWithholding, decimal ResidentCreditRate, bool IsActive, string Notes);
+public sealed record PayrollRunSnapshot(Guid Id, string Reference, DateOnly PeriodStart, DateOnly PeriodEnd, DateOnly PayDate, string RunType, string Status, decimal GrossPayroll, decimal EmployeeWithholdings, decimal EmployerPayrollTaxes, decimal NetPay, string ConcurrencyToken, Guid? JournalEntryId, Guid? ReversalJournalEntryId, DateTimeOffset PreparedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? PostedAtUtc, DateTimeOffset? ReversedAtUtc, string ReversalReason);
 
 public sealed record EmployeeSnapshot(
     string EmployeeNumber,
@@ -228,7 +230,28 @@ public sealed record EmployeeSnapshot(
     string ResidenceState = "",
     string ResidenceCity = "",
     string WorkCity = "",
-    string PayrollFrequency = "Biweekly");
+    string PayrollFrequency = "Biweekly",
+    string ResidenceCounty = "",
+    string ResidenceSchoolDistrict = "",
+    string WorkCounty = "",
+    string WorkSchoolDistrict = "",
+    DateOnly? EmploymentStartedOn = null,
+    DateOnly? EmploymentEndedOn = null,
+    decimal HourlyRate = 0m,
+    decimal OvertimeRate = 0m,
+    bool DirectDepositEnabled = false,
+    bool HasSocialSecurityNumber = false,
+    bool HasBankAccount = false,
+    string ConcurrencyToken = "",
+    string AddressLine1 = "",
+    string AddressLine2 = "",
+    string PostalCode = "",
+    int FederalFormW4Year = 0,
+    bool FederalStep2MultipleJobs = false,
+    decimal FederalStep3Credits = 0m,
+    decimal FederalStep4OtherIncome = 0m,
+    decimal FederalStep4Deductions = 0m,
+    bool FederalWithholdingExempt = false);
 
 public sealed record ProjectsWorkspace(
     int OpenJobs,
@@ -277,4 +300,7 @@ public sealed record TaxProfileSnapshot(
     decimal Rate,
     DateOnly EffectiveOn,
     string Source,
-    bool IsEmployerSpecific);
+    bool IsEmployerSpecific,
+    bool IsActive = false,
+    bool IsVerified = false,
+    string VerificationNotes = "");

@@ -54,6 +54,7 @@ Module-by-module usage links:
 - Payables: [docs/user-guide.md#payables](docs/user-guide.md#payables)
 - Operations: [docs/user-guide.md#operations](docs/user-guide.md#operations)
 - Payroll: [docs/user-guide.md#payroll](docs/user-guide.md#payroll)
+- Payroll workflow and federal calculation: [docs/payroll-guide.md](docs/payroll-guide.md)
 - Projects: [docs/user-guide.md#projects](docs/user-guide.md#projects)
 - Reporting and forms: [docs/user-guide.md#reporting-and-forms](docs/user-guide.md#reporting-and-forms)
 - Taxes: [docs/user-guide.md#taxes](docs/user-guide.md#taxes)

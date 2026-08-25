@@ -32,6 +32,9 @@ public sealed class BrassLedgerDbContext(
     public DbSet<PayrollRun> PayrollRuns => Set<PayrollRun>();
     public DbSet<PayrollJurisdictionRule> PayrollJurisdictionRules => Set<PayrollJurisdictionRule>();
     public DbSet<PayrollRunEmployeeLine> PayrollRunEmployeeLines => Set<PayrollRunEmployeeLine>();
+    public DbSet<PayrollEarningLine> PayrollEarningLines => Set<PayrollEarningLine>();
+    public DbSet<PayrollDeductionLine> PayrollDeductionLines => Set<PayrollDeductionLine>();
+    public DbSet<PayrollTaxLine> PayrollTaxLines => Set<PayrollTaxLine>();
     public DbSet<GeneralLedgerAccount> Accounts => Set<GeneralLedgerAccount>();
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
@@ -104,6 +107,9 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollRun>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollJurisdictionRule>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollRunEmployeeLine>().HasKey(x => x.Id);
+        modelBuilder.Entity<PayrollEarningLine>().HasKey(x => x.Id);
+        modelBuilder.Entity<PayrollDeductionLine>().HasKey(x => x.Id);
+        modelBuilder.Entity<PayrollTaxLine>().HasKey(x => x.Id);
         modelBuilder.Entity<ProjectJob>().HasKey(x => x.Id);
         modelBuilder.Entity<TaxProfile>().HasKey(x => x.Id);
         modelBuilder.Entity<TaxRuleSet>().HasKey(x => x.Id);
@@ -138,6 +144,20 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.InboundJournalEntryId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.ReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PayrollRun>().HasOne<BankAccount>().WithMany().HasForeignKey(run => run.BankAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PayrollRun>().HasOne<JournalEntry>().WithMany().HasForeignKey(run => run.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PayrollRun>().HasOne<JournalEntry>().WithMany().HasForeignKey(run => run.ReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PayrollRunEmployeeLine>().HasOne<PayrollRun>().WithMany().HasForeignKey(line => line.PayrollRunId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PayrollRunEmployeeLine>().HasOne<Employee>().WithMany().HasForeignKey(line => line.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PayrollEarningLine>().HasOne<PayrollRunEmployeeLine>().WithMany().HasForeignKey(line => line.PayrollRunEmployeeLineId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<PayrollDeductionLine>().HasOne<PayrollRunEmployeeLine>().WithMany().HasForeignKey(line => line.PayrollRunEmployeeLineId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<PayrollTaxLine>().HasOne<PayrollRunEmployeeLine>().WithMany().HasForeignKey(line => line.PayrollRunEmployeeLineId).OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Employee>().Property(x => x.SocialSecurityNumber).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<Employee>().Property(x => x.BankRoutingNumber).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<Employee>().Property(x => x.BankAccountNumber).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<Employee>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<PayrollRun>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.InboundReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<GeneralLedgerAccount>()
@@ -235,6 +255,23 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<PayrollRunEmployeeLine>().Property(x => x.PostTaxDeductions));
         ConfigureMoney(modelBuilder.Entity<PayrollRunEmployeeLine>().Property(x => x.EmployerPayrollTaxes));
         ConfigureMoney(modelBuilder.Entity<PayrollRunEmployeeLine>().Property(x => x.NetPay));
+        ConfigureMoney(modelBuilder.Entity<PayrollRunEmployeeLine>().Property(x => x.TaxableWages));
+        ConfigureMoney(modelBuilder.Entity<PayrollRunEmployeeLine>().Property(x => x.YearToDateGrossBefore));
+        ConfigureMoney(modelBuilder.Entity<PayrollRunEmployeeLine>().Property(x => x.YearToDateGrossAfter));
+        ConfigureMoney(modelBuilder.Entity<PayrollEarningLine>().Property(x => x.Hours), 18, 4);
+        ConfigureMoney(modelBuilder.Entity<PayrollEarningLine>().Property(x => x.Rate), 18, 4);
+        ConfigureMoney(modelBuilder.Entity<PayrollEarningLine>().Property(x => x.Amount));
+        ConfigureMoney(modelBuilder.Entity<PayrollDeductionLine>().Property(x => x.EmployeeAmount));
+        ConfigureMoney(modelBuilder.Entity<PayrollDeductionLine>().Property(x => x.EmployerAmount));
+        ConfigureMoney(modelBuilder.Entity<PayrollTaxLine>().Property(x => x.TaxableWages));
+        ConfigureMoney(modelBuilder.Entity<PayrollTaxLine>().Property(x => x.YearToDateTaxableWagesBefore));
+        ConfigureMoney(modelBuilder.Entity<PayrollTaxLine>().Property(x => x.EmployeeAmount));
+        ConfigureMoney(modelBuilder.Entity<PayrollTaxLine>().Property(x => x.EmployerAmount));
+        ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.HourlyRate), 18, 4);
+        ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.OvertimeRate), 18, 4);
+        ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.FederalStep3Credits));
+        ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.FederalStep4OtherIncome));
+        ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.FederalStep4Deductions));
         ConfigureMoney(modelBuilder.Entity<ProjectJob>().Property(x => x.BudgetAmount));
         ConfigureMoney(modelBuilder.Entity<ProjectJob>().Property(x => x.ActualCost));
         ConfigureMoney(modelBuilder.Entity<TaxProfile>().Property(x => x.Rate), 9, 5);
@@ -278,6 +315,10 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollRun>().HasIndex(x => new { x.CompanyId, x.Reference }).IsUnique();
         modelBuilder.Entity<PayrollJurisdictionRule>().HasIndex(x => new { x.CompanyId, x.ResidenceJurisdiction, x.WorkJurisdiction }).IsUnique();
         modelBuilder.Entity<PayrollRunEmployeeLine>().HasIndex(x => new { x.PayrollRunId, x.EmployeeId }).IsUnique();
+        modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.Sequence }).IsUnique();
+        modelBuilder.Entity<PayrollDeductionLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.Sequence }).IsUnique();
+        modelBuilder.Entity<PayrollTaxLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.Sequence }).IsUnique();
+        modelBuilder.Entity<PayrollTaxLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.ObligationCode, x.JurisdictionCode });
         modelBuilder.Entity<ProjectJob>().HasIndex(x => new { x.CompanyId, x.JobNumber }).IsUnique();
         modelBuilder.Entity<BankAccount>().HasIndex(x => new { x.CompanyId, x.LedgerAccountId });
         modelBuilder.Entity<BankReconciliation>().HasIndex(x => new { x.BankAccountId, x.StatementDate }).IsUnique();

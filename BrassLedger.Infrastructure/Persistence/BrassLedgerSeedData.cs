@@ -135,10 +135,10 @@ internal static class BrassLedgerSeedData
 
         var employees = new[]
         {
-            new Employee { Id = Guid.Parse("d6fc3d7c-c72f-4dac-a816-6a6935f33c37"), CompanyId = CompanyId, EmployeeNumber = "E-100", FirstName = "Rosa", LastName = "Mendoza", Department = "Production", State = "AZ", PayType = "Hourly", MonthlyBasePay = 4912m, IsActive = true },
-            new Employee { Id = Guid.Parse("1d1e5ca2-aa46-4eaf-8c02-12222c00cb6a"), CompanyId = CompanyId, EmployeeNumber = "E-104", FirstName = "Milo", LastName = "Hart", Department = "Warehouse", State = "NV", PayType = "Hourly", MonthlyBasePay = 4380m, IsActive = true },
-            new Employee { Id = Guid.Parse("c958dd4f-3678-4165-9c80-dcd8f01a2ae8"), CompanyId = CompanyId, EmployeeNumber = "E-109", FirstName = "Priya", LastName = "Shaw", Department = "Finance", State = "CA", PayType = "Salary", MonthlyBasePay = 7950m, IsActive = true },
-            new Employee { Id = Guid.Parse("5042fc71-3749-42e8-b594-a9f069eb3bb4"), CompanyId = CompanyId, EmployeeNumber = "E-113", FirstName = "Gavin", LastName = "Cole", Department = "Field Service", State = "OH", PayType = "Salary", MonthlyBasePay = 7125m, IsActive = true }
+            new Employee { Id = Guid.Parse("d6fc3d7c-c72f-4dac-a816-6a6935f33c37"), CompanyId = CompanyId, EmployeeNumber = "E-100", FirstName = "Rosa", LastName = "Mendoza", Department = "Production", State = "AZ", PayType = "Hourly", MonthlyBasePay = 4912m, FederalFormW4Year = 2026, IsActive = true },
+            new Employee { Id = Guid.Parse("1d1e5ca2-aa46-4eaf-8c02-12222c00cb6a"), CompanyId = CompanyId, EmployeeNumber = "E-104", FirstName = "Milo", LastName = "Hart", Department = "Warehouse", State = "NV", PayType = "Hourly", MonthlyBasePay = 4380m, FederalFormW4Year = 2026, IsActive = true },
+            new Employee { Id = Guid.Parse("c958dd4f-3678-4165-9c80-dcd8f01a2ae8"), CompanyId = CompanyId, EmployeeNumber = "E-109", FirstName = "Priya", LastName = "Shaw", Department = "Finance", State = "CA", PayType = "Salary", MonthlyBasePay = 7950m, FederalFormW4Year = 2026, IsActive = true },
+            new Employee { Id = Guid.Parse("5042fc71-3749-42e8-b594-a9f069eb3bb4"), CompanyId = CompanyId, EmployeeNumber = "E-113", FirstName = "Gavin", LastName = "Cole", Department = "Field Service", State = "OH", PayType = "Salary", MonthlyBasePay = 7125m, FederalFormW4Year = 2026, IsActive = true }
         };
 
         var projectJobs = new[]
@@ -150,10 +150,10 @@ internal static class BrassLedgerSeedData
 
         var taxProfiles = new[]
         {
-            new TaxProfile { Id = Guid.Parse("afef0ef3-e39b-4b6d-b8c5-3cab981d2b81"), CompanyId = CompanyId, Jurisdiction = "Federal", TaxType = "FIT Withholding", Rate = 0.22000m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "IRS Publication 15-T", IsEmployerSpecific = false },
-            new TaxProfile { Id = Guid.Parse("ba8e3a79-f0fe-4983-a417-5d908b6860ca"), CompanyId = CompanyId, Jurisdiction = "Federal", TaxType = "FUTA", Rate = 0.00600m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "IRS Publication 15", IsEmployerSpecific = false },
-            new TaxProfile { Id = Guid.Parse("1bb2c570-e04b-4f5f-bf86-a4edbeea8820"), CompanyId = CompanyId, Jurisdiction = "Arizona", TaxType = "SUI", Rate = 0.02450m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "Arizona DES notice", IsEmployerSpecific = true },
-            new TaxProfile { Id = Guid.Parse("9a29289b-8b48-40c0-9ae7-06d6e0b71e47"), CompanyId = CompanyId, Jurisdiction = "California", TaxType = "ETT", Rate = 0.00100m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "EDD employer reference", IsEmployerSpecific = false }
+            new TaxProfile { Id = Guid.Parse("afef0ef3-e39b-4b6d-b8c5-3cab981d2b81"), CompanyId = CompanyId, Jurisdiction = "Federal", TaxType = "FIT Withholding", Rate = 0.22000m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "Starter example only", IsEmployerSpecific = false, IsActive = false, IsVerified = false, VerificationNotes = "Inactive placeholder; federal withholding uses the verified 2026 Publication 15-T calculator." },
+            new TaxProfile { Id = Guid.Parse("ba8e3a79-f0fe-4983-a417-5d908b6860ca"), CompanyId = CompanyId, Jurisdiction = "Federal", TaxType = "FUTA", Rate = 0.00600m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "Starter example only", IsEmployerSpecific = true, IsActive = false, IsVerified = false, VerificationNotes = "Activate only after verifying the employer qualifies for the maximum state unemployment credit and credit-reduction treatment." },
+            new TaxProfile { Id = Guid.Parse("1bb2c570-e04b-4f5f-bf86-a4edbeea8820"), CompanyId = CompanyId, Jurisdiction = "Arizona", TaxType = "SUI", Rate = 0.02450m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "Starter example only", IsEmployerSpecific = true, IsActive = false, IsVerified = false, VerificationNotes = "Replace with the employer's current official rate notice before activation." },
+            new TaxProfile { Id = Guid.Parse("9a29289b-8b48-40c0-9ae7-06d6e0b71e47"), CompanyId = CompanyId, Jurisdiction = "California", TaxType = "ETT", Rate = 0.00100m, EffectiveOn = new DateOnly(2026, 1, 1), Source = "Starter example only", IsEmployerSpecific = false, IsActive = false, IsVerified = false, VerificationNotes = "Inactive sample content pending official-source review." }
         };
 
         var journalEntries = new[]

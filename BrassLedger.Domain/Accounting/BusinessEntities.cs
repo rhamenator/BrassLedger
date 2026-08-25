@@ -518,15 +518,38 @@ public sealed class Employee
     public string ResidenceState { get; set; } = string.Empty;
     public string ResidenceCity { get; set; } = string.Empty;
     public string WorkCity { get; set; } = string.Empty;
+    public string ResidenceCounty { get; set; } = string.Empty;
+    public string ResidenceSchoolDistrict { get; set; } = string.Empty;
+    public string WorkCounty { get; set; } = string.Empty;
+    public string WorkSchoolDistrict { get; set; } = string.Empty;
+    public string AddressLine1 { get; set; } = string.Empty;
+    public string AddressLine2 { get; set; } = string.Empty;
+    public string PostalCode { get; set; } = string.Empty;
+    public string SocialSecurityNumber { get; set; } = string.Empty;
+    public string BankRoutingNumber { get; set; } = string.Empty;
+    public string BankAccountNumber { get; set; } = string.Empty;
+    public string BankAccountType { get; set; } = string.Empty;
+    public bool DirectDepositEnabled { get; set; }
+    public DateOnly? EmploymentStartedOn { get; set; }
+    public DateOnly? EmploymentEndedOn { get; set; }
     public string PayType { get; set; } = string.Empty;
     public decimal MonthlyBasePay { get; set; }
+    public decimal HourlyRate { get; set; }
+    public decimal OvertimeRate { get; set; }
     public string FilingStatus { get; set; } = "Single";
     public string PayrollFrequency { get; set; } = "Biweekly";
     public int Allowances { get; set; }
+    public int FederalFormW4Year { get; set; }
+    public bool FederalStep2MultipleJobs { get; set; }
+    public decimal FederalStep3Credits { get; set; }
+    public decimal FederalStep4OtherIncome { get; set; }
+    public decimal FederalStep4Deductions { get; set; }
+    public bool FederalWithholdingExempt { get; set; }
     public decimal AdditionalWithholding { get; set; }
     public decimal PreTaxBenefitDeductions { get; set; }
     public decimal PostTaxBenefitDeductions { get; set; }
     public bool IsActive { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
 public sealed class ProjectJob
@@ -552,6 +575,9 @@ public sealed class TaxProfile
     public DateOnly EffectiveOn { get; set; }
     public string Source { get; set; } = string.Empty;
     public bool IsEmployerSpecific { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsVerified { get; set; }
+    public string VerificationNotes { get; set; } = string.Empty;
 }
 
 public sealed class PayrollRun
@@ -560,6 +586,10 @@ public sealed class PayrollRun
     public Guid CompanyId { get; set; }
     public Guid BankAccountId { get; set; }
     public DateOnly PayDate { get; set; }
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    public string RunType { get; set; } = "Regular";
+    public string Status { get; set; } = "Draft";
     public string Reference { get; set; } = string.Empty;
     public decimal GrossPayroll { get; set; }
     public decimal PreTaxDeductions { get; set; }
@@ -567,8 +597,21 @@ public sealed class PayrollRun
     public decimal PostTaxDeductions { get; set; }
     public decimal EmployerPayrollTaxes { get; set; }
     public decimal NetPay { get; set; }
-    public DateTimeOffset PostedAtUtc { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? PostedByUserId { get; set; }
+    public DateTimeOffset? PostedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string CalculationWarningsJson { get; set; } = "[]";
     public string TaxContentSnapshotJson { get; set; } = "[]";
+    public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
 public sealed class PayrollJurisdictionRule
@@ -595,11 +638,69 @@ public sealed class PayrollRunEmployeeLine
     public string FilingStatus { get; set; } = string.Empty;
     public string PayrollFrequency { get; set; } = string.Empty;
     public decimal GrossPay { get; set; }
+    public decimal TaxableWages { get; set; }
+    public decimal YearToDateGrossBefore { get; set; }
+    public decimal YearToDateGrossAfter { get; set; }
     public decimal PreTaxDeductions { get; set; }
     public decimal EmployeeWithholdings { get; set; }
     public decimal PostTaxDeductions { get; set; }
     public decimal EmployerPayrollTaxes { get; set; }
     public decimal NetPay { get; set; }
+    public string CalculationTraceJson { get; set; } = "[]";
+}
+
+public sealed class PayrollEarningLine
+{
+    public Guid Id { get; set; }
+    public Guid PayrollRunEmployeeLineId { get; set; }
+    public int Sequence { get; set; }
+    public string EarningCode { get; set; } = "REGULAR";
+    public string EarningType { get; set; } = "Regular";
+    public decimal Hours { get; set; }
+    public decimal Rate { get; set; }
+    public decimal Amount { get; set; }
+    public bool IsTaxable { get; set; } = true;
+    public DateOnly? WorkedOn { get; set; }
+    public string WorkState { get; set; } = string.Empty;
+    public string WorkCounty { get; set; } = string.Empty;
+    public string WorkCity { get; set; } = string.Empty;
+    public string WorkSchoolDistrict { get; set; } = string.Empty;
+}
+
+public sealed class PayrollDeductionLine
+{
+    public Guid Id { get; set; }
+    public Guid PayrollRunEmployeeLineId { get; set; }
+    public int Sequence { get; set; }
+    public string DeductionCode { get; set; } = string.Empty;
+    public string DeductionType { get; set; } = string.Empty;
+    public decimal EmployeeAmount { get; set; }
+    public decimal EmployerAmount { get; set; }
+    public bool IsPreTax { get; set; }
+    public bool ExemptFromFederalIncomeTax { get; set; }
+    public bool ExemptFromFica { get; set; }
+    public bool ExemptFromFuta { get; set; }
+    public string LiabilityAccountNumber { get; set; } = "2200";
+}
+
+public sealed class PayrollTaxLine
+{
+    public Guid Id { get; set; }
+    public Guid PayrollRunEmployeeLineId { get; set; }
+    public int Sequence { get; set; }
+    public string ObligationCode { get; set; } = string.Empty;
+    public string JurisdictionCode { get; set; } = string.Empty;
+    public string JurisdictionName { get; set; } = string.Empty;
+    public string TaxType { get; set; } = string.Empty;
+    public decimal TaxableWages { get; set; }
+    public decimal YearToDateTaxableWagesBefore { get; set; }
+    public decimal EmployeeAmount { get; set; }
+    public decimal EmployerAmount { get; set; }
+    public Guid? TaxRuleSetId { get; set; }
+    public Guid? TaxContentPackageId { get; set; }
+    public string ContentVersion { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public string CalculationTraceJson { get; set; } = "{}";
 }
 
 public sealed class TaxRuleSet

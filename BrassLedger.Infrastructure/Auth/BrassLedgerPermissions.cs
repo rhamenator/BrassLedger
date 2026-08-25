@@ -18,6 +18,11 @@ public static class BrassLedgerPermissions
     public const string PurchasingManage = "operations.purchasing.manage";
     public const string CheckDisbursementManage = "treasury.check-disbursement.manage";
     public const string PayrollManage = "payroll.manage";
+    public const string PayrollPrepare = "payroll.prepare";
+    public const string PayrollApprove = "payroll.approve";
+    public const string PayrollPost = "payroll.post";
+    public const string PayrollReverse = "payroll.reverse";
+    public const string PayrollSensitiveData = "payroll.sensitive-data";
     public const string ProjectsManage = "projects.manage";
     public const string ReportingManage = "reporting.manage";
     public const string TaxManage = "tax.manage";
@@ -43,6 +48,11 @@ public static class BrassLedgerPermissions
         new(PurchasingManage, "Purchasing", "Approve and issue purchase orders."),
         new(CheckDisbursementManage, "Check disbursement", "Prepare payments, checks, and cash disbursements."),
         new(PayrollManage, "Payroll", "Maintain payroll-sensitive records and processing."),
+        new(PayrollPrepare, "Payroll preparation", "Prepare payroll drafts, earnings, deductions, and calculation previews."),
+        new(PayrollApprove, "Payroll approval", "Approve reviewed payroll drafts without posting or reversing them."),
+        new(PayrollPost, "Payroll posting", "Post approved payroll runs to the ledger and funding account."),
+        new(PayrollReverse, "Payroll reversal", "Create auditable reversals of posted payroll runs."),
+        new(PayrollSensitiveData, "Payroll sensitive data", "View and maintain protected employee tax and banking fields."),
         new(ProjectsManage, "Projects", "Review and manage project accounting."),
         new(ReportingManage, "Reporting", "Run operational reports, forms, and labels."),
         new(TaxManage, "Taxes", "Maintain tax profiles and tax-facing workflows."),

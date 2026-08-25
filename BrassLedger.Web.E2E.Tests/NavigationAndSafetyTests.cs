@@ -48,7 +48,7 @@ public sealed class NavigationAndSafetyTests
         await using var payrollSession = await _fixture.CreateSessionAsync(browserKind);
         await payrollSession.SignInAsync("payroll");
         await payrollSession.GotoAsync("/payroll");
-        await payrollSession.WaitForHeadingAsync("Employees, labor cost, and tax-ready setup.");
+        await payrollSession.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
         await payrollSession.AssertNoUiFailuresAsync("/payroll");
     }
 
@@ -76,6 +76,7 @@ public sealed class NavigationAndSafetyTests
         var operationsShell = new AppShellPage(operationsSession);
         await operationsShell.OpenAsync();
         await operationsShell.NavigateMenuAsync("operations", "Operational flow from stock to shipment.");
+        Assert.Equal(0, await operationsSession.Page.Locator("a.nav-link[href='payroll']").CountAsync());
         await operationsSession.AssertNoUiFailuresAsync("operations sidebar navigation");
     }
 

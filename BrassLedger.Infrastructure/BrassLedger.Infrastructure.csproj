@@ -12,6 +12,10 @@
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\tax-content\us\federal\2026-payroll-tax-data.json" Link="TaxContent\2026-payroll-tax-data.json" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
