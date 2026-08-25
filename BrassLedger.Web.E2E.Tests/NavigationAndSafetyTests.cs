@@ -121,4 +121,27 @@ public sealed class NavigationAndSafetyTests
         Assert.Contains("did not match an active operator", content);
         await session.AssertNoUiFailuresAsync("invalid login");
     }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task AccountRecovery_UsesUniformResponseAndRejectsInvalidActionLink(BrowserKind browserKind)
+    {
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+
+        var recoveryResponse = await session.Page.Context.APIRequest.GetAsync($"{session.BaseUrl}/forgot-password");
+        Assert.Equal("no-store, no-cache", recoveryResponse.Headers["cache-control"]);
+        await session.GotoAsync("/forgot-password");
+        await session.WaitForHeadingAsync("Request a password reset.");
+        await session.Page.GetByLabel("Username or verified email").FillAsync("definitely-missing@example.test");
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Button, new() { Name = "Request reset link" }).ClickAsync();
+        await session.Page.GetByText("If the account and verified email are eligible", new() { Exact = false }).WaitForAsync();
+        Assert.DoesNotContain("not found", await session.Page.Locator("body").InnerTextAsync(), StringComparison.OrdinalIgnoreCase);
+
+        var actionResponse = await session.Page.Context.APIRequest.GetAsync($"{session.BaseUrl}/account/action/start?token=invalid-opaque-token", new() { MaxRedirects = 0 });
+        Assert.Equal("no-store, no-cache", actionResponse.Headers["cache-control"]);
+        await session.GotoAsync("/account/action/start?token=invalid-opaque-token");
+        await session.WaitForHeadingAsync("This link cannot be used.");
+        Assert.Contains("invalid, expired, already used", await session.Page.Locator("body").InnerTextAsync(), StringComparison.OrdinalIgnoreCase);
+        await session.AssertNoUiFailuresAsync("account recovery invalid-link handling");
+    }
 }

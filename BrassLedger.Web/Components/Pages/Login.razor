@@ -20,6 +20,10 @@
         {
             <div class="auth-error" role="alert">@ErrorMessage</div>
         }
+        else if (!string.IsNullOrWhiteSpace(StatusMessage))
+        {
+            <div class="status-banner" role="status">@StatusMessage</div>
+        }
 
         @if (IsAuthenticated)
         {
@@ -46,6 +50,7 @@
 
                 <button class="action-primary" type="submit">Sign in</button>
             </form>
+            <p class="auth-note"><a href="/forgot-password">Forgot your password?</a></p>
         }
 
         <div class="auth-note">
@@ -75,6 +80,9 @@
     [SupplyParameterFromQuery(Name = "error")]
     public string? Error { get; set; }
 
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
     private bool IsAuthenticated { get; set; }
 
     private string TargetPath => SanitizeReturnUrl(ReturnUrl);
@@ -89,7 +97,16 @@
             ? "The second-factor challenge expired. Sign in with your password to begin again."
         : string.Equals(Error, "mfa-locked", StringComparison.OrdinalIgnoreCase)
             ? "Second-factor verification is temporarily locked after repeated failures. Try again later or use the controlled recovery process."
-        : null;
+            : null;
+
+    private string? StatusMessage => Status switch
+    {
+        "invitation-accepted" => "Your email address was verified and the operator account was activated. Sign in with the password you chose.",
+        "password-reset" => "Your password was reset and prior sessions were invalidated. Sign in with the new password.",
+        "email-verified" => "Your email address was verified. Sign in to continue.",
+        "email-change-verification-sent" => "Your email address was changed and prior sessions were invalidated. Verify the replacement address using the one-use message, then sign in again.",
+        _ => null
+    };
 
     protected override async Task OnInitializedAsync()
     {

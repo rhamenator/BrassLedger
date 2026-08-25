@@ -67,6 +67,7 @@ public sealed record AccountSecuritySnapshot(
     string UserName,
     string DisplayName,
     string Email,
+    DateTimeOffset? EmailConfirmedAtUtc,
     DateTimeOffset? LastPasswordChangedUtc,
     DateTimeOffset? LastSuccessfulSignInUtc,
     bool MfaEnabled,

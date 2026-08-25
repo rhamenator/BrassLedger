@@ -25,6 +25,17 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         Delegate apiMfaHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleApiMfaAsync;
         Delegate apiLogoutHandler = (Func<HttpContext, Task<IResult>>)HandleApiLogoutAsync;
         Delegate switchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleSwitchCompanyAsync;
+        Delegate passwordResetRequestHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandlePasswordResetRequestAsync;
+        Delegate accountActionStartHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleAccountActionStartAsync;
+        Delegate accountActionCompleteHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandleAccountActionCompleteAsync;
+        Delegate emailVerificationRequestHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandleEmailVerificationRequestAsync;
+        Delegate emailChangeHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandleEmailChangeAsync;
+        Delegate emailVerificationCompleteHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandleEmailVerificationCompleteAsync;
+        Delegate apiPasswordResetRequestHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiPasswordResetRequestAsync;
+        Delegate apiAccountActionCompleteHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiAccountActionCompleteAsync;
+        Delegate apiEmailVerificationRequestHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiEmailVerificationRequestAsync;
+        Delegate apiEmailVerificationCompleteHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiEmailVerificationCompleteAsync;
+        Delegate apiEmailChangeHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiEmailChangeAsync;
 
         endpoints.MapPost("/account/login", formLoginHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/account/logout", formLogoutHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
@@ -34,14 +45,205 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         endpoints.MapPost("/account/mfa", formMfaHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/account/disable-mfa", disableMfaHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
         endpoints.MapPost("/account/bootstrap", bootstrapHandler).AllowAnonymous();
+        endpoints.MapPost("/account/password-reset/request", passwordResetRequestHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapGet("/account/action/start", accountActionStartHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/account/action", accountActionCompleteHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/account/email-verification/request", emailVerificationRequestHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity).RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/account/email/change", emailChangeHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity).RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/account/action/verify-email", emailVerificationCompleteHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
 
         endpoints.MapPost("/api/auth/login", apiLoginHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/api/auth/mfa", apiMfaHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/api/auth/logout", apiLogoutHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
         endpoints.MapGet("/api/auth/me", (ClaimsPrincipal principal) => Results.Ok(ToResponse(principal))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
         endpoints.MapPost("/api/auth/active-company", switchCompanyHandler).RequireAuthorization();
+        endpoints.MapPost("/api/auth/password-reset/request", apiPasswordResetRequestHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/api/auth/account-action", apiAccountActionCompleteHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/api/auth/email-verification/request", apiEmailVerificationRequestHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity).RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/api/auth/email-verification/complete", apiEmailVerificationCompleteHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/api/auth/email/change", apiEmailChangeHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity).RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
 
         return endpoints;
+    }
+
+    private static async Task<IResult> HandlePasswordResetRequestAsync(HttpContext context, IAccountActionService accountActionService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        ApplyNoStoreHeaders(context.Response);
+        var form = await context.Request.ReadFormAsync();
+        await accountActionService.RequestPasswordResetAsync(
+            form["identifier"].ToString(),
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        return Results.LocalRedirect("/forgot-password?status=requested");
+    }
+
+    private static async Task<IResult> HandleAccountActionStartAsync(HttpContext context, IAccountActionService accountActionService)
+    {
+        ApplyNoStoreHeaders(context.Response);
+        var token = context.Request.Query["token"].ToString();
+        if (await accountActionService.GetActionAsync(token, context.RequestAborted) is null)
+        {
+            DeleteAccountActionCookie(context);
+            return Results.LocalRedirect("/account/action?error=invalid-or-expired");
+        }
+        context.Response.Cookies.Append(
+            BrassLedgerAuthenticationDefaults.AccountActionCookieName,
+            token,
+            new CookieOptions
+            {
+                HttpOnly = true,
+                IsEssential = true,
+                SameSite = SameSiteMode.Strict,
+                Secure = context.Request.IsHttps,
+                MaxAge = TimeSpan.FromHours(24),
+                Path = "/account/action"
+            });
+        return Results.LocalRedirect("/account/action");
+    }
+
+    private static async Task<IResult> HandleAccountActionCompleteAsync(HttpContext context, IAccountActionService accountActionService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        ApplyNoStoreHeaders(context.Response);
+        if (!context.Request.Cookies.TryGetValue(BrassLedgerAuthenticationDefaults.AccountActionCookieName, out var token))
+            return Results.LocalRedirect("/account/action?error=invalid-or-expired");
+        var form = await context.Request.ReadFormAsync();
+        var result = await accountActionService.CompleteAsync(
+            token,
+            form["newPassword"].ToString(),
+            form["confirmPassword"].ToString(),
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        if (result.Outcome == AccountActionCompletionOutcome.InvalidPassword)
+            return Results.LocalRedirect("/account/action?error=invalid-password");
+        if (result.Outcome != AccountActionCompletionOutcome.Succeeded)
+        {
+            DeleteAccountActionCookie(context);
+            return Results.LocalRedirect("/account/action?error=invalid-or-expired");
+        }
+        DeleteAccountActionCookie(context);
+        return Results.LocalRedirect(result.Purpose == "Invitation" ? "/login?status=invitation-accepted" : "/login?status=password-reset");
+    }
+
+    private static async Task<IResult> HandleApiPasswordResetRequestAsync(HttpContext context, IAccountActionService accountActionService)
+    {
+        ApplyNoStoreHeaders(context.Response);
+        var request = await context.Request.ReadFromJsonAsync<PasswordResetRequest>(cancellationToken: context.RequestAborted);
+        if (request is not null)
+            await accountActionService.RequestPasswordResetAsync(request.Identifier, context.Connection.RemoteIpAddress?.ToString() ?? string.Empty, context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
+        return Results.Accepted(value: new { Message = "If the account and verified email are eligible, a one-time reset link will be sent." });
+    }
+
+    private static async Task<IResult> HandleApiAccountActionCompleteAsync(HttpContext context, IAccountActionService accountActionService)
+    {
+        ApplyNoStoreHeaders(context.Response);
+        var request = await context.Request.ReadFromJsonAsync<AccountActionCompleteRequest>(cancellationToken: context.RequestAborted);
+        if (request is null) return Results.BadRequest();
+        var result = await accountActionService.CompleteAsync(request.Token, request.NewPassword, request.ConfirmPassword, context.Connection.RemoteIpAddress?.ToString() ?? string.Empty, context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
+        return result.Outcome switch
+        {
+            AccountActionCompletionOutcome.Succeeded => Results.Ok(new { result.Purpose, Message = "The account credential was updated. Sign in through the normal login flow." }),
+            AccountActionCompletionOutcome.InvalidPassword => Results.BadRequest(new { Error = "invalid_password" }),
+            _ => Results.BadRequest(new { Error = "invalid_or_expired_action" })
+        };
+    }
+
+    private static async Task<IResult> HandleEmailVerificationRequestAsync(HttpContext context, IAccountActionService accountActionService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Results.Unauthorized();
+        ApplyNoStoreHeaders(context.Response);
+        var result = await accountActionService.RequestEmailVerificationAsync(
+            userId,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        return Results.LocalRedirect(result.Succeeded
+            ? "/account/security?status=email-verification-requested"
+            : "/account/security?error=email-verification-unavailable");
+    }
+
+    private static async Task<IResult> HandleEmailVerificationCompleteAsync(HttpContext context, IAccountActionService accountActionService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        ApplyNoStoreHeaders(context.Response);
+        if (!context.Request.Cookies.TryGetValue(BrassLedgerAuthenticationDefaults.AccountActionCookieName, out var token))
+            return Results.LocalRedirect("/account/action?error=invalid-or-expired");
+        var result = await accountActionService.CompleteEmailVerificationAsync(
+            token,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        DeleteAccountActionCookie(context);
+        return result.Outcome == AccountActionCompletionOutcome.Succeeded
+            ? Results.LocalRedirect("/login?status=email-verified")
+            : Results.LocalRedirect("/account/action?error=invalid-or-expired");
+    }
+
+    private static async Task<IResult> HandleEmailChangeAsync(HttpContext context, IAccountActionService accountActionService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Results.Unauthorized();
+        ApplyNoStoreHeaders(context.Response);
+        var form = await context.Request.ReadFormAsync();
+        var result = await accountActionService.ChangeEmailAsync(
+            userId,
+            form["newEmail"].ToString(),
+            form["currentPassword"].ToString(),
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        if (!result.Succeeded) return Results.LocalRedirect("/account/security?error=email-change-rejected");
+        await context.SignOutAsync(BrassLedgerAuthenticationDefaults.Scheme);
+        return Results.LocalRedirect("/login?status=email-change-verification-sent");
+    }
+
+    private static async Task<IResult> HandleApiEmailVerificationRequestAsync(HttpContext context, IAccountActionService accountActionService)
+    {
+        if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Results.Unauthorized();
+        ApplyNoStoreHeaders(context.Response);
+        var result = await accountActionService.RequestEmailVerificationAsync(
+            userId,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        return result.Succeeded ? Results.Accepted() : Results.BadRequest(new { Error = "email_verification_unavailable" });
+    }
+
+    private static async Task<IResult> HandleApiEmailVerificationCompleteAsync(HttpContext context, IAccountActionService accountActionService)
+    {
+        ApplyNoStoreHeaders(context.Response);
+        var request = await context.Request.ReadFromJsonAsync<EmailVerificationCompleteRequest>(cancellationToken: context.RequestAborted);
+        if (request is null) return Results.BadRequest();
+        var result = await accountActionService.CompleteEmailVerificationAsync(
+            request.Token,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        return result.Outcome == AccountActionCompletionOutcome.Succeeded
+            ? Results.Ok(new { Message = "The account email address was verified." })
+            : Results.BadRequest(new { Error = "invalid_or_expired_action" });
+    }
+
+    private static async Task<IResult> HandleApiEmailChangeAsync(HttpContext context, IAccountActionService accountActionService)
+    {
+        if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Results.Unauthorized();
+        ApplyNoStoreHeaders(context.Response);
+        var request = await context.Request.ReadFromJsonAsync<EmailChangeRequest>(cancellationToken: context.RequestAborted);
+        if (request is null) return Results.BadRequest();
+        var result = await accountActionService.ChangeEmailAsync(
+            userId,
+            request.NewEmail,
+            request.CurrentPassword,
+            context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        if (!result.Succeeded) return Results.BadRequest(new { Error = "email_change_rejected" });
+        await context.SignOutAsync(BrassLedgerAuthenticationDefaults.Scheme);
+        return Results.Accepted(value: new { Message = "The replacement address is pending verification; prior sessions were invalidated." });
     }
 
     private static async Task<IResult> HandleChangePasswordAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
@@ -452,7 +654,18 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             new CookieOptions { Path = "/account/mfa", SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps });
     }
 
+    private static void DeleteAccountActionCookie(HttpContext context)
+    {
+        context.Response.Cookies.Delete(
+            BrassLedgerAuthenticationDefaults.AccountActionCookieName,
+            new CookieOptions { Path = "/account/action", SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps });
+    }
+
     private sealed record LoginRequest(string UserName, string Password);
     private sealed record MfaLoginRequest(string ChallengeToken, string VerificationCode);
     private sealed record SwitchCompanyRequest(Guid CompanyId);
+    private sealed record PasswordResetRequest(string Identifier);
+    private sealed record AccountActionCompleteRequest(string Token, string NewPassword, string ConfirmPassword);
+    private sealed record EmailVerificationCompleteRequest(string Token);
+    private sealed record EmailChangeRequest(string NewEmail, string CurrentPassword);
 }

@@ -29,7 +29,10 @@
         get
         {
             var path = HttpContextAccessor.HttpContext?.Request.Path.Value;
-            return path is not null && (path.StartsWith("/login", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/setup", StringComparison.OrdinalIgnoreCase))
+            return path is not null && (path.StartsWith("/login", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/setup", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/forgot-password", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/account/action", StringComparison.OrdinalIgnoreCase))
                 ? null
                 : InteractiveServer;
         }

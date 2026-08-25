@@ -1,6 +1,7 @@
 @page "/account/security"
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageAccountSecurity)]
 @inject IUserAuthenticationService AuthenticationService
+@inject IAccountActionService AccountActionService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IHttpContextAccessor HttpContextAccessor
 
@@ -31,11 +32,46 @@
             <div class="content-grid">
                 <div><span class="field-label">Username</span><strong>@Snapshot.UserName</strong></div>
                 <div><span class="field-label">Email</span><strong>@Snapshot.Email</strong></div>
+                <div><span class="field-label">Email verification</span><strong>@(Snapshot.EmailConfirmedAtUtc is null ? "Not verified" : $"Verified {FormatTimestamp(Snapshot.EmailConfirmedAtUtc)}")</strong></div>
                 <div><span class="field-label">Last successful sign-in</span><strong>@FormatTimestamp(Snapshot.LastSuccessfulSignInUtc)</strong></div>
                 <div><span class="field-label">Password last changed</span><strong>@FormatTimestamp(Snapshot.LastPasswordChangedUtc)</strong></div>
                 <div><span class="field-label">Authenticator MFA</span><strong>@(Snapshot.MfaEnabled ? "Enabled" : "Not enabled")</strong></div>
                 <div><span class="field-label">MFA enrolled</span><strong>@FormatTimestamp(Snapshot.MfaEnrolledAtUtc)</strong></div>
             </div>
+        </section>
+
+        @if (Snapshot.EmailConfirmedAtUtc is null)
+        {
+            <section class="panel">
+                <h2>Verify email address</h2>
+                <p class="page-intro">A verified address is required for secure password recovery. BrassLedger sends a one-use link to the address shown above; it never displays the link in the application.</p>
+                @if (!AccountActionService.EmailDeliveryConfigured)
+                {
+                    <div class="auth-error" role="alert">Security-email delivery is not configured. Ask an administrator to configure HTTPS public links and SMTP delivery.</div>
+                }
+                <form method="post" action="/account/email-verification/request">
+                    <AntiforgeryToken />
+                    <button class="action-secondary" type="submit" disabled="@(!AccountActionService.EmailDeliveryConfigured)">Send verification message</button>
+                </form>
+            </section>
+        }
+
+        <section class="panel">
+            <h2>Change email address</h2>
+            <p class="page-intro">Changing the address requires your current password, signs out every browser, disables recovery until the replacement address is verified, and sends a one-use verification link to the new address.</p>
+            @if (!AccountActionService.EmailDeliveryConfigured)
+            {
+                <div class="auth-error" role="alert">Email changes are unavailable until security-email delivery is configured.</div>
+            }
+            <details>
+                <summary>Replace account email</summary>
+                <form class="auth-form" method="post" action="/account/email/change">
+                    <AntiforgeryToken />
+                    <div class="field-group"><label class="field-label" for="newEmail">New email address</label><input id="newEmail" class="field-input" name="newEmail" type="email" autocomplete="email" maxlength="320" required /></div>
+                    <div class="field-group"><label class="field-label" for="emailChangePassword">Current password</label><input id="emailChangePassword" class="field-input" name="currentPassword" type="password" autocomplete="current-password" maxlength="1024" required /></div>
+                    <button class="action-secondary" type="submit" disabled="@(!AccountActionService.EmailDeliveryConfigured)">Change address and sign out</button>
+                </form>
+            </details>
         </section>
 
         <section class="panel">
@@ -213,12 +249,16 @@
         "password-reused" => "Choose a password that differs from your current password.",
         "invalid-password" => "Enter matching new passwords containing at least 12 characters.",
         "mfa-disable-rejected" => "MFA was not disabled. Check both the current password and the authenticator or recovery code.",
+        "email-verification-unavailable" => "A verification message could not be queued. Confirm security-email configuration and the account email address.",
+        "email-change-rejected" => "The email address was not changed. Check the current password, replacement address, and whether that address belongs to another operator.",
+        "too-many-requests" => "Too many account-recovery requests came from this network. Wait one minute and try again.",
         _ => Status switch
         {
             "mfa-required" => "Your access role requires MFA. Set up and verify an authenticator before opening business data.",
             "password-changed" => "Your password was changed and all other sessions were signed out.",
             "sessions-revoked" => "All other sessions were signed out. This browser remains signed in.",
             "mfa-disabled" => "Authenticator MFA and all remaining recovery codes were disabled. Other sessions were signed out.",
+            "email-verification-requested" => "A one-use verification link was queued for the account email address. If no message arrives, ask an administrator to review email delivery.",
             _ => null
         }
     };

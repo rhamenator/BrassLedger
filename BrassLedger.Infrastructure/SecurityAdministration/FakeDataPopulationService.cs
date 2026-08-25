@@ -315,6 +315,7 @@ public sealed class FakeDataPopulationService(
             UserName = userName,
             DisplayName = displayName,
             Email = email,
+            EmailLookupHash = AccountEmailIdentity.ComputeLookupHash(email),
             SecurityStamp = Guid.NewGuid().ToString("N"),
             Role = role,
             IsActive = true,

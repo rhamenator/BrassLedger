@@ -232,6 +232,7 @@ internal static class BrassLedgerSeedData
             UserName = userName,
             DisplayName = displayName,
             Email = email,
+            EmailLookupHash = AccountEmailIdentity.ComputeLookupHash(email),
             SecurityStamp = Guid.NewGuid().ToString("N"),
             Role = role,
             IsActive = true,
@@ -252,6 +253,8 @@ internal static class BrassLedgerSeedData
         {
             return;
         }
+        if (!AccountEmailIdentity.TryNormalize(bootstrapOptions.AdminEmail, out var normalizedAdminEmail, out var adminEmailLookupHash))
+            throw new InvalidOperationException("Bootstrap:AdminEmail must be a valid email address when bootstrap administrator credentials are configured.");
 
         var companyId = Guid.NewGuid();
         var company = new Company
@@ -273,7 +276,8 @@ internal static class BrassLedgerSeedData
             CompanyId = companyId,
             UserName = bootstrapOptions.AdminUserName,
             DisplayName = bootstrapOptions.AdminDisplayName,
-            Email = bootstrapOptions.AdminEmail,
+            Email = normalizedAdminEmail,
+            EmailLookupHash = adminEmailLookupHash,
             SecurityStamp = Guid.NewGuid().ToString("N"),
             Role = "Administrator",
             IsActive = true,

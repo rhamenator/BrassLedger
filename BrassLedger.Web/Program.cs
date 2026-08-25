@@ -38,6 +38,18 @@ var webRootPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 app.UseBrassLedgerSecurityHeaders();
 app.Use(async (context, next) =>
 {
+    if (context.Request.Path.StartsWithSegments("/account/action", StringComparison.OrdinalIgnoreCase)
+        || context.Request.Path.StartsWithSegments("/forgot-password", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.Headers.CacheControl = "no-store, no-cache";
+        context.Response.Headers.Pragma = "no-cache";
+        context.Response.Headers.Expires = "0";
+    }
+
+    await next();
+});
+app.Use(async (context, next) =>
+{
     if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
     {
         var requestedPath = context.Request.Path.Value;

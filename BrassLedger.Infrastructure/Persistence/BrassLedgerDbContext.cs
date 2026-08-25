@@ -12,6 +12,8 @@ public sealed class BrassLedgerDbContext(
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
     public DbSet<MfaSignInChallenge> MfaSignInChallenges => Set<MfaSignInChallenge>();
+    public DbSet<AccountActionToken> AccountActionTokens => Set<AccountActionToken>();
+    public DbSet<SecurityEmailOutboxMessage> SecurityEmailOutboxMessages => Set<SecurityEmailOutboxMessage>();
     public DbSet<CompanyMembership> CompanyMemberships => Set<CompanyMembership>();
     public DbSet<CurrencyExchangeRate> CurrencyExchangeRates => Set<CurrencyExchangeRate>();
     public DbSet<ConsolidationGroup> ConsolidationGroups => Set<ConsolidationGroup>();
@@ -94,6 +96,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<AppUser>().HasKey(x => x.Id);
         modelBuilder.Entity<MfaRecoveryCode>().HasKey(x => x.Id);
         modelBuilder.Entity<MfaSignInChallenge>().HasKey(x => x.Id);
+        modelBuilder.Entity<AccountActionToken>().HasKey(x => x.Id);
+        modelBuilder.Entity<SecurityEmailOutboxMessage>().HasKey(x => x.Id);
         modelBuilder.Entity<CompanyMembership>().HasKey(x => x.Id);
         modelBuilder.Entity<CurrencyExchangeRate>().HasKey(x => x.Id);
         modelBuilder.Entity<ConsolidationGroup>().HasKey(x => x.Id);
@@ -271,6 +275,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<AppUser>().Property(x => x.DisplayName).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<AppUser>().Property(x => x.Email).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<AppUser>().Property(x => x.MfaSecret).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<SecurityEmailOutboxMessage>().Property(x => x.RecipientEmail).HasConversion(encryptedStringConverter);
+        modelBuilder.Entity<SecurityEmailOutboxMessage>().Property(x => x.Body).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<IntegrationConnection>().Property(x => x.CredentialsJson).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<AccessRole>().Property(x => x.Description).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Customer>().Property(x => x.Name).HasConversion(encryptedStringConverter);
@@ -414,10 +420,14 @@ public sealed class BrassLedgerDbContext(
 
         modelBuilder.Entity<Company>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.UserName).IsUnique();
+        modelBuilder.Entity<AppUser>().HasIndex(x => x.EmailLookupHash).IsUnique();
         modelBuilder.Entity<MfaRecoveryCode>().HasIndex(x => new { x.UserId, x.UsedAtUtc });
         modelBuilder.Entity<MfaRecoveryCode>().HasIndex(x => x.CodeHash).IsUnique();
         modelBuilder.Entity<MfaSignInChallenge>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<MfaSignInChallenge>().HasIndex(x => new { x.UserId, x.ExpiresAtUtc });
+        modelBuilder.Entity<AccountActionToken>().HasIndex(x => x.TokenHash).IsUnique();
+        modelBuilder.Entity<AccountActionToken>().HasIndex(x => new { x.UserId, x.Purpose, x.ExpiresAtUtc });
+        modelBuilder.Entity<SecurityEmailOutboxMessage>().HasIndex(x => new { x.Status, x.NextAttemptAtUtc, x.LeaseExpiresAtUtc });
         modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.UserId, x.CompanyId }).IsUnique();
         modelBuilder.Entity<CurrencyExchangeRate>().HasIndex(x => new { x.CompanyId, x.BaseCurrency, x.QuoteCurrency, x.EffectiveOn }).IsUnique();
         modelBuilder.Entity<ConsolidationGroup>().HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();

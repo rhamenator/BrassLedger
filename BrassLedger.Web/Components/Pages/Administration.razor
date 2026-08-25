@@ -39,6 +39,39 @@ else
             </aside>
         </section>
 
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageUsers" Context="emailDeliveryAuthorization">
+            <section class="panel">
+                <h2>Security-email delivery</h2>
+                <p class="page-intro">“Accepted by SMTP” means the configured mail server accepted the message; it does not prove inbox delivery. BrassLedger retains protected delivery metadata and clears message bodies after SMTP acceptance.</p>
+                @if (Snapshot.SecurityEmailDeliveries.Count == 0)
+                {
+                    <p class="page-intro">No security-email attempts have been recorded for this company.</p>
+                }
+                else
+                {
+                    <div class="table-scroll">
+                        <table class="data-table">
+                            <thead><tr><th>Created</th><th>Purpose</th><th>Recipient</th><th>Status</th><th>Attempts</th><th>Next attempt / accepted</th><th>Action</th></tr></thead>
+                            <tbody>
+                            @foreach (var delivery in Snapshot.SecurityEmailDeliveries)
+                            {
+                                <tr>
+                                    <td>@delivery.CreatedAtUtc.LocalDateTime</td>
+                                    <td>@delivery.Purpose</td>
+                                    <td>@delivery.MaskedRecipient</td>
+                                    <td>@(delivery.DeliveredAtUtc is null ? delivery.Status : "Accepted by SMTP")@if (!string.IsNullOrWhiteSpace(delivery.LastError)) { <div class="muted-copy">@delivery.LastError</div> }</td>
+                                    <td>@delivery.AttemptCount</td>
+                                    <td>@((delivery.DeliveredAtUtc ?? delivery.NextAttemptAtUtc).LocalDateTime)</td>
+                                    <td>@if (delivery.DeliveredAtUtc is null && delivery.Status is "Failed" or "FailedPermanent") { <button class="action-secondary" type="button" @onclick="() => RetrySecurityEmailAsync(delivery.MessageId)">Retry</button> }</td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+        </AuthorizeView>
+
         @if (!string.IsNullOrWhiteSpace(StatusMessage))
         {
             <section class="panel">
@@ -121,15 +154,19 @@ else
                         <div>
                             <span class="detail-label">@user.Role</span>
                             <strong>@user.DisplayName</strong>
-                            <p>@user.UserName · @user.Email · MFA @(user.MfaEnabled ? "enabled" : user.RoleRequiresMfa ? "enrollment required" : "optional")</p>
+                            <p>@user.UserName · @user.Email · @(user.IsActive ? "Active" : "Invitation pending") · MFA @(user.MfaEnabled ? "enabled" : user.RoleRequiresMfa ? "enrollment required" : "optional")</p>
                         </div>
                     }
                 </div>
             </article>
 
             <article class="panel">
-                <h2>Create operator</h2>
-                <EditForm Model="OperatorForm" OnSubmit="CreateOperatorAsync">
+                <h2>Invite operator</h2>
+                @if (!Snapshot.SecurityEmailDeliveryConfigured)
+                {
+                    <div class="auth-error" role="alert">Configure an HTTPS public base URL and SMTP security-email delivery before inviting operators.</div>
+                }
+                <EditForm Model="OperatorForm" OnSubmit="InviteOperatorAsync">
                     <div class="auth-form">
                         <div class="field-group">
                             <label class="field-label" for="userName">Username</label>
@@ -157,17 +194,7 @@ else
                             </InputSelect>
                         </div>
 
-                        <div class="field-group">
-                            <label class="field-label" for="password">Password</label>
-                            <InputText id="password" class="field-input" type="password" @bind-Value="OperatorForm.Password" />
-                        </div>
-
-                        <div class="field-group">
-                            <label class="field-label" for="confirmPassword">Confirm password</label>
-                            <InputText id="confirmPassword" class="field-input" type="password" @bind-Value="OperatorForm.ConfirmPassword" />
-                        </div>
-
-                        <button class="action-primary" type="submit">Create operator</button>
+                        <button class="action-primary" type="submit" disabled="@(!Snapshot.SecurityEmailDeliveryConfigured)">Queue secure invitation</button>
                     </div>
                 </EditForm>
             </article>
@@ -290,23 +317,28 @@ else
         if (result.Succeeded) await ReloadSnapshotAsync();
     }
 
-    private async Task CreateOperatorAsync(EditContext _)
+    private async Task InviteOperatorAsync(EditContext _)
     {
-        var result = await SecurityAdministrationService.CreateOperatorAsync(
-            new CreateOperatorRequest(
+        var result = await SecurityAdministrationService.InviteOperatorAsync(
+            new CreateOperatorInvitationRequest(
                 OperatorForm.UserName,
                 OperatorForm.DisplayName,
                 OperatorForm.Email,
-                OperatorForm.Password,
-                OperatorForm.ConfirmPassword,
                 OperatorForm.RoleName));
 
-        StatusMessage = result.Succeeded ? "Operator account created." : result.ErrorMessage;
+        StatusMessage = result.Succeeded ? "The inactive operator account was created and its one-time invitation was queued for delivery." : result.ErrorMessage;
         if (result.Succeeded)
         {
             OperatorForm = new CreateOperatorForm();
             await ReloadSnapshotAsync();
         }
+    }
+
+    private async Task RetrySecurityEmailAsync(Guid messageId)
+    {
+        var result = await SecurityAdministrationService.RetrySecurityEmailAsync(messageId);
+        StatusMessage = result.Succeeded ? "The security-email delivery was queued for another bounded attempt." : result.ErrorMessage;
+        await ReloadSnapshotAsync();
     }
 
     private async Task CreateCompanyAsync()
@@ -445,8 +477,6 @@ else
         public string DisplayName { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string RoleName { get; set; } = string.Empty;
-        public string Password { get; set; } = string.Empty;
-        public string ConfirmPassword { get; set; } = string.Empty;
     }
     private sealed class CreateCompanyForm { public string Name { get; set; } = string.Empty; public string LegalName { get; set; } = string.Empty; public string TaxId { get; set; } = string.Empty; public string BaseCurrency { get; set; } = "USD"; public int FiscalYearStartMonth { get; set; } = 1; }
     private sealed class ExchangeRateEditor { public string BaseCurrency { get; set; } = "USD"; public string QuoteCurrency { get; set; } = "CAD"; public decimal Rate { get; set; } = 1m; public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Source { get; set; } = string.Empty; }

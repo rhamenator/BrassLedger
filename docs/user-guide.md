@@ -177,8 +177,10 @@ A disciplined close usually follows this order:
 Current expectations:
 
 - authenticated access is required before users can load accounting data
+- invitations require a one-use email link; operators choose their own password and activate their company membership
+- verify the account email from **Account security** before relying on self-service password recovery
+- password-reset requests use the same response for eligible and unknown identifiers and invalidate prior sessions after a successful reset
 - confidential data should live in the database, not copied publish folders
 - local fallback data directories should not be committed to Git
 - static site assets should come from `BrassLedger.Web/wwwroot`
 - published output under `artifacts` should be treated as disposable packaging
-

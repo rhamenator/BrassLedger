@@ -23,13 +23,23 @@ public static class AuthenticationServiceCollectionExtensions
                 context.HttpContext.Response.Headers.RetryAfter = "60";
                 if (context.HttpContext.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
                 {
+                    var isAccountRecovery = context.HttpContext.Request.Path.StartsWithSegments("/api/auth/password-reset", StringComparison.OrdinalIgnoreCase)
+                        || context.HttpContext.Request.Path.StartsWithSegments("/api/auth/account-action", StringComparison.OrdinalIgnoreCase)
+                        || context.HttpContext.Request.Path.StartsWithSegments("/api/auth/email", StringComparison.OrdinalIgnoreCase);
                     await context.HttpContext.Response.WriteAsJsonAsync(
-                        new { Error = "too_many_login_attempts", RetryAfterSeconds = 60 },
+                        new { Error = isAccountRecovery ? "too_many_account_recovery_attempts" : "too_many_login_attempts", RetryAfterSeconds = 60 },
                         cancellationToken);
                     return;
                 }
 
-                context.HttpContext.Response.Redirect("/login?error=too-many-requests");
+                context.HttpContext.Response.Redirect(
+                    context.HttpContext.Request.Path.StartsWithSegments("/account/password-reset", StringComparison.OrdinalIgnoreCase)
+                        ? "/forgot-password?error=too-many-requests"
+                        : context.HttpContext.Request.Path.StartsWithSegments("/account/email", StringComparison.OrdinalIgnoreCase)
+                            ? "/account/security?error=too-many-requests"
+                        : context.HttpContext.Request.Path.StartsWithSegments("/account/action", StringComparison.OrdinalIgnoreCase)
+                            ? "/account/action?error=too-many-requests"
+                            : "/login?error=too-many-requests");
             };
             options.AddPolicy(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy, httpContext =>
                 RateLimitPartition.GetFixedWindowLimiter(
@@ -37,6 +47,16 @@ public static class AuthenticationServiceCollectionExtensions
                     _ => new FixedWindowRateLimiterOptions
                     {
                         PermitLimit = BrassLedgerAuthenticationDefaults.LoginRequestsPerMinute,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
+            options.AddPolicy(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy, httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = BrassLedgerAuthenticationDefaults.AccountRecoveryRequestsPerMinute,
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                         AutoReplenishment = true

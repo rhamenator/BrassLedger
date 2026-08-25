@@ -4,7 +4,6 @@ using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace BrassLedger.Infrastructure.SecurityAdministration;
@@ -12,7 +11,8 @@ namespace BrassLedger.Infrastructure.SecurityAdministration;
 public sealed class SecurityAdministrationService(
     IDbContextFactory<BrassLedgerDbContext> dbContextFactory,
     IHttpContextAccessor httpContextAccessor,
-    IPasswordHasher<AppUser> passwordHasher) : ISecurityAdministrationService
+    IAccountActionService accountActionService,
+    TimeProvider timeProvider) : ISecurityAdministrationService
 {
     public async Task<SecurityAdministrationSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
@@ -42,6 +42,27 @@ public sealed class SecurityAdministrationService(
             .GroupBy(item => item.membership.Role, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
         var roleMfaRequirements = roles.ToDictionary(role => role.Name, role => role.RequiresMfa, StringComparer.OrdinalIgnoreCase);
+        var deliveries = (await dbContext.SecurityEmailOutboxMessages
+            .AsNoTracking()
+            .Join(
+                dbContext.AccountActionTokens.Where(action => action.CompanyId == companyId),
+                message => message.AccountActionTokenId,
+                action => action.Id,
+                (message, action) => new { message, action.Purpose })
+            .ToListAsync(cancellationToken))
+            .OrderByDescending(item => item.message.CreatedAtUtc)
+            .Take(20)
+            .Select(item => new SecurityEmailDeliverySnapshot(
+                item.message.Id,
+                item.Purpose,
+                MaskEmail(item.message.RecipientEmail),
+                item.message.Status,
+                item.message.AttemptCount,
+                item.message.CreatedAtUtc,
+                item.message.NextAttemptAtUtc,
+                item.message.DeliveredAtUtc,
+                item.message.LastError))
+            .ToArray();
 
         return new SecurityAdministrationSnapshot(
             Permissions: BrassLedgerPermissions.Definitions
@@ -67,7 +88,9 @@ public sealed class SecurityAdministrationService(
                     item.user.MfaEnabled,
                     roleMfaRequirements.GetValueOrDefault(item.membership.Role),
                     item.user.LastSuccessfulSignInUtc))
-                .ToArray());
+                .ToArray(),
+            SecurityEmailDeliveryConfigured: accountActionService.EmailDeliveryConfigured,
+            SecurityEmailDeliveries: deliveries);
     }
 
     public async Task<SecurityOperationResult> CreateRoleAsync(CreateAccessRoleRequest request, CancellationToken cancellationToken = default)
@@ -156,89 +179,66 @@ public sealed class SecurityAdministrationService(
         return SecurityOperationResult.Success();
     }
 
-    public async Task<SecurityOperationResult> CreateOperatorAsync(CreateOperatorRequest request, CancellationToken cancellationToken = default)
+    public async Task<SecurityOperationResult> InviteOperatorAsync(CreateOperatorInvitationRequest request, CancellationToken cancellationToken = default)
     {
         if (!CanManage(BrassLedgerPermissions.UserManage)) return SecurityOperationResult.Failure("You are not authorized to manage operator accounts.");
-        if (string.IsNullOrWhiteSpace(request.UserName))
-        {
-            return SecurityOperationResult.Failure("Enter a username.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.DisplayName))
-        {
-            return SecurityOperationResult.Failure("Enter a display name.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Email))
-        {
-            return SecurityOperationResult.Failure("Enter an email address.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.RoleName))
-        {
-            return SecurityOperationResult.Failure("Select a role.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 12)
-        {
-            return SecurityOperationResult.Failure("Choose a password with at least 12 characters.");
-        }
-
-        if (!string.Equals(request.Password, request.ConfirmPassword, StringComparison.Ordinal))
-        {
-            return SecurityOperationResult.Failure("The password confirmation does not match.");
-        }
-
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(dbContext, cancellationToken);
+        var httpContext = httpContextAccessor.HttpContext;
+        var result = await accountActionService.IssueInvitationAsync(new AccountInvitationRequest(
+            companyId,
+            CurrentUserId(),
+            request.UserName,
+            request.DisplayName,
+            request.Email,
+            request.RoleName,
+            httpContext?.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            httpContext?.Request.Headers.UserAgent.ToString() ?? string.Empty), cancellationToken);
+        return result.Succeeded ? SecurityOperationResult.Success() : SecurityOperationResult.Failure(result.ErrorMessage);
+    }
 
-        await EnsureBuiltInRolesAsync(dbContext, companyId, cancellationToken);
+    public async Task<SecurityOperationResult> RetrySecurityEmailAsync(Guid messageId, CancellationToken cancellationToken = default)
+    {
+        if (!CanManage(BrassLedgerPermissions.UserManage)) return SecurityOperationResult.Failure("You are not authorized to manage security-email delivery.");
+        if (!accountActionService.EmailDeliveryConfigured) return SecurityOperationResult.Failure("Security-email delivery is not configured.");
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(dbContext, cancellationToken);
+        var record = await dbContext.SecurityEmailOutboxMessages
+            .Join(
+                dbContext.AccountActionTokens.Where(action => action.CompanyId == companyId),
+                candidate => candidate.AccountActionTokenId,
+                action => action.Id,
+                (message, action) => new { message, action })
+            .SingleOrDefaultAsync(candidate => candidate.message.Id == messageId, cancellationToken);
+        if (record is null) return SecurityOperationResult.Failure("The security-email delivery record was not found for this company.");
+        var message = record.message;
+        if (message.DeliveredAtUtc is not null) return SecurityOperationResult.Failure("The SMTP server already accepted this message; it cannot be sent again from this record.");
+        if (message.Status is not ("Failed" or "FailedPermanent")) return SecurityOperationResult.Failure("Only a failed security-email delivery can be retried.");
+        if (string.IsNullOrEmpty(message.Body)) return SecurityOperationResult.Failure("The protected message body is no longer retained and cannot be retried.");
+        var now = timeProvider.GetUtcNow();
+        if (message.RequiresUsableAction && (record.action.ConsumedAtUtc is not null || record.action.ExpiresAtUtc <= now))
+            return SecurityOperationResult.Failure("The one-use account action expired or was invalidated; issue a new invitation, verification, or reset action instead.");
 
-        var trimmedUserName = request.UserName.Trim();
-        if (await dbContext.Users.AnyAsync(
-                user => user.UserName.ToUpper() == trimmedUserName.ToUpper(),
-                cancellationToken))
+        message.Status = "Pending";
+        message.AttemptCount = 0;
+        message.NextAttemptAtUtc = now;
+        message.LeaseExpiresAtUtc = null;
+        message.LastError = string.Empty;
+        dbContext.BusinessAuditEntries.Add(new BusinessAuditEntry
         {
-            return SecurityOperationResult.Failure("That username is already in use (usernames are case-insensitive).");
-        }
-
-        var role = await dbContext.AccessRoles
-            .AsNoTracking()
-            .SingleOrDefaultAsync(candidate => candidate.CompanyId == companyId && candidate.IsActive && candidate.Name == request.RoleName.Trim(), cancellationToken);
-        if (role is null)
-        {
-            return SecurityOperationResult.Failure("Select a valid role.");
-        }
-
-        var user = new AppUser
-        {
-            Id = Guid.NewGuid(),
-            CompanyId = companyId,
-            UserName = trimmedUserName,
-            DisplayName = request.DisplayName.Trim(),
-            Email = request.Email.Trim(),
-            SecurityStamp = Guid.NewGuid().ToString("N"),
-            Role = role.Name,
-            IsActive = true,
-            LastPasswordChangedUtc = DateTimeOffset.UtcNow
-        };
-
-        user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
-
-        dbContext.Users.Add(user);
-        dbContext.CompanyMemberships.Add(new CompanyMembership
-        {
-            Id = Guid.NewGuid(),
-            UserId = user.Id,
-            CompanyId = companyId,
-            Role = role.Name,
-            IsOwner = false,
-            IsActive = true,
-            GrantedAtUtc = DateTimeOffset.UtcNow
+            Id = Guid.NewGuid(), CompanyId = companyId, UserId = CurrentUserId(),
+            Action = "security.email-delivery-retried", EntityType = "SecurityEmailOutboxMessage", EntityId = message.Id,
+            DetailJson = System.Text.Json.JsonSerializer.Serialize(new { message.AccountActionTokenId }),
+            OccurredAtUtc = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
-
         return SecurityOperationResult.Success();
+    }
+
+    private static string MaskEmail(string email)
+    {
+        var at = email.IndexOf('@');
+        return at <= 0 ? "protected recipient" : $"{email[0]}***{email[at..]}";
     }
 
     public static async Task EnsureBuiltInRolesAsync(BrassLedgerDbContext dbContext, Guid companyId, CancellationToken cancellationToken = default)

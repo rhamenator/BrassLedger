@@ -224,6 +224,7 @@ public sealed class UserAuthenticationService(
             user.UserName,
             user.DisplayName,
             user.Email,
+            user.EmailConfirmedAtUtc,
             user.LastPasswordChangedUtc,
             user.LastSuccessfulSignInUtc,
             user.MfaEnabled,

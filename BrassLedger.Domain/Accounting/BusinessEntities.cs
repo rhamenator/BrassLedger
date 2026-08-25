@@ -26,6 +26,8 @@ public sealed class AppUser
     public string UserName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public string? EmailLookupHash { get; set; }
+    public DateTimeOffset? EmailConfirmedAtUtc { get; set; }
     public string PasswordHash { get; set; } = string.Empty;
     public string SecurityStamp { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
@@ -65,6 +67,39 @@ public sealed class MfaSignInChallenge
     public int FailedAttemptCount { get; set; }
     public string IpAddress { get; set; } = string.Empty;
     public string UserAgent { get; set; } = string.Empty;
+}
+
+public sealed class AccountActionToken
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid? CompanyId { get; set; }
+    public string Purpose { get; set; } = string.Empty;
+    public string TokenHash { get; set; } = string.Empty;
+    public string SecurityStamp { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? ConsumedAtUtc { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public string RequestedIpAddress { get; set; } = string.Empty;
+}
+
+public sealed class SecurityEmailOutboxMessage
+{
+    public Guid Id { get; set; }
+    public Guid AccountActionTokenId { get; set; }
+    public bool RequiresUsableAction { get; set; } = true;
+    public string RecipientEmail { get; set; } = string.Empty;
+    public string Subject { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+    public string Status { get; set; } = "Pending";
+    public int AttemptCount { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset NextAttemptAtUtc { get; set; }
+    public DateTimeOffset? LeaseExpiresAtUtc { get; set; }
+    public DateTimeOffset? DeliveredAtUtc { get; set; }
+    public string LastError { get; set; } = string.Empty;
+    public string ProviderMessageId { get; set; } = string.Empty;
 }
 
 public sealed class CompanyMembership

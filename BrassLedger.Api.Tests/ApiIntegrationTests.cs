@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.RegularExpressions;
 using BrassLedger.Application.Accounting;
 using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
@@ -7,8 +8,11 @@ using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace BrassLedger.Api.Tests;
 
@@ -209,6 +213,73 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await currentClient.GetAsync("/api/dashboard")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await otherClient.GetAsync("/api/dashboard")).StatusCode);
+    }
+
+    [Fact]
+    public async Task AccountRecoveryApi_VerifiesEmailUsesUniformResetResponseAndConsumesTokensOnce()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory(configureSecurityEmail: true);
+        using var authenticatedClient = await CreateAuthenticatedClientAsync(isolatedFactory);
+
+        var verificationRequest = await authenticatedClient.PostAsync("/api/auth/email-verification/request", null);
+        Assert.Equal(HttpStatusCode.Accepted, verificationRequest.StatusCode);
+        await DispatchAllSecurityEmailAsync(isolatedFactory);
+        var verificationMessage = Assert.Single(isolatedFactory.SecurityEmailTransport.Messages);
+        var verificationToken = ExtractAccountActionToken(verificationMessage.Body);
+
+        using var anonymousClient = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var verification = await anonymousClient.PostAsJsonAsync("/api/auth/email-verification/complete", new { Token = verificationToken });
+        Assert.Equal(HttpStatusCode.OK, verification.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await anonymousClient.PostAsJsonAsync(
+            "/api/auth/email-verification/complete", new { Token = verificationToken })).StatusCode);
+
+        var emailChange = await authenticatedClient.PostAsJsonAsync("/api/auth/email/change", new
+        {
+            NewEmail = "controller-replacement@example.test",
+            CurrentPassword = BrassLedgerAuthenticationDefaults.SeededPassword
+        });
+        Assert.Equal(HttpStatusCode.Accepted, emailChange.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await authenticatedClient.GetAsync("/api/dashboard")).StatusCode);
+        await DispatchAllSecurityEmailAsync(isolatedFactory);
+        var replacementMessage = Assert.Single(isolatedFactory.SecurityEmailTransport.Messages, message => message.Subject.Contains("new BrassLedger email", StringComparison.Ordinal));
+        Assert.Single(isolatedFactory.SecurityEmailTransport.Messages, message => message.Subject.Contains("email address was changed", StringComparison.Ordinal));
+        Assert.Equal(HttpStatusCode.OK, (await anonymousClient.PostAsJsonAsync("/api/auth/email-verification/complete", new
+        {
+            Token = ExtractAccountActionToken(replacementMessage.Body)
+        })).StatusCode);
+
+        var unknownReset = await anonymousClient.PostAsJsonAsync("/api/auth/password-reset/request", new { Identifier = "missing@example.test" });
+        var knownReset = await anonymousClient.PostAsJsonAsync("/api/auth/password-reset/request", new { Identifier = "controller" });
+        Assert.Equal(HttpStatusCode.Accepted, unknownReset.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, knownReset.StatusCode);
+        Assert.Equal(await unknownReset.Content.ReadAsStringAsync(), await knownReset.Content.ReadAsStringAsync());
+
+        await DispatchAllSecurityEmailAsync(isolatedFactory);
+        var resetMessage = Assert.Single(isolatedFactory.SecurityEmailTransport.Messages, message => message.Subject.Contains("Reset", StringComparison.Ordinal));
+        var resetToken = ExtractAccountActionToken(resetMessage.Body);
+        var reset = await anonymousClient.PostAsJsonAsync("/api/auth/account-action", new
+        {
+            Token = resetToken,
+            NewPassword = "API recovery password 2026",
+            ConfirmPassword = "API recovery password 2026"
+        });
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await anonymousClient.PostAsJsonAsync("/api/auth/account-action", new
+        {
+            Token = resetToken,
+            NewPassword = "Another API recovery password 2026",
+            ConfirmPassword = "Another API recovery password 2026"
+        })).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymousClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = BrassLedgerAuthenticationDefaults.SeededPassword
+        })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await anonymousClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = "API recovery password 2026"
+        })).StatusCode);
     }
 
     [Fact]
@@ -856,11 +927,37 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(MfaOperationOutcome.Succeeded, enabled.Outcome);
         return enrollment.RecoveryCodes!;
     }
+
+    private static async Task DispatchAllSecurityEmailAsync(BrassLedgerApiFactory factory)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dispatcher = scope.ServiceProvider.GetRequiredService<ISecurityEmailOutboxDispatcher>();
+        while (await dispatcher.DispatchNextAsync()) { }
+    }
+
+    private static string ExtractAccountActionToken(string body)
+    {
+        var match = Regex.Match(body, @"https://\S+", RegexOptions.CultureInvariant);
+        Assert.True(match.Success);
+        return QueryHelpers.ParseQuery(new Uri(match.Value.Trim()).Query)["token"].ToString();
+    }
 }
 
 public sealed class BrassLedgerApiFactory : WebApplicationFactory<Program>, IDisposable
 {
     private readonly string _contentRootPath = Path.Combine(Path.GetTempPath(), "BrassLedger.Api.Tests", Guid.NewGuid().ToString("N"));
+    private readonly bool _configureSecurityEmail;
+
+    public BrassLedgerApiFactory() : this(false)
+    {
+    }
+
+    internal BrassLedgerApiFactory(bool configureSecurityEmail)
+    {
+        _configureSecurityEmail = configureSecurityEmail;
+    }
+
+    public RecordingSecurityEmailTransport SecurityEmailTransport { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -868,6 +965,18 @@ public sealed class BrassLedgerApiFactory : WebApplicationFactory<Program>, IDis
 
         builder.UseEnvironment("Development");
         builder.UseSetting(WebHostDefaults.ContentRootKey, _contentRootPath);
+        if (_configureSecurityEmail)
+        {
+            builder.UseSetting("AccountEmail:Enabled", "true");
+            builder.UseSetting("AccountEmail:PublicBaseUrl", "https://ledger.example.test");
+            builder.UseSetting("AccountEmail:Host", "smtp.example.test");
+            builder.UseSetting("AccountEmail:FromAddress", "security@example.test");
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<ISecurityEmailTransport>();
+                services.AddSingleton<ISecurityEmailTransport>(SecurityEmailTransport);
+            });
+        }
     }
 
     public new void Dispose()
@@ -888,4 +997,18 @@ public sealed class BrassLedgerApiFactory : WebApplicationFactory<Program>, IDis
             }
         }
     }
+
+    public sealed class RecordingSecurityEmailTransport : ISecurityEmailTransport
+    {
+        public bool IsConfigured => true;
+        public List<RecordedSecurityEmail> Messages { get; } = [];
+
+        public Task<string> SendAsync(string recipient, string subject, string body, CancellationToken cancellationToken = default)
+        {
+            Messages.Add(new RecordedSecurityEmail(recipient, subject, body));
+            return Task.FromResult($"<{Guid.NewGuid():N}@example.test>");
+        }
+    }
+
+    public sealed record RecordedSecurityEmail(string Recipient, string Subject, string Body);
 }

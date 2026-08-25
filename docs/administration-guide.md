@@ -20,6 +20,7 @@ The current application baseline already assumes:
 - protected sensitive fields at rest
 - data-protection key storage for application cryptography
 - security headers in the web application and API
+- expiring, hashed, one-use invitations, email verification, and password-reset actions delivered through a protected SMTP outbox
 
 Every operator can open **Account security** from the signed-in header. Changing a password requires the current password, matching new-password confirmation, and at least 12 characters. A successful change rotates the account security stamp, signs out other browsers, records an audit event, and reissues the current browser's short-lived cookie. **Sign out other sessions** performs the same rotation without changing the password. Use it after a lost device or suspicious activity.
 
@@ -45,9 +46,14 @@ The implementation follows [RFC 6238](https://datatracker.ietf.org/doc/html/rfc6
 
 Company access is validated against the operator's active, company-specific membership on every cookie validation. A role in one company does not grant that role in another company, and disabling a membership invalidates a cookie issued for that company.
 
+### Invitations, verified email, and password recovery
+
+Authorized user managers invite operators from **Administration**. An invitation creates an inactive account and inactive membership, then queues a one-use link through configured security email. The recipient verifies the address and chooses the password; BrassLedger no longer exposes an administrator-selected-password account-creation path. Existing operators use **Account security** to verify their current address. Replacing an address requires password reauthentication, invalidates existing sessions, and requires verification of the new address. Only an active account with a verified address is eligible for password recovery.
+
+Recovery responses are intentionally identical for eligible and unknown identifiers. Tokens are random, stored only as hashes, bound to the account security stamp, rate-limited, expiring, and claimed transactionally so concurrent submissions cannot both succeed. A successful reset rotates the security stamp and invalidates prior sessions. See the [security email guide](security-email-guide.md) for secure SMTP configuration, lifetimes, delivery monitoring, retry behavior, and deployment verification.
+
 Before using live confidential books in production, the remaining security work includes:
 
-- verified password-reset and account-invitation delivery
 - a controlled administrator MFA reset after documented identity verification
 - phishing-resistant passkeys where deployment requirements justify them
 - named device/session inventory instead of stamp-based all-other-session revocation

@@ -27,8 +27,11 @@ public static class ServiceCollectionExtensions
     internal const string W2ReportingSchemaVersion = "2026082502-w2-reporting-metadata";
     internal const string AccountingInterchangeSchemaVersion = "2026082503-accounting-interchange-batches";
     internal const string MultiFactorAuthenticationSchemaVersion = "2026082504-multi-factor-authentication";
-    internal const string CurrentSchemaVersion = "2026082505-privileged-role-mfa";
-    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, CurrentSchemaVersion];
+    internal const string PrivilegedRoleMfaSchemaVersion = "2026082505-privileged-role-mfa";
+    internal const string AccountRecoverySchemaVersion = "2026082506-account-invitations-and-recovery";
+    internal const string AccountEmailLookupSchemaVersion = "2026082507-account-email-lookup";
+    internal const string CurrentSchemaVersion = "2026082508-security-email-action-validity";
+    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, CurrentSchemaVersion];
 
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
@@ -76,11 +79,28 @@ public static class ServiceCollectionExtensions
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddSingleton(new BrassLedgerStoragePaths(dataDirectory, keysDirectory));
         services.AddSingleton(Options.Create(BuildBootstrapOptions(configuration, seedSampleData)));
+        services.AddOptions<AccountEmailOptions>()
+            .Bind(configuration.GetSection("AccountEmail"))
+            .Validate(options => !options.Enabled || !string.IsNullOrWhiteSpace(options.Host), "AccountEmail:Host is required when security email is enabled.")
+            .Validate(options => !options.Enabled || options.Port is > 0 and <= 65535, "AccountEmail:Port must be between 1 and 65535.")
+            .Validate(options => !options.Enabled || options.Security.Trim().ToUpperInvariant() is "STARTTLS" or "SSL" or "SSLONCONNECT", "AccountEmail:Security must be StartTls, Ssl, or SslOnConnect; downgrade-capable SMTP modes are prohibited.")
+            .Validate(options => !options.Enabled || AccountEmailIdentity.TryNormalize(options.FromAddress, out _, out _), "AccountEmail:FromAddress must be a valid mailbox.")
+            .Validate(options => !options.Enabled || Uri.TryCreate(options.PublicBaseUrl, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && !string.IsNullOrWhiteSpace(uri.Host) && string.IsNullOrEmpty(uri.UserInfo) && string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment), "AccountEmail:PublicBaseUrl must be an absolute HTTPS URL without credentials, a query, or a fragment.")
+            .Validate(options => options.InvitationLifetimeHours is >= 1 and <= 168, "AccountEmail:InvitationLifetimeHours must be between 1 and 168.")
+            .Validate(options => options.EmailVerificationLifetimeHours is >= 1 and <= 168, "AccountEmail:EmailVerificationLifetimeHours must be between 1 and 168.")
+            .Validate(options => options.PasswordResetLifetimeMinutes is >= 10 and <= 120, "AccountEmail:PasswordResetLifetimeMinutes must be between 10 and 120.")
+            .Validate(options => options.MaximumDeliveryAttempts is >= 1 and <= 20, "AccountEmail:MaximumDeliveryAttempts must be between 1 and 20.")
+            .Validate(options => options.DeliveryTimeoutSeconds is >= 5 and <= 120, "AccountEmail:DeliveryTimeoutSeconds must be between 5 and 120.")
+            .ValidateOnStart();
         services.AddSingleton<ISensitiveDataProtector, SensitiveDataProtector>();
         services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<TotpService>();
+        services.TryAddSingleton<ISecurityEmailTransport, MailKitSecurityEmailTransport>();
+        services.AddSingleton<ISecurityEmailOutboxDispatcher, SecurityEmailOutboxDispatcher>();
+        services.AddHostedService<SecurityEmailOutboxWorker>();
         services.AddScoped<IUserAuthenticationService, UserAuthenticationService>();
+        services.AddScoped<IAccountActionService, AccountActionService>();
         services.AddScoped<IBootstrapWorkspaceService, BootstrapWorkspaceService>();
         services.AddScoped<IBusinessWorkspaceService, BusinessWorkspaceService>();
         services.AddScoped<ICompanyManagementService, CompanyManagementService>();
@@ -120,6 +140,7 @@ public static class ServiceCollectionExtensions
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var databaseCreated = await dbContext.Database.EnsureCreatedAsync(cancellationToken);
         await ApplySchemaUpgradesAsync(dbContext, databaseCreated, cancellationToken);
+        await EnsureAccountEmailLookupHashesAsync(dbContext, cancellationToken);
         await BrassLedgerSeedData.SeedAsync(dbContext, passwordHasher, bootstrapOptions, cancellationToken);
         await DefaultAccountingSetup.EnsureMinimumSetupAsync(dbContext, cancellationToken);
     }
@@ -227,8 +248,14 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {AccountingInterchangeSchemaVersion} is recorded without prerequisite {W2ReportingSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (applied.Contains(MultiFactorAuthenticationSchemaVersion) && !applied.Contains(AccountingInterchangeSchemaVersion))
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {MultiFactorAuthenticationSchemaVersion} is recorded without prerequisite {AccountingInterchangeSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
-        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(MultiFactorAuthenticationSchemaVersion))
-            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {MultiFactorAuthenticationSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(PrivilegedRoleMfaSchemaVersion) && !applied.Contains(MultiFactorAuthenticationSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {PrivilegedRoleMfaSchemaVersion} is recorded without prerequisite {MultiFactorAuthenticationSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(AccountRecoverySchemaVersion) && !applied.Contains(PrivilegedRoleMfaSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {AccountRecoverySchemaVersion} is recorded without prerequisite {PrivilegedRoleMfaSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(AccountEmailLookupSchemaVersion) && !applied.Contains(AccountRecoverySchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {AccountEmailLookupSchemaVersion} is recorded without prerequisite {AccountRecoverySchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(AccountEmailLookupSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {AccountEmailLookupSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (!applied.Contains(BaselineSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
             {
@@ -247,8 +274,17 @@ public static class ServiceCollectionExtensions
         if (!applied.Contains(MultiFactorAuthenticationSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, MultiFactorAuthenticationSchemaVersion, "Added protected TOTP enrollment, recovery codes, and bounded sign-in challenges.", () => EnsureMultiFactorAuthenticationSchemaAsync(dbContext, cancellationToken), cancellationToken);
 
+        if (!applied.Contains(PrivilegedRoleMfaSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, PrivilegedRoleMfaSchemaVersion, "Added configurable MFA enforcement for privileged access roles.", () => EnsurePrivilegedRoleMfaSchemaAsync(dbContext, cancellationToken), cancellationToken);
+
+        if (!applied.Contains(AccountRecoverySchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, AccountRecoverySchemaVersion, "Added expiring account-action tokens and a protected security-email outbox.", () => EnsureAccountRecoverySchemaAsync(dbContext, cancellationToken), cancellationToken);
+
+        if (!applied.Contains(AccountEmailLookupSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, AccountEmailLookupSchemaVersion, "Added deterministic unique account-email lookup hashes without weakening encrypted email storage.", () => EnsureAccountEmailLookupSchemaAsync(dbContext, cancellationToken), cancellationToken);
+
         if (!applied.Contains(CurrentSchemaVersion))
-            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added configurable MFA enforcement for privileged access roles.", () => EnsurePrivilegedRoleMfaSchemaAsync(dbContext, cancellationToken), cancellationToken);
+            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Prevented delivery of links whose one-use account action expired or was invalidated.", () => EnsureSecurityEmailActionValiditySchemaAsync(dbContext, cancellationToken), cancellationToken);
     }
 
     private static async Task ApplySchemaVersionAsync(BrassLedgerDbContext dbContext, string version, string description, Func<Task> apply, CancellationToken cancellationToken)
@@ -353,6 +389,81 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "AccessRoles" ADD COLUMN IF NOT EXISTS "RequiresMfa" boolean NOT NULL DEFAULT false;""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""UPDATE "AccessRoles" SET "RequiresMfa" = true WHERE "Name" IN ('Administrator', 'Owner/CEO');""", cancellationToken);
         }
+    }
+
+    private static async Task EnsureAccountRecoverySchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await EnsureSqliteColumnAsync(dbContext, "Users", "EmailConfirmedAtUtc", "ALTER TABLE \"Users\" ADD COLUMN \"EmailConfirmedAtUtc\" TEXT NULL;", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "AccountActionTokens" ("Id" TEXT NOT NULL PRIMARY KEY, "UserId" TEXT NOT NULL, "CompanyId" TEXT NULL, "Purpose" TEXT NOT NULL, "TokenHash" TEXT NOT NULL, "SecurityStamp" TEXT NOT NULL, "CreatedAtUtc" TEXT NOT NULL, "ExpiresAtUtc" TEXT NOT NULL, "ConsumedAtUtc" TEXT NULL, "CreatedByUserId" TEXT NULL, "RequestedIpAddress" TEXT NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_AccountActionTokens_TokenHash" ON "AccountActionTokens" ("TokenHash");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_AccountActionTokens_UserId_Purpose_ExpiresAtUtc" ON "AccountActionTokens" ("UserId", "Purpose", "ExpiresAtUtc");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "SecurityEmailOutboxMessages" ("Id" TEXT NOT NULL PRIMARY KEY, "AccountActionTokenId" TEXT NOT NULL, "RecipientEmail" TEXT NOT NULL, "Subject" TEXT NOT NULL, "Body" TEXT NOT NULL, "Status" TEXT NOT NULL, "AttemptCount" INTEGER NOT NULL, "CreatedAtUtc" TEXT NOT NULL, "NextAttemptAtUtc" TEXT NOT NULL, "LeaseExpiresAtUtc" TEXT NULL, "DeliveredAtUtc" TEXT NULL, "LastError" TEXT NOT NULL, "ProviderMessageId" TEXT NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_SecurityEmailOutboxMessages_Status_NextAttemptAtUtc_LeaseExpiresAtUtc" ON "SecurityEmailOutboxMessages" ("Status", "NextAttemptAtUtc", "LeaseExpiresAtUtc");""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "EmailConfirmedAtUtc" timestamptz NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "AccountActionTokens" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "CompanyId" uuid NULL, "Purpose" text NOT NULL, "TokenHash" text NOT NULL, "SecurityStamp" text NOT NULL, "CreatedAtUtc" timestamptz NOT NULL, "ExpiresAtUtc" timestamptz NOT NULL, "ConsumedAtUtc" timestamptz NULL, "CreatedByUserId" uuid NULL, "RequestedIpAddress" text NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_AccountActionTokens_TokenHash" ON "AccountActionTokens" ("TokenHash");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_AccountActionTokens_UserId_Purpose_ExpiresAtUtc" ON "AccountActionTokens" ("UserId", "Purpose", "ExpiresAtUtc");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "SecurityEmailOutboxMessages" ("Id" uuid NOT NULL PRIMARY KEY, "AccountActionTokenId" uuid NOT NULL, "RecipientEmail" text NOT NULL, "Subject" text NOT NULL, "Body" text NOT NULL, "Status" text NOT NULL, "AttemptCount" integer NOT NULL, "CreatedAtUtc" timestamptz NOT NULL, "NextAttemptAtUtc" timestamptz NOT NULL, "LeaseExpiresAtUtc" timestamptz NULL, "DeliveredAtUtc" timestamptz NULL, "LastError" text NOT NULL, "ProviderMessageId" text NOT NULL);""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_SecurityEmailOutboxMessages_Status_NextAttemptAtUtc_LeaseExpiresAtUtc" ON "SecurityEmailOutboxMessages" ("Status", "NextAttemptAtUtc", "LeaseExpiresAtUtc");""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureAccountEmailLookupSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await EnsureSqliteColumnAsync(dbContext, "Users", "EmailLookupHash", "ALTER TABLE \"Users\" ADD COLUMN \"EmailLookupHash\" TEXT NULL;", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_Users_EmailLookupHash" ON "Users" ("EmailLookupHash");""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "EmailLookupHash" text NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_Users_EmailLookupHash" ON "Users" ("EmailLookupHash");""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureSecurityEmailActionValiditySchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await EnsureSqliteColumnAsync(dbContext, "SecurityEmailOutboxMessages", "RequiresUsableAction", "ALTER TABLE \"SecurityEmailOutboxMessages\" ADD COLUMN \"RequiresUsableAction\" INTEGER NOT NULL DEFAULT 1;", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""UPDATE "SecurityEmailOutboxMessages" SET "RequiresUsableAction" = 0 WHERE "Subject" = 'Your BrassLedger password was changed';""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "SecurityEmailOutboxMessages" ADD COLUMN IF NOT EXISTS "RequiresUsableAction" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""UPDATE "SecurityEmailOutboxMessages" SET "RequiresUsableAction" = false WHERE "Subject" = 'Your BrassLedger password was changed';""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureAccountEmailLookupHashesAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        var users = await dbContext.Users.Where(user => user.EmailLookupHash == null).ToListAsync(cancellationToken);
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var existing in await dbContext.Users.AsNoTracking().Where(user => user.EmailLookupHash != null).Select(user => new { user.UserName, user.EmailLookupHash }).ToListAsync(cancellationToken))
+            hashes[existing.EmailLookupHash!] = existing.UserName;
+
+        foreach (var user in users)
+        {
+            if (!AccountEmailIdentity.TryNormalize(user.Email, out _, out var hash)) continue;
+            if (hashes.TryGetValue(hash, out var otherUserName))
+                throw new InvalidOperationException($"Account email uniqueness cannot be established because operators '{otherUserName}' and '{user.UserName}' have the same normalized email address. Resolve the duplicate before upgrading.");
+            hashes.Add(hash, user.UserName);
+            user.EmailLookupHash = hash;
+        }
+
+        if (users.Any(user => user.EmailLookupHash is not null)) await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static async Task EnsureLegacySchemaCompatibilityAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)

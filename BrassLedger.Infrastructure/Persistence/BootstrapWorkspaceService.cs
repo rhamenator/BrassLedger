@@ -60,13 +60,16 @@ public sealed class BootstrapWorkspaceService(
             .AsNoTracking()
             .SingleAsync(role => role.CompanyId == companyId && role.Name == "Administrator", cancellationToken);
 
+        _ = AccountEmailIdentity.TryNormalize(request.AdminEmail, out var normalizedAdminEmail, out var adminEmailLookupHash);
+
         var adminUser = new AppUser
         {
             Id = Guid.NewGuid(),
             CompanyId = companyId,
             UserName = request.AdminUserName.Trim(),
             DisplayName = request.AdminDisplayName.Trim(),
-            Email = request.AdminEmail.Trim(),
+            Email = normalizedAdminEmail,
+            EmailLookupHash = adminEmailLookupHash,
             SecurityStamp = Guid.NewGuid().ToString("N"),
             Role = adminRole.Name,
             IsActive = true,
@@ -117,9 +120,9 @@ public sealed class BootstrapWorkspaceService(
             return "Enter an administrator display name.";
         }
 
-        if (string.IsNullOrWhiteSpace(request.AdminEmail))
+        if (!AccountEmailIdentity.TryNormalize(request.AdminEmail, out _, out _))
         {
-            return "Enter an administrator email address.";
+            return "Enter a valid administrator email address.";
         }
 
         if (string.IsNullOrWhiteSpace(request.AdminPassword) || request.AdminPassword.Length < 12)
