@@ -137,7 +137,7 @@ public sealed class AccountingTransactionService(
         if (!original.IsPosted || !original.Status.Equals("Posted", StringComparison.OrdinalIgnoreCase) || original.ReversedByJournalEntryId.HasValue) return TransactionResult.Failure("Only an unreversed posted journal entry can be reversed.");
         if (!original.SourceModule.Equals("General Ledger", StringComparison.OrdinalIgnoreCase) || original.SourceDocumentId.HasValue) return TransactionResult.Failure("Reverse subledger transactions through their originating workflow.");
         if (request.ReversalDate < original.PostedOn) return TransactionResult.Failure("A reversal cannot precede the original posting date.");
-        if (await db.BankReconciliationItems.AnyAsync(item => item.JournalEntryId == original.Id, cancellationToken)) return TransactionResult.Failure("A reconciled journal entry cannot be reversed until the reconciliation is reopened.");
+        if (await IsInCompletedReconciliationAsync(db, original.Id, cancellationToken)) return TransactionResult.Failure("A reconciled journal entry cannot be reversed until the reconciliation is reopened.");
         var originalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == original.Id).ToListAsync(cancellationToken);
         var accountIds = originalLines.Select(line => line.AccountId).Distinct().ToArray();
         var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
@@ -434,7 +434,7 @@ public sealed class AccountingTransactionService(
         if (payment.Status != "Posted") return TransactionResult.Failure("Only a posted payment can be reversed, returned, or voided.");
         if (await db.SubledgerAdjustments.AnyAsync(adjustment => adjustment.PaymentId == payment.Id && adjustment.Status == "Posted", cancellationToken)) return TransactionResult.Failure("Reverse active refunds or other payment adjustments before reversing the original payment.");
         if (request.ReversalDate < payment.PaymentDate) return TransactionResult.Failure("A payment reversal cannot precede the payment date.");
-        if (await db.BankReconciliationItems.AnyAsync(item => item.JournalEntryId == payment.JournalEntryId, cancellationToken)) return TransactionResult.Failure("A reconciled payment cannot be reversed until its bank reconciliation is reopened.");
+        if (await IsInCompletedReconciliationAsync(db, payment.JournalEntryId, cancellationToken)) return TransactionResult.Failure("A reconciled payment cannot be reversed until its bank reconciliation is reopened.");
         var bank = await db.BankAccounts.SingleAsync(account => account.Id == payment.BankAccountId && account.CompanyId == companyId, cancellationToken);
         var cashAccountNumber = await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken);
         if (string.IsNullOrWhiteSpace(cashAccountNumber)) return TransactionResult.Failure("The payment bank account is not mapped to an active ledger account.");
@@ -623,7 +623,7 @@ public sealed class AccountingTransactionService(
         var adjustment = await db.SubledgerAdjustments.SingleOrDefaultAsync(item => item.Id == request.AdjustmentId && item.CompanyId == companyId, cancellationToken);
         if (adjustment is null || adjustment.Status != "Posted") return TransactionResult.Failure("Only a posted adjustment can be reversed.");
         if (request.ReversalDate < adjustment.AdjustmentDate) return TransactionResult.Failure("The reversal date cannot precede the adjustment date.");
-        if (await db.BankReconciliationItems.AnyAsync(item => item.JournalEntryId == adjustment.JournalEntryId, cancellationToken)) return TransactionResult.Failure("A reconciled adjustment cannot be reversed until its bank reconciliation is reopened.");
+        if (await IsInCompletedReconciliationAsync(db, adjustment.JournalEntryId, cancellationToken)) return TransactionResult.Failure("A reconciled adjustment cannot be reversed until its bank reconciliation is reopened.");
         var reversal = await PostInverseAsync(db, companyId, adjustment.JournalEntryId, request.ReversalDate, $"REV-{adjustment.Reference}", request.Reason, adjustment.Id, "SubledgerAdjustmentReversal", adjustment.BankAccountId, cancellationToken);
         if (!reversal.Succeeded) return reversal;
 
@@ -718,38 +718,38 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> ReconcileBankAccountAsync(ReconcileBankAccountRequest request, CancellationToken cancellationToken = default)
     {
+        if (!HasPermission(BrassLedgerPermissions.LedgerManage)) return TransactionResult.Failure("You are not authorized to complete bank reconciliations.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var bank = await db.BankAccounts.SingleOrDefaultAsync(x => x.Id == request.BankAccountId && x.CompanyId == companyId, cancellationToken);
         if (bank is null) return TransactionResult.Failure("Bank account not found.");
         if (request.StatementDate < bank.LastReconciledOn) return TransactionResult.Failure("Statement date cannot precede the last reconciliation date.");
-        if (await db.BankReconciliations.AnyAsync(reconciliation => reconciliation.BankAccountId == bank.Id && reconciliation.StatementDate == request.StatementDate, cancellationToken))
-            return TransactionResult.Failure("This bank account already has a reconciliation for that statement date.");
-        var candidateEntryIds = await db.JournalEntries.Where(entry => entry.CompanyId == companyId && entry.BankAccountId == bank.Id && entry.PostedOn > bank.LastReconciledOn && entry.PostedOn <= request.StatementDate).Select(entry => entry.Id).ToListAsync(cancellationToken);
+        var reconciliation = await db.BankReconciliations.SingleOrDefaultAsync(item => item.BankAccountId == bank.Id && item.StatementDate == request.StatementDate, cancellationToken);
+        if (reconciliation?.Status == "Completed") return TransactionResult.Failure("This bank account already has a completed reconciliation for that statement date.");
+        var candidateEntryIds = await db.JournalEntries.Where(entry => entry.CompanyId == companyId && entry.BankAccountId == bank.Id && entry.IsPosted && entry.Status == "Posted" && entry.PostedOn > bank.LastReconciledOn && entry.PostedOn <= request.StatementDate).Select(entry => entry.Id).ToListAsync(cancellationToken);
         var selectedEntryIds = request.ClearedJournalEntryIds?.Distinct().ToArray() ?? candidateEntryIds.ToArray();
         if (selectedEntryIds.Any(entryId => !candidateEntryIds.Contains(entryId)))
             return TransactionResult.Failure("A selected cleared item does not belong to this bank account or statement period.");
         var selectedLines = await db.JournalEntryLines.Where(line => selectedEntryIds.Contains(line.JournalEntryId) && line.AccountId == bank.LedgerAccountId).ToListAsync(cancellationToken);
+        var candidateLines = await db.JournalEntryLines.Where(line => candidateEntryIds.Contains(line.JournalEntryId) && line.AccountId == bank.LedgerAccountId).ToListAsync(cancellationToken);
         var clearedAmount = selectedLines.Sum(line => line.Debit - line.Credit);
         var expectedStatementBalance = decimal.Round(bank.LastReconciledBalance + clearedAmount, 2, MidpointRounding.AwayFromZero);
+        var bookBalance = decimal.Round(bank.LastReconciledBalance + candidateLines.Sum(line => line.Debit - line.Credit), 2, MidpointRounding.AwayFromZero);
         var variance = decimal.Round(request.StatementClosingBalance - expectedStatementBalance, 2, MidpointRounding.AwayFromZero);
         if (variance != 0) return TransactionResult.Failure($"Statement balance differs from the cleared book activity by {variance:C}. Review the selected transactions or investigate the difference before reconciling.");
-        var reconciliation = new BankReconciliation
-        {
-            Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bank.Id, StatementDate = request.StatementDate,
-            StatementClosingBalance = request.StatementClosingBalance, BookBalance = expectedStatementBalance,
-            ReconciledByUserId = Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) ? userId : null,
-            ReconciledAtUtc = DateTimeOffset.UtcNow
-        };
-        db.BankReconciliations.Add(reconciliation);
+        if (reconciliation is null) { reconciliation = new BankReconciliation { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bank.Id }; db.BankReconciliations.Add(reconciliation); }
+        else db.BankReconciliationItems.RemoveRange(await db.BankReconciliationItems.Where(item => item.BankReconciliationId == reconciliation.Id).ToListAsync(cancellationToken));
+        reconciliation.StatementDate = request.StatementDate; reconciliation.OpeningBalance = bank.LastReconciledBalance; reconciliation.ClearedAmount = clearedAmount; reconciliation.StatementClosingBalance = request.StatementClosingBalance; reconciliation.BookBalance = bookBalance; reconciliation.Variance = variance; reconciliation.Status = "Completed"; reconciliation.Notes = (request.Notes ?? string.Empty).Trim(); reconciliation.ReconciledByUserId = ResolveUserId(); reconciliation.ReconciledAtUtc = DateTimeOffset.UtcNow; reconciliation.ReopenedByUserId = null; reconciliation.ReopenedAtUtc = null; reconciliation.ReopenReason = string.Empty; reconciliation.ConcurrencyToken = Guid.NewGuid().ToString("N");
         db.BankReconciliationItems.AddRange(selectedEntryIds.Select(entryId => new BankReconciliationItem { Id = Guid.NewGuid(), BankReconciliationId = reconciliation.Id, JournalEntryId = entryId }));
         bank.UnreconciledAmount = decimal.Round(decimal.Abs(bank.CurrentBalance - request.StatementClosingBalance), 2, MidpointRounding.AwayFromZero);
         bank.LastReconciledOn = request.StatementDate;
         bank.LastReconciledBalance = request.StatementClosingBalance;
         bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddBankAudit(db, companyId, "bank-reconciliation.completed", reconciliation.Id, new { reconciliation.StatementDate, reconciliation.OpeningBalance, reconciliation.ClearedAmount, reconciliation.StatementClosingBalance, reconciliation.BookBalance, reconciliation.Variance, reconciliation.Notes, itemCount = selectedEntryIds.Length });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The bank account changed while reconciliation was in progress. Refresh and try again."); }
-        return TransactionResult.Success(bank.Id);
+        catch (DbUpdateException) { return TransactionResult.Failure("This reconciliation was completed concurrently. Refresh and review the resulting report."); }
+        return TransactionResult.Success(reconciliation.Id);
     }
 
     public async Task<TransactionResult> UpdateBankLedgerMappingAsync(UpdateBankLedgerMappingRequest request, CancellationToken cancellationToken = default)
@@ -766,6 +766,221 @@ public sealed class AccountingTransactionService(
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The bank account changed while its mapping was being updated. Refresh and try again."); }
         return TransactionResult.Success(bank.Id);
+    }
+
+    public async Task<BankStatementImportResult> ImportBankStatementAsync(ImportBankStatementRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.LedgerManage)) return BankStatementImportResult.Failure("You are not authorized to import bank statements.");
+        if (string.IsNullOrWhiteSpace(request.FileName) || string.IsNullOrWhiteSpace(request.Content)) return BankStatementImportResult.Failure("A statement file name and content are required.");
+        IReadOnlyList<ParsedBankRow> rows; IReadOnlyList<string> rejections;
+        try { (rows, rejections) = ParseBankStatement(request.Format, request.Content); }
+        catch (InvalidDataException exception) { return BankStatementImportResult.Failure(exception.Message); }
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        if (!await db.BankAccounts.AnyAsync(item => item.Id == request.BankAccountId && item.CompanyId == companyId, cancellationToken)) return BankStatementImportResult.Failure("Bank account not found.");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(request.Content))).ToLowerInvariant();
+        if (await db.BankStatementImportBatches.AnyAsync(item => item.CompanyId == companyId && item.BankAccountId == request.BankAccountId && item.ContentSha256 == hash, cancellationToken)) return BankStatementImportResult.Failure("This exact statement file was already imported.");
+        var externalIds = rows.Select(item => item.ExternalId).ToArray();
+        var existing = await db.BankStatementTransactions.Where(item => item.CompanyId == companyId && item.BankAccountId == request.BankAccountId && externalIds.Contains(item.ExternalId)).Select(item => item.ExternalId).ToListAsync(cancellationToken);
+        var accepted = rows.Where(item => !existing.Contains(item.ExternalId, StringComparer.Ordinal)).ToArray();
+        var debitTotal = accepted.Where(item => item.Amount < 0).Sum(item => -item.Amount); var creditTotal = accepted.Where(item => item.Amount > 0).Sum(item => item.Amount);
+        if (request.DryRun) return new BankStatementImportResult(true, null, accepted.Length, rows.Count - accepted.Length, rejections.Count, debitTotal, creditTotal, rejections, string.Empty);
+        var batch = new BankStatementImportBatch { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = request.BankAccountId, FileName = Path.GetFileName(request.FileName), Format = NormalizeBankFormat(request.Format), ContentSha256 = hash, ImportedCount = accepted.Length, DuplicateCount = rows.Count - accepted.Length, RejectedCount = rejections.Count, DebitTotal = debitTotal, CreditTotal = creditTotal, RejectionJson = System.Text.Json.JsonSerializer.Serialize(rejections), ImportedByUserId = ResolveUserId(), ImportedAtUtc = DateTimeOffset.UtcNow, Status = rejections.Count == 0 ? "Imported" : "ImportedWithRejections" };
+        db.BankStatementImportBatches.Add(batch);
+        db.BankStatementTransactions.AddRange(accepted.Select(row => new BankStatementTransaction { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = request.BankAccountId, ImportBatchId = batch.Id, ExternalId = row.ExternalId, TransactionDate = row.Date, PostedDate = row.PostedDate, Amount = row.Amount, TransactionType = row.Type, Payee = row.Payee, Memo = row.Memo, Reference = row.Reference, RawJson = row.RawJson, Status = "Unmatched", ConcurrencyToken = Guid.NewGuid().ToString("N") }));
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = "bank-statement.imported", EntityType = "BankStatementImportBatch", EntityId = batch.Id, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { batch.FileName, batch.Format, batch.ContentSha256, batch.ImportedCount, batch.DuplicateCount, batch.RejectedCount, batch.DebitTotal, batch.CreditTotal }), OccurredAtUtc = DateTimeOffset.UtcNow });
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return BankStatementImportResult.Failure("The statement or one of its transactions was imported concurrently."); }
+        return new BankStatementImportResult(true, batch.Id, batch.ImportedCount, batch.DuplicateCount, batch.RejectedCount, batch.DebitTotal, batch.CreditTotal, rejections, string.Empty);
+    }
+
+    public async Task<TransactionResult> MatchBankTransactionAsync(MatchBankTransactionRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.LedgerManage)) return TransactionResult.Failure("You are not authorized to match bank transactions.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var transaction = await db.BankStatementTransactions.SingleOrDefaultAsync(item => item.Id == request.BankStatementTransactionId && item.CompanyId == companyId, cancellationToken);
+        if (transaction is null || transaction.Status != "Unmatched") return TransactionResult.Failure("Only an unmatched bank transaction can be matched.");
+        if (await db.BankStatementTransactions.AnyAsync(item => item.CompanyId == companyId && item.MatchedJournalEntryId == request.JournalEntryId, cancellationToken)) return TransactionResult.Failure("That journal entry is already matched to a statement transaction.");
+        var bank = await db.BankAccounts.SingleAsync(item => item.Id == transaction.BankAccountId && item.CompanyId == companyId, cancellationToken);
+        var entry = await db.JournalEntries.SingleOrDefaultAsync(item => item.Id == request.JournalEntryId && item.CompanyId == companyId && item.BankAccountId == bank.Id && item.IsPosted && item.Status == "Posted", cancellationToken);
+        if (entry is null) return TransactionResult.Failure("The journal entry is not posted to this bank account.");
+        var bankLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == entry.Id && line.AccountId == bank.LedgerAccountId).ToListAsync(cancellationToken);
+        var signedAmount = bankLines.Sum(line => line.Debit - line.Credit);
+        if (RoundCurrency(signedAmount) != RoundCurrency(transaction.Amount)) return TransactionResult.Failure("The statement amount does not equal the journal's bank-account amount.");
+        transaction.Status = "Matched"; transaction.MatchedJournalEntryId = entry.Id; transaction.MatchedAtUtc = DateTimeOffset.UtcNow; transaction.MatchedByUserId = ResolveUserId(); transaction.MatchNote = (request.Note ?? string.Empty).Trim(); transaction.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddBankAudit(db, companyId, "bank-transaction.matched", transaction.Id, new { entry.Id, signedAmount, transaction.MatchNote });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The bank transaction changed while it was being matched."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The bank transaction or journal was matched concurrently. Refresh and try again."); }
+        return TransactionResult.Success(transaction.Id);
+    }
+
+    public async Task<TransactionResult> UnmatchBankTransactionAsync(Guid bankStatementTransactionId, string reason, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.LedgerManage)) return TransactionResult.Failure("You are not authorized to unmatch bank transactions.");
+        if (string.IsNullOrWhiteSpace(reason)) return TransactionResult.Failure("An unmatch reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var item = await db.BankStatementTransactions.SingleOrDefaultAsync(transaction => transaction.Id == bankStatementTransactionId && transaction.CompanyId == companyId, cancellationToken);
+        if (item is null || item.Status != "Matched" || !item.MatchedJournalEntryId.HasValue) return TransactionResult.Failure("Only a matched bank transaction can be unmatched.");
+        if (await IsInCompletedReconciliationAsync(db, item.MatchedJournalEntryId.Value, cancellationToken)) return TransactionResult.Failure("A reconciled match cannot be removed until the reconciliation is reopened.");
+        var oldJournalId = item.MatchedJournalEntryId; item.Status = "Unmatched"; item.MatchedJournalEntryId = null; item.MatchedAtUtc = null; item.MatchedByUserId = null; item.MatchNote = string.Empty; item.ConcurrencyToken = Guid.NewGuid().ToString("N"); AddBankAudit(db, companyId, "bank-transaction.unmatched", item.Id, new { oldJournalId, reason = reason.Trim() });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The bank transaction changed while it was being unmatched. Refresh and try again."); }
+        return TransactionResult.Success(item.Id);
+    }
+
+    public async Task<TransactionResult> CreateBankTransferAsync(CreateBankTransferRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.LedgerManage)) return TransactionResult.Failure("You are not authorized to transfer funds.");
+        if (request.FromBankAccountId == request.ToBankAccountId || request.Amount <= 0 || string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Memo)) return TransactionResult.Failure("A transfer requires different bank accounts, a positive amount, reference, and memo.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        if (await db.BankTransfers.AnyAsync(item => item.CompanyId == companyId && item.Reference == request.Reference.Trim(), cancellationToken)) return TransactionResult.Failure("That transfer reference already exists.");
+        var banks = await db.BankAccounts.Where(item => item.CompanyId == companyId && (item.Id == request.FromBankAccountId || item.Id == request.ToBankAccountId)).ToListAsync(cancellationToken);
+        if (banks.Count != 2) return TransactionResult.Failure("Both transfer bank accounts must belong to the active company.");
+        var from = banks.Single(item => item.Id == request.FromBankAccountId); var to = banks.Single(item => item.Id == request.ToBankAccountId); var amount = RoundCurrency(request.Amount);
+        if (from.CurrentBalance < amount) return TransactionResult.Failure("The source bank account does not have sufficient book balance.");
+        var fromAccount = await ResolveBankLedgerAccountNumberAsync(db, companyId, from, cancellationToken); var toAccount = await ResolveBankLedgerAccountNumberAsync(db, companyId, to, cancellationToken);
+        if (string.IsNullOrWhiteSpace(fromAccount) || string.IsNullOrWhiteSpace(toAccount)) return TransactionResult.Failure("Both bank accounts require active ledger mappings.");
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var transferId = Guid.NewGuid();
+        var outbound = await PostAsync(db, companyId, request.TransferDate, "Banking", $"{request.Reference.Trim()}-OUT", request.Memo, [new("1050", amount, 0, "Transfer clearing"), new(fromAccount, 0, amount, "Transfer out")], cancellationToken, from.Id, false, transferId, "BankTransferOutbound");
+        if (!outbound.Succeeded) return outbound;
+        var inbound = await PostAsync(db, companyId, request.TransferDate, "Banking", $"{request.Reference.Trim()}-IN", request.Memo, [new(toAccount, amount, 0, "Transfer in"), new("1050", 0, amount, "Transfer clearing")], cancellationToken, to.Id, false, transferId, "BankTransferInbound");
+        if (!inbound.Succeeded) return inbound;
+        from.CurrentBalance -= amount; to.CurrentBalance += amount; from.UnreconciledAmount += amount; to.UnreconciledAmount += amount; from.ConcurrencyToken = Guid.NewGuid().ToString("N"); to.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var transferRecord = new BankTransfer { Id = transferId, CompanyId = companyId, FromBankAccountId = from.Id, ToBankAccountId = to.Id, TransferDate = request.TransferDate, Amount = amount, Reference = request.Reference.Trim(), Memo = request.Memo.Trim(), JournalEntryId = outbound.Id!.Value, InboundJournalEntryId = inbound.Id!.Value, CreatedByUserId = ResolveUserId(), CreatedAtUtc = DateTimeOffset.UtcNow, Status = "Posted", ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        db.BankTransfers.Add(transferRecord); AddBankAudit(db, companyId, "bank-transfer.posted", transferId, new { fromBankAccountId = from.Id, toBankAccountId = to.Id, amount, outbound = outbound.Id, inbound = inbound.Id });
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return TransactionResult.Failure("The transfer changed concurrently or its reference already exists."); }
+        await transaction.CommitAsync(cancellationToken); return TransactionResult.Success(transferId);
+    }
+
+    public async Task<TransactionResult> ReverseBankTransferAsync(ReverseBankTransferRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.LedgerManage) || !HasPermission(BrassLedgerPermissions.JournalReverse)) return TransactionResult.Failure("You are not authorized to reverse bank transfers.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A transfer reversal reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var transfer = await db.BankTransfers.SingleOrDefaultAsync(item => item.Id == request.BankTransferId && item.CompanyId == companyId, cancellationToken);
+        if (transfer is null || transfer.Status != "Posted") return TransactionResult.Failure("Only a posted bank transfer can be reversed.");
+        if (request.ReversalDate < transfer.TransferDate) return TransactionResult.Failure("The reversal date cannot precede the transfer date.");
+        if (await IsInCompletedReconciliationAsync(db, transfer.JournalEntryId, cancellationToken) || await IsInCompletedReconciliationAsync(db, transfer.InboundJournalEntryId, cancellationToken)) return TransactionResult.Failure("A reconciled bank transfer cannot be reversed until both affected reconciliations are reopened.");
+
+        var banks = await db.BankAccounts.Where(item => item.CompanyId == companyId && (item.Id == transfer.FromBankAccountId || item.Id == transfer.ToBankAccountId)).ToListAsync(cancellationToken);
+        if (banks.Count != 2) return TransactionResult.Failure("Both transfer bank accounts must still belong to the active company.");
+        var from = banks.Single(item => item.Id == transfer.FromBankAccountId);
+        var to = banks.Single(item => item.Id == transfer.ToBankAccountId);
+        var fromAccount = await ResolveBankLedgerAccountNumberAsync(db, companyId, from, cancellationToken);
+        var toAccount = await ResolveBankLedgerAccountNumberAsync(db, companyId, to, cancellationToken);
+        if (string.IsNullOrWhiteSpace(fromAccount) || string.IsNullOrWhiteSpace(toAccount)) return TransactionResult.Failure("Both bank accounts require active ledger mappings.");
+
+        var outboundReversal = await PostAsync(db, companyId, request.ReversalDate, "Banking", $"REV-{transfer.Reference}-OUT", request.Reason,
+            [new(fromAccount, transfer.Amount, 0, "Reverse transfer out"), new("1050", 0, transfer.Amount, "Reverse transfer clearing")],
+            cancellationToken, from.Id, false, transfer.Id, "BankTransferOutboundReversal");
+        if (!outboundReversal.Succeeded) return outboundReversal;
+        var inboundReversal = await PostAsync(db, companyId, request.ReversalDate, "Banking", $"REV-{transfer.Reference}-IN", request.Reason,
+            [new("1050", transfer.Amount, 0, "Reverse transfer clearing"), new(toAccount, 0, transfer.Amount, "Reverse transfer in")],
+            cancellationToken, to.Id, false, transfer.Id, "BankTransferInboundReversal");
+        if (!inboundReversal.Succeeded) return inboundReversal;
+
+        var journalIds = new[] { transfer.JournalEntryId, transfer.InboundJournalEntryId, outboundReversal.Id!.Value, inboundReversal.Id!.Value };
+        var journals = await db.JournalEntries.Where(entry => entry.CompanyId == companyId && journalIds.Contains(entry.Id)).ToDictionaryAsync(entry => entry.Id, cancellationToken);
+        journals[transfer.JournalEntryId].Status = "Reversed";
+        journals[transfer.JournalEntryId].ReversedByJournalEntryId = outboundReversal.Id;
+        journals[transfer.InboundJournalEntryId].Status = "Reversed";
+        journals[transfer.InboundJournalEntryId].ReversedByJournalEntryId = inboundReversal.Id;
+        journals[outboundReversal.Id.Value].ReversalOfJournalEntryId = transfer.JournalEntryId;
+        journals[inboundReversal.Id.Value].ReversalOfJournalEntryId = transfer.InboundJournalEntryId;
+        foreach (var journal in journals.Values) journal.ConcurrencyToken = Guid.NewGuid().ToString("N");
+
+        from.CurrentBalance += transfer.Amount;
+        to.CurrentBalance -= transfer.Amount;
+        from.UnreconciledAmount += transfer.Amount;
+        to.UnreconciledAmount += transfer.Amount;
+        from.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        to.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        transfer.Status = "Reversed";
+        transfer.ReversalJournalEntryId = outboundReversal.Id;
+        transfer.InboundReversalJournalEntryId = inboundReversal.Id;
+        transfer.ReversedByUserId = ResolveUserId();
+        transfer.ReversedAtUtc = DateTimeOffset.UtcNow;
+        transfer.ReversalDate = request.ReversalDate;
+        transfer.ReversalReason = request.Reason.Trim();
+        transfer.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddBankAudit(db, companyId, "bank-transfer.reversed", transfer.Id, new { transfer.ReversalDate, transfer.ReversalReason, transfer.ReversalJournalEntryId, transfer.InboundReversalJournalEntryId });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The transfer changed during reversal. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(transfer.Id);
+    }
+
+    public async Task<TransactionResult> CreateReconciliationAdjustmentAsync(CreateReconciliationAdjustmentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.LedgerManage)) return TransactionResult.Failure("You are not authorized to create reconciliation adjustments.");
+        if (request.Amount == 0 || string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("A non-zero amount, reference, and description are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        if (await db.SubledgerAdjustments.AnyAsync(item => item.CompanyId == companyId && item.Subledger == "Banking" && item.Reference == request.Reference.Trim(), cancellationToken)) return TransactionResult.Failure("That reconciliation adjustment reference already exists.");
+        var bank = await db.BankAccounts.SingleOrDefaultAsync(item => item.Id == request.BankAccountId && item.CompanyId == companyId, cancellationToken); if (bank is null) return TransactionResult.Failure("Bank account not found.");
+        var cash = await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken); var offset = await db.Accounts.SingleOrDefaultAsync(item => item.CompanyId == companyId && item.Number == request.OffsetAccountNumber.Trim() && item.IsActive && !item.IsControlAccount, cancellationToken);
+        if (string.IsNullOrWhiteSpace(cash) || offset is null || offset.Number == cash) return TransactionResult.Failure("Select a valid non-control offset account different from the bank account.");
+        var amount = RoundCurrency(decimal.Abs(request.Amount)); var increase = request.Amount > 0;
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var adjustmentId = Guid.NewGuid();
+        var posting = await PostAsync(db, companyId, request.AdjustmentDate, "Banking", request.Reference, request.Description, increase ? [new(cash, amount, 0, "Bank adjustment"), new(offset.Number, 0, amount, "Reconciliation offset")] : [new(offset.Number, amount, 0, "Reconciliation offset"), new(cash, 0, amount, "Bank adjustment")], cancellationToken, bank.Id, sourceDocumentId: adjustmentId, sourceDocumentType: "BankReconciliationAdjustment");
+        if (!posting.Succeeded) return posting;
+        bank.CurrentBalance += request.Amount;
+        bank.UnreconciledAmount += amount;
+        bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var adjustment = CreateAdjustment(adjustmentId, companyId, "Banking", "BankReconciliationAdjustment", bank.Id, null, null, bank.Id, request.AdjustmentDate, RoundCurrency(request.Amount), request.Reference, request.Description, offset.Number, posting.Id!.Value);
+        db.SubledgerAdjustments.Add(adjustment);
+        AddAdjustmentAudit(db, adjustment, "bank-reconciliation.adjustment-posted");
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The reconciliation adjustment changed concurrently or its reference already exists."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(adjustment.Id);
+    }
+
+    public async Task<TransactionResult> ReverseReconciliationAdjustmentAsync(ReverseReconciliationAdjustmentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.LedgerManage) || !HasPermission(BrassLedgerPermissions.JournalReverse)) return TransactionResult.Failure("You are not authorized to reverse reconciliation adjustments.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("An adjustment reversal reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var adjustment = await db.SubledgerAdjustments.SingleOrDefaultAsync(item => item.Id == request.AdjustmentId && item.CompanyId == companyId && item.Subledger == "Banking" && item.Kind == "BankReconciliationAdjustment", cancellationToken);
+        if (adjustment is null || adjustment.Status != "Posted") return TransactionResult.Failure("Only a posted reconciliation adjustment can be reversed.");
+        if (request.ReversalDate < adjustment.AdjustmentDate) return TransactionResult.Failure("The reversal date cannot precede the adjustment date.");
+        if (await IsInCompletedReconciliationAsync(db, adjustment.JournalEntryId, cancellationToken)) return TransactionResult.Failure("A reconciled adjustment cannot be reversed until its reconciliation is reopened.");
+        var reversal = await PostInverseAsync(db, companyId, adjustment.JournalEntryId, request.ReversalDate, $"REV-{adjustment.Reference}", request.Reason, adjustment.Id, "BankReconciliationAdjustmentReversal", adjustment.BankAccountId, cancellationToken);
+        if (!reversal.Succeeded) return reversal;
+        var bank = await db.BankAccounts.SingleAsync(item => item.Id == adjustment.BankAccountId && item.CompanyId == companyId, cancellationToken);
+        bank.CurrentBalance -= adjustment.Amount;
+        bank.UnreconciledAmount += decimal.Abs(adjustment.Amount);
+        bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        adjustment.Status = "Reversed";
+        adjustment.ReversalJournalEntryId = reversal.Id;
+        adjustment.ReversedByUserId = ResolveUserId();
+        adjustment.ReversedAtUtc = DateTimeOffset.UtcNow;
+        adjustment.ReversalReason = request.Reason.Trim();
+        adjustment.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAdjustmentAudit(db, adjustment, "bank-reconciliation.adjustment-reversed");
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The adjustment changed during reversal. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(adjustment.Id);
+    }
+
+    public async Task<TransactionResult> ReopenBankReconciliationAsync(ReopenBankReconciliationRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.LedgerManage) || !HasPermission(BrassLedgerPermissions.JournalReverse)) return TransactionResult.Failure("You are not authorized to reopen bank reconciliations.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A reopen reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var reconciliation = await db.BankReconciliations.SingleOrDefaultAsync(item => item.Id == request.ReconciliationId && item.CompanyId == companyId, cancellationToken); if (reconciliation is null || reconciliation.Status != "Completed") return TransactionResult.Failure("Only a completed reconciliation can be reopened.");
+        if (await db.BankReconciliations.AnyAsync(item => item.BankAccountId == reconciliation.BankAccountId && item.Status == "Completed" && item.StatementDate > reconciliation.StatementDate, cancellationToken)) return TransactionResult.Failure("Reopen later reconciliations first.");
+        var bank = await db.BankAccounts.SingleAsync(item => item.Id == reconciliation.BankAccountId && item.CompanyId == companyId, cancellationToken); var previous = await db.BankReconciliations.Where(item => item.BankAccountId == bank.Id && item.Status == "Completed" && item.StatementDate < reconciliation.StatementDate).OrderByDescending(item => item.StatementDate).FirstOrDefaultAsync(cancellationToken);
+        reconciliation.Status = "Reopened"; reconciliation.ReopenedByUserId = ResolveUserId(); reconciliation.ReopenedAtUtc = DateTimeOffset.UtcNow; reconciliation.ReopenReason = request.Reason.Trim(); reconciliation.ConcurrencyToken = Guid.NewGuid().ToString("N"); bank.LastReconciledOn = previous?.StatementDate ?? DateOnly.MinValue; bank.LastReconciledBalance = previous?.StatementClosingBalance ?? 0; bank.UnreconciledAmount = decimal.Abs(bank.CurrentBalance - bank.LastReconciledBalance); bank.ConcurrencyToken = Guid.NewGuid().ToString("N"); AddBankAudit(db, companyId, "bank-reconciliation.reopened", reconciliation.Id, new { reconciliation.StatementDate, reconciliation.ReopenReason });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The reconciliation changed while it was being reopened. Refresh and try again."); }
+        return TransactionResult.Success(reconciliation.Id);
     }
 
     public async Task<TransactionResult> PostPayrollRunAsync(PostPayrollRunRequest request, CancellationToken cancellationToken = default)
@@ -1177,6 +1392,123 @@ public sealed class AccountingTransactionService(
         Id = Guid.NewGuid(), CompanyId = workflow.CompanyId, UserId = ResolveUserId(), Action = action, EntityType = "SubledgerDocumentWorkflow", EntityId = workflow.Id,
         DetailJson = System.Text.Json.JsonSerializer.Serialize(new { workflow.DocumentType, workflow.DocumentNumber, workflow.Status, workflow.IsRecurringTemplate, workflow.Frequency, workflow.FrequencyInterval, workflow.NextOccurrenceDate, workflow.EndDate, workflow.SourceTemplateId, workflow.PostedDocumentId }), OccurredAtUtc = DateTimeOffset.UtcNow
     });
+
+    private static (IReadOnlyList<ParsedBankRow> Rows, IReadOnlyList<string> Rejections) ParseBankStatement(string format, string content)
+    {
+        var normalized = NormalizeBankFormat(format);
+        if (normalized is "OFX" or "QFX") return ParseOfxStatement(content);
+        if (normalized == "CAMT.053") return ParseCamtStatement(content);
+        if (normalized == "MT940") return ParseMt940Statement(content);
+        if (normalized != "CSV") throw new InvalidDataException("Bank statement format must be CSV, OFX, QFX, CAMT.053, or MT940.");
+        var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length < 2) throw new InvalidDataException("The CSV statement requires a header and at least one transaction row.");
+        var headers = ParseCsvFields(lines[0]).Select((value, index) => new { Name = value.Trim(), index }).ToDictionary(item => item.Name, item => item.index, StringComparer.OrdinalIgnoreCase);
+        foreach (var required in new[] { "ExternalId", "Date", "Amount" }) if (!headers.ContainsKey(required)) throw new InvalidDataException($"The CSV statement is missing the {required} column.");
+        var rows = new List<ParsedBankRow>(); var rejections = new List<string>(); var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var lineNumber = 2; lineNumber <= lines.Length; lineNumber++)
+        {
+            var fields = ParseCsvFields(lines[lineNumber - 1]);
+            string Field(string name) => headers.TryGetValue(name, out var index) && index < fields.Count ? fields[index].Trim() : string.Empty;
+            var externalId = Field("ExternalId");
+            if (string.IsNullOrWhiteSpace(externalId) || !seen.Add(externalId) || !DateOnly.TryParse(Field("Date"), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date) || !decimal.TryParse(Field("Amount"), System.Globalization.NumberStyles.Number | System.Globalization.NumberStyles.AllowCurrencySymbol, System.Globalization.CultureInfo.InvariantCulture, out var amount) || amount == 0)
+            { rejections.Add($"Line {lineNumber}: requires a unique ExternalId, valid Date, and non-zero Amount."); continue; }
+            DateOnly? postedDate = DateOnly.TryParse(Field("PostedDate"), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedPosted) ? parsedPosted : null;
+            rows.Add(new ParsedBankRow(externalId, date, postedDate, RoundCurrency(amount), Field("Type"), Field("Payee"), Field("Memo"), Field("Reference"), System.Text.Json.JsonSerializer.Serialize(fields)));
+        }
+        return (rows, rejections);
+    }
+
+    private static (IReadOnlyList<ParsedBankRow>, IReadOnlyList<string>) ParseOfxStatement(string content)
+    {
+        var rows = new List<ParsedBankRow>(); var rejections = new List<string>();
+        var matches = System.Text.RegularExpressions.Regex.Matches(content, @"<STMTTRN>(.*?)(?:</STMTTRN>|(?=<STMTTRN>)|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+        var line = 0;
+        foreach (System.Text.RegularExpressions.Match match in matches) { line++; var block = match.Groups[1].Value; string Tag(string name) => System.Text.RegularExpressions.Regex.Match(block, $@"<{name}>([^<\r\n]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Groups[1].Value.Trim(); var id = Tag("FITID"); var dateText = Tag("DTPOSTED"); if (dateText.Length >= 8) dateText = dateText[..8]; if (string.IsNullOrWhiteSpace(id) || !DateOnly.TryParseExact(dateText, "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date) || !decimal.TryParse(Tag("TRNAMT"), System.Globalization.NumberStyles.Number | System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var amount) || amount == 0) { rejections.Add($"OFX transaction {line}: requires FITID, DTPOSTED, and non-zero TRNAMT."); continue; } rows.Add(new ParsedBankRow(id, date, date, RoundCurrency(amount), Tag("TRNTYPE"), Tag("NAME"), Tag("MEMO"), Tag("CHECKNUM"), System.Text.Json.JsonSerializer.Serialize(new { block }))); }
+        if (matches.Count == 0) throw new InvalidDataException("No OFX/QFX statement transactions were found."); return RemoveDuplicateParsedRows(rows, rejections);
+    }
+
+    private static (IReadOnlyList<ParsedBankRow>, IReadOnlyList<string>) ParseCamtStatement(string content)
+    {
+        System.Xml.Linq.XDocument document; try { document = System.Xml.Linq.XDocument.Parse(content); } catch (System.Xml.XmlException exception) { throw new InvalidDataException($"Invalid CAMT.053 XML: {exception.Message}"); }
+        var rows = new List<ParsedBankRow>(); var rejections = new List<string>(); var index = 0;
+        foreach (var entry in document.Descendants().Where(element => element.Name.LocalName == "Ntry"))
+        {
+            index++;
+            string Desc(string name) => entry.Descendants().FirstOrDefault(element => element.Name.LocalName == name)?.Value.Trim() ?? string.Empty;
+            var id = Desc("AcctSvcrRef");
+            if (string.IsNullOrWhiteSpace(id)) id = Desc("NtryRef");
+            var dateValue = entry.Descendants().FirstOrDefault(element => element.Name.LocalName == "BookgDt")?.Descendants().FirstOrDefault(element => element.Name.LocalName is "Dt" or "DtTm")?.Value.Trim() ?? string.Empty;
+            var dateText = dateValue.Length >= 10 ? dateValue[..10] : dateValue;
+            if (!DateOnly.TryParse(dateText, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date) || !decimal.TryParse(Desc("Amt"), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var amount) || amount == 0 || string.IsNullOrWhiteSpace(id))
+            {
+                rejections.Add($"CAMT entry {index}: requires reference, booking date, and non-zero amount.");
+                continue;
+            }
+            if (Desc("CdtDbtInd").Equals("DBIT", StringComparison.OrdinalIgnoreCase)) amount = -amount;
+            rows.Add(new ParsedBankRow(id, date, date, RoundCurrency(amount), Desc("BkTxCd"), Desc("Nm"), Desc("AddtlNtryInf"), Desc("EndToEndId"), entry.ToString(System.Xml.Linq.SaveOptions.DisableFormatting)));
+        }
+        if (index == 0) throw new InvalidDataException("No CAMT.053 entries were found."); return RemoveDuplicateParsedRows(rows, rejections);
+    }
+
+    private static (IReadOnlyList<ParsedBankRow>, IReadOnlyList<string>) ParseMt940Statement(string content)
+    {
+        var rows = new List<ParsedBankRow>();
+        var rejections = new List<string>();
+        var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        ParsedBankRow? pending = null;
+        var sequence = 0;
+        foreach (var raw in lines)
+        {
+            if (raw.StartsWith(":61:", StringComparison.Ordinal))
+            {
+                if (pending is not null) rows.Add(pending);
+                sequence++;
+                var value = raw[4..].Trim();
+                var match = System.Text.RegularExpressions.Regex.Match(value, @"^(?<date>\d{6})(?:\d{4})?(?<sign>R?[CD])(?<amount>\d+(?:,\d{1,2})?)(?<rest>.*)$");
+                if (!match.Success || !DateOnly.TryParseExact(match.Groups["date"].Value, "yyMMdd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date) || !decimal.TryParse(match.Groups["amount"].Value.Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var amount))
+                {
+                    rejections.Add($"MT940 :61: record {sequence} is invalid.");
+                    pending = null;
+                    continue;
+                }
+                var sign = match.Groups["sign"].Value;
+                if (sign is "D" or "RC") amount = -amount;
+                var rest = match.Groups["rest"].Value;
+                var id = rest.Contains("//", StringComparison.Ordinal) ? rest[(rest.IndexOf("//", StringComparison.Ordinal) + 2)..].Trim() : $"MT940-{date:yyyyMMdd}-{sequence}-{amount}";
+                pending = new ParsedBankRow(id, date, date, RoundCurrency(amount), rest.Length >= 4 ? rest[..4] : string.Empty, string.Empty, string.Empty, id, System.Text.Json.JsonSerializer.Serialize(new { raw }));
+            }
+            else if (raw.StartsWith(":86:", StringComparison.Ordinal) && pending is not null)
+            {
+                pending = pending with { Memo = raw[4..].Trim() };
+            }
+        }
+        if (pending is not null) rows.Add(pending);
+        if (sequence == 0) throw new InvalidDataException("No MT940 :61: transactions were found.");
+        return RemoveDuplicateParsedRows(rows, rejections);
+    }
+
+    private static (IReadOnlyList<ParsedBankRow>, IReadOnlyList<string>) RemoveDuplicateParsedRows(List<ParsedBankRow> rows, List<string> rejections)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal); var accepted = new List<ParsedBankRow>(); foreach (var row in rows) { if (seen.Add(row.ExternalId)) accepted.Add(row); else rejections.Add($"Duplicate external transaction ID {row.ExternalId} in the statement."); } return (accepted, rejections);
+    }
+
+    private static string NormalizeBankFormat(string format) => (format ?? string.Empty).Trim().TrimStart('.').ToUpperInvariant() switch { "QFX" => "QFX", "OFX" => "OFX", "CAMT" or "CAMT.053" or "XML" => "CAMT.053", "MT940" or "STA" => "MT940", "CSV" => "CSV", var value => value };
+
+    private static IReadOnlyList<string> ParseCsvFields(string line)
+    {
+        var fields = new List<string>(); var value = new System.Text.StringBuilder(); var quoted = false;
+        for (var index = 0; index < line.Length; index++) { var character = line[index]; if (character == '"') { if (quoted && index + 1 < line.Length && line[index + 1] == '"') { value.Append('"'); index++; } else quoted = !quoted; } else if (character == ',' && !quoted) { fields.Add(value.ToString()); value.Clear(); } else value.Append(character); }
+        if (quoted) throw new InvalidDataException("The CSV statement contains an unterminated quoted field."); fields.Add(value.ToString()); return fields;
+    }
+
+    private void AddBankAudit(BrassLedgerDbContext db, Guid companyId, string action, Guid entityId, object details) => db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = "Banking", EntityId = entityId, DetailJson = System.Text.Json.JsonSerializer.Serialize(details), OccurredAtUtc = DateTimeOffset.UtcNow });
+
+    private static Task<bool> IsInCompletedReconciliationAsync(BrassLedgerDbContext db, Guid journalEntryId, CancellationToken cancellationToken) =>
+        db.BankReconciliationItems.AnyAsync(
+            item => item.JournalEntryId == journalEntryId && db.BankReconciliations.Any(reconciliation => reconciliation.Id == item.BankReconciliationId && reconciliation.Status == "Completed"),
+            cancellationToken);
+
+    private sealed record ParsedBankRow(string ExternalId, DateOnly Date, DateOnly? PostedDate, decimal Amount, string Type, string Payee, string Memo, string Reference, string RawJson);
 
     private void AddAdjustmentAudit(BrassLedgerDbContext db, SubledgerAdjustment adjustment, string action)
     {

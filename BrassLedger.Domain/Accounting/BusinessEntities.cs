@@ -208,8 +208,17 @@ public sealed class BankReconciliation
     public DateOnly StatementDate { get; set; }
     public decimal StatementClosingBalance { get; set; }
     public decimal BookBalance { get; set; }
+    public decimal OpeningBalance { get; set; }
+    public decimal ClearedAmount { get; set; }
+    public decimal Variance { get; set; }
+    public string Status { get; set; } = "Completed";
+    public string Notes { get; set; } = string.Empty;
     public Guid? ReconciledByUserId { get; set; }
     public DateTimeOffset ReconciledAtUtc { get; set; }
+    public Guid? ReopenedByUserId { get; set; }
+    public DateTimeOffset? ReopenedAtUtc { get; set; }
+    public string ReopenReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class BankReconciliationItem
@@ -217,6 +226,72 @@ public sealed class BankReconciliationItem
     public Guid Id { get; set; }
     public Guid BankReconciliationId { get; set; }
     public Guid JournalEntryId { get; set; }
+}
+
+public sealed class BankStatementImportBatch
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid BankAccountId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string Format { get; set; } = string.Empty;
+    public string ContentSha256 { get; set; } = string.Empty;
+    public string Status { get; set; } = "Imported";
+    public int ImportedCount { get; set; }
+    public int DuplicateCount { get; set; }
+    public int RejectedCount { get; set; }
+    public decimal DebitTotal { get; set; }
+    public decimal CreditTotal { get; set; }
+    public string RejectionJson { get; set; } = "[]";
+    public Guid? ImportedByUserId { get; set; }
+    public DateTimeOffset ImportedAtUtc { get; set; }
+}
+
+public sealed class BankStatementTransaction
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid BankAccountId { get; set; }
+    public Guid ImportBatchId { get; set; }
+    public string ExternalId { get; set; } = string.Empty;
+    public DateOnly TransactionDate { get; set; }
+    public DateOnly? PostedDate { get; set; }
+    public decimal Amount { get; set; }
+    public string TransactionType { get; set; } = string.Empty;
+    public string Payee { get; set; } = string.Empty;
+    public string Memo { get; set; } = string.Empty;
+    public string Reference { get; set; } = string.Empty;
+    public string Status { get; set; } = "Unmatched";
+    public Guid? MatchedJournalEntryId { get; set; }
+    public DateTimeOffset? MatchedAtUtc { get; set; }
+    public Guid? MatchedByUserId { get; set; }
+    public string MatchNote { get; set; } = string.Empty;
+    public string RawJson { get; set; } = "{}";
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class BankTransfer
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid FromBankAccountId { get; set; }
+    public Guid ToBankAccountId { get; set; }
+    public DateOnly TransferDate { get; set; }
+    public decimal Amount { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Memo { get; set; } = string.Empty;
+    public string Status { get; set; } = "Posted";
+    public Guid JournalEntryId { get; set; }
+    public Guid InboundJournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? InboundReversalJournalEntryId { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class Customer

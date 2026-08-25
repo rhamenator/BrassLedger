@@ -185,6 +185,44 @@ else
         </Authorized>
         </AuthorizeView>
 
+        <section class="panel"><h2>Bank statement import and matching</h2><div class="content-grid"><div class="field-group"><label class="field-label">Bank account</label><InputSelect aria-label="Statement import bank account" class="field-input" @bind-Value="StatementImportForm.BankAccountId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Format</label><InputSelect aria-label="Bank statement format" class="field-input" @bind-Value="StatementImportForm.Format"><option>CSV</option><option>OFX</option><option>QFX</option><option>CAMT.053</option><option>MT940</option></InputSelect></div><div class="field-group"><label class="field-label">Statement file</label><InputFile aria-label="Bank statement file" class="field-input" OnChange="SelectBankStatementAsync" /></div><button class="action-secondary" type="button" disabled="@(string.IsNullOrWhiteSpace(StatementImportForm.Content))" @onclick="() => ImportBankStatementAsync(true)">Validate statement</button><button class="action-primary" type="button" disabled="@(string.IsNullOrWhiteSpace(StatementImportForm.Content))" @onclick="() => ImportBankStatementAsync(false)">Import statement</button></div>
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Bank</th><th>External ID</th><th>Payee / memo</th><th>Amount</th><th>Status</th><th>Suggested or manual match</th><th></th></tr></thead><tbody>@foreach (var item in Workspace.Treasury.StatementTransactions ?? []) { <tr><td>@item.TransactionDate</td><td>@Workspace.Treasury.BankAccounts.Single(bank => bank.Id == item.BankAccountId).Name</td><td>@item.ExternalId</td><td>@item.Payee @item.Memo</td><td>@item.Amount.ToString("C")</td><td>@item.Status</td><td>@if (item.Status == "Unmatched") { <select aria-label="Journal entry to match" class="field-input" value="@GetMatchSelection(item.Id)" @onchange="args => SetMatchSelection(item.Id, args.Value?.ToString())"><option value="@Guid.Empty">Select journal</option>@foreach (var candidate in (Workspace.Treasury.ReconciliationCandidates ?? []).Where(candidate => candidate.BankAccountId == item.BankAccountId && candidate.SignedAmount == item.Amount).OrderBy(candidate => Math.Abs(candidate.PostedOn.DayNumber - item.TransactionDate.DayNumber))) { <option value="@candidate.JournalEntryId">@candidate.PostedOn — @candidate.Reference</option> }</select> }</td><td>@if (item.Status == "Unmatched") { <button class="action-secondary" type="button" @onclick="() => MatchBankTransactionAsync(item.Id)">Match</button> } else { <button class="action-secondary" type="button" @onclick="() => UnmatchBankTransactionAsync(item.Id)">Unmatch</button> }</td></tr> }</tbody></table></div>
+        </section>
+
+        <section class="panel"><h2>Transfers and reconciliation adjustments</h2><div class="content-grid"><EditForm Model="TransferForm" OnValidSubmit="CreateTransferAsync"><div class="auth-form"><h3>Transfer funds</h3><div class="field-group"><label class="field-label">From bank</label><InputSelect aria-label="Transfer from bank" class="field-input" @bind-Value="TransferForm.FromBankId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">To bank</label><InputSelect aria-label="Transfer to bank" class="field-input" @bind-Value="TransferForm.ToBankId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Transfer date" class="field-input" @bind-Value="TransferForm.Date" /></div><div class="field-group"><label class="field-label">Amount</label><InputNumber aria-label="Transfer amount" class="field-input" @bind-Value="TransferForm.Amount" /></div><div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Transfer reference" class="field-input" @bind-Value="TransferForm.Reference" /></div><div class="field-group"><label class="field-label">Memo</label><InputText aria-label="Transfer memo" class="field-input" @bind-Value="TransferForm.Memo" /></div><button class="action-primary" type="submit">Post bank transfer</button></div></EditForm>
+            <EditForm Model="BankAdjustmentForm" OnValidSubmit="CreateBankAdjustmentAsync"><div class="auth-form"><h3>Reconciliation adjustment</h3><div class="field-group"><label class="field-label">Adjustment bank</label><InputSelect aria-label="Adjustment bank account" class="field-input" @bind-Value="BankAdjustmentForm.BankId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Signed amount</label><InputNumber aria-label="Bank adjustment amount" class="field-input" @bind-Value="BankAdjustmentForm.Amount" /></div><div class="field-group"><label class="field-label">Offset account</label><InputSelect aria-label="Bank adjustment offset account" class="field-input" @bind-Value="BankAdjustmentForm.OffsetAccount"><option value="">Select account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => !account.IsControlAccount && account.Number != "1050" && !Workspace.Treasury.BankAccounts.Any(bank => bank.LedgerAccountNumber == account.Number))) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Bank adjustment reference" class="field-input" @bind-Value="BankAdjustmentForm.Reference" /></div><div class="field-group"><label class="field-label">Description</label><InputText aria-label="Bank adjustment description" class="field-input" @bind-Value="BankAdjustmentForm.Description" /></div><button class="action-primary" type="submit">Post reconciliation adjustment</button></div></EditForm></div>
+            @if ((Workspace.Treasury.Transfers ?? []).Count > 0)
+            {
+                <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals">
+                    <div class="content-grid">
+                        <div class="field-group"><label class="field-label">Transfer reversal date</label><InputDate aria-label="Transfer reversal date" class="field-input" @bind-Value="TransferReversalForm.Date" /></div>
+                        <div class="field-group"><label class="field-label">Transfer reversal reason</label><InputText aria-label="Transfer reversal reason" class="field-input" @bind-Value="TransferReversalForm.Reason" /></div>
+                    </div>
+                </AuthorizeView>
+                <div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>From</th><th>To</th><th>Reference</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>
+                    @foreach (var transfer in Workspace.Treasury.Transfers ?? [])
+                    {
+                        <tr><td>@transfer.TransferDate</td><td>@Workspace.Treasury.BankAccounts.Single(bank => bank.Id == transfer.FromBankAccountId).Name</td><td>@Workspace.Treasury.BankAccounts.Single(bank => bank.Id == transfer.ToBankAccountId).Name</td><td>@transfer.Reference</td><td>@transfer.Amount.ToString("C")</td><td>@transfer.Status</td><td>@if (transfer.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><button class="action-secondary" type="button" @onclick="() => ReverseTransferAsync(transfer.Id)">Reverse</button></AuthorizeView> }</td></tr>
+                    }
+                </tbody></table></div>
+            }
+            @if ((Workspace.Treasury.Adjustments ?? []).Count > 0)
+            {
+                <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals">
+                    <div class="content-grid">
+                        <div class="field-group"><label class="field-label">Adjustment reversal date</label><InputDate aria-label="Adjustment reversal date" class="field-input" @bind-Value="AdjustmentReversalForm.Date" /></div>
+                        <div class="field-group"><label class="field-label">Adjustment reversal reason</label><InputText aria-label="Adjustment reversal reason" class="field-input" @bind-Value="AdjustmentReversalForm.Reason" /></div>
+                    </div>
+                </AuthorizeView>
+                <div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Bank</th><th>Reference</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>
+                    @foreach (var adjustment in Workspace.Treasury.Adjustments ?? [])
+                    {
+                        <tr><td>@adjustment.AdjustmentDate</td><td>@Workspace.Treasury.BankAccounts.Single(bank => bank.Id == adjustment.BankAccountId).Name</td><td>@adjustment.Reference</td><td>@adjustment.Description</td><td>@adjustment.Amount.ToString("C")</td><td>@adjustment.Status</td><td>@if (adjustment.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><button class="action-secondary" type="button" @onclick="() => ReverseBankAdjustmentAsync(adjustment.Id)">Reverse</button></AuthorizeView> }</td></tr>
+                    }
+                </tbody></table></div>
+            }
+        </section>
+
         <section class="panel">
             <h2>Treasury positions</h2>
             <div class="content-grid">
@@ -193,6 +231,7 @@ else
                         <div class="field-group"><label class="field-label">Bank account</label><InputSelect aria-label="Reconciliation bank account" class="field-input" @bind-Value="ReconciliationForm.BankAccountId" @bind-Value:after="ResetReconciliationSelections"><option value="@Guid.Empty">Select account</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div>
                         <div class="field-group"><label class="field-label">Statement date</label><InputDate aria-label="Reconciliation statement date" class="field-input" @bind-Value="ReconciliationForm.StatementDate" @bind-Value:after="ResetReconciliationSelections" /></div>
                         <div class="field-group"><label class="field-label">Statement closing balance</label><InputNumber aria-label="Reconciliation statement closing balance" class="field-input" @bind-Value="ReconciliationForm.StatementBalance" /></div>
+                        <div class="field-group"><label class="field-label">Reconciliation notes</label><InputText aria-label="Bank reconciliation notes" class="field-input" @bind-Value="ReconciliationForm.Notes" /></div>
                         @if (ReconciliationForm.BankAccountId != Guid.Empty)
                         {
                             <div class="field-group">
@@ -251,6 +290,7 @@ else
                     }
                 </tbody>
             </table>
+            <h3>Completed reconciliation reports</h3><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><div class="content-grid"><div class="field-group"><label class="field-label">Reopen reason</label><InputText aria-label="Bank reconciliation reopen reason" class="field-input" @bind-Value="ReopenForm.Reason" /></div></div></AuthorizeView><div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Bank</th><th>Opening</th><th>Cleared</th><th>Statement</th><th>Book</th><th>Variance</th><th>Items</th><th>Status / notes</th><th></th></tr></thead><tbody>@foreach (var report in Workspace.Treasury.Reconciliations ?? []) { <tr><td>@report.StatementDate</td><td>@Workspace.Treasury.BankAccounts.Single(bank => bank.Id == report.BankAccountId).Name</td><td>@report.OpeningBalance.ToString("C")</td><td>@report.ClearedAmount.ToString("C")</td><td>@report.StatementClosingBalance.ToString("C")</td><td>@report.BookBalance.ToString("C")</td><td>@report.Variance.ToString("C")</td><td>@report.ItemCount</td><td>@report.Status @if (report.Status == "Reopened") { <span>— @report.ReopenReason</span> } else if (!string.IsNullOrWhiteSpace(report.Notes)) { <span>— @report.Notes</span> }</td><td>@if (report.Status == "Completed") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><button class="action-secondary" type="button" @onclick="() => ReopenReconciliationAsync(report.Id)">Reopen</button></AuthorizeView> }</td></tr> }</tbody></table></div>
         </section>
     </section>
 }
@@ -263,6 +303,14 @@ else
     private ReconciliationEditor ReconciliationForm { get; } = new();
     private BankMappingEditor BankMappingForm { get; } = new();
     private QuickBooksImportEditor QuickBooksImport { get; } = new();
+    private StatementImportEditor StatementImportForm { get; } = new();
+    private BankMatchEditor MatchForm { get; } = new();
+    private Dictionary<Guid, Guid> MatchSelections { get; } = [];
+    private BankTransferEditor TransferForm { get; } = new();
+    private BankTransferReversalEditor TransferReversalForm { get; } = new();
+    private BankAdjustmentEditor BankAdjustmentForm { get; } = new();
+    private BankAdjustmentReversalEditor AdjustmentReversalForm { get; } = new();
+    private ReopenEditor ReopenForm { get; } = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -300,7 +348,7 @@ else
 
     private async Task ReconcileAsync()
     {
-        var result = await TransactionService.ReconcileBankAccountAsync(new ReconcileBankAccountRequest(ReconciliationForm.BankAccountId, ReconciliationForm.StatementDate, ReconciliationForm.StatementBalance, ReconciliationForm.SelectedEntryIds.ToArray()));
+        var result = await TransactionService.ReconcileBankAccountAsync(new ReconcileBankAccountRequest(ReconciliationForm.BankAccountId, ReconciliationForm.StatementDate, ReconciliationForm.StatementBalance, ReconciliationForm.SelectedEntryIds.ToArray(), ReconciliationForm.Notes));
         StatusMessage = result.Succeeded ? "Bank account reconciled." : result.ErrorMessage;
         if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
@@ -336,7 +384,19 @@ else
         }
     }
 
+    private async Task SelectBankStatementAsync(InputFileChangeEventArgs args) { var file = args.File; StatementImportForm.FileName = file.Name; await using var stream = file.OpenReadStream(10 * 1024 * 1024); using var reader = new StreamReader(stream); StatementImportForm.Content = await reader.ReadToEndAsync(); var extension = Path.GetExtension(file.Name).TrimStart('.').ToUpperInvariant(); if (extension is "OFX" or "QFX" or "CSV" or "MT940") StatementImportForm.Format = extension; else if (extension is "XML") StatementImportForm.Format = "CAMT.053"; }
+    private async Task ImportBankStatementAsync(bool dryRun) { var result = await TransactionService.ImportBankStatementAsync(new ImportBankStatementRequest(StatementImportForm.BankAccountId, StatementImportForm.FileName, StatementImportForm.Format, StatementImportForm.Content, dryRun)); var rejectionDetail = result.Rejections.Count == 0 ? string.Empty : $" {string.Join(" ", result.Rejections.Take(3))}"; StatusMessage = result.Succeeded ? $"{(dryRun ? "Validated" : "Imported")} {result.ImportedCount} transaction(s); {result.DuplicateCount} duplicate(s), {result.RejectedCount} rejection(s).{rejectionDetail}" : result.ErrorMessage; if (result.Succeeded && !dryRun) { StatementImportForm.Content = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); } }
+    private async Task MatchBankTransactionAsync(Guid id) { var result = await TransactionService.MatchBankTransactionAsync(new MatchBankTransactionRequest(id, MatchSelections.GetValueOrDefault(id), MatchForm.Note)); StatusMessage = result.Succeeded ? "Bank transaction matched." : result.ErrorMessage; if (result.Succeeded) { MatchSelections.Remove(id); Workspace = await WorkspaceService.GetWorkspaceAsync(); } }
+    private async Task UnmatchBankTransactionAsync(Guid id) { var result = await TransactionService.UnmatchBankTransactionAsync(id, string.IsNullOrWhiteSpace(MatchForm.Note) ? "Operator correction" : MatchForm.Note); StatusMessage = result.Succeeded ? "Bank transaction unmatched." : result.ErrorMessage; if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    private async Task CreateTransferAsync() { var result = await TransactionService.CreateBankTransferAsync(new CreateBankTransferRequest(TransferForm.FromBankId, TransferForm.ToBankId, TransferForm.Date, TransferForm.Amount, TransferForm.Reference, TransferForm.Memo)); StatusMessage = result.Succeeded ? "Bank transfer posted." : result.ErrorMessage; if (result.Succeeded) { TransferForm.Reset(); Workspace = await WorkspaceService.GetWorkspaceAsync(); } }
+    private async Task ReverseTransferAsync(Guid id) { var result = await TransactionService.ReverseBankTransferAsync(new ReverseBankTransferRequest(id, TransferReversalForm.Date, TransferReversalForm.Reason)); StatusMessage = result.Succeeded ? "Bank transfer reversed." : result.ErrorMessage; if (result.Succeeded) { TransferReversalForm.Reason = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); } }
+    private async Task CreateBankAdjustmentAsync() { var result = await TransactionService.CreateReconciliationAdjustmentAsync(new CreateReconciliationAdjustmentRequest(BankAdjustmentForm.BankId, BankAdjustmentForm.Date, BankAdjustmentForm.Amount, BankAdjustmentForm.OffsetAccount, BankAdjustmentForm.Reference, BankAdjustmentForm.Description)); StatusMessage = result.Succeeded ? "Reconciliation adjustment posted." : result.ErrorMessage; if (result.Succeeded) { BankAdjustmentForm.Reset(); Workspace = await WorkspaceService.GetWorkspaceAsync(); } }
+    private async Task ReverseBankAdjustmentAsync(Guid id) { var result = await TransactionService.ReverseReconciliationAdjustmentAsync(new ReverseReconciliationAdjustmentRequest(id, AdjustmentReversalForm.Date, AdjustmentReversalForm.Reason)); StatusMessage = result.Succeeded ? "Reconciliation adjustment reversed." : result.ErrorMessage; if (result.Succeeded) { AdjustmentReversalForm.Reason = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); } }
+    private async Task ReopenReconciliationAsync(Guid id) { var result = await TransactionService.ReopenBankReconciliationAsync(new ReopenBankReconciliationRequest(id, ReopenForm.Reason)); StatusMessage = result.Succeeded ? "Bank reconciliation reopened." : result.ErrorMessage; if (result.Succeeded) { ReopenForm.Reason = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); } }
+
     private void AddJournalLine() => JournalForm.Lines.Add(new JournalLineEditor());
+    private Guid GetMatchSelection(Guid transactionId) => MatchSelections.GetValueOrDefault(transactionId);
+    private void SetMatchSelection(Guid transactionId, string? value) => MatchSelections[transactionId] = Guid.TryParse(value, out var selected) ? selected : Guid.Empty;
     private void RemoveJournalLine(JournalLineEditor line) { if (JournalForm.Lines.Count > 2) JournalForm.Lines.Remove(line); }
     private IEnumerable<BankReconciliationCandidateSnapshot> VisibleReconciliationCandidates => Workspace?.Treasury.ReconciliationCandidates?.Where(candidate => candidate.BankAccountId == ReconciliationForm.BankAccountId && candidate.PostedOn <= ReconciliationForm.StatementDate) ?? [];
     private IEnumerable<JournalEntrySnapshot> ReversibleJournalEntries => Workspace?.GeneralLedger.RecentEntries.Where(entry => entry.Status == "Posted" && entry.SourceModule == "General Ledger" && entry.ReversalOfJournalEntryId is null) ?? [];
@@ -350,7 +410,14 @@ else
     private sealed class JournalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public List<JournalLineEditor> Lines { get; } = [new(), new()]; public void Reset() { Date = DateOnly.FromDateTime(DateTime.Today); Reference = string.Empty; Description = string.Empty; Lines.Clear(); Lines.Add(new()); Lines.Add(new()); } }
     private sealed class JournalLineEditor { public Guid Key { get; } = Guid.NewGuid(); public string AccountNumber { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public decimal Debit { get; set; } public decimal Credit { get; set; } }
     private sealed class JournalReversalEditor { public Guid JournalEntryId { get; set; } public DateOnly ReversalDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; public void Reset() { JournalEntryId = Guid.Empty; ReversalDate = DateOnly.FromDateTime(DateTime.Today); Reason = string.Empty; } }
-    private sealed class ReconciliationEditor { public Guid BankAccountId { get; set; } public DateOnly StatementDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal StatementBalance { get; set; } public HashSet<Guid> SelectedEntryIds { get; set; } = []; }
+    private sealed class ReconciliationEditor { public Guid BankAccountId { get; set; } public DateOnly StatementDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal StatementBalance { get; set; } public string Notes { get; set; } = string.Empty; public HashSet<Guid> SelectedEntryIds { get; set; } = []; }
     private sealed class BankMappingEditor { public Guid BankAccountId { get; set; } public string LedgerAccountNumber { get; set; } = string.Empty; }
     private sealed class QuickBooksImportEditor { public string Entity { get; set; } = "chart-of-accounts"; public IBrowserFile? File { get; set; } public string FileName { get; set; } = string.Empty; }
+    private sealed class StatementImportEditor { public Guid BankAccountId { get; set; } public string FileName { get; set; } = string.Empty; public string Format { get; set; } = "CSV"; public string Content { get; set; } = string.Empty; }
+    private sealed class BankMatchEditor { public Guid JournalEntryId { get; set; } public string Note { get; set; } = string.Empty; }
+    private sealed class BankTransferEditor { public Guid FromBankId { get; set; } public Guid ToBankId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; public string Memo { get; set; } = string.Empty; public void Reset() { FromBankId = Guid.Empty; ToBankId = Guid.Empty; Amount = 0; Reference = string.Empty; Memo = string.Empty; } }
+    private sealed class BankTransferReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; }
+    private sealed class BankAdjustmentEditor { public Guid BankId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string OffsetAccount { get; set; } = string.Empty; public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public void Reset() { BankId = Guid.Empty; Amount = 0; OffsetAccount = string.Empty; Reference = string.Empty; Description = string.Empty; } }
+    private sealed class BankAdjustmentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; }
+    private sealed class ReopenEditor { public string Reason { get; set; } = string.Empty; }
 }

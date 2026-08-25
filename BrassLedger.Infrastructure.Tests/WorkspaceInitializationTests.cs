@@ -1269,6 +1269,92 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task BankingWorkflow_ImportsMatchesTransfersReconcilesAndReopensAuditably()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>(); var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var before = await workspaceService.GetWorkspaceAsync(); var customer = before.Receivables.Customers.First(); var fromBank = before.Treasury.BankAccounts.First(); var toBank = before.Treasury.BankAccounts.Last();
+        var invoice = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-BANK-WF-1", new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31), 100m, 0m, "4000", "Bank match"));
+        var payment = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customer.Id, fromBank.Id, new DateOnly(2026, 8, 2), 100m, "DEP-BANK-WF-1", "ACH", [new PaymentDocumentApplicationRequest(invoice.Id!.Value, 100m)])); Assert.True(payment.Succeeded, payment.ErrorMessage);
+        const string csv = "ExternalId,Date,Amount,Type,Payee,Memo,Reference\nFIT-100,2026-08-02,100.00,CREDIT,Customer,Invoice receipt,DEP-BANK-WF-1\nFIT-BAD,not-a-date,0,OTHER,,,";
+        var dryRun = await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(fromBank.Id, "statement.csv", "CSV", csv, true)); Assert.True(dryRun.Succeeded, dryRun.ErrorMessage); Assert.Equal(1, dryRun.ImportedCount); Assert.Equal(1, dryRun.RejectedCount);
+        var imported = await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(fromBank.Id, "statement.csv", "CSV", csv)); Assert.True(imported.Succeeded, imported.ErrorMessage); Assert.Equal(1, imported.ImportedCount);
+        Assert.False((await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(fromBank.Id, "statement-copy.csv", "CSV", csv))).Succeeded);
+        const string ofx = "<OFX><BANKTRANLIST><STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260804120000<FITID>OFX-1<TRNAMT>-12.34<NAME>Utility<MEMO>Monthly bill</STMTTRN></BANKTRANLIST></OFX>";
+        var ofxPreview = await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(fromBank.Id, "statement.ofx", "OFX", ofx, true)); Assert.True(ofxPreview.Succeeded, ofxPreview.ErrorMessage); Assert.Equal(12.34m, ofxPreview.DebitTotal);
+        const string camt = "<Document xmlns='urn:iso:std:iso:20022:tech:xsd:camt.053.001.08'><BkToCstmrStmt><Stmt><Ntry><Amt Ccy='USD'>22.50</Amt><CdtDbtInd>CRDT</CdtDbtInd><BookgDt><Dt>2026-08-05</Dt></BookgDt><AcctSvcrRef>CAMT-1</AcctSvcrRef><AddtlNtryInf>Deposit</AddtlNtryInf></Ntry></Stmt></BkToCstmrStmt></Document>";
+        var camtPreview = await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(fromBank.Id, "statement.xml", "CAMT.053", camt, true)); Assert.True(camtPreview.Succeeded, camtPreview.ErrorMessage); Assert.Equal(22.50m, camtPreview.CreditTotal);
+        const string mt940 = ":20:START\n:25:12345\n:61:260806D7,89NTRFNONREF//MT940-1\n:86:Bank fee\n:62F:C260806USD0,00";
+        var mt940Preview = await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(fromBank.Id, "statement.sta", "MT940", mt940, true)); Assert.True(mt940Preview.Succeeded, mt940Preview.ErrorMessage); Assert.Equal(7.89m, mt940Preview.DebitTotal);
+        const string mt940Signs = ":20:SIGNS\n:61:260806D1,00NTRF//D-1\n:61:260806RC2,00NTRF//RC-1\n:61:260806C3,00NTRF//C-1\n:61:260806RD4,00NTRF//RD-1";
+        var signPreview = await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(fromBank.Id, "signs.sta", "MT940", mt940Signs, true)); Assert.True(signPreview.Succeeded, signPreview.ErrorMessage); Assert.Equal(3m, signPreview.DebitTotal); Assert.Equal(7m, signPreview.CreditTotal);
+        const string malformedCamt = "<Document><Ntry><Amt>1.00</Amt><BookgDt><Dt>1</Dt></BookgDt><AcctSvcrRef>BAD-DATE</AcctSvcrRef></Ntry></Document>";
+        var malformedCamtPreview = await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(fromBank.Id, "malformed.xml", "CAMT.053", malformedCamt, true)); Assert.True(malformedCamtPreview.Succeeded, malformedCamtPreview.ErrorMessage); Assert.Equal(1, malformedCamtPreview.RejectedCount);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+        var statementItem = await db.BankStatementTransactions.SingleAsync(item => item.ExternalId == "FIT-100"); var paymentJournalId = await db.JournalEntries.Where(item => item.Reference == "DEP-BANK-WF-1").Select(item => item.Id).SingleAsync();
+        Assert.True((await transactions.MatchBankTransactionAsync(new MatchBankTransactionRequest(statementItem.Id, paymentJournalId, "Exact amount match"))).Succeeded);
+        Assert.False((await transactions.MatchBankTransactionAsync(new MatchBankTransactionRequest(statementItem.Id, paymentJournalId))).Succeeded);
+        Assert.True((await transactions.UnmatchBankTransactionAsync(statementItem.Id, "Testing correction")).Succeeded); Assert.True((await transactions.MatchBankTransactionAsync(new MatchBankTransactionRequest(statementItem.Id, paymentJournalId))).Succeeded);
+
+        var offsetAccount = before.GeneralLedger.Accounts.First(item => item.Type == "Expense" && !item.IsControlAccount).Number;
+        var adjustment = await transactions.CreateReconciliationAdjustmentAsync(new CreateReconciliationAdjustmentRequest(fromBank.Id, new DateOnly(2026, 8, 2), 12m, offsetAccount, "ADJ-BANK-WF-1", "Statement interest")); Assert.True(adjustment.Succeeded, adjustment.ErrorMessage);
+        Assert.False((await transactions.CreateReconciliationAdjustmentAsync(new CreateReconciliationAdjustmentRequest(fromBank.Id, new DateOnly(2026, 8, 2), 12m, offsetAccount, "ADJ-BANK-WF-1", "Duplicate"))).Succeeded);
+        Assert.True((await transactions.ReverseReconciliationAdjustmentAsync(new ReverseReconciliationAdjustmentRequest(adjustment.Id!.Value, new DateOnly(2026, 8, 2), "Incorrect statement line"))).Succeeded);
+        Assert.Equal("Reversed", (await workspaceService.GetWorkspaceAsync()).Treasury.Adjustments!.Single(item => item.Id == adjustment.Id).Status);
+
+        var transfer = await transactions.CreateBankTransferAsync(new CreateBankTransferRequest(fromBank.Id, toBank.Id, new DateOnly(2026, 8, 3), 50m, "TR-BANK-WF-1", "Move operating cash")); Assert.True(transfer.Succeeded, transfer.ErrorMessage);
+        var afterTransfer = await workspaceService.GetWorkspaceAsync(); Assert.Equal(0m, afterTransfer.GeneralLedger.Accounts.Single(item => item.Number == "1050").Balance);
+        Assert.Equal(before.Treasury.BankAccounts.Single(item => item.Id == fromBank.Id).CurrentBalance + 50m, afterTransfer.Treasury.BankAccounts.Single(item => item.Id == fromBank.Id).CurrentBalance);
+        Assert.Equal(before.Treasury.BankAccounts.Single(item => item.Id == toBank.Id).CurrentBalance + 50m, afterTransfer.Treasury.BankAccounts.Single(item => item.Id == toBank.Id).CurrentBalance);
+        var transferRecord = await db.BankTransfers.SingleAsync(item => item.Id == transfer.Id); var reconciliation = await transactions.ReconcileBankAccountAsync(new ReconcileBankAccountRequest(fromBank.Id, new DateOnly(2026, 8, 3), fromBank.LastReconciledBalance + 50m, [paymentJournalId, transferRecord.JournalEntryId])); Assert.True(reconciliation.Succeeded, reconciliation.ErrorMessage);
+        var completed = (await workspaceService.GetWorkspaceAsync()).Treasury.Reconciliations!.Single(item => item.Id == reconciliation.Id); Assert.Equal("Completed", completed.Status); Assert.Equal(50m, completed.ClearedAmount); Assert.Equal(2, completed.ItemCount);
+        Assert.False((await transactions.UnmatchBankTransactionAsync(statementItem.Id, "Cannot change closed report")).Succeeded);
+        Assert.False((await transactions.ReverseBankTransferAsync(new ReverseBankTransferRequest(transfer.Id!.Value, new DateOnly(2026, 8, 4), "Incorrect transfer"))).Succeeded);
+        Assert.True((await transactions.ReopenBankReconciliationAsync(new ReopenBankReconciliationRequest(reconciliation.Id!.Value, "Statement correction"))).Succeeded);
+        Assert.Equal("Reopened", (await workspaceService.GetWorkspaceAsync()).Treasury.Reconciliations!.Single(item => item.Id == reconciliation.Id).Status);
+        Assert.True((await transactions.UnmatchBankTransactionAsync(statementItem.Id, "Correct reopened statement")).Succeeded);
+        Assert.True((await transactions.ReverseBankTransferAsync(new ReverseBankTransferRequest(transfer.Id!.Value, new DateOnly(2026, 8, 4), "Incorrect transfer"))).Succeeded);
+        var afterReversal = await workspaceService.GetWorkspaceAsync(); Assert.Equal("Reversed", afterReversal.Treasury.Transfers!.Single(item => item.Id == transfer.Id).Status); Assert.Equal(0m, afterReversal.GeneralLedger.Accounts.Single(item => item.Number == "1050").Balance);
+        Assert.Equal(before.Treasury.BankAccounts.Single(item => item.Id == fromBank.Id).CurrentBalance + 100m, afterReversal.Treasury.BankAccounts.Single(item => item.Id == fromBank.Id).CurrentBalance);
+        Assert.Equal(before.Treasury.BankAccounts.Single(item => item.Id == toBank.Id).CurrentBalance, afterReversal.Treasury.BankAccounts.Single(item => item.Id == toBank.Id).CurrentBalance);
+        await using var auditDb = await factory.CreateDbContextAsync(); Assert.True(await auditDb.BusinessAuditEntries.AnyAsync(item => item.Action == "bank-transfer.reversed" && item.EntityId == transfer.Id)); Assert.True(await auditDb.BusinessAuditEntries.AnyAsync(item => item.Action == "bank-reconciliation.adjustment-reversed" && item.EntityId == adjustment.Id));
+    }
+
+    [Fact]
+    public async Task BankingWorkflow_EnforcesCompanyIsolationAndSeparateReversalAuthority()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var companyId = await db.Companies.Select(item => item.Id).FirstAsync();
+        var foreignCompanyId = Guid.NewGuid(); var foreignBankId = Guid.NewGuid();
+        db.Companies.Add(new Company { Id = foreignCompanyId, Name = "Foreign company", LegalName = "Foreign company", TaxId = "foreign", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+        db.BankAccounts.Add(new BankAccount { Id = foreignBankId, CompanyId = foreignCompanyId, Name = "Foreign bank", AccountNumberMasked = "****9999", LedgerAccountId = Guid.NewGuid(), CurrentBalance = 100m, LastReconciledOn = new DateOnly(2026, 3, 31), LastReconciledBalance = 100m, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+        await db.SaveChangesAsync();
+
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        void ActAs(params string[] permissions)
+        {
+            var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()) };
+            claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+
+        ActAs(BrassLedgerPermissions.LedgerManage);
+        var banks = workspace.Treasury.BankAccounts;
+        var transfer = await transactions.CreateBankTransferAsync(new CreateBankTransferRequest(banks.First().Id, banks.Last().Id, new DateOnly(2026, 8, 10), 5m, "TR-SOD-BANK-1", "Permission test"));
+        Assert.True(transfer.Succeeded, transfer.ErrorMessage);
+        Assert.False((await transactions.ReverseBankTransferAsync(new ReverseBankTransferRequest(transfer.Id!.Value, new DateOnly(2026, 8, 11), "Requires reversal permission"))).Succeeded);
+        Assert.False((await transactions.CreateBankTransferAsync(new CreateBankTransferRequest(banks.First().Id, foreignBankId, new DateOnly(2026, 8, 10), 5m, "TR-FOREIGN-BANK-1", "Isolation test"))).Succeeded);
+        Assert.False((await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(foreignBankId, "foreign.csv", "CSV", "ExternalId,Date,Amount\nFOREIGN-1,2026-08-10,1.00"))).Succeeded);
+
+        ActAs(BrassLedgerPermissions.LedgerManage, BrassLedgerPermissions.JournalReverse);
+        Assert.True((await transactions.ReverseBankTransferAsync(new ReverseBankTransferRequest(transfer.Id.Value, new DateOnly(2026, 8, 11), "Authorized correction"))).Succeeded);
+    }
+
+    [Fact]
     public async Task TransactionService_ReconcilesOnlySelectedClearedBankActivity()
     {
         using var services = CreateServiceProvider();
@@ -1290,13 +1376,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var db = await dbContextFactory.CreateDbContextAsync();
         var clearedEntryId = (await db.JournalEntries.SingleAsync(entry => entry.Reference == "DEP-CLEARED")).Id;
         var reconciliation = await transactions.ReconcileBankAccountAsync(new ReconcileBankAccountRequest(
-            bank.Id, new DateOnly(2026, 4, 2), bank.LastReconciledBalance + 100m, [clearedEntryId]));
+            bank.Id, new DateOnly(2026, 4, 2), bank.LastReconciledBalance + 100m, [clearedEntryId], "April statement"));
 
         Assert.True(reconciliation.Succeeded, reconciliation.ErrorMessage);
         var reconciledBank = await db.BankAccounts.SingleAsync(account => account.Id == bank.Id);
         Assert.Equal(40m, reconciledBank.UnreconciledAmount);
         Assert.Equal(bank.LastReconciledBalance + 100m, reconciledBank.LastReconciledBalance);
         var recorded = await db.BankReconciliations.SingleAsync(item => item.BankAccountId == bank.Id);
+        Assert.Equal(bank.LastReconciledBalance + 60m, recorded.BookBalance);
+        Assert.Equal("April statement", recorded.Notes);
         var clearedIds = await db.BankReconciliationItems.Where(item => item.BankReconciliationId == recorded.Id).Select(item => item.JournalEntryId).ToListAsync();
         Assert.Equal([clearedEntryId], clearedIds);
     }

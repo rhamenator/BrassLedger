@@ -166,7 +166,7 @@ api.MapPost("/journal-entries/reverse", async (ReverseJournalEntryRequest reques
 {
     var result = await service.ReverseJournalEntryAsync(request, cancellationToken);
     return result.Succeeded ? Results.Created($"/api/journal-entries/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReverseJournals);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger, BrassLedgerAuthorizationPolicies.ReverseJournals);
 
 api.MapPost("/invoices", async (CreateInvoiceRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
@@ -293,6 +293,54 @@ api.MapPost("/bank-reconciliations", async (ReconcileBankAccountRequest request,
     var result = await service.ReconcileBankAccountAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["reconciliation"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+
+api.MapPost("/bank-statements/import", async (ImportBankStatementRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ImportBankStatementAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["statement"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+
+api.MapPost("/bank-transactions/match", async (MatchBankTransactionRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.MatchBankTransactionAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["match"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+
+api.MapPost("/bank-transactions/{transactionId:guid}/unmatch", async (Guid transactionId, string reason, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.UnmatchBankTransactionAsync(transactionId, reason, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.BadRequest(result);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+
+api.MapPost("/bank-transfers", async (CreateBankTransferRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.CreateBankTransferAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/bank-transfers/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["transfer"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+
+api.MapPost("/bank-transfers/reverse", async (ReverseBankTransferRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ReverseBankTransferAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["transfer"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger, BrassLedgerAuthorizationPolicies.ReverseJournals);
+
+api.MapPost("/bank-reconciliation-adjustments", async (CreateReconciliationAdjustmentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.CreateReconciliationAdjustmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/journal-entries/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+
+api.MapPost("/bank-reconciliation-adjustments/reverse", async (ReverseReconciliationAdjustmentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ReverseReconciliationAdjustmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger, BrassLedgerAuthorizationPolicies.ReverseJournals);
+
+api.MapPost("/bank-reconciliations/reopen", async (ReopenBankReconciliationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ReopenBankReconciliationAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["reconciliation"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger, BrassLedgerAuthorizationPolicies.ReverseJournals);
 
 api.MapGet("/bank-accounts/{bankAccountId:guid}/reconciliation-candidates", async (Guid bankAccountId, IDbContextFactory<BrassLedgerDbContext> dbContextFactory, HttpContext context, CancellationToken cancellationToken) =>
 {

@@ -21,8 +21,19 @@ public sealed record VoidSubledgerDocumentRequest(Guid DocumentId, DateOnly Void
 public sealed record ReverseSubledgerAdjustmentRequest(Guid AdjustmentId, DateOnly ReversalDate, string Reason);
 public sealed record SaveRecurringInvoiceTemplateRequest(CreateInvoiceRequest Invoice, string Frequency, int FrequencyInterval, DateOnly NextOccurrenceDate, DateOnly? EndDate = null);
 public sealed record SaveRecurringVendorBillTemplateRequest(CreateVendorBillRequest Bill, string Frequency, int FrequencyInterval, DateOnly NextOccurrenceDate, DateOnly? EndDate = null);
-public sealed record ReconcileBankAccountRequest(Guid BankAccountId, DateOnly StatementDate, decimal StatementClosingBalance, IReadOnlyList<Guid>? ClearedJournalEntryIds = null);
+public sealed record ReconcileBankAccountRequest(Guid BankAccountId, DateOnly StatementDate, decimal StatementClosingBalance, IReadOnlyList<Guid>? ClearedJournalEntryIds = null, string Notes = "");
 public sealed record UpdateBankLedgerMappingRequest(Guid BankAccountId, string LedgerAccountNumber);
+public sealed record ImportBankStatementRequest(Guid BankAccountId, string FileName, string Format, string Content, bool DryRun = false);
+public sealed record BankStatementImportResult(bool Succeeded, Guid? BatchId, int ImportedCount, int DuplicateCount, int RejectedCount, decimal DebitTotal, decimal CreditTotal, IReadOnlyList<string> Rejections, string ErrorMessage)
+{
+    public static BankStatementImportResult Failure(string error) => new(false, null, 0, 0, 0, 0, 0, [], error);
+}
+public sealed record MatchBankTransactionRequest(Guid BankStatementTransactionId, Guid JournalEntryId, string Note = "");
+public sealed record CreateBankTransferRequest(Guid FromBankAccountId, Guid ToBankAccountId, DateOnly TransferDate, decimal Amount, string Reference, string Memo);
+public sealed record ReverseBankTransferRequest(Guid BankTransferId, DateOnly ReversalDate, string Reason);
+public sealed record CreateReconciliationAdjustmentRequest(Guid BankAccountId, DateOnly AdjustmentDate, decimal Amount, string OffsetAccountNumber, string Reference, string Description);
+public sealed record ReverseReconciliationAdjustmentRequest(Guid AdjustmentId, DateOnly ReversalDate, string Reason);
+public sealed record ReopenBankReconciliationRequest(Guid ReconciliationId, string Reason);
 public sealed record PostPayrollRunRequest(
     Guid BankAccountId,
     DateOnly PayDate,
@@ -82,6 +93,14 @@ public interface IAccountingTransactionService
     Task<TransactionResult> GenerateDueRecurringDocumentsAsync(DateOnly throughDate, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReconcileBankAccountAsync(ReconcileBankAccountRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> UpdateBankLedgerMappingAsync(UpdateBankLedgerMappingRequest request, CancellationToken cancellationToken = default);
+    Task<BankStatementImportResult> ImportBankStatementAsync(ImportBankStatementRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> MatchBankTransactionAsync(MatchBankTransactionRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> UnmatchBankTransactionAsync(Guid bankStatementTransactionId, string reason, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CreateBankTransferAsync(CreateBankTransferRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseBankTransferAsync(ReverseBankTransferRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CreateReconciliationAdjustmentAsync(CreateReconciliationAdjustmentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseReconciliationAdjustmentAsync(ReverseReconciliationAdjustmentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReopenBankReconciliationAsync(ReopenBankReconciliationRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> PostPayrollRunAsync(PostPayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<PayrollRunEstimate?> PreviewEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> PostEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default);

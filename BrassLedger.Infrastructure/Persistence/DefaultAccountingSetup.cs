@@ -9,6 +9,7 @@ internal static class DefaultAccountingSetup
     [
         Account(companyId, "1000", "Operating Cash", AccountType.Asset),
         Account(companyId, "1010", "Payroll Clearing", AccountType.Asset),
+        Account(companyId, "1050", "Bank Transfer Clearing", AccountType.Asset),
         Account(companyId, "1100", "Accounts Receivable", AccountType.Asset, true),
         Account(companyId, "1200", "Inventory Asset", AccountType.Asset, true),
         Account(companyId, "1300", "Vendor Advances", AccountType.Asset, true),
@@ -49,6 +50,8 @@ internal static class DefaultAccountingSetup
                     await dbContext.Accounts.AddAsync(Account(companyId, "2200", "Payroll Liabilities", AccountType.Liability, true), cancellationToken);
                 if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "1300", cancellationToken))
                     await dbContext.Accounts.AddAsync(Account(companyId, "1300", "Vendor Advances", AccountType.Asset, true), cancellationToken);
+                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "1050", cancellationToken))
+                    await dbContext.Accounts.AddAsync(Account(companyId, "1050", "Bank Transfer Clearing", AccountType.Asset), cancellationToken);
                 if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "2150", cancellationToken))
                     await dbContext.Accounts.AddAsync(Account(companyId, "2150", "Customer Deposits", AccountType.Liability, true), cancellationToken);
                 if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "4300", cancellationToken))

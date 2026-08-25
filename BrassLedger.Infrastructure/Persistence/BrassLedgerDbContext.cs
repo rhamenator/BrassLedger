@@ -23,6 +23,9 @@ public sealed class BrassLedgerDbContext(
     public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
     public DbSet<BankReconciliation> BankReconciliations => Set<BankReconciliation>();
     public DbSet<BankReconciliationItem> BankReconciliationItems => Set<BankReconciliationItem>();
+    public DbSet<BankStatementImportBatch> BankStatementImportBatches => Set<BankStatementImportBatch>();
+    public DbSet<BankStatementTransaction> BankStatementTransactions => Set<BankStatementTransaction>();
+    public DbSet<BankTransfer> BankTransfers => Set<BankTransfer>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Employee> Employees => Set<Employee>();
@@ -94,6 +97,9 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<BankAccount>().HasKey(x => x.Id);
         modelBuilder.Entity<BankReconciliation>().HasKey(x => x.Id);
         modelBuilder.Entity<BankReconciliationItem>().HasKey(x => x.Id);
+        modelBuilder.Entity<BankStatementImportBatch>().HasKey(x => x.Id);
+        modelBuilder.Entity<BankStatementTransaction>().HasKey(x => x.Id);
+        modelBuilder.Entity<BankTransfer>().HasKey(x => x.Id);
         modelBuilder.Entity<Employee>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollRun>().HasKey(x => x.Id);
         modelBuilder.Entity<PayrollJurisdictionRule>().HasKey(x => x.Id);
@@ -123,6 +129,16 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SubledgerAdjustment>().HasOne<JournalEntry>().WithMany().HasForeignKey(adjustment => adjustment.ReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SubledgerAdjustment>().HasOne<BankAccount>().WithMany().HasForeignKey(adjustment => adjustment.BankAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SubledgerAdjustment>().HasOne<SubledgerPayment>().WithMany().HasForeignKey(adjustment => adjustment.PaymentId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankStatementImportBatch>().HasOne<BankAccount>().WithMany().HasForeignKey(batch => batch.BankAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankStatementTransaction>().HasOne<BankAccount>().WithMany().HasForeignKey(transaction => transaction.BankAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankStatementTransaction>().HasOne<BankStatementImportBatch>().WithMany().HasForeignKey(transaction => transaction.ImportBatchId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankStatementTransaction>().HasOne<JournalEntry>().WithMany().HasForeignKey(transaction => transaction.MatchedJournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankTransfer>().HasOne<BankAccount>().WithMany().HasForeignKey(transfer => transfer.FromBankAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankTransfer>().HasOne<BankAccount>().WithMany().HasForeignKey(transfer => transfer.ToBankAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.InboundJournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.ReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.InboundReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<GeneralLedgerAccount>()
             .Property(x => x.Type)
@@ -172,6 +188,13 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<SubledgerPayment>().Property(x => x.UnappliedAmount));
         ConfigureMoney(modelBuilder.Entity<SubledgerPaymentApplication>().Property(x => x.Amount));
         ConfigureMoney(modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.Amount));
+        ConfigureMoney(modelBuilder.Entity<BankStatementImportBatch>().Property(x => x.DebitTotal));
+        ConfigureMoney(modelBuilder.Entity<BankStatementImportBatch>().Property(x => x.CreditTotal));
+        ConfigureMoney(modelBuilder.Entity<BankStatementTransaction>().Property(x => x.Amount));
+        ConfigureMoney(modelBuilder.Entity<BankTransfer>().Property(x => x.Amount));
+        ConfigureMoney(modelBuilder.Entity<BankReconciliation>().Property(x => x.OpeningBalance));
+        ConfigureMoney(modelBuilder.Entity<BankReconciliation>().Property(x => x.ClearedAmount));
+        ConfigureMoney(modelBuilder.Entity<BankReconciliation>().Property(x => x.Variance));
         ConfigureMoney(modelBuilder.Entity<InventoryItem>().Property(x => x.UnitPrice));
         ConfigureMoney(modelBuilder.Entity<InventoryTransaction>().Property(x => x.QuantityChange));
         ConfigureMoney(modelBuilder.Entity<InventoryTransaction>().Property(x => x.UnitCost));
@@ -189,6 +212,10 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SubledgerPayment>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<SubledgerDocumentWorkflow>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<BankReconciliation>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<BankStatementTransaction>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<BankTransfer>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<BankTransfer>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         ConfigureMoney(modelBuilder.Entity<BankAccount>().Property(x => x.LastReconciledBalance));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.MonthlyBasePay));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.AdditionalWithholding));
@@ -255,6 +282,10 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<BankAccount>().HasIndex(x => new { x.CompanyId, x.LedgerAccountId });
         modelBuilder.Entity<BankReconciliation>().HasIndex(x => new { x.BankAccountId, x.StatementDate }).IsUnique();
         modelBuilder.Entity<BankReconciliationItem>().HasIndex(x => new { x.BankReconciliationId, x.JournalEntryId }).IsUnique();
+        modelBuilder.Entity<BankStatementImportBatch>().HasIndex(x => new { x.CompanyId, x.BankAccountId, x.ContentSha256 }).IsUnique();
+        modelBuilder.Entity<BankStatementTransaction>().HasIndex(x => new { x.CompanyId, x.BankAccountId, x.ExternalId }).IsUnique();
+        modelBuilder.Entity<BankStatementTransaction>().HasIndex(x => new { x.CompanyId, x.BankAccountId, x.Status, x.TransactionDate });
+        modelBuilder.Entity<BankTransfer>().HasIndex(x => new { x.CompanyId, x.Reference }).IsUnique();
         modelBuilder.Entity<TaxRuleSet>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique();
         modelBuilder.Entity<TaxContentPackage>().HasIndex(x => new { x.CompanyId, x.PackageCode, x.Version }).IsUnique();
         modelBuilder.Entity<TaxSourceCapture>().HasIndex(x => new { x.CompanyId, x.CapturedAtUtc });

@@ -50,8 +50,14 @@ public sealed class BusinessWorkspaceService(
         var salesOrders = await dbContext.SalesOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
         var purchaseOrders = await dbContext.PurchaseOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
         var bankAccounts = await dbContext.BankAccounts.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Name).ToListAsync(cancellationToken);
+        var statementTransactions = await dbContext.BankStatementTransactions.AsNoTracking().Where(item => item.CompanyId == company.Id).OrderByDescending(item => item.TransactionDate).ToListAsync(cancellationToken);
+        var importBatches = (await dbContext.BankStatementImportBatches.AsNoTracking().Where(item => item.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(item => item.ImportedAtUtc).ToList();
+        var reconciliations = (await dbContext.BankReconciliations.AsNoTracking().Where(item => item.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(item => item.StatementDate).ToList();
+        var reconciliationIds = reconciliations.Select(item => item.Id).ToArray();
+        var reconciliationItems = reconciliationIds.Length == 0 ? [] : await dbContext.BankReconciliationItems.AsNoTracking().Where(item => reconciliationIds.Contains(item.BankReconciliationId)).ToListAsync(cancellationToken);
+        var bankTransfers = await dbContext.BankTransfers.AsNoTracking().Where(item => item.CompanyId == company.Id).OrderByDescending(item => item.TransferDate).ToListAsync(cancellationToken);
         var bankEntryCandidates = await dbContext.JournalEntries.AsNoTracking()
-            .Where(entry => entry.CompanyId == company.Id && entry.BankAccountId != null && entry.IsPosted)
+            .Where(entry => entry.CompanyId == company.Id && entry.BankAccountId != null && entry.IsPosted && entry.Status == "Posted")
             .OrderBy(entry => entry.PostedOn)
             .ToListAsync(cancellationToken);
         var bankEntryIds = bankEntryCandidates.Select(entry => entry.Id).ToArray();
@@ -196,7 +202,12 @@ public sealed class BusinessWorkspaceService(
                         entry.Description,
                         entry.SourceModule,
                         bankEntryLines.Where(line => line.JournalEntryId == entry.Id && line.AccountId == bankAccounts.Single(bank => bank.Id == entry.BankAccountId!.Value).LedgerAccountId).Sum(line => line.Debit - line.Credit)))
-                    .ToArray()),
+                    .ToArray(),
+                StatementTransactions: statementTransactions.Select(item => new BankStatementTransactionSnapshot(item.Id, item.BankAccountId, item.ImportBatchId, item.ExternalId, item.TransactionDate, item.Amount, item.TransactionType, item.Payee, item.Memo, item.Reference, item.Status, item.MatchedJournalEntryId, item.MatchNote)).ToArray(),
+                ImportBatches: importBatches.Select(item => new BankStatementImportBatchSnapshot(item.Id, item.BankAccountId, item.FileName, item.Format, item.Status, item.ImportedCount, item.DuplicateCount, item.RejectedCount, item.DebitTotal, item.CreditTotal, item.ImportedAtUtc)).ToArray(),
+                Reconciliations: reconciliations.Select(item => new BankReconciliationSnapshot(item.Id, item.BankAccountId, item.StatementDate, item.OpeningBalance, item.ClearedAmount, item.StatementClosingBalance, item.BookBalance, item.Variance, item.Status, item.Notes, item.ReconciledAtUtc, item.ReopenedAtUtc, item.ReopenReason, reconciliationItems.Count(reconciliationItem => reconciliationItem.BankReconciliationId == item.Id))).ToArray(),
+                Transfers: bankTransfers.Select(item => new BankTransferSnapshot(item.Id, item.FromBankAccountId, item.ToBankAccountId, item.TransferDate, item.Amount, item.Reference, item.Memo, item.Status, item.JournalEntryId, item.InboundJournalEntryId, item.ReversalJournalEntryId, item.InboundReversalJournalEntryId, item.ReversalDate, item.ReversalReason)).ToArray(),
+                Adjustments: subledgerAdjustments.Where(item => item.Subledger == "Banking").Select(item => new BankAdjustmentSnapshot(item.Id, item.BankAccountId!.Value, item.AdjustmentDate, item.Amount, item.Reference, item.Reason, item.OffsetAccountNumber, item.Status, item.JournalEntryId, item.ReversalJournalEntryId)).ToArray()),
             Payroll: new PayrollWorkspace(
                 ActiveEmployees: employees.Count(x => x.IsActive),
                 MonthlyGross: employees.Where(x => x.IsActive).Sum(x => x.MonthlyBasePay),

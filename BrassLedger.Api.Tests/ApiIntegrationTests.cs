@@ -203,6 +203,49 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task BankingApi_ImportsStatementsAndReversesTransfersAndAdjustments()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var before = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.NotNull(before);
+        var fromBank = before!.Treasury.BankAccounts.First();
+        var toBank = before.Treasury.BankAccounts.Last();
+
+        var importResponse = await client.PostAsJsonAsync("/api/bank-statements/import", new ImportBankStatementRequest(
+            fromBank.Id, "api-statement.csv", "CSV", "ExternalId,Date,Amount,Payee\nAPI-BANK-1,2026-05-01,15.00,Customer"));
+        Assert.Equal(HttpStatusCode.OK, importResponse.StatusCode);
+        var imported = await importResponse.Content.ReadFromJsonAsync<BankStatementImportResult>();
+        Assert.Equal(1, imported?.ImportedCount);
+
+        var transferResponse = await client.PostAsJsonAsync("/api/bank-transfers", new CreateBankTransferRequest(
+            fromBank.Id, toBank.Id, new DateOnly(2026, 5, 2), 25m, "TR-API-BANK-1", "API transfer"));
+        Assert.Equal(HttpStatusCode.Created, transferResponse.StatusCode);
+        var transfer = await transferResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        Assert.NotNull(transfer?.Id);
+        var reverseTransferResponse = await client.PostAsJsonAsync("/api/bank-transfers/reverse", new ReverseBankTransferRequest(
+            transfer!.Id!.Value, new DateOnly(2026, 5, 3), "API correction"));
+        Assert.Equal(HttpStatusCode.OK, reverseTransferResponse.StatusCode);
+
+        var offsetAccount = before.GeneralLedger.Accounts.First(account => account.Type == "Expense" && !account.IsControlAccount).Number;
+        var adjustmentResponse = await client.PostAsJsonAsync("/api/bank-reconciliation-adjustments", new CreateReconciliationAdjustmentRequest(
+            fromBank.Id, new DateOnly(2026, 5, 4), 5m, offsetAccount, "ADJ-API-BANK-1", "API bank interest"));
+        Assert.Equal(HttpStatusCode.Created, adjustmentResponse.StatusCode);
+        var adjustment = await adjustmentResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        Assert.NotNull(adjustment?.Id);
+        var reverseAdjustmentResponse = await client.PostAsJsonAsync("/api/bank-reconciliation-adjustments/reverse", new ReverseReconciliationAdjustmentRequest(
+            adjustment!.Id!.Value, new DateOnly(2026, 5, 5), "API correction"));
+        Assert.Equal(HttpStatusCode.OK, reverseAdjustmentResponse.StatusCode);
+
+        var after = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.NotNull(after);
+        Assert.Equal(before.Treasury.BankAccounts.Single(bank => bank.Id == fromBank.Id).CurrentBalance, after!.Treasury.BankAccounts.Single(bank => bank.Id == fromBank.Id).CurrentBalance);
+        Assert.Equal(before.Treasury.BankAccounts.Single(bank => bank.Id == toBank.Id).CurrentBalance, after.Treasury.BankAccounts.Single(bank => bank.Id == toBank.Id).CurrentBalance);
+        Assert.Equal("Reversed", after.Treasury.Transfers!.Single(item => item.Id == transfer.Id).Status);
+        Assert.Equal("Reversed", after.Treasury.Adjustments!.Single(item => item.Id == adjustment.Id).Status);
+    }
+
+    [Fact]
     public async Task JournalDraftApi_RequiresApprovalBeforePostingAndPreservesReversalLinks()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();

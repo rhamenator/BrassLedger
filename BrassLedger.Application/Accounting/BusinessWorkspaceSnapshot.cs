@@ -172,7 +172,12 @@ public sealed record TreasuryWorkspace(
     decimal CashOnHand,
     decimal UnreconciledBalance,
     IReadOnlyList<BankAccountSnapshot> BankAccounts,
-    IReadOnlyList<BankReconciliationCandidateSnapshot>? ReconciliationCandidates = null);
+    IReadOnlyList<BankReconciliationCandidateSnapshot>? ReconciliationCandidates = null,
+    IReadOnlyList<BankStatementTransactionSnapshot>? StatementTransactions = null,
+    IReadOnlyList<BankStatementImportBatchSnapshot>? ImportBatches = null,
+    IReadOnlyList<BankReconciliationSnapshot>? Reconciliations = null,
+    IReadOnlyList<BankTransferSnapshot>? Transfers = null,
+    IReadOnlyList<BankAdjustmentSnapshot>? Adjustments = null);
 
 public sealed record BankAccountSnapshot(
     string Name,
@@ -192,6 +197,11 @@ public sealed record BankReconciliationCandidateSnapshot(
     string Description,
     string SourceModule,
     decimal SignedAmount);
+public sealed record BankStatementTransactionSnapshot(Guid Id, Guid BankAccountId, Guid ImportBatchId, string ExternalId, DateOnly TransactionDate, decimal Amount, string TransactionType, string Payee, string Memo, string Reference, string Status, Guid? MatchedJournalEntryId, string MatchNote);
+public sealed record BankStatementImportBatchSnapshot(Guid Id, Guid BankAccountId, string FileName, string Format, string Status, int ImportedCount, int DuplicateCount, int RejectedCount, decimal DebitTotal, decimal CreditTotal, DateTimeOffset ImportedAtUtc);
+public sealed record BankReconciliationSnapshot(Guid Id, Guid BankAccountId, DateOnly StatementDate, decimal OpeningBalance, decimal ClearedAmount, decimal StatementClosingBalance, decimal BookBalance, decimal Variance, string Status, string Notes, DateTimeOffset ReconciledAtUtc, DateTimeOffset? ReopenedAtUtc, string ReopenReason, int ItemCount);
+public sealed record BankTransferSnapshot(Guid Id, Guid FromBankAccountId, Guid ToBankAccountId, DateOnly TransferDate, decimal Amount, string Reference, string Memo, string Status, Guid JournalEntryId, Guid InboundJournalEntryId, Guid? ReversalJournalEntryId, Guid? InboundReversalJournalEntryId, DateOnly? ReversalDate, string ReversalReason);
+public sealed record BankAdjustmentSnapshot(Guid Id, Guid BankAccountId, DateOnly AdjustmentDate, decimal Amount, string Reference, string Description, string OffsetAccountNumber, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId);
 
 public sealed record PayrollWorkspace(
     int ActiveEmployees,
