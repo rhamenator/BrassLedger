@@ -27,6 +27,23 @@ public sealed class LedgerPage
         Assert.Contains("Payroll Clearing", content);
     }
 
+    public async Task ImportQuickBooksInvoiceDraftAsync(string invoiceNumber)
+    {
+        await _session.Page.GetByLabel("QuickBooks data to import").SelectOptionAsync("invoices");
+        await _session.Page.GetByLabel("QuickBooks CSV file").SetInputFilesAsync(new FilePayload
+        {
+            Name = $"{invoiceNumber}.csv",
+            MimeType = "text/csv",
+            Buffer = Encoding.UTF8.GetBytes($"Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Item Description,Quantity,Rate,Income Account\n{invoiceNumber},C-1003,2026-08-10,2026-09-09,75.00,E2E imported service,3,25.00,4000")
+        });
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Validate only" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Validation passed: 1 QuickBooks invoices record(s)");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = $"{invoiceNumber}.csv" })).ToContainTextAsync("Validated");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Import CSV" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Created 1 QuickBooks invoice draft(s)");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = $"{invoiceNumber}.csv" }).First).ToContainTextAsync("DraftsCreated");
+    }
+
     public async Task ImportStatementAndReverseBankingEntriesAsync(string suffix)
     {
         var externalId = $"BANK-E2E-{suffix}";

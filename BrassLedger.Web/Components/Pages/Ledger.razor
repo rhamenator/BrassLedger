@@ -82,15 +82,16 @@ else
 
         <section class="panel">
             <h2>QuickBooks Online interchange</h2>
-            <p class="page-intro">Exchange QuickBooks Online master lists and non-control general journal entries. Imports are validated as a complete batch before anything is saved; invoices, bills, and payments retain their dedicated audited workflows.</p>
+            <p class="page-intro">Exchange QuickBooks Online master lists, non-control general journals, and zero-tax invoices. Invoice imports create drafts for the normal review, approval, and posting workflow. Every import is validated as a complete batch before anything is saved.</p>
             <div class="hero-actions">
                 <a class="action-primary" href="/interchange/quickbooks-online/chart-of-accounts.csv">Chart of accounts CSV</a>
                 <a class="action-secondary" href="/interchange/quickbooks-online/customers.csv">Customers CSV</a>
                 <a class="action-secondary" href="/interchange/quickbooks-online/vendors.csv">Vendors CSV</a>
                 <a class="action-secondary" href="/interchange/quickbooks-online/journal-entries.csv">General journals CSV</a>
+                <a class="action-secondary" href="/interchange/quickbooks-online/invoices.csv">Invoices CSV</a>
             </div>
             <div class="content-grid interchange-import">
-                <div class="field-group"><label class="field-label">Data to import</label><InputSelect aria-label="QuickBooks data to import" class="field-input" @bind-Value="QuickBooksImport.Entity"><option value="chart-of-accounts">Chart of accounts</option><option value="customers">Customers</option><option value="vendors">Vendors</option><option value="journal-entries">General journal entries</option></InputSelect></div>
+                <div class="field-group"><label class="field-label">Data to import</label><InputSelect aria-label="QuickBooks data to import" class="field-input" @bind-Value="QuickBooksImport.Entity"><option value="chart-of-accounts">Chart of accounts</option><option value="customers">Customers</option><option value="vendors">Vendors</option><option value="journal-entries">General journal entries</option><option value="invoices">Zero-tax invoice drafts</option></InputSelect></div>
                 <div class="field-group"><label class="field-label">QuickBooks CSV file</label><InputFile aria-label="QuickBooks CSV file" class="field-input" accept=".csv,text/csv" OnChange="SelectQuickBooksFile" /></div>
                 <div class="field-group import-action"><span class="field-label">Review and import selected file</span><div class="hero-actions"><button class="action-secondary" type="button" disabled="@(QuickBooksImport.File is null)" @onclick="() => ImportQuickBooksAsync(true)">Validate only</button><button class="action-primary" type="button" disabled="@(QuickBooksImport.File is null)" @onclick="() => ImportQuickBooksAsync(false)">Import CSV</button></div></div>
             </div>
@@ -381,7 +382,9 @@ else
             await using var content = QuickBooksImport.File.OpenReadStream(2 * 1024 * 1024);
             var result = await InterchangeService.ImportQuickBooksOnlineCsvAsync(QuickBooksImport.Entity, content, new(dryRun, QuickBooksImport.FileName));
             StatusMessage = result.Succeeded
-                ? dryRun ? $"Validation passed: {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s) are ready to import; no accounting records changed." : $"Imported {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s)."
+                ? dryRun ? $"Validation passed: {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s) are ready to import; no accounting records changed."
+                    : QuickBooksImport.Entity == "invoices" ? $"Created {result.ImportedCount} QuickBooks invoice draft(s) for review, approval, and posting; no balances changed yet."
+                    : $"Imported {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s)."
                 : string.Join(" ", result.Errors);
             InterchangeBatches = await InterchangeService.GetRecentBatchesAsync();
             if (result.Succeeded && !dryRun) { QuickBooksImport.File = null; QuickBooksImport.FileName = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); }

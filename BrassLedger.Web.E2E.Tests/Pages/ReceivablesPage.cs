@@ -26,6 +26,18 @@ public sealed class ReceivablesPage
         Assert.Contains("$12,720.00", content);
     }
 
+    public async Task ApproveAndPostImportedInvoiceAsync(string invoiceNumber)
+    {
+        var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = invoiceNumber });
+        await Assertions.Expect(workflowRow).ToContainTextAsync("Draft");
+        await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Invoice draft approved.");
+        workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = invoiceNumber });
+        await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Approved invoice posted.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = invoiceNumber }).Filter(new() { HasText = "$75.00" })).ToContainTextAsync("$75.00");
+    }
+
     public async Task CreateItemizedInvoiceAsync(string invoiceNumber)
     {
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Add line" }).ClickAsync();

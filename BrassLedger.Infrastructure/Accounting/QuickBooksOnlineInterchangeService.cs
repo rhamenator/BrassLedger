@@ -31,12 +31,15 @@ public sealed class QuickBooksOnlineInterchangeService(
             "vendors" => (await db.Vendors.Where(x => x.CompanyId == companyId).OrderBy(x => x.VendorNumber).ToListAsync(cancellationToken))
                 .Select(x => new[] { x.Name, x.Name, x.Email, x.VendorNumber }),
             "journal-entries" => await ExportJournalEntriesAsync(db, companyId, cancellationToken),
+            "invoices" => await ExportInvoicesAsync(db, companyId, cancellationToken),
             _ => null
         };
         if (rows is null) return null;
 
         var header = normalizedEntity == "journal-entries"
             ? new[] { "Journal No.", "Journal Date", "Reference", "Journal/Description", "Account Name", "Debits", "Credits", "Line Description" }
+            : normalizedEntity == "invoices"
+            ? new[] { "Invoice No.", "Customer", "Invoice Date", "Due Date", "Item Amount", "Item Description", "Quantity", "Rate" }
             : normalizedEntity == "chart-of-accounts"
             ? new[] { "Account Name", "Type", "Detail Type", "Account Number" }
             : new[] { "Display Name", "Company Name", "Email", normalizedEntity == "customers" ? "Customer Number" : "Vendor Number" };
@@ -48,8 +51,10 @@ public sealed class QuickBooksOnlineInterchangeService(
     {
         options ??= new();
         var normalizedEntity = NormalizeEntity(entity);
-        if (normalizedEntity is not ("chart-of-accounts" or "customers" or "vendors" or "journal-entries"))
-            return AccountingInterchangeImportResult.Failure("Supported imports are chart-of-accounts, customers, vendors, and general journal entries.");
+        if (normalizedEntity is not ("chart-of-accounts" or "customers" or "vendors" or "journal-entries" or "invoices"))
+            return AccountingInterchangeImportResult.Failure("Supported imports are chart-of-accounts, customers, vendors, general journal entries, and zero-tax invoices.");
+        if (normalizedEntity == "invoices" && (!HasPermission(BrassLedgerPermissions.SubledgerPrepare) || !HasPermission(BrassLedgerPermissions.ReceivablesManage)))
+            return AccountingInterchangeImportResult.Failure("You are not authorized to prepare accounts-receivable invoice drafts.");
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
@@ -70,12 +75,14 @@ public sealed class QuickBooksOnlineInterchangeService(
             "chart-of-accounts" => await ImportAccountsAsync(db, companyId, rows, options.DryRun, cancellationToken),
             "customers" => await ImportCustomersAsync(db, companyId, rows, options.DryRun, cancellationToken),
             "vendors" => await ImportVendorsAsync(db, companyId, rows, options.DryRun, cancellationToken),
-            _ => await ImportJournalEntriesAsync(db, companyId, rows, options.DryRun, cancellationToken)
+            "journal-entries" => await ImportJournalEntriesAsync(db, companyId, rows, options.DryRun, cancellationToken),
+            _ => await ImportInvoicesAsync(db, companyId, rows, options.DryRun, parsed.ContentSha256, options.FileName, cancellationToken)
         };
         if (!result.Succeeded)
             return await RecordRejectedBatchAsync(db, companyId, normalizedEntity, options, parsed.ContentSha256, rows.Count, result.Errors, cancellationToken);
 
-        var batch = NewBatch(companyId, normalizedEntity, options, parsed.ContentSha256, options.DryRun ? "Validated" : "Imported", rows.Count, result.ImportedCount, [], options.DryRun ? null : committedImportKey);
+        var batchStatus = options.DryRun ? "Validated" : normalizedEntity == "invoices" ? "DraftsCreated" : "Imported";
+        var batch = NewBatch(companyId, normalizedEntity, options, parsed.ContentSha256, batchStatus, rows.Count, result.ImportedCount, [], options.DryRun ? null : committedImportKey);
         db.AccountingInterchangeBatches.Add(batch);
         db.BusinessAuditEntries.Add(new BusinessAuditEntry
         {
@@ -115,6 +122,22 @@ public sealed class QuickBooksOnlineInterchangeService(
             entry.EntryNumber, entry.PostedOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), entry.Reference, entry.Description,
             accountNames.GetValueOrDefault(line.AccountId, string.Empty), line.Debit.ToString("0.00", CultureInfo.InvariantCulture), line.Credit.ToString("0.00", CultureInfo.InvariantCulture), line.Description
         }));
+    }
+
+    private static async Task<IEnumerable<string[]>> ExportInvoicesAsync(BrassLedgerDbContext db, Guid companyId, CancellationToken ct)
+    {
+        var invoices = await db.SalesInvoices.AsNoTracking().Where(invoice => invoice.CompanyId == companyId && invoice.Status != "Voided" && invoice.TaxAmount == 0).OrderBy(invoice => invoice.InvoiceDate).ThenBy(invoice => invoice.InvoiceNumber).ToListAsync(ct);
+        var invoiceIds = invoices.Select(invoice => invoice.Id).ToArray();
+        var lines = await db.SalesInvoiceLines.AsNoTracking().Where(line => invoiceIds.Contains(line.SalesInvoiceId)).OrderBy(line => line.Sequence).ToListAsync(ct);
+        var customerIds = invoices.Select(invoice => invoice.CustomerId).Distinct().ToArray();
+        var customers = await db.Customers.AsNoTracking().Where(customer => customerIds.Contains(customer.Id)).ToDictionaryAsync(customer => customer.Id, customer => customer.Name, ct);
+        return invoices.SelectMany(invoice =>
+        {
+            var invoiceLines = lines.Where(line => line.SalesInvoiceId == invoice.Id).ToArray();
+            if (invoiceLines.Length == 0)
+                return new[] { new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture), "Imported invoice", "1", invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture) } };
+            return invoiceLines.Select(line => new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), RoundCurrency(line.Quantity * line.UnitPrice - line.DiscountAmount).ToString("0.00", CultureInfo.InvariantCulture), line.Description, line.DiscountAmount == 0 ? line.Quantity.ToString("0.####", CultureInfo.InvariantCulture) : string.Empty, line.DiscountAmount == 0 ? line.UnitPrice.ToString("0.00", CultureInfo.InvariantCulture) : string.Empty });
+        });
     }
 
     private async Task<AccountingInterchangeImportResult> ImportJournalEntriesAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, bool dryRun, CancellationToken ct)
@@ -160,6 +183,77 @@ public sealed class QuickBooksOnlineInterchangeService(
         if (dryRun) return AccountingInterchangeImportResult.Success(imports.Count, true, rows.Count);
         var posted = await transactionService.PostJournalEntriesAsync(imports.Select(pair => new PostJournalEntryRequest(pair.Value.Date, BuildJournalImportReference(pair.Key), BuildImportedJournalDescription(pair.Key, pair.Value.Reference, pair.Value.Description), pair.Value.Lines)).ToArray(), ct);
         if (!posted.Succeeded) return AccountingInterchangeImportResult.Failure($"Journal import was not committed: {posted.ErrorMessage}");
+        return AccountingInterchangeImportResult.Success(imports.Count);
+    }
+
+    private async Task<AccountingInterchangeImportResult> ImportInvoicesAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, bool dryRun, string contentSha256, string fileName, CancellationToken ct)
+    {
+        var errors = new List<string>();
+        var customers = await db.Customers.Where(customer => customer.CompanyId == companyId).Select(customer => new { customer.Id, customer.CustomerNumber, customer.Name }).ToListAsync(ct);
+        var revenueAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount && account.Type == AccountType.Revenue).Select(account => new { account.Number, account.Name }).ToListAsync(ct);
+        var imports = new Dictionary<string, (Guid CustomerId, DateOnly InvoiceDate, DateOnly DueDate, List<SalesInvoiceLineRequest> Lines)>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var invoiceNumber = Value(row, "invoice no.", "invoice no", "invoice number");
+            var customerReference = Value(row, "customer", "customer name");
+            var customerMatches = customers.Where(customer => customer.CustomerNumber.Equals(customerReference, StringComparison.OrdinalIgnoreCase) || customer.Name.Equals(customerReference, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var accountReference = Value(row, "income account", "revenue account", "account");
+            if (string.IsNullOrWhiteSpace(accountReference)) accountReference = "4000";
+            var accountMatches = revenueAccounts.Where(account => account.Number.Equals(accountReference, StringComparison.OrdinalIgnoreCase) || account.Name.Equals(accountReference, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var amountText = Value(row, "item amount", "line amount", "amount");
+            var taxText = Value(row, "tax amount", "line tax amount");
+            if (string.IsNullOrWhiteSpace(invoiceNumber) || customerMatches.Length != 1 || accountMatches.Length != 1
+                || !DateOnly.TryParse(Value(row, "invoice date"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var invoiceDate)
+                || !DateOnly.TryParse(Value(row, "due date"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var dueDate)
+                || dueDate < invoiceDate || !decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var itemAmount) || itemAmount <= 0
+                || (!string.IsNullOrWhiteSpace(taxText) && (!decimal.TryParse(taxText, NumberStyles.Number, CultureInfo.InvariantCulture, out var taxAmount) || taxAmount != 0)))
+            {
+                errors.Add($"Row {index + 2}: Invoice No., one existing Customer, Invoice Date, Due Date, positive Item Amount, zero Tax Amount, and one active revenue account are required.");
+                continue;
+            }
+            var quantity = 1m; var rate = itemAmount;
+            var quantityText = Value(row, "quantity"); var rateText = Value(row, "rate", "unit price");
+            if (!string.IsNullOrWhiteSpace(quantityText) || !string.IsNullOrWhiteSpace(rateText))
+            {
+                if (!decimal.TryParse(quantityText, NumberStyles.Number, CultureInfo.InvariantCulture, out quantity) || quantity <= 0
+                    || !decimal.TryParse(rateText, NumberStyles.Number, CultureInfo.InvariantCulture, out rate) || rate < 0
+                    || RoundCurrency(quantity * rate) != RoundCurrency(itemAmount))
+                {
+                    errors.Add($"Row {index + 2}: Quantity multiplied by Rate must equal Item Amount to the cent.");
+                    continue;
+                }
+            }
+            if (!imports.TryGetValue(invoiceNumber, out var invoice))
+            {
+                invoice = (customerMatches[0].Id, invoiceDate, dueDate, []);
+                imports.Add(invoiceNumber, invoice);
+            }
+            else if (invoice.CustomerId != customerMatches[0].Id || invoice.InvoiceDate != invoiceDate || invoice.DueDate != dueDate)
+            {
+                errors.Add($"Row {index + 2}: every line in invoice '{invoiceNumber}' must use the same customer and dates.");
+                continue;
+            }
+            var description = Value(row, "item description", "description");
+            invoice.Lines.Add(new SalesInvoiceLineRequest(string.IsNullOrWhiteSpace(description) ? $"QuickBooks invoice {invoiceNumber}" : description, quantity, rate, 0, 0, accountMatches[0].Number));
+        }
+        if (imports.Count > 100) errors.Add("A QuickBooks invoice batch can contain at most 100 invoices.");
+        var numbers = imports.Keys.ToArray();
+        var postedNumbers = await db.SalesInvoices.Where(invoice => invoice.CompanyId == companyId).Select(invoice => invoice.InvoiceNumber).ToListAsync(ct);
+        var draftNumbers = await db.SubledgerDocumentWorkflows.Where(workflow => workflow.CompanyId == companyId && workflow.DocumentType == "Invoice" && !workflow.IsRecurringTemplate).Select(workflow => workflow.DocumentNumber).ToListAsync(ct);
+        var existingPosted = postedNumbers.Where(existing => numbers.Contains(existing, StringComparer.OrdinalIgnoreCase));
+        var existingDrafts = draftNumbers.Where(existing => numbers.Contains(existing, StringComparer.OrdinalIgnoreCase));
+        errors.AddRange(existingPosted.Concat(existingDrafts).Distinct(StringComparer.OrdinalIgnoreCase).Select(number => $"Invoice '{number}' already exists as a posted invoice or draft."));
+        if (errors.Count > 0) return AccountingInterchangeImportResult.Failure(errors.ToArray());
+        if (dryRun) return AccountingInterchangeImportResult.Success(imports.Count, true, rows.Count);
+        var now = DateTimeOffset.UtcNow; var userId = ResolveUserId(); var safeFileName = Path.GetFileName(fileName);
+        foreach (var (number, invoice) in imports)
+        {
+            var request = new CreateInvoiceRequest(invoice.CustomerId, number, invoice.InvoiceDate, invoice.DueDate, invoice.Lines.Sum(line => line.Quantity * line.UnitPrice), 0, invoice.Lines[0].RevenueAccountNumber, $"Imported from QuickBooks invoice {number}", invoice.Lines);
+            var workflow = new SubledgerDocumentWorkflow { Id = Guid.NewGuid(), CompanyId = companyId, DocumentType = "Invoice", DocumentNumber = number.Trim(), PayloadJson = System.Text.Json.JsonSerializer.Serialize(request), Status = "Draft", CreatedByUserId = userId, CreatedAtUtc = now, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+            db.SubledgerDocumentWorkflows.Add(workflow);
+            db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = userId, Action = "subledger-document.draft.imported", EntityType = nameof(SubledgerDocumentWorkflow), EntityId = workflow.Id, OccurredAtUtc = now, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { provider = "quickbooks-online", safeFileName, contentSha256, workflow.DocumentType, workflow.DocumentNumber, lineCount = invoice.Lines.Count }) });
+        }
         return AccountingInterchangeImportResult.Success(imports.Count);
     }
 
@@ -354,6 +448,11 @@ public sealed class QuickBooksOnlineInterchangeService(
         if (Guid.TryParse(claim, out var id)) return id;
         if (httpContext is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
         return await db.Companies.Select(x => x.Id).FirstAsync(ct);
+    }
+    private bool HasPermission(string permission)
+    {
+        var principal = httpContextAccessor.HttpContext?.User;
+        return principal is null || principal.IsInRole("Administrator") || principal.IsInRole("Owner/CEO") || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission);
     }
     private Guid? ResolveUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
 }

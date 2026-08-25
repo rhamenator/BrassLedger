@@ -425,6 +425,10 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains("\"Account Name\",\"Type\",\"Detail Type\",\"Account Number\"", exportedCsv);
         Assert.Contains("\"Accounts Receivable\",\"Accounts Receivable\",\"Accounts Receivable\",\"1100\"", exportedCsv);
         Assert.Contains("\"Sales Tax Payable\",\"Other Current Liability\",\"Sales tax payable\",\"2100\"", exportedCsv);
+        var invoiceExport = await client.GetStringAsync("/api/interchange/quickbooks-online/invoices.csv");
+        Assert.Contains("\"Invoice No.\",\"Customer\",\"Invoice Date\",\"Due Date\",\"Item Amount\",\"Item Description\",\"Quantity\",\"Rate\"", invoiceExport);
+        Assert.Contains("INV-24021", invoiceExport);
+        Assert.DoesNotContain("INV-24015", invoiceExport);
 
         var token = await client.GetFromJsonAsync<Dictionary<string, string>>("/api/antiforgery/token");
         Assert.NotNull(token);
@@ -487,6 +491,47 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains(batches, batch => batch.Status == "Imported" && !batch.IsDryRun && batch.ImportedCount == 1);
         Assert.Contains(batches, batch => batch.Status == "DuplicateRejected" && batch.DuplicateCount == 2 && batch.RejectedCount == 2 && batch.Rejections.Count == 1);
         Assert.Contains(batches, batch => batch.Status == "Rejected" && batch.FileName == "malformed-customers.csv" && batch.RejectedCount == 1 && batch.ContentSha256.Length == 64);
+
+        var beforeInvoiceImport = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var receivablesBefore = beforeInvoiceImport!.Receivables.OpenBalance;
+        const string invoiceCsv = "Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Item Description,Quantity,Rate,Income Account\r\nQBO-INV-1,C-1003,2026-05-10,2026-06-09,50.00,Imported service,2,25.00,Product Revenue\r\nQBO-INV-1,C-1003,2026-05-10,2026-06-09,25.00,Imported materials,1,25.00,4000";
+        using var invoicePreviewForm = new MultipartFormDataContent();
+        invoicePreviewForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        invoicePreviewForm.Add(new StringContent(invoiceCsv), "file", "quickbooks-invoices.csv");
+        var invoicePreview = await client.PostAsync("/api/interchange/quickbooks-online/invoices?dryRun=true", invoicePreviewForm);
+        Assert.True(invoicePreview.StatusCode == HttpStatusCode.OK, await invoicePreview.Content.ReadAsStringAsync());
+        var afterInvoicePreview = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.DoesNotContain(afterInvoicePreview!.Receivables.Workflows ?? [], workflow => workflow.DocumentNumber == "QBO-INV-1");
+        Assert.Equal(receivablesBefore, afterInvoicePreview.Receivables.OpenBalance);
+
+        using var invoiceImportForm = new MultipartFormDataContent();
+        invoiceImportForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        invoiceImportForm.Add(new StringContent(invoiceCsv), "file", "quickbooks-invoices.csv");
+        var invoiceImport = await client.PostAsync("/api/interchange/quickbooks-online/invoices", invoiceImportForm);
+        Assert.True(invoiceImport.StatusCode == HttpStatusCode.OK, await invoiceImport.Content.ReadAsStringAsync());
+        var afterInvoiceImport = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var importedDraft = Assert.Single(afterInvoiceImport!.Receivables.Workflows ?? [], workflow => workflow.DocumentNumber == "QBO-INV-1");
+        Assert.Equal("Draft", importedDraft.Status);
+        Assert.Equal(receivablesBefore, afterInvoiceImport.Receivables.OpenBalance);
+
+        using var approveRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/subledger-document-workflows/{importedDraft.Id}/approve");
+        approveRequest.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(approveRequest)).StatusCode);
+        using var postRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/subledger-document-workflows/{importedDraft.Id}/post");
+        postRequest.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(postRequest)).StatusCode);
+        var afterInvoicePost = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.Equal(receivablesBefore + 75m, afterInvoicePost!.Receivables.OpenBalance);
+        Assert.Contains(afterInvoicePost.Receivables.Invoices, invoice => invoice.InvoiceNumber == "QBO-INV-1" && invoice.TotalAmount == 75m);
+        using var taxableInvoiceForm = new MultipartFormDataContent();
+        taxableInvoiceForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        taxableInvoiceForm.Add(new StringContent("Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Tax Amount\r\nQBO-TAX-1,C-1003,2026-05-10,2026-06-09,50.00,3.00"), "file", "taxable-quickbooks-invoices.csv");
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/interchange/quickbooks-online/invoices?dryRun=true", taxableInvoiceForm)).StatusCode);
+        var invoiceBatches = await client.GetFromJsonAsync<AccountingInterchangeBatchSnapshot[]>("/api/interchange/batches");
+        Assert.Contains(invoiceBatches!, batch => batch.EntityType == "invoices" && batch.Status == "Validated" && batch.ImportedCount == 1);
+        Assert.Contains(invoiceBatches!, batch => batch.EntityType == "invoices" && batch.Status == "DraftsCreated" && batch.ImportedCount == 1);
+        Assert.Contains(invoiceBatches!, batch => batch.EntityType == "invoices" && batch.Status == "Rejected" && batch.FileName == "taxable-quickbooks-invoices.csv");
+        Assert.DoesNotContain((await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.Receivables.Workflows ?? [], workflow => workflow.DocumentNumber == "QBO-TAX-1");
 
         using var unauthorizedClient = await CreateAuthenticatedClientAsync(isolatedFactory, "operations");
         Assert.Equal(HttpStatusCode.Forbidden, (await unauthorizedClient.GetAsync("/api/interchange/quickbooks-online/chart-of-accounts.csv")).StatusCode);

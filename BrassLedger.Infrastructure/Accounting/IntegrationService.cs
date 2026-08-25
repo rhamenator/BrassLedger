@@ -12,7 +12,7 @@ public sealed class IntegrationService(IDbContextFactory<BrassLedgerDbContext> d
 {
     private static readonly IReadOnlyList<IntegrationProviderSnapshot> Catalog =
     [
-        new("quickbooks-online", "QuickBooks Online", "Accounting", "Operator-run CSV interchange; OAuth/API synchronization is not implemented.", false, "File interchange available", "Chart of accounts, customers, vendors, and non-control general journals via reviewed CSV", false),
+        new("quickbooks-online", "QuickBooks Online", "Accounting", "Operator-run CSV interchange; OAuth/API synchronization is not implemented.", false, "File interchange available", "Chart of accounts, customers, vendors, non-control general journals, and zero-tax invoice draft interchange via reviewed CSV", false),
         new("plaid", "Plaid", "Banking", "Connection profile only; no transaction-feed adapter is deployed.", false),
         new("stripe", "Stripe", "Payments", "Connection profile only; no payment-event adapter is deployed.", false),
         new("square", "Square", "Payments", "Connection profile only; no point-of-sale adapter is deployed.", false),

@@ -229,6 +229,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var catalog = await integrations.GetCatalogAsync();
         var quickBooks = catalog.Single(provider => provider.Code == "quickbooks-online");
         Assert.Equal("File interchange available", quickBooks.ImplementationStatus); Assert.False(quickBooks.LiveSynchronizationAvailable);
+        Assert.Contains("zero-tax invoice draft interchange", quickBooks.SupportedCapabilities, StringComparison.OrdinalIgnoreCase);
         Assert.All(catalog.Where(provider => provider.Code != "quickbooks-online"), provider => Assert.Equal("Profile only", provider.ImplementationStatus));
         var saved = await integrations.SaveConnectionAsync(new SaveIntegrationConnectionRequest(null, "stripe", "Primary Stripe", "{\"mode\":\"test\"}", "{\"apiKey\":\"super-secret\"}", false));
         Assert.True(saved.Succeeded, saved.ErrorMessage);
@@ -243,6 +244,34 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var stored = await ReadScalarAsync(connection, "SELECT CredentialsJson FROM IntegrationConnections WHERE Name = 'Primary Stripe';");
         Assert.DoesNotContain("super-secret", stored);
         Assert.StartsWith("enc::", stored);
+    }
+
+    [Fact]
+    public async Task QuickBooksInvoiceImport_RequiresReceivablesAndDraftPreparationPermissions()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var companyId = await db.Companies.Select(company => company.Id).FirstAsync();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.LedgerManage)
+            ], "test"))
+        };
+        var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
+        await using var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("Invoice No.,Customer,Invoice Date,Due Date,Item Amount\r\nDENIED-1,C-1001,2026-05-10,2026-06-09,50.00"));
+
+        var result = await interchange.ImportQuickBooksOnlineCsvAsync("invoices", csv, new(true, "denied.csv"));
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("not authorized", result.Errors.Single(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.AccountingInterchangeBatches.AnyAsync(batch => batch.CompanyId == companyId && batch.FileName == "denied.csv"));
     }
 
     [Fact]

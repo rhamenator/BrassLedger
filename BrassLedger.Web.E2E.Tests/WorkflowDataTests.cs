@@ -48,6 +48,22 @@ public sealed class WorkflowDataTests
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task QuickBooksInvoiceImport_ValidatesCreatesDraftAndUsesNormalPostingWorkflow(BrowserKind browserKind)
+    {
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync();
+        var invoiceNumber = $"QBO-E2E-{Guid.NewGuid():N}"[..20];
+        var ledger = new LedgerPage(session);
+        await ledger.OpenAsync();
+        await ledger.ImportQuickBooksInvoiceDraftAsync(invoiceNumber);
+        var receivables = new ReceivablesPage(session);
+        await receivables.OpenAsync();
+        await receivables.ApproveAndPostImportedInvoiceAsync(invoiceNumber);
+        await session.AssertNoUiFailuresAsync("QuickBooks invoice import workflow");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task OperationsAndReportingPages_ShowExpectedOperationalArtifacts(BrowserKind browserKind)
     {
         await using var operationsSession = await _fixture.CreateSessionAsync(browserKind);
