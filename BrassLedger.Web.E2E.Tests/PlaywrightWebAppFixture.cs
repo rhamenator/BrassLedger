@@ -226,12 +226,14 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             BrowserKind.Chromium => await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true,
-                ExecutablePath = ResolveChromiumExecutablePath()
+                ExecutablePath = ResolveChromiumExecutablePath(),
+                Args = ["--disable-gpu", "--font-render-hinting=none"]
             }),
             BrowserKind.Edge => await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true,
-                ExecutablePath = ResolveEdgeExecutablePath()
+                ExecutablePath = ResolveEdgeExecutablePath(),
+                Args = ["--disable-gpu", "--font-render-hinting=none"]
             }),
             BrowserKind.Firefox => await Playwright.Firefox.LaunchAsync(new BrowserTypeLaunchOptions
             {

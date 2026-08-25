@@ -30,8 +30,12 @@ public sealed class BusinessWorkspaceService(
         var journalEntries = await dbContext.JournalEntries.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.PostedOn).ThenByDescending(x => x.EntryNumber).Take(20).ToListAsync(cancellationToken);
         var customers = await dbContext.Customers.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.CustomerNumber).ToListAsync(cancellationToken);
         var invoices = await dbContext.SalesInvoices.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.InvoiceDate).ToListAsync(cancellationToken);
+        var invoiceIds = invoices.Select(invoice => invoice.Id).ToArray();
+        var invoiceLines = invoiceIds.Length == 0 ? [] : await dbContext.SalesInvoiceLines.AsNoTracking().Where(line => invoiceIds.Contains(line.SalesInvoiceId)).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
         var vendors = await dbContext.Vendors.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.VendorNumber).ToListAsync(cancellationToken);
         var vendorBills = await dbContext.VendorBills.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.DueDate).ToListAsync(cancellationToken);
+        var vendorBillIds = vendorBills.Select(bill => bill.Id).ToArray();
+        var vendorBillLines = vendorBillIds.Length == 0 ? [] : await dbContext.VendorBillLines.AsNoTracking().Where(line => vendorBillIds.Contains(line.VendorBillId)).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
         var inventoryItems = await dbContext.InventoryItems.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsActive).OrderBy(x => x.Sku).ToListAsync(cancellationToken);
         var salesOrders = await dbContext.SalesOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
         var purchaseOrders = await dbContext.PurchaseOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
@@ -53,6 +57,9 @@ public sealed class BusinessWorkspaceService(
 
         var customerNames = customers.ToDictionary(x => x.Id, x => x.Name);
         var vendorNames = vendors.ToDictionary(x => x.Id, x => x.Name);
+        var accountNumbersById = accounts.ToDictionary(account => account.Id, account => account.Number);
+        var invoiceLineLookup = invoiceLines.ToLookup(line => line.SalesInvoiceId);
+        var vendorBillLineLookup = vendorBillLines.ToLookup(line => line.VendorBillId);
 
         var moduleCounts = BuildModuleCounts(
             accounts.Count + journalEntries.Count,
@@ -119,7 +126,8 @@ public sealed class BusinessWorkspaceService(
                     x.Status,
                     x.TotalAmount,
                     x.BalanceDue,
-                    x.Id)).ToArray()),
+                    x.Id,
+                    invoiceLineLookup[x.Id].Select(line => new InvoiceLineSnapshot(line.Sequence, line.Description, line.Quantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"))).ToArray())).ToArray()),
             Payables: new PayablesWorkspace(
                 OpenBalance: vendorBills.Sum(x => x.BalanceDue),
                 DueThisWeekCount: vendorBills.Count(x => x.DueDate <= DateOnly.FromDateTime(DateTime.Today.AddDays(7)) && x.BalanceDue > 0m),
@@ -132,7 +140,8 @@ public sealed class BusinessWorkspaceService(
                     x.Status,
                     x.TotalAmount,
                     x.BalanceDue,
-                    x.Id)).ToArray()),
+                    x.Id,
+                    vendorBillLineLookup[x.Id].Select(line => new BillLineSnapshot(line.Sequence, line.Description, line.Quantity, line.UnitCost, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.ExpenseAccountId, "Unavailable"))).ToArray())).ToArray()),
             Operations: new OperationsWorkspace(
                 InventoryItemCount: inventoryItems.Count,
                 ReorderAlerts: inventoryItems.Count(x => x.QuantityOnHand <= x.ReorderPoint),

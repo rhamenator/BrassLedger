@@ -1,3 +1,5 @@
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor HttpContextAccessor
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -13,9 +15,23 @@
 
 <body>
     <CascadingAuthenticationState>
-        <Routes />
+        <Routes @rendermode="RoutesRenderMode" />
     </CascadingAuthenticationState>
-    <script src="_framework/blazor.web.js"></script>
+    <script src="_framework/blazor.web.js" autostart="false"></script>
+    <script src="blazor-start.js"></script>
 </body>
 
 </html>
+
+@code {
+    private Microsoft.AspNetCore.Components.IComponentRenderMode? RoutesRenderMode
+    {
+        get
+        {
+            var path = HttpContextAccessor.HttpContext?.Request.Path.Value;
+            return path is not null && (path.StartsWith("/login", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/setup", StringComparison.OrdinalIgnoreCase))
+                ? null
+                : InteractiveServer;
+        }
+    }
+}

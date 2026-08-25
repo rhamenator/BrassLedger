@@ -247,6 +247,20 @@ public sealed class SalesInvoice
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
+public sealed class SalesInvoiceLine
+{
+    public Guid Id { get; set; }
+    public Guid SalesInvoiceId { get; set; }
+    public int Sequence { get; set; }
+    public Guid RevenueAccountId { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal LineTotal { get; set; }
+}
+
 public sealed class Vendor
 {
     public Guid Id { get; set; }
@@ -271,6 +285,20 @@ public sealed class VendorBill
     public decimal TotalAmount { get; set; }
     public decimal BalanceDue { get; set; }
     public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class VendorBillLine
+{
+    public Guid Id { get; set; }
+    public Guid VendorBillId { get; set; }
+    public int Sequence { get; set; }
+    public Guid ExpenseAccountId { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal LineTotal { get; set; }
 }
 
 public sealed class InventoryItem

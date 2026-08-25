@@ -19,10 +19,7 @@ else
                 <p class="eyebrow">Accounts Receivable and CRM</p>
                 <h1>Customers, invoices, and open-balance follow-up.</h1>
             </div>
-            <p class="page-intro">
-                The CRM and receivables concepts are sharing the same customer workspace so we can grow collections,
-                sales history, and account notes without adding module gating.
-            </p>
+            <p class="page-intro">Create itemized invoices, post revenue and sales tax to the ledger, and follow open customer balances.</p>
         </header>
 
         <section class="stats-grid">
@@ -53,10 +50,29 @@ else
                     <div class="field-group"><label class="field-label">Invoice number</label><InputText aria-label="Invoice number" class="field-input" @bind-Value="InvoiceForm.Number" /></div>
                     <div class="field-group"><label class="field-label">Invoice date</label><InputDate aria-label="Invoice date" class="field-input" @bind-Value="InvoiceForm.Date" /></div>
                     <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Invoice due date" class="field-input" @bind-Value="InvoiceForm.DueDate" /></div>
-                    <div class="field-group"><label class="field-label">Subtotal</label><InputNumber aria-label="Invoice subtotal" class="field-input" @bind-Value="InvoiceForm.Subtotal" /></div>
-                    <div class="field-group"><label class="field-label">Tax</label><InputNumber aria-label="Invoice tax" class="field-input" @bind-Value="InvoiceForm.Tax" /></div>
-                    <div class="field-group"><label class="field-label">Revenue account</label><InputSelect aria-label="Invoice revenue account" class="field-input" @bind-Value="InvoiceForm.RevenueAccount"><option value="4000">4000 — Product Revenue</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(x => x.Type == "Revenue")) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
                 </div>
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>Description</th><th>Quantity</th><th>Unit price</th><th>Discount</th><th>Tax</th><th>Revenue account</th><th>Line total</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                        <tbody>
+                            @foreach (var line in InvoiceForm.Lines)
+                            {
+                                <tr @key="line">
+                                    <td><InputText aria-label="Invoice line description" class="field-input" @bind-Value="line.Description" /></td>
+                                    <td><InputNumber aria-label="Invoice line quantity" class="field-input" @bind-Value="line.Quantity" /></td>
+                                    <td><InputNumber aria-label="Invoice line unit price" class="field-input" @bind-Value="line.UnitPrice" /></td>
+                                    <td><InputNumber aria-label="Invoice line discount" class="field-input" @bind-Value="line.Discount" /></td>
+                                    <td><InputNumber aria-label="Invoice line tax" class="field-input" @bind-Value="line.Tax" /></td>
+                                    <td><InputSelect aria-label="Invoice line revenue account" class="field-input" @bind-Value="line.RevenueAccount">@foreach (var account in Workspace.GeneralLedger.Accounts.Where(x => x.Type == "Revenue")) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></td>
+                                    <td>@line.Total.ToString("C")</td>
+                                    <td><button class="action-secondary" type="button" disabled="@(InvoiceForm.Lines.Count == 1)" @onclick="() => RemoveInvoiceLine(line)">Remove</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot><tr><th colspan="6">Invoice total</th><th>@InvoiceForm.Total.ToString("C")</th><th></th></tr></tfoot>
+                    </table>
+                </div>
+                <button class="action-secondary" type="button" @onclick="AddInvoiceLine">Add line</button>
                 <button class="action-primary" type="submit">Post invoice</button>
             </EditForm>
         </section>
@@ -105,6 +121,7 @@ else
                             <th>Invoice</th>
                             <th>Customer</th>
                             <th>Status</th>
+                            <th>Lines</th>
                             <th>Due</th>
                             <th>Balance</th>
                         </tr>
@@ -116,6 +133,7 @@ else
                                 <td>@invoice.InvoiceNumber</td>
                                 <td>@invoice.CustomerName</td>
                                 <td>@invoice.Status</td>
+                                <td>@(invoice.Lines?.Count ?? 0)</td>
                                 <td>@invoice.DueDate.ToString("MMM d, yyyy")</td>
                                 <td>@invoice.BalanceDue.ToString("C")</td>
                             </tr>
@@ -140,10 +158,18 @@ else
 
     private async Task CreateInvoiceAsync()
     {
-        var result = await TransactionService.CreateInvoiceAsync(new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, InvoiceForm.Subtotal, InvoiceForm.Tax, InvoiceForm.RevenueAccount, $"Invoice {InvoiceForm.Number}"));
+        var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount)).ToArray();
+        var result = await TransactionService.CreateInvoiceAsync(new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? "4000", $"Invoice {InvoiceForm.Number}", lines));
         StatusMessage = result.Succeeded ? "Invoice posted." : result.ErrorMessage;
-        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+        if (result.Succeeded)
+        {
+            Workspace = await WorkspaceService.GetWorkspaceAsync();
+            InvoiceForm.Reset();
+        }
     }
+
+    private void AddInvoiceLine() => InvoiceForm.Lines.Add(new InvoiceLineEditor());
+    private void RemoveInvoiceLine(InvoiceLineEditor line) { if (InvoiceForm.Lines.Count > 1) InvoiceForm.Lines.Remove(line); }
 
     private async Task ApplyPaymentAsync()
     {
@@ -152,6 +178,25 @@ else
         if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
 
-    private sealed class InvoiceEditor { public Guid CustomerId { get; set; } public string Number { get; set; } = string.Empty; public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); public decimal Subtotal { get; set; } public decimal Tax { get; set; } public string RevenueAccount { get; set; } = "4000"; }
+    private sealed class InvoiceEditor
+    {
+        public Guid CustomerId { get; set; }
+        public string Number { get; set; } = string.Empty;
+        public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30));
+        public List<InvoiceLineEditor> Lines { get; } = [new()];
+        public decimal Total => Lines.Sum(line => line.Total);
+        public void Reset() { Number = string.Empty; Lines.Clear(); Lines.Add(new InvoiceLineEditor()); }
+    }
+    private sealed class InvoiceLineEditor
+    {
+        public string Description { get; set; } = string.Empty;
+        public decimal Quantity { get; set; } = 1m;
+        public decimal UnitPrice { get; set; }
+        public decimal Discount { get; set; }
+        public decimal Tax { get; set; }
+        public string RevenueAccount { get; set; } = "4000";
+        public decimal Total => decimal.Round(Quantity * UnitPrice - Discount + Tax, 2, MidpointRounding.AwayFromZero);
+    }
     private sealed class PaymentEditor { public Guid InvoiceId { get; set; } public Guid BankId { get; set; } public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; }
 }

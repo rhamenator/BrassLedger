@@ -38,6 +38,8 @@ public sealed class BrassLedgerDbContext(
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<ReportCatalogItem> ReportCatalogItems => Set<ReportCatalogItem>();
     public DbSet<SalesInvoice> SalesInvoices => Set<SalesInvoice>();
+    public DbSet<SalesInvoiceLine> SalesInvoiceLines => Set<SalesInvoiceLine>();
+    public DbSet<VendorBillLine> VendorBillLines => Set<VendorBillLine>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<TaxProfile> TaxProfiles => Set<TaxProfile>();
     public DbSet<TaxRuleSet> TaxRuleSets => Set<TaxRuleSet>();
@@ -72,6 +74,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<GeneralLedgerAccount>().HasKey(x => x.Id);
         modelBuilder.Entity<JournalEntry>().HasKey(x => x.Id);
         modelBuilder.Entity<JournalEntryLine>().HasKey(x => x.Id);
+        modelBuilder.Entity<SalesInvoiceLine>().HasKey(x => x.Id);
+        modelBuilder.Entity<VendorBillLine>().HasKey(x => x.Id);
         modelBuilder.Entity<Customer>().HasKey(x => x.Id);
         modelBuilder.Entity<SalesInvoice>().HasKey(x => x.Id);
         modelBuilder.Entity<Vendor>().HasKey(x => x.Id);
@@ -98,6 +102,11 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<TaxFormRequirement>().HasKey(x => x.Id);
         modelBuilder.Entity<ReportCatalogItem>().HasKey(x => x.Id);
         modelBuilder.Entity<LabelTemplate>().HasKey(x => x.Id);
+
+        modelBuilder.Entity<SalesInvoiceLine>().HasOne<SalesInvoice>().WithMany().HasForeignKey(line => line.SalesInvoiceId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SalesInvoiceLine>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(line => line.RevenueAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VendorBillLine>().HasOne<VendorBill>().WithMany().HasForeignKey(line => line.VendorBillId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<VendorBillLine>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(line => line.ExpenseAccountId).OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<GeneralLedgerAccount>()
             .Property(x => x.Type)
@@ -129,9 +138,19 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<SalesInvoice>().Property(x => x.TaxAmount));
         ConfigureMoney(modelBuilder.Entity<SalesInvoice>().Property(x => x.TotalAmount));
         ConfigureMoney(modelBuilder.Entity<SalesInvoice>().Property(x => x.BalanceDue));
+        ConfigureMoney(modelBuilder.Entity<SalesInvoiceLine>().Property(x => x.Quantity), 18, 4);
+        ConfigureMoney(modelBuilder.Entity<SalesInvoiceLine>().Property(x => x.UnitPrice));
+        ConfigureMoney(modelBuilder.Entity<SalesInvoiceLine>().Property(x => x.DiscountAmount));
+        ConfigureMoney(modelBuilder.Entity<SalesInvoiceLine>().Property(x => x.TaxAmount));
+        ConfigureMoney(modelBuilder.Entity<SalesInvoiceLine>().Property(x => x.LineTotal));
         ConfigureMoney(modelBuilder.Entity<Vendor>().Property(x => x.OpenBalance));
         ConfigureMoney(modelBuilder.Entity<VendorBill>().Property(x => x.TotalAmount));
         ConfigureMoney(modelBuilder.Entity<VendorBill>().Property(x => x.BalanceDue));
+        ConfigureMoney(modelBuilder.Entity<VendorBillLine>().Property(x => x.Quantity), 18, 4);
+        ConfigureMoney(modelBuilder.Entity<VendorBillLine>().Property(x => x.UnitCost));
+        ConfigureMoney(modelBuilder.Entity<VendorBillLine>().Property(x => x.DiscountAmount));
+        ConfigureMoney(modelBuilder.Entity<VendorBillLine>().Property(x => x.TaxAmount));
+        ConfigureMoney(modelBuilder.Entity<VendorBillLine>().Property(x => x.LineTotal));
         ConfigureMoney(modelBuilder.Entity<InventoryItem>().Property(x => x.UnitPrice));
         ConfigureMoney(modelBuilder.Entity<InventoryTransaction>().Property(x => x.QuantityChange));
         ConfigureMoney(modelBuilder.Entity<InventoryTransaction>().Property(x => x.UnitCost));
@@ -192,7 +211,9 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<Customer>().HasIndex(x => new { x.CompanyId, x.CustomerNumber }).IsUnique();
         modelBuilder.Entity<Vendor>().HasIndex(x => new { x.CompanyId, x.VendorNumber }).IsUnique();
         modelBuilder.Entity<SalesInvoice>().HasIndex(x => new { x.CompanyId, x.InvoiceNumber }).IsUnique();
+        modelBuilder.Entity<SalesInvoiceLine>().HasIndex(x => new { x.SalesInvoiceId, x.Sequence }).IsUnique();
         modelBuilder.Entity<VendorBill>().HasIndex(x => new { x.CompanyId, x.BillNumber }).IsUnique();
+        modelBuilder.Entity<VendorBillLine>().HasIndex(x => new { x.VendorBillId, x.Sequence }).IsUnique();
         modelBuilder.Entity<SalesOrder>().HasIndex(x => new { x.CompanyId, x.OrderNumber }).IsUnique();
         modelBuilder.Entity<PurchaseOrder>().HasIndex(x => new { x.CompanyId, x.OrderNumber }).IsUnique();
         modelBuilder.Entity<Employee>().HasIndex(x => new { x.CompanyId, x.EmployeeNumber }).IsUnique();

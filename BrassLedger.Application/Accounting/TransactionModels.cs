@@ -4,8 +4,10 @@ public sealed record JournalLineRequest(string AccountNumber, decimal Debit, dec
 public sealed record PostJournalEntryRequest(DateOnly PostedOn, string Reference, string Description, IReadOnlyList<JournalLineRequest> Lines);
 public sealed record SaveJournalEntryDraftRequest(Guid? Id, DateOnly EntryDate, string Reference, string Description, IReadOnlyList<JournalLineRequest> Lines);
 public sealed record ReverseJournalEntryRequest(Guid JournalEntryId, DateOnly ReversalDate, string Reason);
-public sealed record CreateInvoiceRequest(Guid CustomerId, string InvoiceNumber, DateOnly InvoiceDate, DateOnly DueDate, decimal Subtotal, decimal TaxAmount, string RevenueAccountNumber, string Description);
-public sealed record CreateVendorBillRequest(Guid VendorId, string BillNumber, DateOnly BillDate, DateOnly DueDate, decimal TotalAmount, string ExpenseAccountNumber, string Description);
+public sealed record SalesInvoiceLineRequest(string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, string RevenueAccountNumber);
+public sealed record CreateInvoiceRequest(Guid CustomerId, string InvoiceNumber, DateOnly InvoiceDate, DateOnly DueDate, decimal Subtotal, decimal TaxAmount, string RevenueAccountNumber, string Description, IReadOnlyList<SalesInvoiceLineRequest>? Lines = null);
+public sealed record VendorBillLineRequest(string Description, decimal Quantity, decimal UnitCost, decimal DiscountAmount, decimal TaxAmount, string ExpenseAccountNumber);
+public sealed record CreateVendorBillRequest(Guid VendorId, string BillNumber, DateOnly BillDate, DateOnly DueDate, decimal TotalAmount, string ExpenseAccountNumber, string Description, IReadOnlyList<VendorBillLineRequest>? Lines = null);
 public sealed record ApplyInvoicePaymentRequest(Guid InvoiceId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference);
 public sealed record ApplyBillPaymentRequest(Guid VendorBillId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference);
 public sealed record ReconcileBankAccountRequest(Guid BankAccountId, DateOnly StatementDate, decimal StatementClosingBalance, IReadOnlyList<Guid>? ClearedJournalEntryIds = null);

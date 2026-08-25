@@ -188,30 +188,52 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default)
     {
-        if (request.Subtotal < 0 || request.TaxAmount < 0 || request.DueDate < request.InvoiceDate)
-            return TransactionResult.Failure("Invoice amounts must be non-negative and the due date cannot precede the invoice date.");
+        var requestedLines = request.Lines?.ToArray() ?? [];
+        if (string.IsNullOrWhiteSpace(request.InvoiceNumber) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("An invoice number and description are required.");
+        if (request.DueDate < request.InvoiceDate) return TransactionResult.Failure("The invoice due date cannot precede the invoice date.");
+        if (requestedLines.Length > 0 && requestedLines.Any(line => string.IsNullOrWhiteSpace(line.Description) || line.Quantity <= 0 || line.UnitPrice < 0 || line.DiscountAmount < 0 || line.DiscountAmount > line.Quantity * line.UnitPrice || line.TaxAmount < 0 || string.IsNullOrWhiteSpace(line.RevenueAccountNumber)))
+            return TransactionResult.Failure("Each invoice line requires a description, positive quantity, valid price and discount, non-negative tax, and revenue account.");
+        if (requestedLines.Length == 0 && (request.Subtotal < 0 || request.TaxAmount < 0)) return TransactionResult.Failure("Invoice amounts must be non-negative.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var customer = await db.Customers.SingleOrDefaultAsync(x => x.Id == request.CustomerId && x.CompanyId == companyId, cancellationToken);
         if (customer is null) return TransactionResult.Failure("Customer not found.");
         if (await db.SalesInvoices.AnyAsync(x => x.CompanyId == companyId && x.InvoiceNumber == request.InvoiceNumber.Trim(), cancellationToken)) return TransactionResult.Failure("Invoice number already exists.");
-        var total = request.Subtotal + request.TaxAmount;
+        var revenueNumbers = (requestedLines.Length == 0 ? [request.RevenueAccountNumber] : requestedLines.Select(line => line.RevenueAccountNumber)).Select(number => number?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (revenueNumbers.Any(string.IsNullOrWhiteSpace)) return TransactionResult.Failure("Every invoice line requires a revenue account.");
+        var validRevenueAccountCount = await db.Accounts.CountAsync(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Revenue && !account.IsControlAccount && revenueNumbers.Contains(account.Number), cancellationToken);
+        if (validRevenueAccountCount != revenueNumbers.Length) return TransactionResult.Failure("Every invoice distribution must use an active, non-control revenue account.");
+        var lineAmounts = requestedLines.Select((line, index) => new
+        {
+            Request = line,
+            Sequence = index + 1,
+            NetAmount = RoundCurrency(line.Quantity * line.UnitPrice - line.DiscountAmount),
+            TaxAmount = RoundCurrency(line.TaxAmount)
+        }).ToArray();
+        var subtotal = requestedLines.Length == 0 ? RoundCurrency(request.Subtotal) : lineAmounts.Sum(line => line.NetAmount);
+        var taxAmount = requestedLines.Length == 0 ? RoundCurrency(request.TaxAmount) : lineAmounts.Sum(line => line.TaxAmount);
+        var total = subtotal + taxAmount;
         if (total <= 0) return TransactionResult.Failure("Invoice total must be greater than zero.");
         if (customer.CreditLimit > 0 && customer.OpenBalance + total > customer.CreditLimit)
             return TransactionResult.Failure("Posting this invoice would exceed the customer's credit limit.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var lines = new List<JournalLineRequest>
         {
-            new("1100", total, 0, "Invoice receivable"),
-            new(request.RevenueAccountNumber, 0, request.Subtotal, "Invoice revenue")
+            new("1100", total, 0, "Invoice receivable")
         };
-        if (request.TaxAmount > 0)
-            lines.Add(new JournalLineRequest("2100", 0, request.TaxAmount, "Sales tax payable"));
+        if (requestedLines.Length == 0) lines.Add(new JournalLineRequest(request.RevenueAccountNumber, 0, subtotal, "Invoice revenue"));
+        else lines.AddRange(lineAmounts.GroupBy(line => line.Request.RevenueAccountNumber.Trim(), StringComparer.OrdinalIgnoreCase).Select(group => new JournalLineRequest(group.Key, 0, group.Sum(line => line.NetAmount), "Invoice revenue")));
+        if (taxAmount > 0) lines.Add(new JournalLineRequest("2100", 0, taxAmount, "Sales tax payable"));
         var invoiceId = Guid.NewGuid();
         var posting = await PostAsync(db, companyId, request.InvoiceDate, "Accounts Receivable", request.InvoiceNumber, request.Description, lines, cancellationToken, allowControlAccounts: true, sourceDocumentId: invoiceId, sourceDocumentType: "SalesInvoice");
         if (!posting.Succeeded) return posting;
-        var invoice = new SalesInvoice { Id = invoiceId, CompanyId = companyId, CustomerId = request.CustomerId, InvoiceNumber = request.InvoiceNumber.Trim(), InvoiceDate = request.InvoiceDate, DueDate = request.DueDate, Status = "Open", Subtotal = request.Subtotal, TaxAmount = request.TaxAmount, TotalAmount = total, BalanceDue = total };
+        var invoice = new SalesInvoice { Id = invoiceId, CompanyId = companyId, CustomerId = request.CustomerId, InvoiceNumber = request.InvoiceNumber.Trim(), InvoiceDate = request.InvoiceDate, DueDate = request.DueDate, Status = "Open", Subtotal = subtotal, TaxAmount = taxAmount, TotalAmount = total, BalanceDue = total, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.SalesInvoices.Add(invoice);
+        if (lineAmounts.Length > 0)
+        {
+            var revenueAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && revenueNumbers.Contains(account.Number)).ToDictionaryAsync(account => account.Number, StringComparer.OrdinalIgnoreCase, cancellationToken);
+            db.SalesInvoiceLines.AddRange(lineAmounts.Select(line => new SalesInvoiceLine { Id = Guid.NewGuid(), SalesInvoiceId = invoice.Id, Sequence = line.Sequence, RevenueAccountId = revenueAccounts[line.Request.RevenueAccountNumber.Trim()].Id, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitPrice = line.Request.UnitPrice, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount }));
+        }
         customer.OpenBalance += total;
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException) { return TransactionResult.Failure("Invoice number already exists or was posted concurrently. Refresh and try again."); }
@@ -221,20 +243,48 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> CreateVendorBillAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default)
     {
-        if (request.TotalAmount <= 0 || request.DueDate < request.BillDate) return TransactionResult.Failure("Bill amount must be positive and its due date cannot precede the bill date.");
+        var requestedLines = request.Lines?.ToArray() ?? [];
+        if (string.IsNullOrWhiteSpace(request.BillNumber) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("A bill number and description are required.");
+        if (request.DueDate < request.BillDate) return TransactionResult.Failure("The bill due date cannot precede the bill date.");
+        if (requestedLines.Length > 0 && requestedLines.Any(line => string.IsNullOrWhiteSpace(line.Description) || line.Quantity <= 0 || line.UnitCost < 0 || line.DiscountAmount < 0 || line.DiscountAmount > line.Quantity * line.UnitCost || line.TaxAmount < 0 || string.IsNullOrWhiteSpace(line.ExpenseAccountNumber)))
+            return TransactionResult.Failure("Each bill line requires a description, positive quantity, valid cost and discount, non-negative tax, and expense account.");
+        if (requestedLines.Length == 0 && request.TotalAmount <= 0) return TransactionResult.Failure("Bill amount must be positive.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         if (!await db.Vendors.AnyAsync(x => x.Id == request.VendorId && x.CompanyId == companyId, cancellationToken)) return TransactionResult.Failure("Vendor not found.");
         if (await db.VendorBills.AnyAsync(x => x.CompanyId == companyId && x.BillNumber == request.BillNumber.Trim(), cancellationToken)) return TransactionResult.Failure("Bill number already exists.");
+        var expenseNumbers = (requestedLines.Length == 0 ? [request.ExpenseAccountNumber] : requestedLines.Select(line => line.ExpenseAccountNumber)).Select(number => number?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (expenseNumbers.Any(string.IsNullOrWhiteSpace)) return TransactionResult.Failure("Every bill line requires an expense account.");
+        var validExpenseAccountCount = await db.Accounts.CountAsync(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Expense && !account.IsControlAccount && expenseNumbers.Contains(account.Number), cancellationToken);
+        if (validExpenseAccountCount != expenseNumbers.Length) return TransactionResult.Failure("Every bill distribution must use an active, non-control expense account.");
+        var lineAmounts = requestedLines.Select((line, index) => new
+        {
+            Request = line,
+            Sequence = index + 1,
+            NetAmount = RoundCurrency(line.Quantity * line.UnitCost - line.DiscountAmount),
+            TaxAmount = RoundCurrency(line.TaxAmount)
+        }).ToArray();
+        var total = requestedLines.Length == 0 ? RoundCurrency(request.TotalAmount) : lineAmounts.Sum(line => line.NetAmount + line.TaxAmount);
+        if (total <= 0) return TransactionResult.Failure("Bill total must be positive.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var billId = Guid.NewGuid();
+        IReadOnlyList<JournalLineRequest> postingLines = requestedLines.Length == 0
+            ? [new(request.ExpenseAccountNumber, total, 0, "Bill expense"), new("2000", 0, total, "Accounts payable")]
+            : lineAmounts.GroupBy(line => line.Request.ExpenseAccountNumber.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(group => new JournalLineRequest(group.Key, group.Sum(line => line.NetAmount + line.TaxAmount), 0, "Bill expense and tax"))
+                .Append(new JournalLineRequest("2000", 0, total, "Accounts payable")).ToArray();
         var posting = await PostAsync(db, companyId, request.BillDate, "Accounts Payable", request.BillNumber, request.Description,
-            [new(request.ExpenseAccountNumber, request.TotalAmount, 0, "Bill expense"), new("2000", 0, request.TotalAmount, "Accounts payable")], cancellationToken, allowControlAccounts: true, sourceDocumentId: billId, sourceDocumentType: "VendorBill");
+            postingLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: billId, sourceDocumentType: "VendorBill");
         if (!posting.Succeeded) return posting;
-        var bill = new VendorBill { Id = billId, CompanyId = companyId, VendorId = request.VendorId, BillNumber = request.BillNumber.Trim(), BillDate = request.BillDate, DueDate = request.DueDate, Status = "Open", TotalAmount = request.TotalAmount, BalanceDue = request.TotalAmount };
+        var bill = new VendorBill { Id = billId, CompanyId = companyId, VendorId = request.VendorId, BillNumber = request.BillNumber.Trim(), BillDate = request.BillDate, DueDate = request.DueDate, Status = "Open", TotalAmount = total, BalanceDue = total, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.VendorBills.Add(bill);
+        if (lineAmounts.Length > 0)
+        {
+            var expenseAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && expenseNumbers.Contains(account.Number)).ToDictionaryAsync(account => account.Number, StringComparer.OrdinalIgnoreCase, cancellationToken);
+            db.VendorBillLines.AddRange(lineAmounts.Select(line => new VendorBillLine { Id = Guid.NewGuid(), VendorBillId = bill.Id, Sequence = line.Sequence, ExpenseAccountId = expenseAccounts[line.Request.ExpenseAccountNumber.Trim()].Id, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitCost = line.Request.UnitCost, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount }));
+        }
         var vendor = await db.Vendors.SingleAsync(x => x.Id == request.VendorId, cancellationToken);
-        vendor.OpenBalance += request.TotalAmount;
+        vendor.OpenBalance += total;
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException) { return TransactionResult.Failure("Bill number already exists or was posted concurrently. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);

@@ -19,9 +19,7 @@ else
                 <p class="eyebrow">Accounts Payable</p>
                 <h1>Vendor management and outgoing cash commitments.</h1>
             </div>
-            <p class="page-intro">
-                Payables are running off the same shared ledger model, so bills, treasury, and reporting stay in sync.
-            </p>
+            <p class="page-intro">Enter itemized vendor bills, distribute costs to expense accounts, and manage outstanding obligations.</p>
         </header>
 
         <section class="stats-grid">
@@ -52,9 +50,29 @@ else
                     <div class="field-group"><label class="field-label">Bill number</label><InputText aria-label="Bill number" class="field-input" @bind-Value="BillForm.Number" /></div>
                     <div class="field-group"><label class="field-label">Bill date</label><InputDate aria-label="Bill date" class="field-input" @bind-Value="BillForm.Date" /></div>
                     <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Bill due date" class="field-input" @bind-Value="BillForm.DueDate" /></div>
-                    <div class="field-group"><label class="field-label">Amount</label><InputNumber aria-label="Bill amount" class="field-input" @bind-Value="BillForm.Amount" /></div>
-                    <div class="field-group"><label class="field-label">Expense account</label><InputSelect aria-label="Bill expense account" class="field-input" @bind-Value="BillForm.ExpenseAccount"><option value="5100">5100 — Cost of Goods Sold</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(x => x.Type == "Expense")) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
                 </div>
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>Description</th><th>Quantity</th><th>Unit cost</th><th>Discount</th><th>Tax</th><th>Expense account</th><th>Line total</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                        <tbody>
+                            @foreach (var line in BillForm.Lines)
+                            {
+                                <tr @key="line">
+                                    <td><InputText aria-label="Bill line description" class="field-input" @bind-Value="line.Description" /></td>
+                                    <td><InputNumber aria-label="Bill line quantity" class="field-input" @bind-Value="line.Quantity" /></td>
+                                    <td><InputNumber aria-label="Bill line unit cost" class="field-input" @bind-Value="line.UnitCost" /></td>
+                                    <td><InputNumber aria-label="Bill line discount" class="field-input" @bind-Value="line.Discount" /></td>
+                                    <td><InputNumber aria-label="Bill line tax" class="field-input" @bind-Value="line.Tax" /></td>
+                                    <td><InputSelect aria-label="Bill line expense account" class="field-input" @bind-Value="line.ExpenseAccount">@foreach (var account in Workspace.GeneralLedger.Accounts.Where(x => x.Type == "Expense")) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></td>
+                                    <td>@line.Total.ToString("C")</td>
+                                    <td><button class="action-secondary" type="button" disabled="@(BillForm.Lines.Count == 1)" @onclick="() => RemoveBillLine(line)">Remove</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot><tr><th colspan="6">Bill total</th><th>@BillForm.Total.ToString("C")</th><th></th></tr></tfoot>
+                    </table>
+                </div>
+                <button class="action-secondary" type="button" @onclick="AddBillLine">Add line</button>
                 <button class="action-primary" type="submit">Post bill</button>
             </EditForm>
         </section>
@@ -103,6 +121,7 @@ else
                             <th>Bill</th>
                             <th>Vendor</th>
                             <th>Status</th>
+                            <th>Lines</th>
                             <th>Due</th>
                             <th>Balance</th>
                         </tr>
@@ -114,6 +133,7 @@ else
                                 <td>@bill.BillNumber</td>
                                 <td>@bill.VendorName</td>
                                 <td>@bill.Status</td>
+                                <td>@(bill.Lines?.Count ?? 0)</td>
                                 <td>@bill.DueDate.ToString("MMM d, yyyy")</td>
                                 <td>@bill.BalanceDue.ToString("C")</td>
                             </tr>
@@ -138,10 +158,18 @@ else
 
     private async Task CreateBillAsync()
     {
-        var result = await TransactionService.CreateVendorBillAsync(new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, BillForm.Amount, BillForm.ExpenseAccount, $"Bill {BillForm.Number}"));
+        var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount)).ToArray();
+        var result = await TransactionService.CreateVendorBillAsync(new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? "5100", $"Bill {BillForm.Number}", lines));
         StatusMessage = result.Succeeded ? "Vendor bill posted." : result.ErrorMessage;
-        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+        if (result.Succeeded)
+        {
+            Workspace = await WorkspaceService.GetWorkspaceAsync();
+            BillForm.Reset();
+        }
     }
+
+    private void AddBillLine() => BillForm.Lines.Add(new BillLineEditor());
+    private void RemoveBillLine(BillLineEditor line) { if (BillForm.Lines.Count > 1) BillForm.Lines.Remove(line); }
 
     private async Task ApplyPaymentAsync()
     {
@@ -150,6 +178,25 @@ else
         if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
 
-    private sealed class BillEditor { public Guid VendorId { get; set; } public string Number { get; set; } = string.Empty; public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); public decimal Amount { get; set; } public string ExpenseAccount { get; set; } = "5100"; }
+    private sealed class BillEditor
+    {
+        public Guid VendorId { get; set; }
+        public string Number { get; set; } = string.Empty;
+        public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30));
+        public List<BillLineEditor> Lines { get; } = [new()];
+        public decimal Total => Lines.Sum(line => line.Total);
+        public void Reset() { Number = string.Empty; Lines.Clear(); Lines.Add(new BillLineEditor()); }
+    }
+    private sealed class BillLineEditor
+    {
+        public string Description { get; set; } = string.Empty;
+        public decimal Quantity { get; set; } = 1m;
+        public decimal UnitCost { get; set; }
+        public decimal Discount { get; set; }
+        public decimal Tax { get; set; }
+        public string ExpenseAccount { get; set; } = "5100";
+        public decimal Total => decimal.Round(Quantity * UnitCost - Discount + Tax, 2, MidpointRounding.AwayFromZero);
+    }
     private sealed class PaymentEditor { public Guid BillId { get; set; } public Guid BankId { get; set; } public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; }
 }

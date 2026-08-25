@@ -1,5 +1,6 @@
 using BrassLedger.Application.Accounting;
 using BrassLedger.Application.Taxation;
+using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
@@ -409,6 +410,117 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains(lines, line => line.Number == "1100" && line.Debit == 108m);
         Assert.Contains(lines, line => line.Number == "4000" && line.Credit == 100m);
         Assert.Contains(lines, line => line.Number == "2100" && line.Credit == 8m);
+    }
+
+    [Fact]
+    public async Task TransactionService_PostsAuthoritativeInvoiceLinesAcrossRevenueAccounts()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var setupDb = await dbContextFactory.CreateDbContextAsync())
+        {
+            var companyId = await setupDb.Companies.Select(company => company.Id).SingleAsync();
+            setupDb.Accounts.Add(new GeneralLedgerAccount { Id = Guid.NewGuid(), CompanyId = companyId, Number = "4100", Name = "Service Revenue", Type = AccountType.Revenue, IsActive = true });
+            await setupDb.SaveChangesAsync();
+        }
+
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var customer = (await workspaceService.GetWorkspaceAsync()).Receivables.Customers.First();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var result = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(
+            customer.Id, "INV-LINES-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 9999m, 9999m, "invalid-summary-account", "Itemized invoice",
+            [
+                new SalesInvoiceLineRequest("Equipment", 2m, 50m, 5m, 7m, "4000"),
+                new SalesInvoiceLineRequest("Installation", 3m, 20m, 0m, 3m, "4100")
+            ]));
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == result.Id);
+        Assert.Equal(155m, invoice.Subtotal);
+        Assert.Equal(10m, invoice.TaxAmount);
+        Assert.Equal(165m, invoice.TotalAmount);
+        var documentLines = await db.SalesInvoiceLines.Where(line => line.SalesInvoiceId == invoice.Id).OrderBy(line => line.Sequence).ToListAsync();
+        Assert.Collection(documentLines,
+            line => { Assert.Equal(102m, line.LineTotal); Assert.Equal(5m, line.DiscountAmount); },
+            line => Assert.Equal(63m, line.LineTotal));
+        var postings = await (from line in db.JournalEntryLines
+                              join entry in db.JournalEntries on line.JournalEntryId equals entry.Id
+                              join account in db.Accounts on line.AccountId equals account.Id
+                              where entry.SourceDocumentId == invoice.Id
+                              select new { account.Number, line.Debit, line.Credit }).ToListAsync();
+        Assert.Contains(postings, line => line.Number == "1100" && line.Debit == 165m);
+        Assert.Contains(postings, line => line.Number == "4000" && line.Credit == 95m);
+        Assert.Contains(postings, line => line.Number == "4100" && line.Credit == 60m);
+        Assert.Contains(postings, line => line.Number == "2100" && line.Credit == 10m);
+        Assert.Equal(postings.Sum(line => line.Debit), postings.Sum(line => line.Credit));
+        var snapshot = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(2, snapshot.Receivables.Invoices.Single(item => item.Id == invoice.Id).Lines?.Count);
+    }
+
+    [Fact]
+    public async Task TransactionService_PostsAuthoritativeBillLinesAcrossExpenseAccounts()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var setupDb = await dbContextFactory.CreateDbContextAsync())
+        {
+            var companyId = await setupDb.Companies.Select(company => company.Id).SingleAsync();
+            setupDb.Accounts.Add(new GeneralLedgerAccount { Id = Guid.NewGuid(), CompanyId = companyId, Number = "6200", Name = "Office Expense", Type = AccountType.Expense, IsActive = true });
+            await setupDb.SaveChangesAsync();
+        }
+
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var vendor = (await workspaceService.GetWorkspaceAsync()).Payables.Vendors.First();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var result = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(
+            vendor.Id, "B-LINES-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 9999m, "invalid-summary-account", "Itemized bill",
+            [
+                new VendorBillLineRequest("Materials", 2m, 25m, 5m, 3m, "5100"),
+                new VendorBillLineRequest("Supplies", 1m, 40m, 0m, 2m, "6200")
+            ]));
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        var bill = await db.VendorBills.SingleAsync(item => item.Id == result.Id);
+        Assert.Equal(90m, bill.TotalAmount);
+        var documentLines = await db.VendorBillLines.Where(line => line.VendorBillId == bill.Id).OrderBy(line => line.Sequence).ToListAsync();
+        Assert.Collection(documentLines, line => Assert.Equal(48m, line.LineTotal), line => Assert.Equal(42m, line.LineTotal));
+        var postings = await (from line in db.JournalEntryLines
+                              join entry in db.JournalEntries on line.JournalEntryId equals entry.Id
+                              join account in db.Accounts on line.AccountId equals account.Id
+                              where entry.SourceDocumentId == bill.Id
+                              select new { account.Number, line.Debit, line.Credit }).ToListAsync();
+        Assert.Contains(postings, line => line.Number == "5100" && line.Debit == 48m);
+        Assert.Contains(postings, line => line.Number == "6200" && line.Debit == 42m);
+        Assert.Contains(postings, line => line.Number == "2000" && line.Credit == 90m);
+        Assert.Equal(postings.Sum(line => line.Debit), postings.Sum(line => line.Credit));
+        var snapshot = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(2, snapshot.Payables.Bills.Single(item => item.Id == bill.Id).Lines?.Count);
+    }
+
+    [Fact]
+    public async Task TransactionService_RejectsInvalidDocumentLinesWithoutPosting()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+
+        var result = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(
+            workspace.Receivables.Customers.First().Id, "INV-BAD-LINE", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 0m, 0m, "4000", "Invalid line",
+            [new SalesInvoiceLineRequest("Over-discounted", 1m, 10m, 11m, 0m, "4000")]));
+
+        Assert.False(result.Succeeded);
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        Assert.False(await db.SalesInvoices.AnyAsync(invoice => invoice.InvoiceNumber == "INV-BAD-LINE"));
+        Assert.False(await db.JournalEntries.AnyAsync(entry => entry.Reference == "INV-BAD-LINE"));
     }
 
     [Fact]

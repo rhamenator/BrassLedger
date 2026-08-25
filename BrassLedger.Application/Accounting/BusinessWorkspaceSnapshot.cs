@@ -92,7 +92,10 @@ public sealed record InvoiceSnapshot(
     string Status,
     decimal TotalAmount,
     decimal BalanceDue,
-    Guid Id = default);
+    Guid Id = default,
+    IReadOnlyList<InvoiceLineSnapshot>? Lines = null);
+
+public sealed record InvoiceLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber);
 
 public sealed record PayablesWorkspace(
     decimal OpenBalance,
@@ -116,7 +119,10 @@ public sealed record BillSnapshot(
     string Status,
     decimal TotalAmount,
     decimal BalanceDue,
-    Guid Id = default);
+    Guid Id = default,
+    IReadOnlyList<BillLineSnapshot>? Lines = null);
+
+public sealed record BillLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitCost, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string ExpenseAccountNumber);
 
 public sealed record OperationsWorkspace(
     int InventoryItemCount,
