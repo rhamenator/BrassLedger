@@ -298,6 +298,73 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task MichiganSourceCapture_SeparatesStateDetroitAndPendingCityRules()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/mi/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var state = root.GetProperty("stateWithholding");
+        var cities = root.GetProperty("localJurisdictions").EnumerateArray().ToArray();
+        var detroit = Assert.Single(cities, item => item.GetProperty("code").GetString() == "MI-DETROIT");
+
+        Assert.Equal(0.0425m, state.GetProperty("rate").GetDecimal());
+        Assert.Equal(5900, state.GetProperty("annualPersonalAndDependencyExemption").GetInt32());
+        Assert.Equal(6, state.GetProperty("reciprocalStates").GetArrayLength());
+        Assert.Equal(24, cities.Length);
+        Assert.Equal(24, cities.Select(item => item.GetProperty("jurisdictionId").GetString()).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(23, cities.Count(item => item.GetProperty("rateCaptureStatus").GetString() == "PendingOfficialLocalPublication"));
+        Assert.Equal("Exact2026Publication", detroit.GetProperty("rateCaptureStatus").GetString());
+        Assert.Equal(0.024m, detroit.GetProperty("residentRate").GetDecimal());
+        Assert.Equal(0.012m, detroit.GetProperty("nonresidentRate").GetDecimal());
+        Assert.Equal(600, detroit.GetProperty("annualExemption").GetInt32());
+        Assert.Equal(3.97m, detroit.GetProperty("officialExample").GetProperty("withholding").GetDecimal());
+        Assert.True(root.GetProperty("localSelectionModel").GetProperty("multipleCityWithholdingRequired").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("rawSourcesChecksummed").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task OhioSourceCapture_PreservesMidyearTablesAndSeparateLocalSelectionModels()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/oh/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var versions = root.GetProperty("stateWithholdingVersions").EnumerateArray().ToArray();
+        var former = versions[0];
+        var current = versions[1];
+
+        Assert.Equal(2, versions.Length);
+        Assert.Equal("2026-01-01", former.GetProperty("effectiveOn").GetString());
+        Assert.Equal("2026-07-31", former.GetProperty("effectiveThrough").GetString());
+        Assert.Equal("2026-08-01", current.GetProperty("effectiveOn").GetString());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, current.GetProperty("effectiveThrough").ValueKind);
+        Assert.All(versions, version => Assert.Equal(5, version.GetProperty("tables").GetArrayLength()));
+        Assert.All(versions.SelectMany(version => version.GetProperty("tables").EnumerateArray()), table => Assert.Equal(3, table.GetProperty("brackets").GetArrayLength()));
+
+        var formerWeekly = former.GetProperty("tables")[0];
+        var currentWeekly = current.GetProperty("tables")[0];
+        var currentMonthlyTop = current.GetProperty("tables")[3].GetProperty("brackets")[2];
+        Assert.Equal(0.01775m, formerWeekly.GetProperty("brackets")[0].GetProperty("rate").GetDecimal());
+        Assert.Equal(0.03640m, formerWeekly.GetProperty("brackets")[2].GetProperty("rate").GetDecimal());
+        Assert.Equal(0.01600m, currentWeekly.GetProperty("brackets")[0].GetProperty("rate").GetDecimal());
+        Assert.Equal(8.02m, currentWeekly.GetProperty("brackets")[1].GetProperty("baseTax").GetDecimal());
+        Assert.Equal(50.54m, currentWeekly.GetProperty("brackets")[2].GetProperty("baseTax").GetDecimal());
+        Assert.Equal(218.99m, currentMonthlyTop.GetProperty("baseTax").GetDecimal());
+        Assert.Equal(0.03400m, currentMonthlyTop.GetProperty("rate").GetDecimal());
+
+        var school = root.GetProperty("schoolDistrictWithholding");
+        var municipal = root.GetProperty("municipalWithholding");
+        Assert.Equal("employeeResidenceAddress", school.GetProperty("selectionBasis").GetString());
+        Assert.Contains("exemption", school.GetProperty("traditionalTaxBase").GetString()!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("without personal-exemption", school.GetProperty("earnedIncomeTaxBase").GetString()!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(20, municipal.GetProperty("generalTransientWorkThresholdDays").GetInt32());
+        Assert.Equal(12, municipal.GetProperty("petroleumRefineryThresholdDays").GetInt32());
+        Assert.False(root.GetProperty("review").GetProperty("schoolDistrictRatesTranscribed").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("municipalRatesTranscribed").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();

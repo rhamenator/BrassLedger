@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-mi",
+  "capturedAtUtc": "2026-08-25T06:10:00Z",
+  "effectiveOn": "2026-01-01",
+  "sources": [
+    {
+      "url": "https://www.michigan.gov/taxes/-/media/Project/Websites/taxes/Forms/SUW/TY2026/446_Withholding-Guide_2026.pdf",
+      "title": "2026 Michigan Income Tax Withholding Guide, Form 446",
+      "revision": "02-26",
+      "pages": 5,
+      "rawCaptureStatus": "Official page rendered; origin rejected direct byte retrieval with HTTP 403, so checksum is pending"
+    },
+    {
+      "url": "https://www.michigan.gov/taxes/-/media/Project/Websites/taxes/Forms/City-Withholding/TY2026/5469_ty2026.pdf",
+      "title": "2026 City of Detroit Income Tax Withholding Guide, Form 5469",
+      "revision": "05-25",
+      "pages": 4,
+      "rawCaptureStatus": "Official page rendered; origin rejected direct byte retrieval with HTTP 403, so checksum is pending"
+    },
+    {
+      "url": "https://www.michigan.gov/taxes/citytax/what-cities-impose-an-income-tax",
+      "title": "Michigan cities imposing income taxes"
+    }
+  ],
+  "stateWithholding": {
+    "method": "periodic-exemption-deduction-flat-rate",
+    "rate": 0.0425,
+    "annualPersonalAndDependencyExemption": 5900,
+    "regularPayrollFormula": "Subtract the payroll-period share of annual MI-W4 personal and dependency exemptions from compensation, do not reduce below zero, then multiply by 4.25%.",
+    "separatelyPaidBonusFormula": "Multiply the entire separately paid bonus or other supplemental compensation by 4.25% without an exemption adjustment.",
+    "forms": ["MI-W4", "MI-W4P"],
+    "invalidOrMissingMiW4": "Use a prior valid MI-W4 if one remains effective; otherwise withhold from total compensation using zero exemptions.",
+    "certificateSubmissionTriggers": ["Ten or more exemptions", "Employee claims compensation is exempt"],
+    "reciprocalStates": ["IL", "IN", "KY", "MN", "OH", "WI"],
+    "residencyAndWorkRules": [
+      "Withhold Michigan tax for employees working in Michigan unless a reciprocal-state exemption applies.",
+      "A Michigan employer assigning a Michigan resident temporarily outside Michigan continues Michigan withholding.",
+      "A reciprocal-state resident working in Michigan is exempt when supported by the employer's retained nonresidency certification."
+    ],
+    "otherBranches": {
+      "taxablePensionAndRetirement": "Apply 4.25% after the MI-W4P exemption allowance; without MI-W4P apply 4.25% to the entire taxable distribution.",
+      "nonresidentReportableGamblingWinnings": "Apply 4.25%.",
+      "pensionAnnualSubtractionSingleOrMarriedSeparate": 67610,
+      "pensionAnnualSubtractionJoint": 135220,
+      "pensionRuleRequiresBirthYearSourceAndPublicSafetyClassification": true
+    }
+  },
+  "localSelectionModel": {
+    "form": "DW-4 / Form 5527 or the corresponding locally administered city certificate",
+    "requiredCapabilities": ["Residence city", "Up to two work cities", "Percent of compensation earned in each work city", "Personal and dependency exemptions", "Resident credit interaction between taxing cities"],
+    "predominantWorkCityRule": "For Detroit nonresidents, the taxable work city must represent the greatest percentage earned among Michigan taxing cities other than the residence city and must be at least 25%.",
+    "multipleCityWithholdingRequired": true
+  },
+  "localJurisdictions": [
+    { "jurisdictionId": "jurisdiction-us-mi-albion", "code": "MI-ALBION", "name": "Albion", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-battle-creek", "code": "MI-BATTLE-CREEK", "name": "Battle Creek", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-benton-harbor", "code": "MI-BENTON-HARBOR", "name": "Benton Harbor", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-big-rapids", "code": "MI-BIG-RAPIDS", "name": "Big Rapids", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    {
+      "jurisdictionId": "jurisdiction-us-mi-detroit", "code": "MI-DETROIT", "name": "Detroit", "type": "City", "administration": "MichiganDepartmentOfTreasury", "rateCaptureStatus": "Exact2026Publication",
+      "residentRate": 0.024, "nonresidentRate": 0.012, "annualExemption": 600,
+      "periodExemption": { "Daily": 1.64, "Weekly": 11.54, "Biweekly": 23.08, "Semimonthly": 25.00, "Monthly": 50.00 },
+      "residentApplicability": "All compensation regardless of work location.",
+      "nonresidentApplicability": "Detroit-allocated compensation only, and only when Detroit is the predominant place of employment.",
+      "missingCertificateRule": "Apply resident rate to all compensation with zero exemptions.",
+      "supplementalRule": "Apply the applicable resident or nonresident rate without exemptions.",
+      "residentOtherTaxingCityCreditFormula": "Detroit resident withholding rate equals 2.4% minus the other work city's nonresident rate; withhold separately for both cities.",
+      "officialExample": { "frequency": "Weekly", "resident": true, "grossWages": 200, "exemptions": 3, "taxableWages": 165.38, "withholding": 3.97 }
+    },
+    { "jurisdictionId": "jurisdiction-us-mi-east-lansing", "code": "MI-EAST-LANSING", "name": "East Lansing", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-flint", "code": "MI-FLINT", "name": "Flint", "type": "City", "administration": "LocalThrough2026WithStateTransitionFor2027", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-grand-rapids", "code": "MI-GRAND-RAPIDS", "name": "Grand Rapids", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-grayling", "code": "MI-GRAYLING", "name": "Grayling", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-hamtramck", "code": "MI-HAMTRAMCK", "name": "Hamtramck", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-highland-park", "code": "MI-HIGHLAND-PARK", "name": "Highland Park", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-hudson", "code": "MI-HUDSON", "name": "Hudson", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-ionia", "code": "MI-IONIA", "name": "Ionia", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-jackson", "code": "MI-JACKSON", "name": "Jackson", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-lansing", "code": "MI-LANSING", "name": "Lansing", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-lapeer", "code": "MI-LAPEER", "name": "Lapeer", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-muskegon", "code": "MI-MUSKEGON", "name": "Muskegon", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-muskegon-heights", "code": "MI-MUSKEGON-HEIGHTS", "name": "Muskegon Heights", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-pontiac", "code": "MI-PONTIAC", "name": "Pontiac", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-port-huron", "code": "MI-PORT-HURON", "name": "Port Huron", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-portland", "code": "MI-PORTLAND", "name": "Portland", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-saginaw", "code": "MI-SAGINAW", "name": "Saginaw", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-springfield", "code": "MI-SPRINGFIELD", "name": "Springfield", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" },
+    { "jurisdictionId": "jurisdiction-us-mi-walker", "code": "MI-WALKER", "name": "Walker", "type": "City", "administration": "Local", "rateCaptureStatus": "PendingOfficialLocalPublication" }
+  ],
+  "sharedLocalRelationship": { "type": "ContainedBy", "targetJurisdictionId": "jurisdiction-us-mi", "validFrom": "2026-01-01", "validThrough": null },
+  "captureWarnings": [
+    "The State of Michigan identifies 24 taxing cities but administers only Detroit during 2026; each of the other 23 cities requires its own current official rate, form, filing, and boundary capture.",
+    "Flint administration transfers to the Michigan Department of Treasury on January 1, 2027 for 2026 and future tax-year returns; this does not make Treasury the 2026 payroll withholding administrator.",
+    "Raw PDF checksums are pending because direct retrieval returned HTTP 403 during this capture."
+  ],
+  "review": {
+    "stateFormulaTranscribed": true,
+    "detroitFormulaTranscribed": true,
+    "detroitOfficialExampleTranscribed": true,
+    "allLocalRatesTranscribed": false,
+    "rawSourcesChecksummed": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Capture current official publications for the remaining 23 cities, verify state and Detroit rounding, implement multi-city allocation and resident credits, and add executable tests before activation."
+  }
+}
