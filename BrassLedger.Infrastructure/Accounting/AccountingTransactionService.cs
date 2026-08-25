@@ -1081,13 +1081,17 @@ public sealed class AccountingTransactionService(
             return TransactionResult.Failure("Payroll run reference already exists.");
         var estimate = await CalculateEmployeePayrollAsync(db, companyId, expandedRequest, cancellationToken);
         if (estimate is null) return TransactionResult.Failure("Each payroll employee must be active and have applicable effective Federal or work-state tax profiles.");
+        var calculatedLiabilityAccounts = estimate.Employees.SelectMany(employee => employee.Deductions ?? []).Select(deduction => NormalizeLiabilityAccountNumber(deduction.LiabilityAccountNumber)).Append("2200").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (await db.Accounts.CountAsync(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Liability && calculatedLiabilityAccounts.Contains(account.Number), cancellationToken) != calculatedLiabilityAccounts.Length)
+            return TransactionResult.Failure("Every configured payroll deduction plan must use an active liability account in this company.");
         var runEmployees = await db.Employees.Where(employee => employee.CompanyId == companyId && estimate.Employees.Select(line => line.EmployeeId).Contains(employee.Id)).ToDictionaryAsync(employee => employee.Id, cancellationToken);
         foreach (var estimateLine in estimate.Employees)
         {
-            var input = expandedRequest.Employees.Single(candidate => candidate.EmployeeId == estimateLine.EmployeeId);
-            var deductions = ResolvePayrollDeductions(input, runEmployees[estimateLine.EmployeeId]);
-            if (RoundCurrency(deductions.Where(deduction => deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount)) != estimateLine.PreTaxDeductions || RoundCurrency(deductions.Where(deduction => !deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount)) != estimateLine.PostTaxDeductions)
+            var deductions = estimateLine.Deductions ?? [];
+            if (deductions.Any(deduction => deduction.LimitApplied && deduction.PayrollDeductionPlanId is null))
                 return TransactionResult.Failure($"Payroll deductions for {estimateLine.EmployeeName} exceed available gross or net pay. Reduce them before saving the draft.");
+            if (RoundCurrency(deductions.Where(deduction => deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount)) != estimateLine.PreTaxDeductions || RoundCurrency(deductions.Where(deduction => !deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount)) != estimateLine.PostTaxDeductions)
+                return TransactionResult.Failure($"Calculated deductions for {estimateLine.EmployeeName} do not reconcile to the payroll estimate.");
         }
         var bank = await db.BankAccounts.SingleOrDefaultAsync(account => account.Id == request.BankAccountId && account.CompanyId == companyId, cancellationToken);
         if (bank is null) return TransactionResult.Failure("Payroll funding account not found.");
@@ -1104,8 +1108,8 @@ public sealed class AccountingTransactionService(
             db.PayrollRunEmployeeLines.Add(line);
             var earnings = input.Earnings is { Count: > 0 } ? input.Earnings : [new PayrollEarningInput("REGULAR", "Regular", 0, 0, estimateLine.GrossPay, true, null, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict)];
             db.PayrollEarningLines.AddRange(earnings.Select((earning, index) => new PayrollEarningLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, PayrollTimeEntryId = earning.SourceTimeEntryId, Sequence = index + 1, EarningCode = earning.EarningCode.Trim(), EarningType = earning.EarningType.Trim(), Hours = earning.Hours, Rate = earning.Rate, Amount = RoundCurrency(earning.Amount), IsTaxable = earning.IsTaxable, WorkedOn = earning.WorkedOn, WorkState = string.IsNullOrWhiteSpace(earning.WorkState) ? employee.State : earning.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(earning.WorkCounty) ? employee.WorkCounty : earning.WorkCounty.Trim(), WorkCity = string.IsNullOrWhiteSpace(earning.WorkCity) ? employee.WorkCity : earning.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(earning.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : earning.WorkSchoolDistrict.Trim() }));
-            var deductions = ResolvePayrollDeductions(input, employee);
-            db.PayrollDeductionLines.AddRange(deductions.Select((deduction, index) => new PayrollDeductionLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, DeductionCode = deduction.DeductionCode.Trim(), DeductionType = deduction.DeductionType.Trim(), EmployeeAmount = RoundCurrency(deduction.EmployeeAmount), EmployerAmount = RoundCurrency(deduction.EmployerAmount), IsPreTax = deduction.IsPreTax, ExemptFromFederalIncomeTax = deduction.ExemptFromFederalIncomeTax, ExemptFromFica = deduction.ExemptFromFica, ExemptFromFuta = deduction.ExemptFromFuta, LiabilityAccountNumber = NormalizeLiabilityAccountNumber(deduction.LiabilityAccountNumber) }));
+            var deductions = estimateLine.Deductions ?? [];
+            db.PayrollDeductionLines.AddRange(deductions.Select((deduction, index) => new PayrollDeductionLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, PayrollDeductionPlanId = deduction.PayrollDeductionPlanId, EmployeePayrollDeductionElectionId = deduction.EmployeePayrollDeductionElectionId, DeductionCode = deduction.DeductionCode.Trim(), DeductionType = deduction.DeductionType.Trim(), EmployeeAmount = RoundCurrency(deduction.EmployeeAmount), RequestedEmployeeAmount = RoundCurrency(deduction.RequestedEmployeeAmount ?? deduction.EmployeeAmount), EmployerAmount = RoundCurrency(deduction.EmployerAmount), IsPreTax = deduction.IsPreTax, ExemptFromFederalIncomeTax = deduction.ExemptFromFederalIncomeTax, ExemptFromFica = deduction.ExemptFromFica, ExemptFromFuta = deduction.ExemptFromFuta, LiabilityAccountNumber = NormalizeLiabilityAccountNumber(deduction.LiabilityAccountNumber), LimitApplied = deduction.LimitApplied, LimitRuleCode = deduction.LimitRuleCode, CalculationTraceJson = deduction.CalculationTraceJson }));
             db.PayrollTaxLines.AddRange((estimateLine.Taxes ?? []).Select((tax, index) => new PayrollTaxLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, ObligationCode = tax.ObligationCode, JurisdictionCode = tax.JurisdictionCode, JurisdictionName = tax.JurisdictionName, TaxType = tax.TaxType, TaxableWages = tax.TaxableWages, YearToDateTaxableWagesBefore = tax.YearToDateTaxableWagesBefore, EmployeeAmount = tax.EmployeeAmount, EmployerAmount = tax.EmployerAmount, TaxRuleSetId = tax.TaxRuleSetId, TaxContentPackageId = tax.TaxContentPackageId, ContentVersion = tax.ContentVersion, Source = tax.Source, CalculationTraceJson = tax.CalculationTraceJson }));
         }
         foreach (var timecard in expansion.Timecards)
@@ -1186,7 +1190,7 @@ public sealed class AccountingTransactionService(
         {
             var employee = employees[line.EmployeeId];
             priorByEmployee.TryGetValue(line.EmployeeId, out var prior);
-            var directDeposit = employee.DirectDepositEnabled && !string.IsNullOrWhiteSpace(employee.BankRoutingNumber) && !string.IsNullOrWhiteSpace(employee.BankAccountNumber) && !string.IsNullOrWhiteSpace(employee.BankAccountType);
+            var directDeposit = employee.DirectDepositEnabled && employee.DirectDepositAuthorizationOn <= run.PayDate && !string.IsNullOrWhiteSpace(employee.DirectDepositAuthorizationReference) && !string.IsNullOrWhiteSpace(employee.BankRoutingNumber) && !string.IsNullOrWhiteSpace(employee.BankAccountNumber) && !string.IsNullOrWhiteSpace(employee.BankAccountType);
             var lastFour = directDeposit ? employee.BankAccountNumber[^Math.Min(4, employee.BankAccountNumber.Length)..] : string.Empty;
             db.PayrollEmployeePayments.Add(new PayrollEmployeePayment
             {
@@ -1357,6 +1361,7 @@ public sealed class AccountingTransactionService(
         if (await IsInCompletedReconciliationAsync(db, run.JournalEntryId.Value, cancellationToken)) return TransactionResult.Failure("Reopen the bank reconciliation before reversing this payroll run.");
         var liabilities = await db.PayrollLiabilities.Where(liability => liability.CompanyId == companyId && liability.PayrollRunId == run.Id).ToListAsync(cancellationToken);
         var employeePayments = await db.PayrollEmployeePayments.Where(payment => payment.CompanyId == companyId && payment.PayrollRunId == run.Id).ToListAsync(cancellationToken);
+        var paymentFiles = await db.PayrollPaymentFiles.Where(file => file.CompanyId == companyId && file.PayrollRunId == run.Id && file.Status != "Voided").ToListAsync(cancellationToken);
         if (liabilities.Any(liability => liability.OutstandingAmount != liability.OriginalAmount)) return TransactionResult.Failure("Reverse every payment applied to this payroll run's liabilities before reversing the payroll run.");
         var original = await db.JournalEntries.SingleAsync(entry => entry.Id == run.JournalEntryId && entry.CompanyId == companyId, cancellationToken);
         var originalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == original.Id).ToListAsync(cancellationToken);
@@ -1373,8 +1378,9 @@ public sealed class AccountingTransactionService(
         run.Status = "Reversed"; run.ReversalJournalEntryId = reversal.Id; run.ReversedByUserId = ResolveUserId(); run.ReversedAtUtc = DateTimeOffset.UtcNow; run.ReversalDate = request.ReversalDate; run.ReversalReason = request.Reason.Trim(); run.ConcurrencyToken = Guid.NewGuid().ToString("N");
         foreach (var liability in liabilities) { liability.Status = "Reversed"; liability.OutstandingAmount = 0; liability.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
         foreach (var payment in employeePayments) { payment.Status = "Reversed"; payment.ReversedAtUtc = run.ReversedAtUtc; payment.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
+        foreach (var file in paymentFiles) { file.Status = "Voided"; file.VoidedAtUtc = run.ReversedAtUtc; file.VoidReason = $"Payroll reversed: {request.Reason.Trim()}"; file.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
         bank.CurrentBalance += run.NetPay; bank.UnreconciledAmount += run.NetPay; bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        AddPayrollAudit(db, companyId, "payroll-run.reversed", run, new { run.JournalEntryId, run.ReversalJournalEntryId, run.ReversalDate, run.ReversalReason });
+        AddPayrollAudit(db, companyId, "payroll-run.reversed", run, new { run.JournalEntryId, run.ReversalJournalEntryId, run.ReversalDate, run.ReversalReason, voidedPaymentFileCount = paymentFiles.Count });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The payroll run or funding account changed while reversing. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);
@@ -1447,13 +1453,22 @@ public sealed class AccountingTransactionService(
             if (!string.IsNullOrWhiteSpace(accountNumber)) employee.BankAccountNumber = accountNumber;
             if (!string.IsNullOrWhiteSpace(bankAccountType)) employee.BankAccountType = bankAccountType;
         }
+        if (request.ClearDirectDepositAuthorization) { employee.DirectDepositAuthorizationOn = null; employee.DirectDepositAuthorizationReference = string.Empty; }
+        else if (request.DirectDepositAuthorizationOn.HasValue || !string.IsNullOrWhiteSpace(request.DirectDepositAuthorizationReference))
+        {
+            if (!request.DirectDepositAuthorizationOn.HasValue || string.IsNullOrWhiteSpace(request.DirectDepositAuthorizationReference)) return TransactionResult.Failure("Direct-deposit authorization requires both the signed date and a reference to the retained authorization evidence.");
+            if (request.DirectDepositAuthorizationOn > DateOnly.FromDateTime(DateTime.Today)) return TransactionResult.Failure("Direct-deposit authorization cannot be enabled before its signed date.");
+            employee.DirectDepositAuthorizationOn = request.DirectDepositAuthorizationOn; employee.DirectDepositAuthorizationReference = request.DirectDepositAuthorizationReference.Trim();
+        }
         if (request.DirectDepositEnabled && (string.IsNullOrWhiteSpace(employee.BankRoutingNumber) || string.IsNullOrWhiteSpace(employee.BankAccountNumber) || string.IsNullOrWhiteSpace(employee.BankAccountType)))
             return TransactionResult.Failure("Direct deposit requires a valid routing number, bank account number, and account type.");
+        if (request.DirectDepositEnabled && (!employee.DirectDepositAuthorizationOn.HasValue || string.IsNullOrWhiteSpace(employee.DirectDepositAuthorizationReference)))
+            return TransactionResult.Failure("Direct deposit requires a signed authorization date and a reference to the retained authorization evidence.");
         employee.AddressLine1 = request.AddressLine1.Trim(); employee.AddressLine2 = request.AddressLine2.Trim(); employee.PostalCode = request.PostalCode.Trim();
         employee.ResidenceCounty = request.ResidenceCounty.Trim(); employee.ResidenceSchoolDistrict = request.ResidenceSchoolDistrict.Trim(); employee.WorkCounty = request.WorkCounty.Trim(); employee.WorkSchoolDistrict = request.WorkSchoolDistrict.Trim();
         employee.EmploymentStartedOn = request.EmploymentStartedOn; employee.EmploymentEndedOn = request.EmploymentEndedOn; employee.HourlyRate = request.HourlyRate; employee.OvertimeRate = request.OvertimeRate; employee.DirectDepositEnabled = request.DirectDepositEnabled;
         employee.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = "employee.protected-details.updated", EntityType = "Employee", EntityId = employee.Id, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { employee.EmploymentStartedOn, employee.EmploymentEndedOn, employee.ResidenceCounty, employee.WorkCounty, employee.DirectDepositEnabled, hasSocialSecurityNumber = !string.IsNullOrWhiteSpace(employee.SocialSecurityNumber), hasBankAccount = !string.IsNullOrWhiteSpace(employee.BankAccountNumber) }), OccurredAtUtc = DateTimeOffset.UtcNow });
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = "employee.protected-details.updated", EntityType = "Employee", EntityId = employee.Id, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { employee.EmploymentStartedOn, employee.EmploymentEndedOn, employee.ResidenceCounty, employee.WorkCounty, employee.DirectDepositEnabled, employee.DirectDepositAuthorizationOn, hasDirectDepositAuthorization = !string.IsNullOrWhiteSpace(employee.DirectDepositAuthorizationReference), hasSocialSecurityNumber = !string.IsNullOrWhiteSpace(employee.SocialSecurityNumber), hasBankAccount = !string.IsNullOrWhiteSpace(employee.BankAccountNumber) }), OccurredAtUtc = DateTimeOffset.UtcNow });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The employee record changed while it was being saved. Refresh and try again."); }
         return TransactionResult.Success(employee.Id);
@@ -1663,22 +1678,30 @@ public sealed class AccountingTransactionService(
         var priorLines = await db.PayrollRunEmployeeLines.Join(db.PayrollRuns.Where(run => run.CompanyId == companyId && run.Status == "Posted" && run.PayDate.Year == request.PayDate.Year && run.PayDate < request.PayDate), line => line.PayrollRunId, run => run.Id, (line, _) => line).ToListAsync(cancellationToken);
         var priorLineIds = priorLines.Select(line => line.Id).ToArray();
         var priorTaxLines = priorLineIds.Length == 0 ? [] : await db.PayrollTaxLines.Where(line => priorLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
+        var deductionPlans = await db.PayrollDeductionPlans.Where(plan => plan.CompanyId == companyId && plan.IsActive && plan.EffectiveOn <= request.PayDate && (plan.ExpiresOn == null || plan.ExpiresOn >= request.PayDate)).OrderBy(plan => plan.Priority).ThenBy(plan => plan.Code).ToListAsync(cancellationToken);
+        var deductionPlanIds = deductionPlans.Select(plan => plan.Id).ToArray();
+        var deductionElections = deductionPlanIds.Length == 0 ? [] : await db.EmployeePayrollDeductionElections.Where(election => election.CompanyId == companyId && election.IsActive && ids.Contains(election.EmployeeId) && deductionPlanIds.Contains(election.PayrollDeductionPlanId) && election.EffectiveOn <= request.PayDate && (election.ExpiresOn == null || election.ExpiresOn >= request.PayDate)).ToListAsync(cancellationToken);
+        var priorDeductionLines = priorLineIds.Length == 0 ? [] : await db.PayrollDeductionLines.Where(line => priorLineIds.Contains(line.PayrollRunEmployeeLineId) && line.PayrollDeductionPlanId != null).ToListAsync(cancellationToken);
         var estimates = new List<EmployeePayrollEstimate>();
         foreach (var input in request.Employees)
         {
             var employee = employees.Single(candidate => candidate.Id == input.EmployeeId);
             var grossPay = ResolveGrossPay(input);
-            var requestedDeductions = input.Deductions ?? [];
-            var requestedPreTax = requestedDeductions.Where(deduction => deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount);
-            var requestedPostTax = requestedDeductions.Where(deduction => !deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount);
+            var employeeElections = deductionElections.Where(election => election.EmployeeId == employee.Id).ToArray();
+            var electedPlans = employeeElections.Join(deductionPlans, election => election.PayrollDeductionPlanId, plan => plan.Id, (election, plan) => new ElectedDeductionPlan(election, plan)).OrderBy(item => item.Plan.Priority).ThenBy(item => item.Plan.Code).ToArray();
+            var employeePriorLineIds = priorLines.Where(line => line.EmployeeId == employee.Id).Select(line => line.Id).ToHashSet();
+            var priorPlanAmounts = priorDeductionLines.Where(line => employeePriorLineIds.Contains(line.PayrollRunEmployeeLineId) && line.PayrollDeductionPlanId.HasValue).GroupBy(line => line.PayrollDeductionPlanId!.Value).ToDictionary(group => group.Key, group => group.Sum(line => line.EmployeeAmount));
+            var requestedDeductions = ResolvePayrollDeductions(input, employee).ToList();
+            requestedDeductions.AddRange(electedPlans.Where(item => item.Plan.IsPreTax).Select(item => BuildPlanDeduction(item.Plan, item.Election, grossPay, grossPay)));
+            var appliedPreTax = ApplyPreTaxDeductionLimits(requestedDeductions.Where(deduction => deduction.IsPreTax), electedPlans, grossPay, priorPlanAmounts);
+            requestedDeductions = appliedPreTax.Concat(requestedDeductions.Where(deduction => !deduction.IsPreTax)).ToList();
             var taxableEarnings = input.Earnings is { Count: > 0 } ? input.Earnings.Where(earning => earning.IsTaxable).Sum(earning => earning.Amount) : grossPay;
-            var preTax = Math.Min(grossPay, Math.Max(0, employee.PreTaxBenefitDeductions + requestedPreTax));
+            var preTax = RoundCurrency(requestedDeductions.Where(deduction => deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount));
             var taxable = Math.Max(0, taxableEarnings - preTax);
             var allocations = BuildPayrollWorkAllocations(input, employee, taxableEarnings, taxable);
             var residenceJurisdictions = ResidenceJurisdictions(employee);
             var workJurisdictions = allocations.SelectMany(AllocationJurisdictions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             var rules = jurisdictionRules.Where(rule => residenceJurisdictions.Any(jurisdiction => JurisdictionEquals(jurisdiction, rule.ResidenceJurisdiction)) && workJurisdictions.Any(jurisdiction => JurisdictionEquals(jurisdiction, rule.WorkJurisdiction))).ToArray();
-            var employeePriorLineIds = priorLines.Where(line => line.EmployeeId == employee.Id).Select(line => line.Id).ToHashSet();
             var employeePriorTaxLines = priorTaxLines.Where(line => employeePriorLineIds.Contains(line.PayrollRunEmployeeLineId)).ToArray();
 
             var matchedRules = contentRules.Select(rule =>
@@ -1730,7 +1753,7 @@ public sealed class AccountingTransactionService(
                 if (isEmployeeTax && scope.IsResidence) residentObligations.Add(obligation);
                 taxLines.Add(new PayrollTaxEstimate(obligation, profile.Jurisdiction, profile.Jurisdiction, profile.TaxType, cappedTaxable, priorGross, isEmployeeTax ? amount : 0, isEmployeeTax ? 0 : amount, null, null, string.Empty, profile.Source, System.Text.Json.JsonSerializer.Serialize(new { method = "profile-rate", profile.Rate, profile.AnnualWageBase, taxableWages = cappedTaxable, scope.IsResidence, scope.WorkState, scope.WorkCounty, scope.WorkCity, scope.WorkSchoolDistrict, amount })));
             }
-            var federalIncomeTaxable = Math.Max(0, taxableEarnings - employee.PreTaxBenefitDeductions - requestedDeductions.Where(deduction => deduction.ExemptFromFederalIncomeTax).Sum(deduction => deduction.EmployeeAmount));
+            var federalIncomeTaxable = Math.Max(0, taxableEarnings - requestedDeductions.Where(deduction => deduction.ExemptFromFederalIncomeTax).Sum(deduction => deduction.EmployeeAmount));
             var ficaTaxable = Math.Max(0, taxableEarnings - requestedDeductions.Where(deduction => deduction.ExemptFromFica).Sum(deduction => deduction.EmployeeAmount));
             var priorSocialSecurityWages = employeePriorTaxLines.Where(line => line.ObligationCode == "US-OASDI-EMPLOYEE").Sum(line => line.TaxableWages);
             var priorMedicareWages = employeePriorTaxLines.Where(line => line.ObligationCode == "US-MEDICARE-EMPLOYEE").Sum(line => line.TaxableWages);
@@ -1747,11 +1770,15 @@ public sealed class AccountingTransactionService(
             var additionalWithholding = employee.FederalWithholdingExempt ? 0 : Math.Max(0, employee.AdditionalWithholding);
             employeeTaxes = RoundCurrency(employeeTaxes + additionalWithholding);
             if (additionalWithholding > 0) taxLines.Add(new PayrollTaxEstimate("FEDERAL-ADDITIONAL-WITHHOLDING", "US", "Federal", "Additional withholding", taxable, priorLines.Where(line => line.EmployeeId == employee.Id).Sum(line => line.TaxableWages), additionalWithholding, 0, null, null, string.Empty, "Employee election", System.Text.Json.JsonSerializer.Serialize(new { amount = additionalWithholding })));
-            var postTax = Math.Min(Math.Max(0, employee.PostTaxBenefitDeductions + requestedPostTax), Math.Max(0, taxable - employeeTaxes));
+            var disposableEarnings = RoundCurrency(Math.Max(0, grossPay - employeeTaxes - requestedDeductions.Where(deduction => deduction.IsPreTax && deduction.PayrollDeductionPlanId.HasValue && deductionPlans.Single(plan => plan.Id == deduction.PayrollDeductionPlanId).ReducesDisposableEarnings).Sum(deduction => deduction.EmployeeAmount)));
+            requestedDeductions.AddRange(electedPlans.Where(item => !item.Plan.IsPreTax).Select(item => BuildPlanDeduction(item.Plan, item.Election, grossPay, disposableEarnings)));
+            var appliedDeductions = ApplyDeductionLimits(requestedDeductions, electedPlans, grossPay, employeeTaxes, disposableEarnings, employee.PayrollFrequency, priorPlanAmounts);
+            preTax = RoundCurrency(appliedDeductions.Where(deduction => deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount));
+            var postTax = RoundCurrency(appliedDeductions.Where(deduction => !deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount));
             var net = RoundCurrency(Math.Max(0, grossPay - preTax - employeeTaxes - postTax));
             var ytdGross = priorLines.Where(line => line.EmployeeId == employee.Id).Sum(line => line.GrossPay);
-            var employerBenefitContributions = RoundCurrency(requestedDeductions.Sum(deduction => deduction.EmployerAmount));
-            estimates.Add(new EmployeePayrollEstimate(employee.Id, $"{employee.FirstName} {employee.LastName}", employee.State, employee.FilingStatus, grossPay, preTax, employeeTaxes, postTax, RoundCurrency(employerTaxes), net, ytdGross, taxLines, employerBenefitContributions));
+            var employerBenefitContributions = RoundCurrency(appliedDeductions.Sum(deduction => deduction.EmployerAmount));
+            estimates.Add(new EmployeePayrollEstimate(employee.Id, $"{employee.FirstName} {employee.LastName}", employee.State, employee.FilingStatus, grossPay, preTax, employeeTaxes, postTax, RoundCurrency(employerTaxes), net, ytdGross, taxLines, employerBenefitContributions, appliedDeductions));
         }
         return new PayrollRunEstimate(estimates.Sum(line => line.GrossPay), estimates.Sum(line => line.PreTaxDeductions), estimates.Sum(line => line.EmployeeWithholdings), estimates.Sum(line => line.PostTaxDeductions), estimates.Sum(line => line.EmployerPayrollTaxes), estimates.Sum(line => line.NetPay), estimates, estimates.Sum(line => line.EmployerBenefitContributions));
     }
@@ -1875,6 +1902,141 @@ public sealed class AccountingTransactionService(
             deductions.Add(new PayrollDeductionInput("RECURRING-POST-TAX", "Recurring post-tax benefit", employee.PostTaxBenefitDeductions));
         deductions.AddRange(input.Deductions ?? []);
         return deductions;
+    }
+
+    private sealed record ElectedDeductionPlan(EmployeePayrollDeductionElection Election, PayrollDeductionPlan Plan);
+
+    private static PayrollDeductionInput BuildPlanDeduction(PayrollDeductionPlan plan, EmployeePayrollDeductionElection election, decimal grossPay, decimal disposableEarnings)
+    {
+        var employeeValue = election.EmployeeValueOverride ?? plan.DefaultEmployeeValue;
+        var employerValue = election.EmployerValueOverride ?? plan.DefaultEmployerValue;
+        var basis = plan.CalculationMethod == "PercentDisposable" ? disposableEarnings : grossPay;
+        var employeeAmount = plan.CalculationMethod == "Fixed" ? employeeValue : basis * employeeValue;
+        var employerAmount = plan.CalculationMethod == "Fixed" ? employerValue : basis * employerValue;
+        employeeAmount = RoundCurrency(Math.Max(0, employeeAmount)); employerAmount = RoundCurrency(Math.Max(0, employerAmount));
+        return new PayrollDeductionInput(plan.Code, plan.Name, employeeAmount, employerAmount, plan.IsPreTax, plan.LiabilityAccountNumber, plan.ExemptFromFederalIncomeTax, plan.ExemptFromFica, plan.ExemptFromFuta, plan.Id, election.Id, employeeAmount, false, plan.LimitRuleCode,
+            System.Text.Json.JsonSerializer.Serialize(new { source = "effective-dated employee election", plan.Code, plan.Category, plan.CalculationMethod, basis, employeeValue, employerValue, requestedEmployeeAmount = employeeAmount, requestedEmployerAmount = employerAmount, planEffectiveOn = plan.EffectiveOn, planExpiresOn = plan.ExpiresOn, electionEffectiveOn = election.EffectiveOn, electionExpiresOn = election.ExpiresOn }));
+    }
+
+    private static IReadOnlyList<PayrollDeductionInput> ApplyPreTaxDeductionLimits(IEnumerable<PayrollDeductionInput> deductions, IReadOnlyList<ElectedDeductionPlan> electedPlans, decimal grossPay, IReadOnlyDictionary<Guid, decimal> priorPlanAmounts)
+    {
+        var planById = electedPlans.ToDictionary(item => item.Plan.Id, item => item);
+        var result = new List<PayrollDeductionInput>();
+        decimal appliedTotal = 0;
+        foreach (var deduction in deductions.OrderBy(item => item.PayrollDeductionPlanId.HasValue && planById.TryGetValue(item.PayrollDeductionPlanId.Value, out var configured) ? configured.Plan.Priority : 90000).ThenBy(item => item.DeductionCode, StringComparer.OrdinalIgnoreCase))
+        {
+            var requested = RoundCurrency(Math.Max(0, deduction.EmployeeAmount));
+            var allowed = Math.Max(0, grossPay - appliedTotal);
+            PayrollDeductionPlan? plan = null; EmployeePayrollDeductionElection? election = null;
+            if (deduction.PayrollDeductionPlanId.HasValue && planById.TryGetValue(deduction.PayrollDeductionPlanId.Value, out var elected)) { plan = elected.Plan; election = elected.Election; }
+            if (plan?.EmployeeLimitPerPay is { } perPay) allowed = Math.Min(allowed, perPay);
+            var annualLimit = election?.EmployeeAnnualLimitOverride ?? plan?.EmployeeAnnualLimit;
+            if (annualLimit is { } annual && plan is not null) allowed = Math.Min(allowed, Math.Max(0, annual - priorPlanAmounts.GetValueOrDefault(plan.Id)));
+            if (plan is not null) allowed = Math.Min(allowed, Math.Max(0, grossPay - appliedTotal - plan.MinimumNetPay));
+            var applied = RoundCurrency(Math.Min(requested, allowed)); appliedTotal += applied;
+            result.Add(WithAppliedDeduction(deduction, requested, applied, new { phase = "pretax", grossPay, appliedBefore = appliedTotal - applied, employeeLimitPerPay = plan?.EmployeeLimitPerPay, annualLimit, priorAnnualAmount = plan is null ? 0 : priorPlanAmounts.GetValueOrDefault(plan.Id), minimumNetPay = plan?.MinimumNetPay ?? 0 }));
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<PayrollDeductionInput> ApplyDeductionLimits(IReadOnlyList<PayrollDeductionInput> deductions, IReadOnlyList<ElectedDeductionPlan> electedPlans, decimal grossPay, decimal employeeTaxes, decimal disposableEarnings, string payrollFrequency, IReadOnlyDictionary<Guid, decimal> priorPlanAmounts)
+    {
+        var planById = electedPlans.ToDictionary(item => item.Plan.Id, item => item);
+        var result = deductions.Where(item => item.IsPreTax).ToList();
+        var preTaxTotal = result.Sum(item => item.EmployeeAmount);
+        decimal postTaxApplied = 0, ordinaryGarnishmentApplied = 0, supportApplied = 0;
+        var postTax = deductions.Where(item => !item.IsPreTax).OrderBy(item => item.PayrollDeductionPlanId.HasValue && planById.TryGetValue(item.PayrollDeductionPlanId.Value, out var configured) ? configured.Plan.Priority : 90000).ThenBy(item => item.DeductionCode, StringComparer.OrdinalIgnoreCase);
+        foreach (var deduction in postTax)
+        {
+            var requested = RoundCurrency(Math.Max(0, deduction.EmployeeAmount));
+            var availableNet = Math.Max(0, grossPay - preTaxTotal - employeeTaxes - postTaxApplied);
+            var allowed = availableNet;
+            PayrollDeductionPlan? plan = null; EmployeePayrollDeductionElection? election = null;
+            decimal? legalLimit = null;
+            if (deduction.PayrollDeductionPlanId.HasValue && planById.TryGetValue(deduction.PayrollDeductionPlanId.Value, out var elected)) { plan = elected.Plan; election = elected.Election; }
+            if (plan?.EmployeeLimitPerPay is { } perPay) allowed = Math.Min(allowed, perPay);
+            var annualLimit = election?.EmployeeAnnualLimitOverride ?? plan?.EmployeeAnnualLimit;
+            if (annualLimit is { } annual && plan is not null) allowed = Math.Min(allowed, Math.Max(0, annual - priorPlanAmounts.GetValueOrDefault(plan.Id)));
+            if (plan is not null) allowed = Math.Min(allowed, Math.Max(0, availableNet - plan.MinimumNetPay));
+            if (plan is not null)
+            {
+                legalLimit = plan.LimitRuleCode switch
+                {
+                    "OrdinaryGarnishmentFederal" => Math.Max(0, CalculateOrdinaryGarnishmentLimit(disposableEarnings, payrollFrequency, plan.LimitRuleJson) - ordinaryGarnishmentApplied),
+                    "ChildSupportFederal" => Math.Max(0, CalculateChildSupportLimit(disposableEarnings, plan.LimitRuleJson, election?.OrderDetailsJson ?? "{}") - supportApplied),
+                    "ConfiguredDisposablePercent" => Math.Max(0, disposableEarnings * JsonDecimal(plan.LimitRuleJson, "maxDisposablePercent", 0)),
+                    _ => null
+                };
+                if (legalLimit.HasValue) allowed = Math.Min(allowed, legalLimit.Value);
+                var configuredMaximum = JsonNullableDecimal(plan.LimitRuleJson, "maximumAmountPerPay");
+                if (configuredMaximum.HasValue) allowed = Math.Min(allowed, configuredMaximum.Value);
+            }
+            var applied = RoundCurrency(Math.Min(requested, Math.Max(0, allowed)));
+            if (plan?.LimitRuleCode == "OrdinaryGarnishmentFederal") ordinaryGarnishmentApplied += applied;
+            if (plan?.LimitRuleCode == "ChildSupportFederal") supportApplied += applied;
+            result.Add(WithAppliedDeduction(deduction, requested, applied, new { phase = "posttax", grossPay, employeeTaxes, disposableEarnings, availableNet, employeeLimitPerPay = plan?.EmployeeLimitPerPay, annualLimit, priorAnnualAmount = plan is null ? 0 : priorPlanAmounts.GetValueOrDefault(plan.Id), minimumNetPay = plan?.MinimumNetPay ?? 0, legalLimit, officialSourceUrl = plan?.OfficialSourceUrl, sourceRetrievedOn = plan?.SourceRetrievedOn }));
+            postTaxApplied += applied;
+        }
+        return result;
+    }
+
+    private static PayrollDeductionInput WithAppliedDeduction(PayrollDeductionInput deduction, decimal requested, decimal applied, object limitTrace) => deduction with
+    {
+        EmployeeAmount = applied,
+        RequestedEmployeeAmount = requested,
+        LimitApplied = applied < requested,
+        CalculationTraceJson = System.Text.Json.JsonSerializer.Serialize(new { requestTrace = deduction.CalculationTraceJson, limitTrace, requestedEmployeeAmount = requested, appliedEmployeeAmount = applied, limitApplied = applied < requested })
+    };
+
+    private static decimal CalculateOrdinaryGarnishmentLimit(decimal disposableEarnings, string payrollFrequency, string ruleJson)
+    {
+        var maximumPercent = Math.Min(0.25m, JsonDecimal(ruleJson, "maxDisposablePercent", 0.25m));
+        var minimumHourlyWage = Math.Max(0, JsonDecimal(ruleJson, "protectedMinimumHourlyRate", 7.25m));
+        var protectedHours = Math.Max(0, JsonDecimal(ruleJson, "protectedHoursPerWeek", 30m));
+        var periodWeeks = PayrollPeriodWeeks(payrollFrequency);
+        var protectedAmount = JsonNullableDecimal(ruleJson, "fixedProtectedAmountPerPay") ?? RoundCurrency(minimumHourlyWage * protectedHours * periodWeeks);
+        return RoundCurrency(Math.Min(disposableEarnings * maximumPercent, Math.Max(0, disposableEarnings - protectedAmount)));
+    }
+
+    private static decimal CalculateChildSupportLimit(decimal disposableEarnings, string ruleJson, string orderDetailsJson)
+    {
+        var supportingAnotherFamily = JsonBoolean(orderDetailsJson, "supportsAnotherSpouseOrChild", false);
+        var arrearsOverTwelveWeeks = JsonBoolean(orderDetailsJson, "arrearsOver12Weeks", false);
+        var federalPercent = (supportingAnotherFamily ? 0.50m : 0.60m) + (arrearsOverTwelveWeeks ? 0.05m : 0);
+        var configuredPercent = JsonDecimal(ruleJson, "maxDisposablePercent", federalPercent);
+        return RoundCurrency(disposableEarnings * Math.Min(federalPercent, Math.Max(0, configuredPercent)));
+    }
+
+    private static decimal PayrollPeriodWeeks(string frequency) => frequency.Trim().ToLowerInvariant() switch
+    {
+        "weekly" => 1m,
+        "biweekly" => 2m,
+        "semimonthly" => 13m / 6m,
+        "monthly" => 13m / 3m,
+        "quarterly" => 13m,
+        "annual" => 52m,
+        _ => 1m
+    };
+
+    private static decimal JsonDecimal(string json, string propertyName, decimal fallback) => JsonNullableDecimal(json, propertyName) ?? fallback;
+    private static decimal? JsonNullableDecimal(string json, string propertyName)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+            return document.RootElement.TryGetProperty(propertyName, out var property) && property.TryGetDecimal(out var value) ? value : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    private static bool JsonBoolean(string json, string propertyName, bool fallback)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+            return document.RootElement.TryGetProperty(propertyName, out var property) && property.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False ? property.GetBoolean() : fallback;
+        }
+        catch (System.Text.Json.JsonException) { return fallback; }
     }
 
     private static string NormalizeLiabilityAccountNumber(string accountNumber) => string.IsNullOrWhiteSpace(accountNumber) ? "2200" : accountNumber.Trim();

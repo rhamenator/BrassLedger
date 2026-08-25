@@ -1317,7 +1317,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.False(invalid.Succeeded);
         Assert.Contains("ABA routing", invalid.ErrorMessage);
 
-        var saved = await transactions.SaveEmployeeEmploymentDetailsAsync(new SaveEmployeeEmploymentDetailsRequest(employee.Id, "1 Main St", "Unit 2", "48201", "Wayne", "Detroit", "Oakland", "Royal Oak", new DateOnly(2024, 1, 1), null, 30m, 45m, true, "Checking", "123-45-6789", "021000021", "12345678", ConcurrencyToken: employee.ConcurrencyToken));
+        var saved = await transactions.SaveEmployeeEmploymentDetailsAsync(new SaveEmployeeEmploymentDetailsRequest(employee.Id, "1 Main St", "Unit 2", "48201", "Wayne", "Detroit", "Oakland", "Royal Oak", new DateOnly(2024, 1, 1), null, 30m, 45m, true, "Checking", "123-45-6789", "021000021", "12345678", ConcurrencyToken: employee.ConcurrencyToken, DirectDepositAuthorizationOn: new DateOnly(2026, 1, 15), DirectDepositAuthorizationReference: "Signed authorization EMP-001"));
         Assert.True(saved.Succeeded, saved.ErrorMessage);
 
         var refreshed = (await workspaceService.GetWorkspaceAsync()).Payroll.Employees.Single(candidate => candidate.Id == employee.Id);
@@ -1923,6 +1923,104 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("April statement", recorded.Notes);
         var clearedIds = await db.BankReconciliationItems.Where(item => item.BankReconciliationId == recorded.Id).Select(item => item.JournalEntryId).ToListAsync();
         Assert.Equal([clearedEntryId], clearedIds);
+    }
+
+    [Fact]
+    public async Task PayrollDeductionPlans_AreEffectiveDatedAuditableAndApplyFederalGarnishmentLimit()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var configuration = scope.ServiceProvider.GetRequiredService<IPayrollDeductionConfigurationService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var employee = await db.Employees.FirstAsync(item => item.IsActive);
+        employee.PayrollFrequency = "Weekly"; employee.PreTaxBenefitDeductions = 0; employee.PostTaxBenefitDeductions = 0; employee.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        await db.SaveChangesAsync();
+        var bankId = await db.BankAccounts.Where(item => item.CompanyId == employee.CompanyId).Select(item => item.Id).FirstAsync();
+
+        var invalid = await configuration.SavePlanAsync(new SavePayrollDeductionPlanRequest(null, "GARN-BAD", "Unverified garnishment", "OrdinaryGarnishment", "Fixed", 500m, 0, false, false, false, false, false, "2200", 10, null, null, 0, "OrdinaryGarnishmentFederal", "{}", "", null, new DateOnly(2026, 1, 1), null, true));
+        Assert.False(invalid.Succeeded);
+        Assert.Contains("official source", invalid.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var planResult = await configuration.SavePlanAsync(new SavePayrollDeductionPlanRequest(null, "GARN-ORD", "Ordinary creditor garnishment", "OrdinaryGarnishment", "Fixed", 500m, 0, false, false, false, false, false, "2200", 10, null, null, 0, "OrdinaryGarnishmentFederal", "{\"maxDisposablePercent\":0.25,\"protectedMinimumHourlyRate\":7.25,\"protectedHoursPerWeek\":30}", "https://www.dol.gov/agencies/whd/fact-sheets/30-cppa", new DateOnly(2026, 8, 25), new DateOnly(2026, 1, 1), null, true));
+        Assert.True(planResult.Succeeded, planResult.ErrorMessage);
+        var electionResult = await configuration.SaveElectionAsync(new SaveEmployeePayrollDeductionElectionRequest(null, employee.Id, planResult.Id!.Value, null, null, null, "{\"court\":\"Example County Court\",\"caseNumber\":\"TEST-123\"}", new DateOnly(2026, 1, 1), null, true));
+        Assert.True(electionResult.Succeeded, electionResult.ErrorMessage);
+        var overlapping = await configuration.SaveElectionAsync(new SaveEmployeePayrollDeductionElectionRequest(null, employee.Id, planResult.Id.Value, 100m, null, null, "{}", new DateOnly(2026, 6, 1), null, true));
+        Assert.False(overlapping.Succeeded);
+        Assert.Contains("overlapping", overlapping.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var request = new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 8, 28), "PR-GARN-1", [new EmployeePayrollInput(employee.Id, 500m)], new DateOnly(2026, 8, 22), new DateOnly(2026, 8, 28));
+        var preview = await transactions.PreviewEmployeePayrollRunAsync(request);
+        Assert.NotNull(preview);
+        var estimate = Assert.Single(preview!.Employees);
+        var deduction = Assert.Single(estimate.Deductions!, item => item.PayrollDeductionPlanId == planResult.Id);
+        var disposable = estimate.GrossPay - estimate.EmployeeWithholdings;
+        var expectedLimit = decimal.Round(Math.Min(disposable * .25m, Math.Max(0, disposable - 217.50m)), 2, MidpointRounding.AwayFromZero);
+        Assert.Equal(500m, deduction.RequestedEmployeeAmount);
+        Assert.Equal(expectedLimit, deduction.EmployeeAmount);
+        Assert.True(deduction.LimitApplied);
+        Assert.Equal("OrdinaryGarnishmentFederal", deduction.LimitRuleCode);
+        Assert.Contains("officialSourceUrl", deduction.CalculationTraceJson);
+
+        var draft = await transactions.SaveEmployeePayrollRunDraftAsync(request);
+        Assert.True(draft.Succeeded, draft.ErrorMessage);
+        await using var persistedDb = await factory.CreateDbContextAsync();
+        var persisted = await persistedDb.PayrollDeductionLines.SingleAsync(item => item.PayrollDeductionPlanId == planResult.Id && item.EmployeePayrollDeductionElectionId == electionResult.Id);
+        Assert.Equal(500m, persisted.RequestedEmployeeAmount);
+        Assert.Equal(expectedLimit, persisted.EmployeeAmount);
+        Assert.True(persisted.LimitApplied);
+        Assert.True(await persistedDb.BusinessAuditEntries.AnyAsync(item => item.Action == "payroll-deduction-plan.created" && item.EntityId == planResult.Id));
+        Assert.True(await persistedDb.BusinessAuditEntries.AnyAsync(item => item.Action == "employee-payroll-deduction-election.created" && item.EntityId == electionResult.Id));
+    }
+
+    [Fact]
+    public async Task PayrollPaymentFiles_AreProtectedReconciledFixedWidthAndVoidedWithReversal()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var paymentFiles = scope.ServiceProvider.GetRequiredService<IPayrollPaymentFileService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var employee = await db.Employees.FirstAsync(item => item.IsActive);
+        employee.DirectDepositEnabled = true; employee.DirectDepositAuthorizationOn = new DateOnly(2026, 1, 15); employee.DirectDepositAuthorizationReference = "Signed authorization ACH-TEST"; employee.BankRoutingNumber = "021000021"; employee.BankAccountNumber = "1234567890"; employee.BankAccountType = "Checking"; employee.PreTaxBenefitDeductions = 0; employee.PostTaxBenefitDeductions = 0; employee.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        await db.SaveChangesAsync();
+        var bank = await db.BankAccounts.FirstAsync(item => item.CompanyId == employee.CompanyId);
+        var payroll = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bank.Id, new DateOnly(2026, 8, 28), "PR-ACH-1", [new EmployeePayrollInput(employee.Id, 1000m)], new DateOnly(2026, 8, 22), new DateOnly(2026, 8, 28)));
+        Assert.True(payroll.Succeeded, payroll.ErrorMessage);
+
+        var unvalidatedOrigin = await paymentFiles.SaveBankOriginAsync(new SavePayrollBankOriginConfigurationRequest(null, bank.Id, "021000021", "123456789", "EXAMPLE ODFI", "BRASS LEDGER MFG", "1123456789", "PAYROLL", "02100002", new DateOnly(2026, 1, 1), null, true, false, "Awaiting bank test"));
+        Assert.True(unvalidatedOrigin.Succeeded, unvalidatedOrigin.ErrorMessage);
+        var blocked = await paymentFiles.GenerateAsync(new GeneratePayrollPaymentFileRequest(payroll.Id!.Value, "NachaPpd", new DateOnly(2026, 8, 28)));
+        Assert.False(blocked.Succeeded);
+        Assert.Contains("bank-validated", blocked.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var configuration = (await paymentFiles.GetAsync()).BankOrigins.Single(item => item.Id == unvalidatedOrigin.Id);
+        var validatedOrigin = await paymentFiles.SaveBankOriginAsync(new SavePayrollBankOriginConfigurationRequest(configuration.Id, bank.Id, "021000021", "123456789", "EXAMPLE ODFI", "BRASS LEDGER MFG", "1123456789", "PAYROLL", "02100002", new DateOnly(2026, 1, 1), null, true, true, "Validated against ODFI test file on 2026-08-25", configuration.ConcurrencyToken));
+        Assert.True(validatedOrigin.Succeeded, validatedOrigin.ErrorMessage);
+
+        var generated = await paymentFiles.GenerateAsync(new GeneratePayrollPaymentFileRequest(payroll.Id.Value, "NachaPpd", new DateOnly(2026, 8, 28)));
+        Assert.True(generated.Succeeded, generated.ErrorMessage);
+        Assert.False((await paymentFiles.GenerateAsync(new GeneratePayrollPaymentFileRequest(payroll.Id.Value, "NachaPpd"))).Succeeded);
+        var download = await paymentFiles.DownloadAsync(generated.Id!.Value);
+        Assert.NotNull(download);
+        var content = System.Text.Encoding.UTF8.GetString(download!.Content);
+        var records = content.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(0, records.Length % 10);
+        Assert.All(records, record => Assert.Equal(94, System.Text.Encoding.ASCII.GetByteCount(record)));
+        Assert.StartsWith("1", records[0]); Assert.StartsWith("5", records[1]); Assert.StartsWith("6", records[2]); Assert.StartsWith("8", records[3]); Assert.StartsWith("9", records[4]);
+        Assert.Equal("220", records[1][1..4]); Assert.Equal("PPD", records[1][50..53]); Assert.Equal("22", records[2][1..3]);
+        var workspace = await paymentFiles.GetAsync(); var file = Assert.Single(workspace.Files, item => item.Id == generated.Id);
+        Assert.Equal(1, file.EntryCount); Assert.Equal(1000m - (await db.PayrollRunEmployeeLines.SingleAsync(item => item.PayrollRunId == payroll.Id)).EmployeeWithholdings, file.CreditTotal);
+        Assert.Equal(file.ContentSha256, download.ContentSha256); Assert.Equal("GeneratedForBankValidation", file.Status);
+
+        var run = await db.PayrollRuns.SingleAsync(item => item.Id == payroll.Id);
+        var reversal = await transactions.ReversePayrollRunAsync(new ReversePayrollRunRequest(run.Id, run.PayDate, "Test ACH reversal", run.ConcurrencyToken));
+        Assert.True(reversal.Succeeded, reversal.ErrorMessage);
+        var voided = Assert.Single((await paymentFiles.GetAsync()).Files, item => item.Id == generated.Id);
+        Assert.Equal("Voided", voided.Status); Assert.Contains("Payroll reversed", voided.VoidReason);
+        Assert.True(await db.BusinessAuditEntries.AnyAsync(item => item.Action == "payroll-payment-file.generated" && item.EntityId == generated.Id));
     }
 
     private ServiceProvider CreateServiceProvider()

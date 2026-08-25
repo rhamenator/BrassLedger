@@ -12,6 +12,28 @@
     --shadow-soft: 0 20px 50px rgba(18, 57, 64, 0.1);
 }
 
+.panel > details {
+    margin: 0.8rem 0 1rem;
+    border: 1px solid var(--border, #d9ded8);
+    border-radius: 0.65rem;
+    background: rgba(255, 255, 255, 0.45);
+}
+
+.panel > details > summary {
+    padding: 0.75rem 0.9rem;
+    font-weight: 700;
+    color: var(--ink, #183f3a);
+}
+
+.panel > details[open] > summary {
+    border-bottom: 1px solid var(--border, #d9ded8);
+}
+
+.panel > details > form,
+.panel > details > .table-scroll {
+    padding: 0.9rem;
+}
+
 html,
 body {
     margin: 0;

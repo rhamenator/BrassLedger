@@ -34,6 +34,17 @@ public sealed class PayrollWorkflowTests
         runRow = session.Page.Locator("table.data-table tbody tr").Filter(new() { HasTextString = reference });
         await runRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
         await session.Page.GetByText("Approved payroll posted to the ledger.", new() { Exact = true }).WaitForAsync();
+
+        var paymentFileSection = session.Page.GetByRole(AriaRole.Heading, new() { Name = "Employee payment files", Exact = true }).Locator("..");
+        var paymentRunSelect = paymentFileSection.GetByLabel("Payment file payroll run");
+        await Assertions.Expect(paymentRunSelect.Locator("option:checked")).ToContainTextAsync(reference);
+        await paymentFileSection.GetByLabel("Payroll payment file format").SelectOptionAsync("CheckRegisterCsv");
+        await paymentFileSection.GetByRole(AriaRole.Button, new() { Name = "Generate immutable payment file", Exact = true }).ClickAsync();
+        await session.Page.GetByText("Immutable payroll payment file generated and reconciled. Download it below; NACHA output still requires bank acceptance.", new() { Exact = true }).WaitForAsync();
+        var paymentFileRow = paymentFileSection.Locator("table.data-table tbody tr").Filter(new() { HasTextString = reference });
+        await Assertions.Expect(paymentFileRow).ToContainTextAsync("CheckRegisterCsv");
+        Assert.Contains("/payroll/payment-files/", await paymentFileRow.GetByRole(AriaRole.Link, new() { Name = "Download", Exact = true }).GetAttributeAsync("href"));
+
         runRow = session.Page.Locator("table.data-table tbody tr").Filter(new() { HasTextString = reference });
         await runRow.GetByRole(AriaRole.Button, new() { Name = "View register", Exact = true }).ClickAsync();
 

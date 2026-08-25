@@ -523,6 +523,43 @@ api.MapPut("/payroll-jurisdiction-rules", async (SavePayrollJurisdictionRuleRequ
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["jurisdictionRule"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayroll);
 
+api.MapGet("/payroll-deduction-configuration", async (IPayrollDeductionConfigurationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetAsync(cancellationToken)))
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.MaintainEmployeePayrollSetup);
+
+api.MapPut("/payroll-deduction-plans", async (SavePayrollDeductionPlanRequest request, IPayrollDeductionConfigurationService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SavePlanAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["deductionPlan"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayroll);
+
+api.MapPut("/employee-payroll-deduction-elections", async (SaveEmployeePayrollDeductionElectionRequest request, IPayrollDeductionConfigurationService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveElectionAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["deductionElection"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.MaintainEmployeePayrollSetup);
+
+api.MapGet("/payroll-payment-files", async (IPayrollPaymentFileService service, CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(cancellationToken)))
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+
+api.MapPut("/payroll-bank-origins", async (SavePayrollBankOriginConfigurationRequest request, IPayrollPaymentFileService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveBankOriginAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["bankOrigin"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.MaintainEmployeePayrollSetup);
+
+api.MapPost("/payroll-payment-files", async (GeneratePayrollPaymentFileRequest request, IPayrollPaymentFileService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.GenerateAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/payroll-payment-files/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["paymentFile"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PostPayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+
+api.MapGet("/payroll-payment-files/{paymentFileId:guid}/download", async (Guid paymentFileId, IPayrollPaymentFileService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.DownloadAsync(paymentFileId, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file.Content, file.ContentType, file.FileName);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+
 api.MapGet("/companies", async (ICompanyManagementService service, CancellationToken cancellationToken) => Results.Ok(await service.GetMyCompaniesAsync(cancellationToken))).RequireAuthorization();
 api.MapPost("/companies", async (CreateCompanyRequest request, ICompanyManagementService service, CancellationToken cancellationToken) =>
 {

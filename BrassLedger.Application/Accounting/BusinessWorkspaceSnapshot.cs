@@ -259,7 +259,9 @@ public sealed record EmployeeSnapshot(
     decimal FederalStep3Credits = 0m,
     decimal FederalStep4OtherIncome = 0m,
     decimal FederalStep4Deductions = 0m,
-    bool FederalWithholdingExempt = false);
+    bool FederalWithholdingExempt = false,
+    DateOnly? DirectDepositAuthorizationOn = null,
+    bool HasDirectDepositAuthorization = false);
 
 public sealed record ProjectsWorkspace(
     int OpenJobs,

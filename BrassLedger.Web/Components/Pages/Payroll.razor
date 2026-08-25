@@ -4,6 +4,8 @@
 @inject IAccountingTransactionService TransactionService
 @inject IPayrollReportingService PayrollReportingService
 @inject IPayrollFilingService PayrollFilingService
+@inject IPayrollDeductionConfigurationService PayrollDeductionConfigurationService
+@inject IPayrollPaymentFileService PayrollPaymentFileService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Payroll</PageTitle>
@@ -46,6 +48,84 @@ else
         </section>
 
         <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData"><Authorized Context="payrollFilingContext">
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.MaintainEmployeePayrollSetup"><Authorized Context="deductionConfigurationContext">
+        <section class="panel">
+            <h2>Deduction, benefit, and court-order plans</h2>
+            <p class="page-intro">Create effective-dated plans, then enroll employees below. Percentage values are decimal rates (for example, 0.05 is 5%). Court-order limits require a dated official source and JSON rule parameters; payroll records both the requested and applied amounts whenever a limit is reached.</p>
+            <details open="@DeductionPlanForm.Id.HasValue"><summary>@(DeductionPlanForm.Id.HasValue ? $"Edit plan {DeductionPlanForm.Code}" : "Create a deduction or benefit plan")</summary>
+            <EditForm Model="DeductionPlanForm" OnValidSubmit="SaveDeductionPlanAsync">
+                <div class="content-grid">
+                    <div class="field-group"><label class="field-label">Plan code</label><InputText aria-label="Deduction plan code" class="field-input" @bind-Value="DeductionPlanForm.Code" /></div>
+                    <div class="field-group"><label class="field-label">Plan name</label><InputText aria-label="Deduction plan name" class="field-input" @bind-Value="DeductionPlanForm.Name" /></div>
+                    <div class="field-group"><label class="field-label">Category</label><InputSelect aria-label="Deduction plan category" class="field-input" @bind-Value="DeductionPlanForm.Category">@foreach (var category in DeductionCategories) { <option value="@category">@CategoryLabel(category)</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Calculation</label><InputSelect aria-label="Deduction calculation method" class="field-input" @bind-Value="DeductionPlanForm.CalculationMethod"><option>Fixed</option><option>PercentGross</option><option>PercentDisposable</option></InputSelect></div>
+                    <div class="field-group"><label class="field-label">Employee value</label><InputNumber aria-label="Default employee deduction value" class="field-input" @bind-Value="DeductionPlanForm.DefaultEmployeeValue" /></div>
+                    <div class="field-group"><label class="field-label">Employer value</label><InputNumber aria-label="Default employer contribution value" class="field-input" @bind-Value="DeductionPlanForm.DefaultEmployerValue" /></div>
+                    <div class="field-group"><label class="field-label">Liability account</label><InputText aria-label="Deduction liability account" class="field-input" @bind-Value="DeductionPlanForm.LiabilityAccountNumber" /></div>
+                    <div class="field-group"><label class="field-label">Priority</label><InputNumber aria-label="Deduction priority" class="field-input" @bind-Value="DeductionPlanForm.Priority" /></div>
+                    <div class="field-group"><label class="field-label">Per-pay employee limit</label><InputNumber aria-label="Employee limit per pay" class="field-input" @bind-Value="DeductionPlanForm.EmployeeLimitPerPay" /></div>
+                    <div class="field-group"><label class="field-label">Annual employee limit</label><InputNumber aria-label="Annual employee deduction limit" class="field-input" @bind-Value="DeductionPlanForm.EmployeeAnnualLimit" /></div>
+                    <div class="field-group"><label class="field-label">Minimum net pay</label><InputNumber aria-label="Minimum employee net pay" class="field-input" @bind-Value="DeductionPlanForm.MinimumNetPay" /></div>
+                    <div class="field-group"><label class="field-label">Legal limit</label><InputSelect aria-label="Deduction legal limit rule" class="field-input" @bind-Value="DeductionPlanForm.LimitRuleCode"><option>None</option><option>OrdinaryGarnishmentFederal</option><option>ChildSupportFederal</option><option>ConfiguredDisposablePercent</option><option>NoCcpaLimit</option></InputSelect></div>
+                    <div class="field-group"><label class="field-label">Effective</label><InputDate aria-label="Deduction plan effective date" class="field-input" @bind-Value="DeductionPlanForm.EffectiveOn" /></div>
+                    <div class="field-group"><label class="field-label">Expires</label><InputDate aria-label="Deduction plan expiration date" class="field-input" @bind-Value="DeductionPlanForm.ExpiresOn" /></div>
+                    <div class="field-group"><label class="field-label">Official source URL</label><InputText aria-label="Deduction legal official source URL" class="field-input" @bind-Value="DeductionPlanForm.OfficialSourceUrl" /></div>
+                    <div class="field-group"><label class="field-label">Source retrieved</label><InputDate aria-label="Deduction legal source retrieval date" class="field-input" @bind-Value="DeductionPlanForm.SourceRetrievedOn" /></div>
+                    <div class="field-group"><label class="field-label">Legal rule JSON</label><InputTextArea aria-label="Deduction legal rule JSON" class="field-input" @bind-Value="DeductionPlanForm.LimitRuleJson" /></div>
+                </div>
+                @if (DeductionPlanForm.LimitRuleCode is "OrdinaryGarnishmentFederal" or "ChildSupportFederal") { <button class="action-secondary" type="button" @onclick="LoadFederalDeductionRuleDefaults">Load current federal defaults</button> }
+                <div class="content-grid"><label class="check-field"><InputCheckbox @bind-Value="DeductionPlanForm.IsPreTax" /> Pretax</label><label class="check-field"><InputCheckbox @bind-Value="DeductionPlanForm.ExemptFromFederalIncomeTax" /> Exempt from federal income tax</label><label class="check-field"><InputCheckbox @bind-Value="DeductionPlanForm.ExemptFromFica" /> Exempt from FICA</label><label class="check-field"><InputCheckbox @bind-Value="DeductionPlanForm.ExemptFromFuta" /> Exempt from FUTA</label><label class="check-field"><InputCheckbox @bind-Value="DeductionPlanForm.ReducesDisposableEarnings" /> Required by law when computing disposable earnings</label><label class="check-field"><InputCheckbox @bind-Value="DeductionPlanForm.IsActive" /> Active</label></div>
+                <button class="action-primary" type="submit">@(DeductionPlanForm.Id.HasValue ? "Update plan" : "Create plan")</button>@if (DeductionPlanForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetDeductionPlanEditor">Cancel edit</button> }
+            </EditForm></details>
+            @if (DeductionConfiguration.Plans.Count > 0) { <div class="table-scroll"><table class="data-table"><thead><tr><th>Priority</th><th>Plan</th><th>Category</th><th>Calculation</th><th>Limits</th><th>Effective</th><th>Status</th><th></th></tr></thead><tbody>@foreach (var plan in DeductionConfiguration.Plans) { <tr><td>@plan.Priority</td><td><strong>@plan.Code</strong><br />@plan.Name</td><td>@CategoryLabel(plan.Category)</td><td>@plan.CalculationMethod<br />@(plan.IsPreTax ? "Pretax" : "Post-tax")</td><td>@plan.LimitRuleCode@if (plan.EmployeeLimitPerPay.HasValue) { <br /><span>@plan.EmployeeLimitPerPay.Value.ToString("C") per pay</span> }@if (plan.EmployeeAnnualLimit.HasValue) { <br /><span>@plan.EmployeeAnnualLimit.Value.ToString("C") annual</span> }</td><td>@plan.EffectiveOn@if (plan.ExpiresOn.HasValue) { <span>–@plan.ExpiresOn</span> }</td><td>@(plan.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => EditDeductionPlan(plan)">Edit</button></td></tr> }</tbody></table></div> }
+
+            <h3>Employee elections and orders</h3>
+            <p>Order details are protected payroll data. For support limits, JSON may include <code>supportsAnotherSpouseOrChild</code> and <code>arrearsOver12Weeks</code>; court and case references can be retained in the same audited object.</p>
+            <details open="@DeductionElectionForm.Id.HasValue"><summary>@(DeductionElectionForm.Id.HasValue ? $"Edit {DeductionElectionForm.EmployeeId}'s election" : "Enroll an employee or record an order")</summary><EditForm Model="DeductionElectionForm" OnValidSubmit="SaveDeductionElectionAsync"><div class="content-grid">
+                <div class="field-group"><label class="field-label">Employee</label><InputSelect aria-label="Deduction election employee" class="field-input" @bind-Value="DeductionElectionForm.EmployeeId">@foreach (var employee in Workspace.Payroll.Employees) { <option value="@employee.Id">@employee.EmployeeNumber — @employee.FullName</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Plan</label><InputSelect aria-label="Deduction election plan" class="field-input" @bind-Value="DeductionElectionForm.PayrollDeductionPlanId">@foreach (var plan in DeductionConfiguration.Plans) { <option value="@plan.Id">@plan.Code — @plan.Name</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Employee value override</label><InputNumber aria-label="Employee deduction value override" class="field-input" @bind-Value="DeductionElectionForm.EmployeeValueOverride" /></div>
+                <div class="field-group"><label class="field-label">Employer value override</label><InputNumber aria-label="Employer deduction value override" class="field-input" @bind-Value="DeductionElectionForm.EmployerValueOverride" /></div>
+                <div class="field-group"><label class="field-label">Annual limit override</label><InputNumber aria-label="Employee annual deduction limit override" class="field-input" @bind-Value="DeductionElectionForm.EmployeeAnnualLimitOverride" /></div>
+                <div class="field-group"><label class="field-label">Effective</label><InputDate aria-label="Deduction election effective date" class="field-input" @bind-Value="DeductionElectionForm.EffectiveOn" /></div>
+                <div class="field-group"><label class="field-label">Expires</label><InputDate aria-label="Deduction election expiration date" class="field-input" @bind-Value="DeductionElectionForm.ExpiresOn" /></div>
+                <div class="field-group"><label class="field-label">Protected order/election JSON</label><InputTextArea aria-label="Protected deduction order details" class="field-input" @bind-Value="DeductionElectionForm.OrderDetailsJson" /></div>
+                <label class="check-field"><InputCheckbox @bind-Value="DeductionElectionForm.IsActive" /> Active</label>
+            </div><button class="action-primary" type="submit">@(DeductionElectionForm.Id.HasValue ? "Update election" : "Enroll employee")</button>@if (DeductionElectionForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetDeductionElectionEditor">Cancel edit</button> }</EditForm></details>
+            @if (DeductionConfiguration.Elections.Count > 0) { <div class="table-scroll"><table class="data-table"><thead><tr><th>Employee</th><th>Plan</th><th>Effective</th><th>Overrides</th><th>Status</th><th></th></tr></thead><tbody>@foreach (var election in DeductionConfiguration.Elections) { <tr><td>@EmployeeName(election.EmployeeId)</td><td>@election.PlanCode — @election.PlanName</td><td>@election.EffectiveOn@if (election.ExpiresOn.HasValue) { <span>–@election.ExpiresOn</span> }</td><td>@(election.EmployeeValueOverride?.ToString() ?? "Plan default")</td><td>@(election.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => EditDeductionElection(election)">Edit</button></td></tr> }</tbody></table></div> }
+        </section>
+        </Authorized></AuthorizeView>
+
+        <section class="panel">
+            <h2>Employee payment files</h2>
+            <p class="page-intro">Generate immutable files only after payroll posts and employee payments reconcile to net pay. ACH instruction CSV and check-register CSV are bank-neutral exports. NACHA PPD output uses 94-byte records and control totals, but remains marked for bank validation because each originating bank controls its accepted origin values and submission process.</p>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.MaintainEmployeePayrollSetup"><Authorized Context="bankOriginContext">
+                <h3>ACH originating-bank settings</h3>
+                <details open="@BankOriginForm.Id.HasValue"><summary>@(BankOriginForm.Id.HasValue ? $"Edit origin for {BankOriginForm.BankAccountId}" : "Configure an ACH bank origin")</summary><EditForm Model="BankOriginForm" OnValidSubmit="SaveBankOriginAsync"><div class="content-grid">
+                    <div class="field-group"><label class="field-label">Funding account</label><InputSelect aria-label="ACH origin funding account" class="field-input" @bind-Value="BankOriginForm.BankAccountId">@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Immediate destination routing</label><InputText aria-label="ACH immediate destination routing number" class="field-input" autocomplete="off" @bind-Value="BankOriginForm.ImmediateDestinationRoutingNumber" /></div>
+                    <div class="field-group"><label class="field-label">Immediate origin</label><InputText aria-label="ACH immediate origin" class="field-input" autocomplete="off" @bind-Value="BankOriginForm.ImmediateOrigin" /></div>
+                    <div class="field-group"><label class="field-label">Destination bank name</label><InputText aria-label="ACH destination bank name" class="field-input" @bind-Value="BankOriginForm.DestinationBankName" /></div>
+                    <div class="field-group"><label class="field-label">Origin name</label><InputText aria-label="ACH origin name" class="field-input" @bind-Value="BankOriginForm.OriginName" /></div>
+                    <div class="field-group"><label class="field-label">Company identification</label><InputText aria-label="ACH company identification" class="field-input" autocomplete="off" @bind-Value="BankOriginForm.CompanyIdentification" /></div>
+                    <div class="field-group"><label class="field-label">Entry description</label><InputText aria-label="ACH company entry description" class="field-input" @bind-Value="BankOriginForm.CompanyEntryDescription" /></div>
+                    <div class="field-group"><label class="field-label">Originating DFI ID</label><InputText aria-label="ACH originating DFI identification" class="field-input" @bind-Value="BankOriginForm.OriginatingDfiIdentification" /></div>
+                    <div class="field-group"><label class="field-label">Effective</label><InputDate aria-label="ACH origin effective date" class="field-input" @bind-Value="BankOriginForm.EffectiveOn" /></div>
+                    <div class="field-group"><label class="field-label">Expires</label><InputDate aria-label="ACH origin expiration date" class="field-input" @bind-Value="BankOriginForm.ExpiresOn" /></div>
+                    <div class="field-group"><label class="field-label">Bank-validation notes</label><InputTextArea aria-label="ACH bank validation notes" class="field-input" @bind-Value="BankOriginForm.BankValidationNotes" /></div>
+                    <label class="check-field"><InputCheckbox @bind-Value="BankOriginForm.IsActive" /> Active</label><label class="check-field"><InputCheckbox @bind-Value="BankOriginForm.IsBankValidated" /> Originating bank validated these exact settings</label>
+                </div><button class="action-primary" type="submit">@(BankOriginForm.Id.HasValue ? "Update bank origin" : "Save bank origin")</button>@if (BankOriginForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetBankOriginEditor">Cancel edit</button> }</EditForm></details>
+                @if (PaymentFileWorkspace.BankOrigins.Count > 0) { <div class="table-scroll"><table class="data-table"><thead><tr><th>Funding account</th><th>Destination</th><th>Origin</th><th>Effective</th><th>Bank validation</th><th></th></tr></thead><tbody>@foreach (var origin in PaymentFileWorkspace.BankOrigins) { <tr><td>@origin.BankAccountName</td><td>@origin.DestinationBankName<br />••••@origin.DestinationRoutingLastFour</td><td>@origin.OriginName<br />@origin.ImmediateOriginMasked</td><td>@origin.EffectiveOn@if (origin.ExpiresOn.HasValue) { <span>–@origin.ExpiresOn</span> }</td><td>@(origin.IsBankValidated ? "Validated" : "Not validated")<br />@origin.BankValidationNotes</td><td><button class="action-secondary" type="button" @onclick="() => EditBankOrigin(origin)">Edit</button></td></tr> }</tbody></table></div> }
+            </Authorized></AuthorizeView>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostPayroll"><Authorized Context="paymentFileGenerateContext">
+                <h3>Generate from posted payroll</h3>
+                <div class="content-grid"><div class="field-group"><label class="field-label">Payroll run</label><InputSelect aria-label="Payment file payroll run" class="field-input" @bind-Value="PaymentFileForm.PayrollRunId">@foreach (var run in Workspace.Payroll.Runs?.Where(item => item.Status == "Posted") ?? []) { <option value="@run.Id">@run.Reference — @run.PayDate</option> }</InputSelect></div><div class="field-group"><label class="field-label">Format</label><InputSelect aria-label="Payroll payment file format" class="field-input" @bind-Value="PaymentFileForm.Format"><option value="AchInstructionsCsv">ACH instruction CSV</option><option value="CheckRegisterCsv">Check register CSV</option><option value="NachaPpd">NACHA PPD (bank validation required)</option></InputSelect></div><div class="field-group"><label class="field-label">Effective entry date</label><InputDate aria-label="ACH effective entry date" class="field-input" @bind-Value="PaymentFileForm.EffectiveEntryDate" /></div></div>
+                <button class="action-primary" type="button" @onclick="GeneratePaymentFileAsync" disabled="@(PaymentFileForm.PayrollRunId == Guid.Empty)">Generate immutable payment file</button>@if (PaymentFileForm.PayrollRunId == Guid.Empty) { <p>No posted, unreversed payroll run is available.</p> }
+            </Authorized></AuthorizeView>
+            @if (PaymentFileWorkspace.Files.Count > 0) { <div class="table-scroll"><table class="data-table"><thead><tr><th>Payroll</th><th>Format</th><th>Entries</th><th>Total</th><th>Status</th><th>Generated</th><th>Integrity</th><th></th></tr></thead><tbody>@foreach (var file in PaymentFileWorkspace.Files) { <tr><td>@file.PayrollReference</td><td>@file.Format<br /><small>@file.SpecificationVersion</small></td><td>@file.EntryCount</td><td>@file.CreditTotal.ToString("C")</td><td>@file.Status@if (!string.IsNullOrWhiteSpace(file.VoidReason)) { <br /><strong>@file.VoidReason</strong> }</td><td>@file.GeneratedAtUtc.ToLocalTime().ToString("g")</td><td><code>@file.ContentSha256[..12]</code><br /><code>@file.SourceDigestSha256[..12]</code></td><td><a class="action-secondary" href="@($"/payroll/payment-files/{file.Id}/download")">@(file.Status == "Voided" ? "Download voided copy" : "Download")</a></td></tr> }</tbody></table></div> }
+            else { <p>No payment files have been generated.</p> }
+        </section>
+
         <section class="panel">
             <h2>Federal filing data and payroll close</h2>
             <p class="page-intro">Generate source-locked 2026 Form 941, Form 940, or W-2/W-3 data from posted, unreversed payroll. Approval freezes the source digest and locks affected payroll until the filing is reopened. JSON output is preparation data for professional review; it is not an electronically transmitted return.</p>
@@ -136,7 +216,14 @@ else
             <table class="data-table"><thead><tr><th>Employee</th><th>Work state</th><th>Gross pay</th></tr></thead><tbody>@foreach (var employee in Workspace.Payroll.Employees.Where(employee => employee.IsActive)) { var employeeId = employee.Id; <tr><td>@employee.FullName</td><td>@employee.State</td><td><input type="number" min="0" step="0.01" aria-label="@($"Gross pay for {employee.FullName}")" class="field-input" value="@RunLines[employeeId].ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetRunLine(employeeId, args.Value)" /></td></tr> }</tbody></table>
             <button class="action-secondary" type="submit">Preview payroll</button>
             @if (Preview is not null) { <button class="action-primary" type="button" @onclick="SavePayrollDraftAsync">Save reviewed draft</button> }</EditForm>
-            @if (Preview is not null) { <table class="data-table"><thead><tr><th>Employee</th><th>Gross</th><th>Pre-tax benefits</th><th>Withholding</th><th>Post-tax benefits</th><th>Employer taxes</th><th>Employer benefits</th><th>Net pay</th></tr></thead><tbody>@foreach (var line in Preview.Employees) { <tr><td>@line.EmployeeName (@line.WorkState)</td><td>@line.GrossPay.ToString("C")</td><td>@line.PreTaxDeductions.ToString("C")</td><td>@line.EmployeeWithholdings.ToString("C")</td><td>@line.PostTaxDeductions.ToString("C")</td><td>@line.EmployerPayrollTaxes.ToString("C")</td><td>@line.EmployerBenefitContributions.ToString("C")</td><td>@line.NetPay.ToString("C")</td></tr> }</tbody></table> }
+            @if (Preview is not null)
+            {
+                <table class="data-table"><thead><tr><th>Employee</th><th>Gross</th><th>Pre-tax benefits</th><th>Withholding</th><th>Post-tax benefits</th><th>Employer taxes</th><th>Employer benefits</th><th>Net pay</th></tr></thead><tbody>@foreach (var line in Preview.Employees) { <tr><td>@line.EmployeeName (@line.WorkState)</td><td>@line.GrossPay.ToString("C")</td><td>@line.PreTaxDeductions.ToString("C")</td><td>@line.EmployeeWithholdings.ToString("C")</td><td>@line.PostTaxDeductions.ToString("C")</td><td>@line.EmployerPayrollTaxes.ToString("C")</td><td>@line.EmployerBenefitContributions.ToString("C")</td><td>@line.NetPay.ToString("C")</td></tr> }</tbody></table>
+                @foreach (var line in Preview.Employees.Where(item => item.Deductions?.Count > 0))
+                {
+                    <details><summary>Review deductions for @line.EmployeeName</summary><div class="table-scroll"><table class="data-table"><thead><tr><th>Code</th><th>Type</th><th>Requested</th><th>Applied</th><th>Employer</th><th>Tax treatment</th><th>Limit</th></tr></thead><tbody>@foreach (var deduction in line.Deductions!) { <tr><td>@deduction.DeductionCode</td><td>@deduction.DeductionType</td><td>@(deduction.RequestedEmployeeAmount ?? deduction.EmployeeAmount).ToString("C")</td><td>@deduction.EmployeeAmount.ToString("C")</td><td>@deduction.EmployerAmount.ToString("C")</td><td>@(deduction.IsPreTax ? "Pretax" : "Post-tax")</td><td>@if (deduction.LimitApplied) { <strong>Limited by @deduction.LimitRuleCode</strong> } else { <span>Not limited</span> }</td></tr> }</tbody></table></div></details>
+                }
+            }
         </section>
         </Authorized></AuthorizeView>
 
@@ -336,9 +423,12 @@ else
                         <div class="field-group"><label class="field-label">New routing number</label><input aria-label="Employee bank routing number" class="field-input" type="password" inputmode="numeric" autocomplete="off" @bind="EmploymentForm.BankRoutingNumber" /></div>
                         <div class="field-group"><label class="field-label">New account number</label><input aria-label="Employee bank account number" class="field-input" type="password" inputmode="numeric" autocomplete="off" @bind="EmploymentForm.BankAccountNumber" /></div>
                         <div class="field-group"><label class="field-label">Account type</label><InputSelect aria-label="Employee bank account type" class="field-input" @bind-Value="EmploymentForm.BankAccountType"><option value="">Select</option><option>Checking</option><option>Savings</option></InputSelect></div>
+                        <div class="field-group"><label class="field-label">Authorization signed date</label><InputDate aria-label="Direct deposit authorization signed date" class="field-input" @bind-Value="EmploymentForm.DirectDepositAuthorizationOn" />@if (SelectedEmployee?.HasDirectDepositAuthorization == true) { <small>Stored authorization dated @SelectedEmployee.DirectDepositAuthorizationOn</small> }</div>
+                        <div class="field-group"><label class="field-label">Authorization evidence reference</label><InputText aria-label="Direct deposit authorization evidence reference" class="field-input" autocomplete="off" @bind-Value="EmploymentForm.DirectDepositAuthorizationReference" /></div>
                         <div class="field-group"><label class="field-label"><InputCheckbox @bind-Value="EmploymentForm.DirectDepositEnabled" /> Direct deposit enabled</label></div>
                         <div class="field-group"><label class="field-label"><InputCheckbox @bind-Value="EmploymentForm.ClearSocialSecurityNumber" /> Remove stored SSN</label></div>
                         <div class="field-group"><label class="field-label"><InputCheckbox @bind-Value="EmploymentForm.ClearBankDetails" /> Remove stored bank details</label></div>
+                        <div class="field-group"><label class="field-label"><InputCheckbox @bind-Value="EmploymentForm.ClearDirectDepositAuthorization" /> Remove stored direct-deposit authorization</label></div>
                     </div><button class="action-primary" type="submit">Save protected details</button></EditForm>
                 }
             </article>
@@ -402,6 +492,13 @@ else
     private List<PayrollClosePeriodSnapshot> PayrollClosePeriods { get; set; } = [];
     private PayrollFilingEditor FilingForm { get; } = new();
     private PayrollCloseEditor CloseForm { get; } = new();
+    private PayrollDeductionConfiguration DeductionConfiguration { get; set; } = new([], []);
+    private PayrollDeductionPlanEditor DeductionPlanForm { get; set; } = new();
+    private PayrollDeductionElectionEditor DeductionElectionForm { get; set; } = new();
+    private PayrollPaymentFileWorkspace PaymentFileWorkspace { get; set; } = new([], []);
+    private PayrollBankOriginEditor BankOriginForm { get; set; } = new();
+    private PayrollPaymentFileEditor PaymentFileForm { get; set; } = new();
+    private static readonly string[] DeductionCategories = ["Medical", "Dental", "Vision", "HSA", "HealthFSA", "DependentCareFSA", "Retirement401k", "Retirement403b", "Retirement457", "RetirementSimpleIra", "RetirementSepIra", "RetirementRoth", "LifeInsurance", "DisabilityInsurance", "Transit", "Parking", "UnionDues", "CharitableContribution", "EmployeeLoan", "ChildSupport", "Alimony", "OrdinaryGarnishment", "TaxLevy", "BankruptcyOrder", "FederalAgencyDebt", "PtoPurchase", "Other"];
     private string FilingReopenReason = string.Empty;
     private string ReversalReason = string.Empty;
     private JurisdictionRuleEditor JurisdictionRuleForm { get; } = new();
@@ -435,6 +532,8 @@ else
         Workspace = await WorkspaceService.GetWorkspaceAsync();
         var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)) PayrollFilings = (await PayrollFilingService.GetFilingsAsync()).ToList();
+        if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)) PaymentFileWorkspace = await PayrollPaymentFileService.GetAsync();
+        if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData) && authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage)) DeductionConfiguration = await PayrollDeductionConfigurationService.GetAsync();
         PayrollClosePeriods = (await PayrollFilingService.GetClosePeriodsAsync()).ToList();
         foreach (var employee in Workspace.Payroll.Employees)
         {
@@ -443,11 +542,73 @@ else
         }
         SelectedPayrollSetupEmployeeId = Workspace.Payroll.Employees.FirstOrDefault()?.Id ?? Guid.Empty;
         SelectedEmployeeId = SelectedPayrollSetupEmployeeId;
+        DeductionElectionForm.EmployeeId = SelectedPayrollSetupEmployeeId;
+        DeductionElectionForm.PayrollDeductionPlanId = DeductionConfiguration.Plans.FirstOrDefault()?.Id ?? Guid.Empty;
         var defaultBankAccountId = Workspace.Treasury.BankAccounts.FirstOrDefault()?.Id ?? Guid.Empty;
         RunForm.BankAccountId = defaultBankAccountId;
         LiabilityPaymentForm.BankAccountId = defaultBankAccountId;
+        BankOriginForm.BankAccountId = defaultBankAccountId;
+        PaymentFileForm.PayrollRunId = Workspace.Payroll.Runs?.FirstOrDefault(item => item.Status == "Posted")?.Id ?? Guid.Empty;
         LoadEmploymentEditor();
         ResetTimecardEditor();
+    }
+
+    private static string CategoryLabel(string value) => value switch { "HealthFSA" => "Health FSA", "DependentCareFSA" => "Dependent-care FSA", "Retirement401k" => "401(k)", "Retirement403b" => "403(b)", "Retirement457" => "457 plan", "RetirementSimpleIra" => "SIMPLE IRA", "RetirementSepIra" => "SEP IRA", "RetirementRoth" => "Roth retirement", "LifeInsurance" => "Life insurance", "DisabilityInsurance" => "Disability insurance", "UnionDues" => "Union dues", "CharitableContribution" => "Charitable contribution", "EmployeeLoan" => "Employee loan", "ChildSupport" => "Child support", "OrdinaryGarnishment" => "Ordinary garnishment", "TaxLevy" => "Tax levy", "BankruptcyOrder" => "Bankruptcy order", "FederalAgencyDebt" => "Federal agency debt", "PtoPurchase" => "PTO purchase", _ => value };
+    private string EmployeeName(Guid employeeId) => Workspace?.Payroll.Employees.FirstOrDefault(item => item.Id == employeeId)?.FullName ?? "Employee unavailable";
+
+    private async Task RefreshDeductionConfigurationAsync()
+    {
+        DeductionConfiguration = await PayrollDeductionConfigurationService.GetAsync();
+        if (DeductionElectionForm.PayrollDeductionPlanId == Guid.Empty) DeductionElectionForm.PayrollDeductionPlanId = DeductionConfiguration.Plans.FirstOrDefault()?.Id ?? Guid.Empty;
+    }
+
+    private async Task SaveDeductionPlanAsync()
+    {
+        var form = DeductionPlanForm;
+        var result = await PayrollDeductionConfigurationService.SavePlanAsync(new SavePayrollDeductionPlanRequest(form.Id, form.Code, form.Name, form.Category, form.CalculationMethod, form.DefaultEmployeeValue, form.DefaultEmployerValue, form.IsPreTax, form.ExemptFromFederalIncomeTax, form.ExemptFromFica, form.ExemptFromFuta, form.ReducesDisposableEarnings, form.LiabilityAccountNumber, form.Priority, form.EmployeeLimitPerPay, form.EmployeeAnnualLimit, form.MinimumNetPay, form.LimitRuleCode, form.LimitRuleJson, form.OfficialSourceUrl, form.SourceRetrievedOn, form.EffectiveOn, form.ExpiresOn, form.IsActive, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Effective-dated payroll deduction plan saved with its legal-source metadata." : result.ErrorMessage;
+        if (result.Succeeded) { ResetDeductionPlanEditor(); await RefreshDeductionConfigurationAsync(); }
+    }
+
+    private void EditDeductionPlan(PayrollDeductionPlanSnapshot plan) => DeductionPlanForm = new PayrollDeductionPlanEditor { Id = plan.Id, Code = plan.Code, Name = plan.Name, Category = plan.Category, CalculationMethod = plan.CalculationMethod, DefaultEmployeeValue = plan.DefaultEmployeeValue, DefaultEmployerValue = plan.DefaultEmployerValue, IsPreTax = plan.IsPreTax, ExemptFromFederalIncomeTax = plan.ExemptFromFederalIncomeTax, ExemptFromFica = plan.ExemptFromFica, ExemptFromFuta = plan.ExemptFromFuta, ReducesDisposableEarnings = plan.ReducesDisposableEarnings, LiabilityAccountNumber = plan.LiabilityAccountNumber, Priority = plan.Priority, EmployeeLimitPerPay = plan.EmployeeLimitPerPay, EmployeeAnnualLimit = plan.EmployeeAnnualLimit, MinimumNetPay = plan.MinimumNetPay, LimitRuleCode = plan.LimitRuleCode, LimitRuleJson = plan.LimitRuleJson, OfficialSourceUrl = plan.OfficialSourceUrl, SourceRetrievedOn = plan.SourceRetrievedOn, EffectiveOn = plan.EffectiveOn, ExpiresOn = plan.ExpiresOn, IsActive = plan.IsActive, ConcurrencyToken = plan.ConcurrencyToken };
+    private void ResetDeductionPlanEditor() => DeductionPlanForm = new();
+    private void LoadFederalDeductionRuleDefaults()
+    {
+        DeductionPlanForm.OfficialSourceUrl = "https://www.dol.gov/agencies/whd/fact-sheets/30-cppa";
+        DeductionPlanForm.SourceRetrievedOn = DateOnly.FromDateTime(DateTime.Today);
+        DeductionPlanForm.LimitRuleJson = DeductionPlanForm.LimitRuleCode == "OrdinaryGarnishmentFederal" ? "{\"maxDisposablePercent\":0.25,\"protectedMinimumHourlyRate\":7.25,\"protectedHoursPerWeek\":30}" : "{}";
+    }
+
+    private async Task SaveDeductionElectionAsync()
+    {
+        var form = DeductionElectionForm;
+        var result = await PayrollDeductionConfigurationService.SaveElectionAsync(new SaveEmployeePayrollDeductionElectionRequest(form.Id, form.EmployeeId, form.PayrollDeductionPlanId, form.EmployeeValueOverride, form.EmployerValueOverride, form.EmployeeAnnualLimitOverride, form.OrderDetailsJson, form.EffectiveOn, form.ExpiresOn, form.IsActive, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Employee deduction election saved and will apply only within its effective dates." : result.ErrorMessage;
+        if (result.Succeeded) { ResetDeductionElectionEditor(); await RefreshDeductionConfigurationAsync(); }
+    }
+
+    private void EditDeductionElection(EmployeePayrollDeductionElectionSnapshot election) => DeductionElectionForm = new PayrollDeductionElectionEditor { Id = election.Id, EmployeeId = election.EmployeeId, PayrollDeductionPlanId = election.PayrollDeductionPlanId, EmployeeValueOverride = election.EmployeeValueOverride, EmployerValueOverride = election.EmployerValueOverride, EmployeeAnnualLimitOverride = election.EmployeeAnnualLimitOverride, OrderDetailsJson = election.OrderDetailsJson, EffectiveOn = election.EffectiveOn, ExpiresOn = election.ExpiresOn, IsActive = election.IsActive, ConcurrencyToken = election.ConcurrencyToken };
+    private void ResetDeductionElectionEditor() => DeductionElectionForm = new PayrollDeductionElectionEditor { EmployeeId = Workspace?.Payroll.Employees.FirstOrDefault()?.Id ?? Guid.Empty, PayrollDeductionPlanId = DeductionConfiguration.Plans.FirstOrDefault()?.Id ?? Guid.Empty };
+
+    private async Task RefreshPaymentFilesAsync() => PaymentFileWorkspace = await PayrollPaymentFileService.GetAsync();
+    private async Task SaveBankOriginAsync()
+    {
+        var form = BankOriginForm;
+        var result = await PayrollPaymentFileService.SaveBankOriginAsync(new SavePayrollBankOriginConfigurationRequest(form.Id, form.BankAccountId, form.ImmediateDestinationRoutingNumber, form.ImmediateOrigin, form.DestinationBankName, form.OriginName, form.CompanyIdentification, form.CompanyEntryDescription, form.OriginatingDfiIdentification, form.EffectiveOn, form.ExpiresOn, form.IsActive, form.IsBankValidated, form.BankValidationNotes, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Protected ACH bank-origin settings saved. NACHA generation remains subject to the originating bank's acceptance." : result.ErrorMessage;
+        if (result.Succeeded) { ResetBankOriginEditor(); await RefreshPaymentFilesAsync(); }
+    }
+    private void EditBankOrigin(PayrollBankOriginConfigurationSnapshot origin)
+    {
+        BankOriginForm = new PayrollBankOriginEditor { Id = origin.Id, BankAccountId = origin.BankAccountId, DestinationBankName = origin.DestinationBankName, OriginName = origin.OriginName, CompanyEntryDescription = origin.CompanyEntryDescription, OriginatingDfiIdentification = origin.OriginatingDfiIdentification, EffectiveOn = origin.EffectiveOn, ExpiresOn = origin.ExpiresOn, IsActive = origin.IsActive, IsBankValidated = origin.IsBankValidated, BankValidationNotes = origin.BankValidationNotes, ConcurrencyToken = origin.ConcurrencyToken };
+        StatusMessage = "Re-enter the protected destination routing number, immediate origin, and company identification before saving this bank-origin update.";
+    }
+    private void ResetBankOriginEditor() => BankOriginForm = new PayrollBankOriginEditor { BankAccountId = Workspace?.Treasury.BankAccounts.FirstOrDefault()?.Id ?? Guid.Empty };
+    private async Task GeneratePaymentFileAsync()
+    {
+        var result = await PayrollPaymentFileService.GenerateAsync(new GeneratePayrollPaymentFileRequest(PaymentFileForm.PayrollRunId, PaymentFileForm.Format, PaymentFileForm.EffectiveEntryDate));
+        StatusMessage = result.Succeeded ? "Immutable payroll payment file generated and reconciled. Download it below; NACHA output still requires bank acceptance." : result.ErrorMessage;
+        if (result.Succeeded) await RefreshPaymentFilesAsync();
     }
 
     private async Task GenerateFilingAsync() => await SaveFilingAsync(new SavePayrollFilingDraftRequest(null, FilingForm.FormCode, FilingForm.TaxYear, FilingForm.FormCode == "941" ? FilingForm.Quarter : null));
@@ -572,6 +733,12 @@ else
         var result = await TransactionService.PostApprovedPayrollRunAsync(new PostApprovedPayrollRunRequest(run.Id, run.ConcurrencyToken));
         StatusMessage = result.Succeeded ? "Approved payroll posted to the ledger." : result.ErrorMessage;
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        if (result.Succeeded)
+        {
+            PaymentFileForm.PayrollRunId = run.Id;
+            PaymentFileForm.EffectiveEntryDate = run.PayDate;
+            await RefreshPaymentFilesAsync();
+        }
     }
     private async Task CancelPayrollAsync(PayrollRunSnapshot run)
     {
@@ -629,7 +796,7 @@ else
     }
     private async Task SaveEmploymentDetailsAsync()
     {
-        var request = new SaveEmployeeEmploymentDetailsRequest(SelectedEmployeeId, EmploymentForm.AddressLine1, EmploymentForm.AddressLine2, EmploymentForm.PostalCode, EmploymentForm.ResidenceCounty, EmploymentForm.ResidenceSchoolDistrict, EmploymentForm.WorkCounty, EmploymentForm.WorkSchoolDistrict, EmploymentForm.EmploymentStartedOn, EmploymentForm.EmploymentEndedOn, EmploymentForm.HourlyRate, EmploymentForm.OvertimeRate, EmploymentForm.DirectDepositEnabled, EmploymentForm.BankAccountType, EmploymentForm.SocialSecurityNumber, EmploymentForm.BankRoutingNumber, EmploymentForm.BankAccountNumber, EmploymentForm.ClearSocialSecurityNumber, EmploymentForm.ClearBankDetails, EmploymentForm.ConcurrencyToken);
+        var request = new SaveEmployeeEmploymentDetailsRequest(SelectedEmployeeId, EmploymentForm.AddressLine1, EmploymentForm.AddressLine2, EmploymentForm.PostalCode, EmploymentForm.ResidenceCounty, EmploymentForm.ResidenceSchoolDistrict, EmploymentForm.WorkCounty, EmploymentForm.WorkSchoolDistrict, EmploymentForm.EmploymentStartedOn, EmploymentForm.EmploymentEndedOn, EmploymentForm.HourlyRate, EmploymentForm.OvertimeRate, EmploymentForm.DirectDepositEnabled, EmploymentForm.BankAccountType, EmploymentForm.SocialSecurityNumber, EmploymentForm.BankRoutingNumber, EmploymentForm.BankAccountNumber, EmploymentForm.ClearSocialSecurityNumber, EmploymentForm.ClearBankDetails, EmploymentForm.ConcurrencyToken, EmploymentForm.DirectDepositAuthorizationOn, EmploymentForm.DirectDepositAuthorizationReference, EmploymentForm.ClearDirectDepositAuthorization);
         var result = await TransactionService.SaveEmployeeEmploymentDetailsAsync(request);
         StatusMessage = result.Succeeded ? "Protected employee details saved. Stored identifiers remain masked." : result.ErrorMessage;
         if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); LoadEmploymentEditor(); }
@@ -644,10 +811,14 @@ else
     private sealed class PayrollRunEditor { public Guid BankAccountId { get; set; } public DateOnly PayDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly PeriodStart { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(-13)); public DateOnly PeriodEnd { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string RunType { get; set; } = "Regular"; public string Reference { get; set; } = $"PR-{DateTime.Today:yyyyMMdd}"; }
     private sealed class PayrollFilingEditor { public string FormCode { get; set; } = "941"; public int TaxYear { get; set; } = 2026; public int Quarter { get; set; } = ((DateTime.Today.Month - 1) / 3) + 1; }
     private sealed class PayrollCloseEditor { public string PeriodType { get; set; } = "Quarter"; public int TaxYear { get; set; } = 2026; public int Quarter { get; set; } = ((DateTime.Today.Month - 1) / 3) + 1; }
+    private sealed class PayrollDeductionPlanEditor { public Guid? Id { get; set; } public string Code { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public string Category { get; set; } = "Other"; public string CalculationMethod { get; set; } = "Fixed"; public decimal DefaultEmployeeValue { get; set; } public decimal DefaultEmployerValue { get; set; } public bool IsPreTax { get; set; } public bool ExemptFromFederalIncomeTax { get; set; } public bool ExemptFromFica { get; set; } public bool ExemptFromFuta { get; set; } public bool ReducesDisposableEarnings { get; set; } public string LiabilityAccountNumber { get; set; } = "2200"; public int Priority { get; set; } = 100; public decimal? EmployeeLimitPerPay { get; set; } public decimal? EmployeeAnnualLimit { get; set; } public decimal MinimumNetPay { get; set; } public string LimitRuleCode { get; set; } = "None"; public string LimitRuleJson { get; set; } = "{}"; public string OfficialSourceUrl { get; set; } = string.Empty; public DateOnly? SourceRetrievedOn { get; set; } public DateOnly EffectiveOn { get; set; } = new(2026, 1, 1); public DateOnly? ExpiresOn { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class PayrollDeductionElectionEditor { public Guid? Id { get; set; } public Guid EmployeeId { get; set; } public Guid PayrollDeductionPlanId { get; set; } public decimal? EmployeeValueOverride { get; set; } public decimal? EmployerValueOverride { get; set; } public decimal? EmployeeAnnualLimitOverride { get; set; } public string OrderDetailsJson { get; set; } = "{}"; public DateOnly EffectiveOn { get; set; } = new(2026, 1, 1); public DateOnly? ExpiresOn { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class PayrollBankOriginEditor { public Guid? Id { get; set; } public Guid BankAccountId { get; set; } public string ImmediateDestinationRoutingNumber { get; set; } = string.Empty; public string ImmediateOrigin { get; set; } = string.Empty; public string DestinationBankName { get; set; } = string.Empty; public string OriginName { get; set; } = string.Empty; public string CompanyIdentification { get; set; } = string.Empty; public string CompanyEntryDescription { get; set; } = "PAYROLL"; public string OriginatingDfiIdentification { get; set; } = string.Empty; public DateOnly EffectiveOn { get; set; } = new(2026, 1, 1); public DateOnly? ExpiresOn { get; set; } public bool IsActive { get; set; } = true; public bool IsBankValidated { get; set; } public string BankValidationNotes { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class PayrollPaymentFileEditor { public Guid PayrollRunId { get; set; } public string Format { get; set; } = "AchInstructionsCsv"; public DateOnly? EffectiveEntryDate { get; set; } }
     private sealed class PayrollTimecardEditor { public Guid? Id { get; set; } public Guid EmployeeId { get; set; } public DateOnly PeriodStart { get; set; } public DateOnly PeriodEnd { get; set; } public string Notes { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; public List<PayrollTimeEntryEditor> Entries { get; set; } = []; }
     private sealed class PayrollTimeEntryEditor { public DateOnly WorkDate { get; set; } public string EarningCode { get; set; } = "REG"; public string EarningType { get; set; } = "Regular"; public decimal Hours { get; set; } public decimal Rate { get; set; } public decimal Amount { get; set; } public bool IsTaxable { get; set; } = true; public string WorkState { get; set; } = string.Empty; public string WorkCounty { get; set; } = string.Empty; public string WorkCity { get; set; } = string.Empty; public string WorkSchoolDistrict { get; set; } = string.Empty; public Guid? ProjectJobId { get; set; } public string Notes { get; set; } = string.Empty; }
     private sealed class PayrollLiabilityPaymentEditor { public Guid BankAccountId { get; set; } public DateOnly PaymentDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = $"TAX-{DateTime.Today:yyyyMMdd}"; public string Payee { get; set; } = string.Empty; public string Method { get; set; } = "EFT"; public void Reset() { Reference = $"TAX-{DateTime.Today:yyyyMMdd}"; Payee = string.Empty; } }
     private sealed class EmployeePayrollEditor(string filingStatus, string payrollFrequency, int allowances, decimal additionalWithholding, decimal preTaxBenefitDeductions, decimal postTaxBenefitDeductions, string residenceState, string residenceCity, string workState, string workCity, int federalFormW4Year, bool federalStep2MultipleJobs, decimal federalStep3Credits, decimal federalStep4OtherIncome, decimal federalStep4Deductions, bool federalWithholdingExempt) { public string FilingStatus { get; set; } = filingStatus; public string PayrollFrequency { get; set; } = payrollFrequency; public int Allowances { get; set; } = allowances; public decimal AdditionalWithholding { get; set; } = additionalWithholding; public decimal PreTaxBenefitDeductions { get; set; } = preTaxBenefitDeductions; public decimal PostTaxBenefitDeductions { get; set; } = postTaxBenefitDeductions; public string ResidenceState { get; set; } = residenceState; public string ResidenceCity { get; set; } = residenceCity; public string WorkState { get; set; } = workState; public string WorkCity { get; set; } = workCity; public int FederalFormW4Year { get; set; } = federalFormW4Year; public bool FederalStep2MultipleJobs { get; set; } = federalStep2MultipleJobs; public decimal FederalStep3Credits { get; set; } = federalStep3Credits; public decimal FederalStep4OtherIncome { get; set; } = federalStep4OtherIncome; public decimal FederalStep4Deductions { get; set; } = federalStep4Deductions; public bool FederalWithholdingExempt { get; set; } = federalWithholdingExempt; }
     private sealed class JurisdictionRuleEditor { public string ResidenceJurisdiction { get; set; } = string.Empty; public string WorkJurisdiction { get; set; } = string.Empty; public bool ExemptWorkWithholding { get; set; } public decimal ResidentCreditRate { get; set; } public string Notes { get; set; } = string.Empty; }
-    private sealed class EmployeeEmploymentEditor { public string AddressLine1 { get; set; } = string.Empty; public string AddressLine2 { get; set; } = string.Empty; public string PostalCode { get; set; } = string.Empty; public string ResidenceCounty { get; set; } = string.Empty; public string ResidenceSchoolDistrict { get; set; } = string.Empty; public string WorkCounty { get; set; } = string.Empty; public string WorkSchoolDistrict { get; set; } = string.Empty; public DateOnly? EmploymentStartedOn { get; set; } public DateOnly? EmploymentEndedOn { get; set; } public decimal HourlyRate { get; set; } public decimal OvertimeRate { get; set; } public bool DirectDepositEnabled { get; set; } public string BankAccountType { get; set; } = string.Empty; public string SocialSecurityNumber { get; set; } = string.Empty; public string BankRoutingNumber { get; set; } = string.Empty; public string BankAccountNumber { get; set; } = string.Empty; public bool ClearSocialSecurityNumber { get; set; } public bool ClearBankDetails { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class EmployeeEmploymentEditor { public string AddressLine1 { get; set; } = string.Empty; public string AddressLine2 { get; set; } = string.Empty; public string PostalCode { get; set; } = string.Empty; public string ResidenceCounty { get; set; } = string.Empty; public string ResidenceSchoolDistrict { get; set; } = string.Empty; public string WorkCounty { get; set; } = string.Empty; public string WorkSchoolDistrict { get; set; } = string.Empty; public DateOnly? EmploymentStartedOn { get; set; } public DateOnly? EmploymentEndedOn { get; set; } public decimal HourlyRate { get; set; } public decimal OvertimeRate { get; set; } public bool DirectDepositEnabled { get; set; } public string BankAccountType { get; set; } = string.Empty; public string SocialSecurityNumber { get; set; } = string.Empty; public string BankRoutingNumber { get; set; } = string.Empty; public string BankAccountNumber { get; set; } = string.Empty; public DateOnly? DirectDepositAuthorizationOn { get; set; } public string DirectDepositAuthorizationReference { get; set; } = string.Empty; public bool ClearSocialSecurityNumber { get; set; } public bool ClearBankDetails { get; set; } public bool ClearDirectDepositAuthorization { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; }
 }

@@ -350,11 +350,22 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var registerCsv = await client.GetAsync($"/api/payroll-runs/{run.Id}/register.csv");
         Assert.Equal("text/csv", registerCsv.Content.Headers.ContentType?.MediaType);
         Assert.Contains("\"TOTAL\"", await registerCsv.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/payroll-deduction-configuration")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/payroll-payment-files")).StatusCode);
+        var paymentFileResponse = await client.PostAsJsonAsync("/api/payroll-payment-files", new GeneratePayrollPaymentFileRequest(run.Id, "CheckRegisterCsv"));
+        Assert.Equal(HttpStatusCode.Created, paymentFileResponse.StatusCode);
+        var paymentFileResult = await paymentFileResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var paymentFileDownload = await client.GetAsync($"/api/payroll-payment-files/{paymentFileResult!.Id}/download");
+        Assert.Equal("text/csv", paymentFileDownload.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("CheckReference", await paymentFileDownload.Content.ReadAsStringAsync());
         using (var nonPayrollClient = await CreateAuthenticatedClientAsync(isolatedFactory, "controller"))
         {
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/register")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/employees/{employee.Id}/pay-statement")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-filings")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-deduction-configuration")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-payment-files")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-payment-files/{paymentFileResult.Id}/download")).StatusCode);
         }
         var filingResponse = await client.PostAsJsonAsync("/api/payroll-filings/drafts", new SavePayrollFilingDraftRequest(null, "941", 2026, 2));
         Assert.Equal(HttpStatusCode.Created, filingResponse.StatusCode);
@@ -382,6 +393,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal("Reversed", run.Status);
         Assert.NotNull(run.ReversalJournalEntryId);
         Assert.Equal(bank.CurrentBalance, workspace.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
+        var paymentFileWorkspace = await client.GetFromJsonAsync<PayrollPaymentFileWorkspace>("/api/payroll-payment-files");
+        Assert.Equal("Voided", paymentFileWorkspace!.Files.Single(item => item.Id == paymentFileResult.Id).Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/payroll-runs/cancel", new CancelPayrollRunRequest(run.Id, "Too late", run.ConcurrencyToken))).StatusCode);
     }
 

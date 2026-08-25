@@ -126,6 +126,7 @@ public sealed class UiSession : IAsyncDisposable
             """
             () => {
               const isVisible = (element) => {
+                if (element.closest('details:not([open])') && !element.closest('summary')) return false;
                 const style = window.getComputedStyle(element);
                 return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
               };
@@ -149,7 +150,7 @@ public sealed class UiSession : IAsyncDisposable
                   const name = ariaLabel || ariaLabelledBy || title || text || value || placeholder;
                   return name.length === 0;
                 })
-                .map(element => `${element.tagName.toLowerCase()}${element.getAttribute('href') ? `:${element.getAttribute('href')}` : ''}`);
+                .map(element => element.outerHTML.substring(0, 300));
             }
             """);
 

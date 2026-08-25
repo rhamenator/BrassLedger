@@ -530,6 +530,8 @@ public sealed class Employee
     public string BankAccountNumber { get; set; } = string.Empty;
     public string BankAccountType { get; set; } = string.Empty;
     public bool DirectDepositEnabled { get; set; }
+    public DateOnly? DirectDepositAuthorizationOn { get; set; }
+    public string DirectDepositAuthorizationReference { get; set; } = string.Empty;
     public DateOnly? EmploymentStartedOn { get; set; }
     public DateOnly? EmploymentEndedOn { get; set; }
     public string PayType { get; set; } = string.Empty;
@@ -672,6 +674,52 @@ public sealed class PayrollJurisdictionRule
     public string Notes { get; set; } = string.Empty;
 }
 
+public sealed class PayrollDeductionPlan
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = "Other";
+    public string CalculationMethod { get; set; } = "Fixed";
+    public decimal DefaultEmployeeValue { get; set; }
+    public decimal DefaultEmployerValue { get; set; }
+    public bool IsPreTax { get; set; }
+    public bool ExemptFromFederalIncomeTax { get; set; }
+    public bool ExemptFromFica { get; set; }
+    public bool ExemptFromFuta { get; set; }
+    public bool ReducesDisposableEarnings { get; set; }
+    public string LiabilityAccountNumber { get; set; } = "2200";
+    public int Priority { get; set; } = 100;
+    public decimal? EmployeeLimitPerPay { get; set; }
+    public decimal? EmployeeAnnualLimit { get; set; }
+    public decimal MinimumNetPay { get; set; }
+    public string LimitRuleCode { get; set; } = "None";
+    public string LimitRuleJson { get; set; } = "{}";
+    public string OfficialSourceUrl { get; set; } = string.Empty;
+    public DateOnly? SourceRetrievedOn { get; set; }
+    public DateOnly EffectiveOn { get; set; }
+    public DateOnly? ExpiresOn { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class EmployeePayrollDeductionElection
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public Guid PayrollDeductionPlanId { get; set; }
+    public decimal? EmployeeValueOverride { get; set; }
+    public decimal? EmployerValueOverride { get; set; }
+    public decimal? EmployeeAnnualLimitOverride { get; set; }
+    public string OrderDetailsJson { get; set; } = "{}";
+    public DateOnly EffectiveOn { get; set; }
+    public DateOnly? ExpiresOn { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
 public sealed class PayrollRunEmployeeLine
 {
     public Guid Id { get; set; }
@@ -720,15 +768,21 @@ public sealed class PayrollDeductionLine
     public Guid Id { get; set; }
     public Guid PayrollRunEmployeeLineId { get; set; }
     public int Sequence { get; set; }
+    public Guid? PayrollDeductionPlanId { get; set; }
+    public Guid? EmployeePayrollDeductionElectionId { get; set; }
     public string DeductionCode { get; set; } = string.Empty;
     public string DeductionType { get; set; } = string.Empty;
     public decimal EmployeeAmount { get; set; }
+    public decimal RequestedEmployeeAmount { get; set; }
     public decimal EmployerAmount { get; set; }
     public bool IsPreTax { get; set; }
     public bool ExemptFromFederalIncomeTax { get; set; }
     public bool ExemptFromFica { get; set; }
     public bool ExemptFromFuta { get; set; }
     public string LiabilityAccountNumber { get; set; } = "2200";
+    public bool LimitApplied { get; set; }
+    public string LimitRuleCode { get; set; } = "None";
+    public string CalculationTraceJson { get; set; } = "{}";
 }
 
 public sealed class PayrollTaxLine
@@ -824,6 +878,51 @@ public sealed class PayrollEmployeePayment
     public string Status { get; set; } = "Issued";
     public DateTimeOffset IssuedAtUtc { get; set; }
     public DateTimeOffset? ReversedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollBankOriginConfiguration
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid BankAccountId { get; set; }
+    public string ImmediateDestinationRoutingNumber { get; set; } = string.Empty;
+    public string ImmediateOrigin { get; set; } = string.Empty;
+    public string DestinationBankName { get; set; } = string.Empty;
+    public string OriginName { get; set; } = string.Empty;
+    public string CompanyIdentification { get; set; } = string.Empty;
+    public string CompanyEntryDescription { get; set; } = "PAYROLL";
+    public string OriginatingDfiIdentification { get; set; } = string.Empty;
+    public DateOnly EffectiveOn { get; set; }
+    public DateOnly? ExpiresOn { get; set; }
+    public bool IsActive { get; set; } = true;
+    public bool IsBankValidated { get; set; }
+    public string BankValidationNotes { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollPaymentFile
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid PayrollRunId { get; set; }
+    public Guid? PayrollBankOriginConfigurationId { get; set; }
+    public string Format { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "text/plain";
+    public string Content { get; set; } = string.Empty;
+    public string ContentSha256 { get; set; } = string.Empty;
+    public string SourceDigestSha256 { get; set; } = string.Empty;
+    public int EntryCount { get; set; }
+    public decimal CreditTotal { get; set; }
+    public long RoutingHash { get; set; }
+    public string FileIdModifier { get; set; } = string.Empty;
+    public string Status { get; set; } = "Generated";
+    public string SpecificationVersion { get; set; } = string.Empty;
+    public Guid? GeneratedByUserId { get; set; }
+    public DateTimeOffset GeneratedAtUtc { get; set; }
+    public DateTimeOffset? VoidedAtUtc { get; set; }
+    public string VoidReason { get; set; } = string.Empty;
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 

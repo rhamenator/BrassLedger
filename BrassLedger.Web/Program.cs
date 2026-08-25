@@ -101,6 +101,12 @@ app.MapGet("/payroll/filings/{filingId:guid}/data.json", async (Guid filingId, B
     return filing is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(filing.Data.GetRawText()), "application/json", $"payroll-{filing.FormCode.ToLowerInvariant()}-{filing.TaxYear}{(filing.Quarter.HasValue ? $"-q{filing.Quarter}" : string.Empty)}.json");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 
+app.MapGet("/payroll/payment-files/{paymentFileId:guid}/download", async (Guid paymentFileId, BrassLedger.Application.Accounting.IPayrollPaymentFileService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.DownloadAsync(paymentFileId, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file.Content, file.ContentType, file.FileName);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
