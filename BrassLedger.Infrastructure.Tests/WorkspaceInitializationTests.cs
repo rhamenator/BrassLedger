@@ -511,6 +511,47 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task JournalLifecycle_EnforcesPreparationApprovalPostingAndReversalPermissionsSeparately()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        var companyId = await db.Companies.Select(company => company.Id).FirstAsync();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+
+        void ActAs(string permission)
+        {
+            var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+            context.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)
+            ], "test"));
+            accessor.HttpContext = context;
+        }
+
+        ActAs(BrassLedgerPermissions.JournalPrepare);
+        var draft = await transactions.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(null, new DateOnly(2026, 5, 6), "JE-SOD-1", "Separation of duties",
+            [new JournalLineRequest("1000", 20m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 20m, "Credit")]));
+        Assert.True(draft.Succeeded, draft.ErrorMessage);
+        Assert.False((await transactions.ApproveJournalEntryAsync(draft.Id!.Value)).Succeeded);
+
+        ActAs(BrassLedgerPermissions.JournalApprove);
+        Assert.True((await transactions.ApproveJournalEntryAsync(draft.Id.Value)).Succeeded);
+        Assert.False((await transactions.PostApprovedJournalEntryAsync(draft.Id.Value)).Succeeded);
+
+        ActAs(BrassLedgerPermissions.JournalPost);
+        Assert.True((await transactions.PostApprovedJournalEntryAsync(draft.Id.Value)).Succeeded);
+        Assert.False((await transactions.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(draft.Id.Value, new DateOnly(2026, 5, 7), "Not authorized"))).Succeeded);
+
+        ActAs(BrassLedgerPermissions.JournalReverse);
+        Assert.True((await transactions.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(draft.Id.Value, new DateOnly(2026, 5, 7), "Authorized reversal"))).Succeeded);
+    }
+
+    [Fact]
     public async Task TransactionService_PostsCashToTheSelectedBankLedgerAccount()
     {
         using var services = CreateServiceProvider();

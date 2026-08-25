@@ -142,31 +142,31 @@ api.MapPost("/journal-entries", async (PostJournalEntryRequest request, IAccount
 {
     var result = await service.PostJournalEntryAsync(request, cancellationToken);
     return result.Succeeded ? Results.Created($"/api/journal-entries/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PostJournals);
 
 api.MapPost("/journal-entry-drafts", async (SaveJournalEntryDraftRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveJournalEntryDraftAsync(request, cancellationToken);
     return result.Succeeded ? Results.Created($"/api/journal-entry-drafts/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareJournals);
 
 api.MapPost("/journal-entry-drafts/{journalEntryId:guid}/approve", async (Guid journalEntryId, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.ApproveJournalEntryAsync(journalEntryId, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApproveJournals);
 
 api.MapPost("/journal-entry-drafts/{journalEntryId:guid}/post", async (Guid journalEntryId, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.PostApprovedJournalEntryAsync(journalEntryId, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PostJournals);
 
 api.MapPost("/journal-entries/reverse", async (ReverseJournalEntryRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.ReverseJournalEntryAsync(request, cancellationToken);
     return result.Succeeded ? Results.Created($"/api/journal-entries/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReverseJournals);
 
 api.MapPost("/invoices", async (CreateInvoiceRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {

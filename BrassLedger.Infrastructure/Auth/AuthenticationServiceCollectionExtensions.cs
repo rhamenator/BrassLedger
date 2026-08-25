@@ -34,6 +34,14 @@ public static class AuthenticationServiceCollectionExtensions
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.WorkspaceView));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageLedger, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.LedgerManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.PrepareJournals, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.JournalPrepare));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ApproveJournals, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.JournalApprove));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.PostJournals, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.JournalPost));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ReverseJournals, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.JournalReverse));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageReceivables, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManagePayables, policy =>

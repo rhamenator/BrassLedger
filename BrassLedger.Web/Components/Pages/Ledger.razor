@@ -49,6 +49,8 @@ else
             <h2>Prepare journal entry</h2>
             <p class="page-intro">Save the entry as a draft, approve it after review, and then post it. Account balances do not change until the approved entry is posted. Receivables, payables, inventory, and payroll control accounts remain restricted to their dedicated workflows.</p>
             @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals">
+            <Authorized Context="journalPreparationAuthorization">
             <EditForm Model="JournalForm" OnValidSubmit="SaveJournalDraftAsync">
                 <div class="content-grid">
                     <div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Journal entry date" class="field-input" @bind-Value="JournalForm.Date" /></div>
@@ -73,6 +75,9 @@ else
                 </table>
                 <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddJournalLine">Add line</button><button class="action-primary" type="submit">Save draft</button></div>
             </EditForm>
+            </Authorized>
+            <NotAuthorized><p class="muted-copy">Your role can review the ledger but cannot prepare journal drafts.</p></NotAuthorized>
+            </AuthorizeView>
         </section>
 
         <section class="panel">
@@ -145,11 +150,15 @@ else
                                 <td>
                                     @if (entry.Status == "Draft")
                                     {
-                                        <button class="action-secondary" type="button" @onclick="() => ApproveJournalAsync(entry.Id)">Approve</button>
+                                        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals">
+                                            <Authorized Context="journalApprovalAuthorization"><button class="action-secondary" type="button" @onclick="() => ApproveJournalAsync(entry.Id)">Approve</button></Authorized>
+                                        </AuthorizeView>
                                     }
                                     else if (entry.Status == "Approved")
                                     {
-                                        <button class="action-primary" type="button" @onclick="() => PostApprovedJournalAsync(entry.Id)">Post</button>
+                                        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostJournals">
+                                            <Authorized Context="journalPostingAuthorization"><button class="action-primary" type="button" @onclick="() => PostApprovedJournalAsync(entry.Id)">Post</button></Authorized>
+                                        </AuthorizeView>
                                     }
                                 </td>
                             </tr>
@@ -159,6 +168,8 @@ else
             </article>
         </section>
 
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals">
+        <Authorized Context="journalReversalAuthorization">
         <section class="panel">
             <h2>Reverse posted general journal</h2>
             <p class="page-intro">A reversal creates a new equal-and-opposite entry and preserves the original audit history. Transactions originating in receivables, payables, inventory, or payroll must be corrected in their originating workflow.</p>
@@ -171,6 +182,8 @@ else
                 <button class="action-primary" type="submit">Create reversal</button>
             </EditForm>
         </section>
+        </Authorized>
+        </AuthorizeView>
 
         <section class="panel">
             <h2>Treasury positions</h2>

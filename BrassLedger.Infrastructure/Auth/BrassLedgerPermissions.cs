@@ -4,6 +4,10 @@ public static class BrassLedgerPermissions
 {
     public const string WorkspaceView = "workspace.view";
     public const string LedgerManage = "ledger.manage";
+    public const string JournalPrepare = "ledger.journal.prepare";
+    public const string JournalApprove = "ledger.journal.approve";
+    public const string JournalPost = "ledger.journal.post";
+    public const string JournalReverse = "ledger.journal.reverse";
     public const string ReceivablesManage = "receivables.manage";
     public const string PayablesManage = "payables.manage";
     public const string RequisitionManage = "operations.requisition.manage";
@@ -20,7 +24,11 @@ public static class BrassLedgerPermissions
     public static IReadOnlyList<PermissionDefinition> Definitions { get; } =
     [
         new(WorkspaceView, "Workspace access", "Sign in and review the shared accounting workspace."),
-        new(LedgerManage, "Ledger", "Post and review general ledger activity."),
+        new(LedgerManage, "Ledger", "Review general ledger activity and accounting balances."),
+        new(JournalPrepare, "Journal preparation", "Create and edit unposted general journal drafts."),
+        new(JournalApprove, "Journal approval", "Approve balanced general journal drafts after review."),
+        new(JournalPost, "Journal posting", "Post approved general journals and change account balances."),
+        new(JournalReverse, "Journal reversal", "Create auditable reversals of posted general journals."),
         new(ReceivablesManage, "Receivables", "Work customer balances, invoices, and cash application."),
         new(PayablesManage, "Payables", "Review vendor balances and payable obligations."),
         new(RequisitionManage, "Requisitioning", "Create and route purchase requisitions."),

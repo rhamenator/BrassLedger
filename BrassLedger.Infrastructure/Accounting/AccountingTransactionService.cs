@@ -15,6 +15,7 @@ public sealed class AccountingTransactionService(
 {
     public async Task<TransactionResult> SaveJournalEntryDraftAsync(SaveJournalEntryDraftRequest request, CancellationToken cancellationToken = default)
     {
+        if (!HasPermission(BrassLedgerPermissions.JournalPrepare)) return TransactionResult.Failure("You are not authorized to prepare journal entries.");
         if (string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Description))
             return TransactionResult.Failure("A journal reference and description are required.");
         if (request.Lines.Count < 2 || request.Lines.Any(line => line.Debit < 0 || line.Credit < 0 || (line.Debit == 0 && line.Credit == 0) || (line.Debit > 0 && line.Credit > 0)))
@@ -68,6 +69,7 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> ApproveJournalEntryAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
     {
+        if (!HasPermission(BrassLedgerPermissions.JournalApprove)) return TransactionResult.Failure("You are not authorized to approve journal entries.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var entry = await db.JournalEntries.SingleOrDefaultAsync(candidate => candidate.Id == journalEntryId && candidate.CompanyId == companyId, cancellationToken);
@@ -90,6 +92,7 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> PostApprovedJournalEntryAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
     {
+        if (!HasPermission(BrassLedgerPermissions.JournalPost)) return TransactionResult.Failure("You are not authorized to post journal entries.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -124,6 +127,7 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> ReverseJournalEntryAsync(ReverseJournalEntryRequest request, CancellationToken cancellationToken = default)
     {
+        if (!HasPermission(BrassLedgerPermissions.JournalReverse)) return TransactionResult.Failure("You are not authorized to reverse journal entries.");
         if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A reversal reason is required.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
@@ -155,6 +159,7 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> PostJournalEntryAsync(PostJournalEntryRequest request, CancellationToken cancellationToken = default)
     {
+        if (!HasPermission(BrassLedgerPermissions.JournalPost)) return TransactionResult.Failure("You are not authorized to post journal entries.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -166,6 +171,7 @@ public sealed class AccountingTransactionService(
 
     public async Task<TransactionResult> PostJournalEntriesAsync(IReadOnlyList<PostJournalEntryRequest> requests, CancellationToken cancellationToken = default)
     {
+        if (!HasPermission(BrassLedgerPermissions.JournalPost)) return TransactionResult.Failure("You are not authorized to post journal entries.");
         if (requests.Count == 0) return TransactionResult.Failure("Provide at least one journal entry to import.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
@@ -568,6 +574,18 @@ public sealed class AccountingTransactionService(
     {
         var userIdValue = httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(userIdValue, out var userId) ? userId : null;
+    }
+
+    private bool HasPermission(string permission)
+    {
+        var httpContext = httpContextAccessor.HttpContext;
+        var principal = httpContext?.User;
+        if (principal is null) return true;
+        if (!Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out _))
+            throw new UnauthorizedAccessException("An authenticated company context is required.");
+        return principal.IsInRole("Administrator")
+            || principal.IsInRole("Owner/CEO")
+            || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission);
     }
 
     private static void AddJournalAudit(BrassLedgerDbContext db, Guid companyId, Guid? userId, string action, JournalEntry entry, object details)

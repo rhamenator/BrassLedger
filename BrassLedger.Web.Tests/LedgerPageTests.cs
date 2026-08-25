@@ -1,5 +1,7 @@
 using Bunit;
+using Bunit.TestDoubles;
 using BrassLedger.Application.Accounting;
+using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Web.Components.Pages;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -9,6 +11,13 @@ public sealed class LedgerPageTests : TestContext
 {
     public LedgerPageTests()
     {
+        var authorization = this.AddTestAuthorization();
+        authorization.SetAuthorized("controller");
+        authorization.SetPolicies(
+            BrassLedgerAuthorizationPolicies.PrepareJournals,
+            BrassLedgerAuthorizationPolicies.ApproveJournals,
+            BrassLedgerAuthorizationPolicies.PostJournals,
+            BrassLedgerAuthorizationPolicies.ReverseJournals);
         Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(TestWorkspaceData.CreateWorkspace()));
         Services.AddSingleton<IAccountingTransactionService>(new StubAccountingTransactionService());
         Services.AddSingleton<IAccountingInterchangeService>(new StubAccountingInterchangeService());

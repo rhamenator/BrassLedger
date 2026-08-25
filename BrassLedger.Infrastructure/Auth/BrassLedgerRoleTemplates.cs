@@ -10,12 +10,38 @@ public static class BrassLedgerRoleTemplates
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.LedgerManage,
+            BrassLedgerPermissions.JournalPrepare,
+            BrassLedgerPermissions.JournalApprove,
+            BrassLedgerPermissions.JournalPost,
+            BrassLedgerPermissions.JournalReverse,
             BrassLedgerPermissions.ReceivablesManage,
             BrassLedgerPermissions.PayablesManage,
             BrassLedgerPermissions.ReportingManage,
             BrassLedgerPermissions.TaxManage,
             BrassLedgerPermissions.PublishManage,
             BrassLedgerPermissions.ProjectsManage
+        ]),
+        new("journal-preparer", "Journal Preparer", "Creates journal drafts without authority to approve, post, or reverse them.", false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.LedgerManage,
+            BrassLedgerPermissions.JournalPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("journal-approver", "Journal Approver", "Reviews and approves journal drafts without authority to prepare, post, or reverse them.", false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.LedgerManage,
+            BrassLedgerPermissions.JournalApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("journal-poster", "Journal Poster", "Posts approved journals and creates controlled reversals without editing their preparation.", false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.LedgerManage,
+            BrassLedgerPermissions.JournalPost,
+            BrassLedgerPermissions.JournalReverse,
+            BrassLedgerPermissions.ReportingManage
         ]),
         new("requisitioning", "Requisitioning Clerk", "Can prepare requisitions without approving purchasing or writing checks.", false,
         [
