@@ -56,6 +56,84 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
 
         Assert.True(File.Exists(databasePath));
+        await using var connection = new SqliteConnection($"Data Source={databasePath}");
+        await connection.OpenAsync();
+        Assert.Equal("2", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.StartsWith("2026082502-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
+    }
+
+    [Fact]
+    public async Task InitializeBrassLedgerAsync_UpgradesPreLedgerDatabaseOnceAndRetainsData()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                DROP TABLE "BrassLedgerSchemaVersions";
+                ALTER TABLE "PayrollTimeEntries" DROP COLUMN "W2ReportingJson";
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await services.InitializeBrassLedgerAsync();
+
+        await using var verified = new SqliteConnection($"Data Source={databasePath}");
+        await verified.OpenAsync();
+        Assert.Equal("2", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
+        Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
+    }
+
+    [Fact]
+    public async Task InitializeBrassLedgerAsync_AppliesMissingOrderedMigrationWithoutLegacyReplay()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082502-%';
+                ALTER TABLE "PayrollEarningLines" DROP COLUMN "W2ReportingJson";
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await services.InitializeBrassLedgerAsync();
+
+        await using var verified = new SqliteConnection($"Data Source={databasePath}");
+        await verified.OpenAsync();
+        Assert.Equal("2", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollEarningLines') WHERE name = 'W2ReportingJson';"));
+        Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
+    }
+
+    [Fact]
+    public async Task InitializeBrassLedgerAsync_RejectsUnknownNewerSchemaWithoutChangingData()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """INSERT INTO "BrassLedgerSchemaVersions" ("VersionId", "AppliedAtUtc", "ProductVersion", "Description", "Provider") VALUES ('9999999999-future', '2099-01-01T00:00:00Z', '99.0', 'Future schema', 'test');""";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => services.InitializeBrassLedgerAsync());
+
+        Assert.Contains("automatic downgrade is prohibited", exception.Message, StringComparison.OrdinalIgnoreCase);
+        await using var verified = new SqliteConnection($"Data Source={databasePath}");
+        await verified.OpenAsync();
+        Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
     }
 
     [Fact]

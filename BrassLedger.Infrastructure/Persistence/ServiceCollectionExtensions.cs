@@ -13,6 +13,7 @@ using BrassLedger.Application.Taxation;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -21,6 +22,10 @@ namespace BrassLedger.Infrastructure.Persistence;
 
 public static class ServiceCollectionExtensions
 {
+    internal const string BaselineSchemaVersion = "2026082501-versioned-schema-baseline";
+    internal const string CurrentSchemaVersion = "2026082502-w2-reporting-metadata";
+    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, CurrentSchemaVersion];
+
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
         IConfiguration configuration,
@@ -107,9 +112,8 @@ public static class ServiceCollectionExtensions
             .Protect("initialized");
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        await dbContext.Database.EnsureCreatedAsync(cancellationToken);
-        await EnsureLegacySchemaCompatibilityAsync(dbContext, cancellationToken);
-        await EnsureCaseInsensitiveUserNameUniquenessAsync(dbContext, cancellationToken);
+        var databaseCreated = await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+        await ApplySchemaUpgradesAsync(dbContext, databaseCreated, cancellationToken);
         await BrassLedgerSeedData.SeedAsync(dbContext, passwordHasher, bootstrapOptions, cancellationToken);
         await DefaultAccountingSetup.EnsureMinimumSetupAsync(dbContext, cancellationToken);
     }
@@ -184,6 +188,80 @@ public static class ServiceCollectionExtensions
     private static string BuildDefaultSqliteConnectionString(string dataDirectory)
     {
         return $"Data Source={Path.Combine(dataDirectory, "brassledger.db")}";
+    }
+
+    private static async Task ApplySchemaUpgradesAsync(BrassLedgerDbContext dbContext, bool databaseCreated, CancellationToken cancellationToken)
+    {
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE TABLE IF NOT EXISTS "BrassLedgerSchemaVersions" ("VersionId" text NOT NULL PRIMARY KEY, "AppliedAtUtc" text NOT NULL, "ProductVersion" text NOT NULL, "Description" text NOT NULL, "Provider" text NOT NULL);""",
+            cancellationToken);
+
+        var applied = new HashSet<string>(StringComparer.Ordinal);
+        var connection = dbContext.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose) await connection.OpenAsync(cancellationToken);
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """SELECT "VersionId" FROM "BrassLedgerSchemaVersions" ORDER BY "VersionId";""";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) applied.Add(reader.GetString(0));
+        }
+        finally
+        {
+            if (shouldClose) await connection.CloseAsync();
+        }
+
+        var unsupported = applied.Where(version => !SupportedSchemaVersions.Contains(version)).OrderBy(version => version, StringComparer.Ordinal).ToArray();
+        if (unsupported.Length > 0)
+            throw new InvalidOperationException($"This database contains unsupported or newer BrassLedger schema version(s): {string.Join(", ", unsupported)}. Upgrade the application before opening this database; automatic downgrade is prohibited.");
+        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(BaselineSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {BaselineSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (!applied.Contains(BaselineSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
+            {
+                // Databases created before the version ledger traverse the compatibility bridge once.
+                // Fresh databases already match the EF model and skip that legacy-only path.
+                if (!databaseCreated) await EnsureLegacySchemaCompatibilityAsync(dbContext, cancellationToken);
+                await EnsureCaseInsensitiveUserNameUniquenessAsync(dbContext, cancellationToken);
+            }, cancellationToken);
+
+        if (!applied.Contains(CurrentSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added durable W-2 reporting metadata to time entries and posted earning lines.", () => EnsureW2ReportingMetadataSchemaAsync(dbContext, cancellationToken), cancellationToken);
+    }
+
+    private static async Task ApplySchemaVersionAsync(BrassLedgerDbContext dbContext, string version, string description, Func<Task> apply, CancellationToken cancellationToken)
+    {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await apply();
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"""INSERT INTO "BrassLedgerSchemaVersions" ("VersionId", "AppliedAtUtc", "ProductVersion", "Description", "Provider") VALUES ({version}, {DateTimeOffset.UtcNow.ToString("O")}, {"2026.08.25"}, {description}, {dbContext.Database.ProviderName ?? "Unknown"});""",
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    private static async Task EnsureW2ReportingMetadataSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await EnsureSqliteColumnAsync(dbContext, "PayrollTimeEntries", "W2ReportingJson", "ALTER TABLE \"PayrollTimeEntries\" ADD COLUMN \"W2ReportingJson\" TEXT NOT NULL DEFAULT '{}';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "PayrollEarningLines", "W2ReportingJson", "ALTER TABLE \"PayrollEarningLines\" ADD COLUMN \"W2ReportingJson\" TEXT NOT NULL DEFAULT '{}';", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "PayrollTimeEntries" ADD COLUMN IF NOT EXISTS "W2ReportingJson" text NOT NULL DEFAULT '{{}}';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "PayrollEarningLines" ADD COLUMN IF NOT EXISTS "W2ReportingJson" text NOT NULL DEFAULT '{{}}';""", cancellationToken);
+        }
     }
 
     private static async Task EnsureLegacySchemaCompatibilityAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
@@ -971,6 +1049,7 @@ public static class ServiceCollectionExtensions
         try
         {
             using var command = connection.CreateCommand();
+            command.Transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction();
             command.CommandText = $"PRAGMA table_info('{tableName}');";
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -983,6 +1062,7 @@ public static class ServiceCollectionExtensions
             }
 
             using var alterCommand = connection.CreateCommand();
+            alterCommand.Transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction();
             alterCommand.CommandText = alterSql;
             await alterCommand.ExecuteNonQueryAsync(cancellationToken);
         }

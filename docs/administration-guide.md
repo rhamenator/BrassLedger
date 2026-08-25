@@ -30,6 +30,23 @@ Use these rules consistently:
 - `BrassLedger.Web/wwwroot` is the source location for committed static assets
 - `artifacts` is a publish output folder and should be disposable
 
+## Database upgrades
+
+BrassLedger records every applied schema step in `BrassLedgerSchemaVersions`. A brand-new empty database is created from the current model and immediately receives the ordered baseline and subsequent version records. A database from a prerelease that predates the ledger traverses the legacy compatibility bridge exactly once, inside the baseline transaction, and is then governed by the same ordered migrations. Normal subsequent startup applies only missing versions; it does not replay the legacy compatibility script.
+
+Each migration and its ledger record commit in one database transaction. Startup stops before seeding or normal application access if a step fails, if a later version appears without its prerequisite, or if the database contains a version unknown to the running application. BrassLedger never attempts an automatic downgrade. Restore a verified backup or install a compatible newer application rather than deleting or editing version records manually.
+
+Before upgrading a production installation:
+
+1. Stop all but one application instance.
+2. Create and verify a backup that includes the database and data-protection keys.
+3. Record the current application release and latest schema version.
+4. Start the new release and retain its startup/migration log.
+5. Confirm sign-in, company counts, ledger balances, open subledgers, and the latest payroll after startup.
+6. Keep the pre-upgrade backup until business-owner reconciliation is complete.
+
+The automated infrastructure suite exercises fresh creation, pre-ledger adoption, an independently missing ordered migration, refusal of a future version, and business-data retention on SQLite. CI also provisions an isolated PostgreSQL database and runs the creation and incremental-migration scenario there. Maintainers can run the PostgreSQL test locally by setting `BRASSLEDGER_TEST_POSTGRES` to an isolated database whose name contains `brassledger_test`; the test deliberately recreates that database's `public` schema.
+
 ## Publishing
 
 A clean publish process looks like this:

@@ -10,6 +10,22 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_DB: brassledger_test
+          POSTGRES_USER: brassledger
+          POSTGRES_PASSWORD: brassledger-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U brassledger -d brassledger_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      BRASSLEDGER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=brassledger_test;Username=brassledger;Password=brassledger-ci-only;Include Error Detail=true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
