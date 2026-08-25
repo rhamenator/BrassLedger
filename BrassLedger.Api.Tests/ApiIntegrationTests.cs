@@ -355,6 +355,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var depositWorkspace = await client.GetFromJsonAsync<PayrollDepositScheduleWorkspace>("/api/payroll-deposit-schedules");
         Assert.Contains(depositWorkspace!.Configurations, item => item.TaxYear == 2026 && item.IsApproved);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/payroll-disaster-relief")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/ssa-wage-files")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/payroll-deduction-configuration")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/payroll-payment-files")).StatusCode);
         var paymentFileResponse = await client.PostAsJsonAsync("/api/payroll-payment-files", new GeneratePayrollPaymentFileRequest(run.Id, "CheckRegisterCsv"));
@@ -372,6 +373,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.PostAsJsonAsync("/api/payroll-filing-corrections/w2c/drafts", new SaveW2CorrectionDraftRequest(null, Guid.NewGuid(), new DateOnly(2026, 8, 25), "Unauthorized correction attempt must never reach the protected service.", true, "TEST-EVIDENCE"))).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-deposit-schedules")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-disaster-relief")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/ssa-wage-files")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-deduction-configuration")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-payment-files")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-payment-files/{paymentFileResult.Id}/download")).StatusCode);

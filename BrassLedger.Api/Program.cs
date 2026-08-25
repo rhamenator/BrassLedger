@@ -535,6 +535,28 @@ api.MapPost("/payroll-filing-corrections/w2c/void", async (VoidW2CorrectionReque
     var result = await service.VoidW2CorrectionAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollFilingCorrection"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapGet("/ssa-wage-files", async (ISsaWageFileService service, CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(cancellationToken)))
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPut("/ssa-wage-files/configuration", async (SaveSsaWageFileConfigurationRequest request, ISsaWageFileService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveConfigurationAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ssaWageFile"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/ssa-wage-files/generate", async (GenerateSsaWageFileRequest request, ISsaWageFileService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.GenerateAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/ssa-wage-files/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ssaWageFile"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/ssa-wage-files/validation", async (RecordSsaWageFileValidationRequest request, ISsaWageFileService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.RecordValidationAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ssaWageFile"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApprovePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapGet("/ssa-wage-files/{fileId:guid}/download", async (Guid fileId, ISsaWageFileService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.DownloadAsync(fileId, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file.Content, "text/plain; charset=us-ascii", file.FileName);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 api.MapGet("/payroll-close-periods", async (IPayrollFilingService service, CancellationToken cancellationToken) => Results.Ok(await service.GetClosePeriodsAsync(cancellationToken)))
     .RequireAuthorization(BrassLedgerAuthorizationPolicies.AccessPayroll);
 api.MapPost("/payroll-close-periods", async (ClosePayrollPeriodRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>

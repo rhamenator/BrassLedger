@@ -1042,6 +1042,68 @@ public sealed class PayrollFilingCorrection
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
+public sealed class PayrollSsaWageFileConfiguration
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public int SpecificationTaxYear { get; set; }
+    public string SpecificationVersion { get; set; } = string.Empty;
+    public string LayoutCompatibilityCode { get; set; } = string.Empty;
+    public string OfficialSpecificationUrl { get; set; } = string.Empty;
+    public string OfficialSpecificationSha256 { get; set; } = string.Empty;
+    public DateOnly SourceRetrievedOn { get; set; }
+    public string ReviewNotes { get; set; } = string.Empty;
+    public string SubmitterEin { get; set; } = string.Empty;
+    public string BsoUserId { get; set; } = string.Empty;
+    public string SubmitterName { get; set; } = string.Empty;
+    public string LocationAddress { get; set; } = string.Empty;
+    public string DeliveryAddress { get; set; } = string.Empty;
+    public string City { get; set; } = string.Empty;
+    public string State { get; set; } = string.Empty;
+    public string PostalCode { get; set; } = string.Empty;
+    public string ContactName { get; set; } = string.Empty;
+    public string ContactPhone { get; set; } = string.Empty;
+    public string ContactEmail { get; set; } = string.Empty;
+    public string PreparerCode { get; set; } = "L";
+    public string EmployerLocationAddress { get; set; } = string.Empty;
+    public string EmployerDeliveryAddress { get; set; } = string.Empty;
+    public string EmployerCity { get; set; } = string.Empty;
+    public string EmployerState { get; set; } = string.Empty;
+    public string EmployerPostalCode { get; set; } = string.Empty;
+    public string EmployerContactName { get; set; } = string.Empty;
+    public string EmployerContactPhone { get; set; } = string.Empty;
+    public string EmployerContactEmail { get; set; } = string.Empty;
+    public bool IsApproved { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public bool IsActive { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollSsaWageFile
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid PayrollFilingCorrectionId { get; set; }
+    public Guid PayrollSsaWageFileConfigurationId { get; set; }
+    public int TaxYear { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string ContentBase64 { get; set; } = string.Empty;
+    public string ContentSha256 { get; set; } = string.Empty;
+    public string SourceDigestSha256 { get; set; } = string.Empty;
+    public string SpecificationVersion { get; set; } = string.Empty;
+    public string Status { get; set; } = "GeneratedForAccuWage";
+    public int RecordCount { get; set; }
+    public int EmployeeRecordCount { get; set; }
+    public Guid? GeneratedByUserId { get; set; }
+    public DateTimeOffset GeneratedAtUtc { get; set; }
+    public Guid? ValidatedByUserId { get; set; }
+    public DateTimeOffset? ValidatedAtUtc { get; set; }
+    public string AccuWageEvidenceReference { get; set; } = string.Empty;
+    public string ValidationNotes { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
 public sealed class PayrollClosePeriod
 {
     public Guid Id { get; set; }
