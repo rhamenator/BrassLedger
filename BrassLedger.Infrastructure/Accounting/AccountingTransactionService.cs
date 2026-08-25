@@ -1154,6 +1154,39 @@ public sealed class AccountingTransactionService(
         return TransactionResult.Success(run.Id);
     }
 
+    public async Task<TransactionResult> CancelPayrollRunAsync(CancelPayrollRunRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollReverse)) return TransactionResult.Failure("You are not authorized to cancel payroll runs.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A payroll cancellation reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var run = await db.PayrollRuns.SingleOrDefaultAsync(candidate => candidate.Id == request.PayrollRunId && candidate.CompanyId == companyId, cancellationToken);
+        if (run is null) return TransactionResult.Failure("Payroll run not found.");
+        if (run.Status != "Draft") return TransactionResult.Failure("Only a draft payroll run can be cancelled. Posted payroll must be reversed.");
+        if (!string.Equals(run.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll run changed after it was opened. Refresh and review it again.");
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var timecards = await db.PayrollTimecards.Where(card => card.CompanyId == companyId && card.PayrollRunId == run.Id).ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        run.Status = "Cancelled";
+        run.CancelledByUserId = ResolveUserId();
+        run.CancelledAtUtc = now;
+        run.CancellationReason = request.Reason.Trim();
+        run.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        foreach (var timecard in timecards)
+        {
+            timecard.Status = "Approved";
+            timecard.PayrollRunId = null;
+            timecard.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            AddTimecardAudit(db, companyId, "payroll-timecard.released", timecard, new { cancelledPayrollRunId = run.Id, run.Reference, run.CancellationReason });
+        }
+        AddPayrollAudit(db, companyId, "payroll-run.cancelled", run, new { run.CancellationReason, releasedTimecardCount = timecards.Count });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The payroll run or one of its timecards changed while it was being cancelled. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(run.Id);
+    }
+
     public async Task<TransactionResult> ReversePayrollRunAsync(ReversePayrollRunRequest request, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.PayrollReverse)) return TransactionResult.Failure("You are not authorized to reverse payroll runs.");
@@ -1426,7 +1459,11 @@ public sealed class AccountingTransactionService(
         if (timecards.Any(card => !entries.Any(entry => entry.PayrollTimecardId == card.Id)))
             return PayrollTimecardExpansion.Failure("Every selected timecard must contain at least one earning entry.");
         var entryIds = entries.Select(entry => entry.Id).ToArray();
-        if (await db.PayrollEarningLines.AnyAsync(line => line.PayrollTimeEntryId != null && entryIds.Contains(line.PayrollTimeEntryId.Value), cancellationToken))
+        if (await db.PayrollEarningLines
+            .Where(line => line.PayrollTimeEntryId != null && entryIds.Contains(line.PayrollTimeEntryId.Value))
+            .Join(db.PayrollRunEmployeeLines, earning => earning.PayrollRunEmployeeLineId, employeeLine => employeeLine.Id, (_, employeeLine) => employeeLine.PayrollRunId)
+            .Join(db.PayrollRuns.Where(run => run.Status != "Cancelled"), runId => runId, run => run.Id, (_, _) => true)
+            .AnyAsync(cancellationToken))
             return PayrollTimecardExpansion.Failure("One or more selected time entries have already been used by another payroll run.");
 
         var employees = await db.Employees.Where(employee => employee.CompanyId == companyId && requestedEmployeeIds.Contains(employee.Id)).ToDictionaryAsync(employee => employee.Id, cancellationToken);

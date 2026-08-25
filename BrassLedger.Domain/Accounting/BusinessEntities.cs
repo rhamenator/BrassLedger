@@ -647,6 +647,9 @@ public sealed class PayrollRun
     public DateTimeOffset? ApprovedAtUtc { get; set; }
     public Guid? PostedByUserId { get; set; }
     public DateTimeOffset? PostedAtUtc { get; set; }
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
     public Guid? ReversedByUserId { get; set; }
     public DateTimeOffset? ReversedAtUtc { get; set; }
     public DateOnly? ReversalDate { get; set; }

@@ -399,6 +399,12 @@ api.MapPost("/payroll-runs/post", async (PostApprovedPayrollRunRequest request, 
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payroll"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.PostPayroll);
 
+api.MapPost("/payroll-runs/cancel", async (CancelPayrollRunRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.CancelPayrollRunAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payroll"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll);
+
 api.MapPost("/payroll-runs/reverse", async (ReversePayrollRunRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.ReversePayrollRunAsync(request, cancellationToken);

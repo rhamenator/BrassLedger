@@ -1321,18 +1321,32 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var reused = await transactions.SaveEmployeePayrollRunDraftAsync(request with { Reference = "TIMECARD-PAYROLL-REUSE" });
         Assert.False(reused.Succeeded);
         Assert.Contains("approved", reused.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var savedRun = (await workspaceService.GetWorkspaceAsync()).Payroll.Runs!.Single(run => run.Id == saved.Id);
+        Assert.False((await transactions.CancelPayrollRunAsync(new CancelPayrollRunRequest(savedRun.Id, "", savedRun.ConcurrencyToken))).Succeeded);
+        var cancelled = await transactions.CancelPayrollRunAsync(new CancelPayrollRunRequest(savedRun.Id, "Incorrect draft configuration", savedRun.ConcurrencyToken));
+        Assert.True(cancelled.Succeeded, cancelled.ErrorMessage);
+        var afterCancellation = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal("Cancelled", afterCancellation.Payroll.Runs!.Single(run => run.Id == saved.Id).Status);
+        Assert.Equal("Approved", afterCancellation.Payroll.Timecards!.Single(candidate => candidate.Id == card.Id).Status);
+
+        var replacement = await transactions.SaveEmployeePayrollRunDraftAsync(request with { Reference = "TIMECARD-PAYROLL-REPLACEMENT" });
+        Assert.True(replacement.Succeeded, replacement.ErrorMessage);
+        consumed = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(candidate => candidate.Id == card.Id);
+        Assert.Equal("Consumed", consumed.Status);
+        Assert.Equal(replacement.Id, consumed.PayrollRunId);
         var correctionCard = await transactions.SavePayrollTimecardDraftAsync(new SavePayrollTimecardDraftRequest(null, employee.Id, periodStart, periodEnd,
             [new PayrollTimeEntryInput(periodStart, "CORR", "Correction", 1m, 30m, 30m, true, "AZ", "Maricopa", "Phoenix")], "Correction after the original card was consumed"));
         Assert.True(correctionCard.Succeeded, correctionCard.ErrorMessage);
 
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
-        var runLineId = await db.PayrollRunEmployeeLines.Where(line => line.PayrollRunId == saved.Id).Select(line => line.Id).SingleAsync();
+        var runLineId = await db.PayrollRunEmployeeLines.Where(line => line.PayrollRunId == replacement.Id).Select(line => line.Id).SingleAsync();
         var earningLines = await db.PayrollEarningLines.Where(line => line.PayrollRunEmployeeLineId == runLineId).OrderBy(line => line.Sequence).ToListAsync();
         var sourceEntries = await db.PayrollTimeEntries.Where(entry => entry.PayrollTimecardId == card.Id).OrderBy(entry => entry.WorkDate).ThenBy(entry => entry.Sequence).ToListAsync();
         Assert.Equal(sourceEntries.Select(entry => entry.Id), earningLines.Select(line => line.PayrollTimeEntryId!.Value));
         Assert.Equal(sourceEntries.Select(entry => entry.Amount), earningLines.Select(line => line.Amount));
-        Assert.Single(await db.BusinessAuditEntries.Where(entry => entry.EntityType == "PayrollTimecard" && entry.EntityId == card.Id && entry.Action == "payroll-timecard.consumed").ToListAsync());
+        Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.EntityType == "PayrollTimecard" && entry.EntityId == card.Id && entry.Action == "payroll-timecard.consumed"));
+        Assert.Single(await db.BusinessAuditEntries.Where(entry => entry.EntityType == "PayrollTimecard" && entry.EntityId == card.Id && entry.Action == "payroll-timecard.released").ToListAsync());
     }
 
     [Fact]

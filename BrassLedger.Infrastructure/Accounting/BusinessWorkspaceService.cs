@@ -262,7 +262,7 @@ public sealed class BusinessWorkspaceService(
                     canViewPayrollSensitiveData ? x.FederalStep4Deductions : 0m,
                     canViewPayrollSensitiveData && x.FederalWithholdingExempt)).ToArray(),
                 JurisdictionRules: payrollJurisdictionRules.Select(rule => new PayrollJurisdictionRuleSnapshot(rule.Id, rule.ResidenceJurisdiction, rule.WorkJurisdiction, rule.ExemptWorkWithholding, rule.ResidentCreditRate, rule.IsActive, rule.Notes)).ToArray(),
-                Runs: payrollRuns.Select(run => new PayrollRunSnapshot(run.Id, run.Reference, run.PeriodStart, run.PeriodEnd, run.PayDate, run.RunType, run.Status, run.GrossPayroll, run.EmployeeWithholdings, run.EmployerPayrollTaxes, run.NetPay, run.ConcurrencyToken, run.JournalEntryId, run.ReversalJournalEntryId, run.PreparedAtUtc, run.ApprovedAtUtc, run.PostedAtUtc, run.ReversedAtUtc, run.ReversalReason)).ToArray(),
+                Runs: payrollRuns.Select(run => new PayrollRunSnapshot(run.Id, run.Reference, run.PeriodStart, run.PeriodEnd, run.PayDate, run.RunType, run.Status, run.GrossPayroll, run.EmployeeWithholdings, run.EmployerPayrollTaxes, run.NetPay, run.ConcurrencyToken, run.JournalEntryId, run.ReversalJournalEntryId, run.PreparedAtUtc, run.ApprovedAtUtc, run.PostedAtUtc, run.ReversedAtUtc, run.ReversalReason, run.CancelledAtUtc, run.CancellationReason)).ToArray(),
                 Timecards: payrollTimecards.Select(timecard =>
                 {
                     var employee = employeeById[timecard.EmployeeId];

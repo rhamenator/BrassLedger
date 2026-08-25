@@ -10,8 +10,11 @@ A draft must move through these states:
 2. `Approved` — the reviewed calculation is locked for posting.
 3. `Posted` — a balanced payroll journal and funding-account movement exist.
 4. `Reversed` — the original remains in history and a linked equal-and-opposite journal records the correction.
+5. `Cancelled` — a draft was rejected before posting; its calculation and audit history remain, and any assigned approved timecards are released for a replacement draft.
 
 Preparation, approval, posting, reversal, general payroll maintenance, and access to protected employee fields are separate permissions. A stale browser or API request is rejected by the payroll run's concurrency token. Payroll cannot post into a closed accounting period, and a reconciled payroll journal cannot be reversed until its bank reconciliation is reopened.
+
+Cancelling requires the payroll-reversal permission, a current concurrency token, and a reason. It is valid only for a draft. The cancellation and release of every source timecard occur in one transaction. Cancelled earning lines retain their original source-entry links for review, but they do not prevent those entries from feeding one later active payroll run.
 
 ## Employee and earning setup
 

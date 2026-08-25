@@ -57,6 +57,7 @@ public sealed record EmployeePayrollEstimate(Guid EmployeeId, string EmployeeNam
 public sealed record PayrollRunEstimate(decimal GrossPayroll, decimal PreTaxDeductions, decimal EmployeeWithholdings, decimal PostTaxDeductions, decimal EmployerPayrollTaxes, decimal NetPay, IReadOnlyList<EmployeePayrollEstimate> Employees);
 public sealed record ApprovePayrollRunRequest(Guid PayrollRunId, string ConcurrencyToken);
 public sealed record PostApprovedPayrollRunRequest(Guid PayrollRunId, string ConcurrencyToken);
+public sealed record CancelPayrollRunRequest(Guid PayrollRunId, string Reason, string ConcurrencyToken);
 public sealed record ReversePayrollRunRequest(Guid PayrollRunId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record SaveEmployeePayrollSetupRequest(Guid EmployeeId, string FilingStatus, int Allowances, decimal AdditionalWithholding, decimal PreTaxBenefitDeductions, decimal PostTaxBenefitDeductions, string ResidenceState = "", string ResidenceCity = "", string WorkState = "", string WorkCity = "", string PayrollFrequency = "Biweekly", int FederalFormW4Year = 2026, bool FederalStep2MultipleJobs = false, decimal FederalStep3Credits = 0, decimal FederalStep4OtherIncome = 0, decimal FederalStep4Deductions = 0, bool FederalWithholdingExempt = false);
 public sealed record SaveEmployeeEmploymentDetailsRequest(Guid EmployeeId, string AddressLine1, string AddressLine2, string PostalCode, string ResidenceCounty, string ResidenceSchoolDistrict, string WorkCounty, string WorkSchoolDistrict, DateOnly? EmploymentStartedOn, DateOnly? EmploymentEndedOn, decimal HourlyRate, decimal OvertimeRate, bool DirectDepositEnabled, string BankAccountType, string SocialSecurityNumber = "", string BankRoutingNumber = "", string BankAccountNumber = "", bool ClearSocialSecurityNumber = false, bool ClearBankDetails = false, string ConcurrencyToken = "");
@@ -118,6 +119,7 @@ public interface IAccountingTransactionService
     Task<TransactionResult> SaveEmployeePayrollRunDraftAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApprovePayrollRunAsync(ApprovePayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> PostApprovedPayrollRunAsync(PostApprovedPayrollRunRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CancelPayrollRunAsync(CancelPayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReversePayrollRunAsync(ReversePayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> PostEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveEmployeePayrollSetupAsync(SaveEmployeePayrollSetupRequest request, CancellationToken cancellationToken = default);

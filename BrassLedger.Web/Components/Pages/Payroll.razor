@@ -112,14 +112,14 @@ else
         <section class="panel">
             <h2>Payroll run workflow</h2>
             <p class="page-intro">Drafts do not affect cash or the ledger. Approve after review, post only when funding is ready, and use reversal to preserve the original run and create an equal-and-opposite journal.</p>
-            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollReverseReasonContext"><div class="field-group"><label class="field-label">Reversal reason</label><InputText aria-label="Payroll reversal reason" class="field-input" @bind-Value="ReversalReason" /></div></Authorized></AuthorizeView>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollReverseReasonContext"><div class="field-group"><label class="field-label">Cancellation / reversal reason</label><InputText aria-label="Payroll cancellation or reversal reason" class="field-input" @bind-Value="ReversalReason" /></div></Authorized></AuthorizeView>
             @if (Workspace.Payroll.Runs?.Count > 0)
             {
                 <table class="data-table"><thead><tr><th>Reference</th><th>Period</th><th>Pay date</th><th>Type</th><th>Status</th><th>Gross</th><th>Withholding</th><th>Employer tax</th><th>Net</th><th>Action</th></tr></thead><tbody>
                 @foreach (var run in Workspace.Payroll.Runs)
                 {
                     <tr><td>@run.Reference</td><td>@run.PeriodStart.ToString("MMM d")–@run.PeriodEnd.ToString("MMM d, yyyy")</td><td>@run.PayDate.ToString("MMM d, yyyy")</td><td>@run.RunType</td><td>@run.Status</td><td>@run.GrossPayroll.ToString("C")</td><td>@run.EmployeeWithholdings.ToString("C")</td><td>@run.EmployerPayrollTaxes.ToString("C")</td><td>@run.NetPay.ToString("C")</td><td>
-                        @if (run.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="payrollApproveContext"><button class="action-secondary" type="button" @onclick="async () => await ApprovePayrollAsync(run)">Approve</button></Authorized></AuthorizeView> }
+                        @if (run.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="payrollApproveContext"><button class="action-secondary" type="button" @onclick="async () => await ApprovePayrollAsync(run)">Approve</button></Authorized></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollCancelContext"><button class="action-secondary" type="button" @onclick="async () => await CancelPayrollAsync(run)">Cancel</button></Authorized></AuthorizeView> }
                         else if (run.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostPayroll"><Authorized Context="payrollPostContext"><button class="action-primary" type="button" @onclick="async () => await PostApprovedPayrollAsync(run)">Post</button></Authorized></AuthorizeView> }
                         else if (run.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollReverseContext"><button class="action-secondary" type="button" @onclick="async () => await ReversePayrollAsync(run)">Reverse</button></Authorized></AuthorizeView> }
                     </td></tr>
@@ -433,6 +433,14 @@ else
     {
         var result = await TransactionService.PostApprovedPayrollRunAsync(new PostApprovedPayrollRunRequest(run.Id, run.ConcurrencyToken));
         StatusMessage = result.Succeeded ? "Approved payroll posted to the ledger." : result.ErrorMessage;
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+    private async Task CancelPayrollAsync(PayrollRunSnapshot run)
+    {
+        if (string.IsNullOrWhiteSpace(ReversalReason)) { StatusMessage = "Enter a cancellation reason before cancelling the payroll draft."; return; }
+        var result = await TransactionService.CancelPayrollRunAsync(new CancelPayrollRunRequest(run.Id, ReversalReason, run.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Payroll draft cancelled; its approved timecards are available for another reviewed draft." : result.ErrorMessage;
+        if (result.Succeeded) ReversalReason = string.Empty;
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
     private async Task ReversePayrollAsync(PayrollRunSnapshot run)

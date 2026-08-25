@@ -331,7 +331,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollJurisdictionRule>().HasIndex(x => new { x.CompanyId, x.ResidenceJurisdiction, x.WorkJurisdiction }).IsUnique();
         modelBuilder.Entity<PayrollRunEmployeeLine>().HasIndex(x => new { x.PayrollRunId, x.EmployeeId }).IsUnique();
         modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.Sequence }).IsUnique();
-        modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => x.PayrollTimeEntryId).IsUnique();
+        modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => x.PayrollTimeEntryId);
         modelBuilder.Entity<PayrollDeductionLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PayrollTaxLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PayrollTaxLine>().HasIndex(x => new { x.PayrollRunEmployeeLineId, x.ObligationCode, x.JurisdictionCode });
