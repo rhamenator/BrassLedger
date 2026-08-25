@@ -49,6 +49,11 @@ public sealed class PayrollWorkflowTests
         Assert.Contains("YTD:", await payStatement.InnerTextAsync());
         Assert.Contains("Earnings", await payStatement.InnerTextAsync());
         Assert.Contains("Taxes and deductions", await payStatement.InnerTextAsync());
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Generate filing draft", Exact = true }).ClickAsync();
+        await session.Page.GetByText("Payroll filing draft generated from posted payroll; professional review is still required.", new() { Exact = true }).WaitForAsync();
+        var filingSection = session.Page.GetByRole(AriaRole.Heading, new() { Name = "Federal filing data and payroll close", Exact = true }).Locator("..");
+        await filingSection.GetByText("Draft", new() { Exact = true }).WaitForAsync();
+        Assert.Contains("/payroll/filings/", await filingSection.GetByRole(AriaRole.Link, new() { Name = "Download JSON", Exact = true }).GetAttributeAsync("href"));
         await session.AssertNoUiFailuresAsync("payroll register and pay statement workflow");
     }
 

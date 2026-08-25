@@ -354,7 +354,18 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         {
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/register")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync($"/api/payroll-runs/{run.Id}/employees/{employee.Id}/pay-statement")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await nonPayrollClient.GetAsync("/api/payroll-filings")).StatusCode);
         }
+        var filingResponse = await client.PostAsJsonAsync("/api/payroll-filings/drafts", new SavePayrollFilingDraftRequest(null, "941", 2026, 2));
+        Assert.Equal(HttpStatusCode.Created, filingResponse.StatusCode);
+        var filingResult = await filingResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var filing = await client.GetFromJsonAsync<PayrollFilingSnapshot>($"/api/payroll-filings/{filingResult!.Id}");
+        Assert.NotNull(filing);
+        Assert.True(filing!.Data.GetProperty("WagesTipsAndOtherCompensation").GetDecimal() > 0);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-filings/approve", new ApprovePayrollFilingRequest(filing.Id, filing.ConcurrencyToken))).StatusCode);
+        filing = await client.GetFromJsonAsync<PayrollFilingSnapshot>($"/api/payroll-filings/{filing.Id}");
+        Assert.Equal("Approved", filing!.Status);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-filings/reopen", new ReopenPayrollFilingRequest(filing.Id, "API correction test", filing.ConcurrencyToken))).StatusCode);
         var liability = workspace.Payroll.Liabilities!.First(item => item.Status == "Open");
         var liabilityPaymentResponse = await client.PostAsJsonAsync("/api/payroll-liability-payments", new RecordPayrollLiabilityPaymentRequest(bank.Id, new DateOnly(2026, 6, 13), "API-TAX-PAY-1", "Tax agency", "EFT", [new PayrollLiabilityPaymentApplicationInput(liability.Id, liability.OutstandingAmount)]));
         Assert.Equal(HttpStatusCode.Created, liabilityPaymentResponse.StatusCode);

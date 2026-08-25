@@ -465,6 +465,46 @@ api.MapGet("/payroll-runs/{payrollRunId:guid}/employees/{employeeId:guid}/pay-st
     return statement is null ? Results.NotFound() : Results.Ok(statement);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 
+api.MapGet("/payroll-filings", async (IPayrollFilingService service, CancellationToken cancellationToken) => Results.Ok(await service.GetFilingsAsync(cancellationToken)))
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapGet("/payroll-filings/{filingId:guid}", async (Guid filingId, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var filing = await service.GetFilingAsync(filingId, cancellationToken);
+    return filing is null ? Results.NotFound() : Results.Ok(filing);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapGet("/payroll-filings/{filingId:guid}/data.json", async (Guid filingId, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var filing = await service.GetFilingAsync(filingId, cancellationToken);
+    return filing is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(filing.Data.GetRawText()), "application/json", $"payroll-{filing.FormCode.ToLowerInvariant()}-{filing.TaxYear}{(filing.Quarter.HasValue ? $"-q{filing.Quarter}" : string.Empty)}.json");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/payroll-filings/drafts", async (SavePayrollFilingDraftRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveDraftAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/payroll-filings/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollFiling"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/payroll-filings/approve", async (ApprovePayrollFilingRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ApproveAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollFiling"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApprovePayroll, BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+api.MapPost("/payroll-filings/reopen", async (ReopenPayrollFilingRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ReopenFilingAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollFiling"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll);
+api.MapGet("/payroll-close-periods", async (IPayrollFilingService service, CancellationToken cancellationToken) => Results.Ok(await service.GetClosePeriodsAsync(cancellationToken)))
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.AccessPayroll);
+api.MapPost("/payroll-close-periods", async (ClosePayrollPeriodRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ClosePeriodAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/payroll-close-periods/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollClosePeriod"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PostPayroll);
+api.MapPost("/payroll-close-periods/reopen", async (ReopenPayrollPeriodRequest request, IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.ReopenPeriodAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payrollClosePeriod"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayroll);
+
 api.MapPut("/employees/payroll-setup", async (SaveEmployeePayrollSetupRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveEmployeePayrollSetupAsync(request, cancellationToken);

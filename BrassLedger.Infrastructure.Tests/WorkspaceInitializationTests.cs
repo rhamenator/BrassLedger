@@ -1226,6 +1226,84 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task PayrollFilings_ReconcileProtectDataDetectSourceChangesAndLockClosedPeriods()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var filings = scope.ServiceProvider.GetRequiredService<IPayrollFilingService>();
+        var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var employee = workspace.Payroll.Employees.First();
+        var bankId = workspace.Treasury.BankAccounts.Single(account => account.LedgerAccountNumber == "1010").Id;
+        var protectedDetails = await transactions.SaveEmployeeEmploymentDetailsAsync(new SaveEmployeeEmploymentDetailsRequest(employee.Id, "1 Main St", "", "85001", "Maricopa", "", "Maricopa", "", new DateOnly(2024, 1, 1), null, 25m, 37.5m, false, "", "123-45-6789", "", "", ConcurrencyToken: employee.ConcurrencyToken));
+        Assert.True(protectedDetails.Succeeded, protectedDetails.ErrorMessage);
+
+        var firstRun = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 4, 10), "FILING-Q2-1", [new EmployeePayrollInput(employee.Id, 1_000m)], new DateOnly(2026, 3, 29), new DateOnly(2026, 4, 4)));
+        Assert.True(firstRun.Succeeded, firstRun.ErrorMessage);
+        var filingDraft = await filings.SaveDraftAsync(new SavePayrollFilingDraftRequest(null, "941", 2026, 2));
+        Assert.True(filingDraft.Succeeded, filingDraft.ErrorMessage);
+        var draft = await filings.GetFilingAsync(filingDraft.Id!.Value);
+        Assert.NotNull(draft);
+        Assert.Equal("Draft", draft!.Status);
+        Assert.Equal(2, draft.Data.GetProperty("Quarter").GetInt32());
+        Assert.True(draft.Data.GetProperty("WagesTipsAndOtherCompensation").GetDecimal() > 0);
+        Assert.Equal(draft.Data.GetProperty("TotalTaxesBeforeAdjustments").GetDecimal(), draft.Data.GetProperty("BalanceDue").GetDecimal());
+
+        var changedSource = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 5, 8), "FILING-Q2-2", [new EmployeePayrollInput(employee.Id, 750m)], new DateOnly(2026, 4, 26), new DateOnly(2026, 5, 2)));
+        Assert.True(changedSource.Succeeded, changedSource.ErrorMessage);
+        var staleApproval = await filings.ApproveAsync(new ApprovePayrollFilingRequest(draft.Id, draft.ConcurrencyToken));
+        Assert.False(staleApproval.Succeeded);
+        Assert.Contains("changed", staleApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var regenerated = await filings.SaveDraftAsync(new SavePayrollFilingDraftRequest(draft.Id, "941", 2026, 2, draft.ConcurrencyToken));
+        Assert.True(regenerated.Succeeded, regenerated.ErrorMessage);
+        draft = await filings.GetFilingAsync(draft.Id);
+        var approved = await filings.ApproveAsync(new ApprovePayrollFilingRequest(draft!.Id, draft.ConcurrencyToken));
+        Assert.True(approved.Succeeded, approved.ErrorMessage);
+        var lockedPayroll = await transactions.SaveEmployeePayrollRunDraftAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 6, 5), "FILING-Q2-LOCKED", [new EmployeePayrollInput(employee.Id, 500m)]));
+        Assert.False(lockedPayroll.Succeeded);
+        Assert.Contains("filing", lockedPayroll.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var close = await filings.ClosePeriodAsync(new ClosePayrollPeriodRequest("Quarter", 2026, 2));
+        Assert.True(close.Succeeded, close.ErrorMessage);
+        var closePeriod = Assert.Single(await filings.GetClosePeriodsAsync());
+        Assert.Equal("Closed", closePeriod.Status);
+        var approvedFiling = await filings.GetFilingAsync(draft.Id);
+        Assert.False((await filings.ReopenFilingAsync(new ReopenPayrollFilingRequest(draft.Id, "Correction required", approvedFiling!.ConcurrencyToken))).Succeeded);
+
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.OpenConnectionAsync();
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "SELECT DataJson FROM PayrollFilings WHERE Id = $id";
+            var parameter = command.CreateParameter(); parameter.ParameterName = "$id"; parameter.Value = draft.Id; command.Parameters.Add(parameter);
+            var stored = (await command.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+            Assert.StartsWith("enc::", stored);
+            Assert.DoesNotContain("123456789", stored);
+        }
+
+        var reopenedPeriod = await filings.ReopenPeriodAsync(new ReopenPayrollPeriodRequest(closePeriod.Id, "Post approved correction", closePeriod.ConcurrencyToken));
+        Assert.True(reopenedPeriod.Succeeded, reopenedPeriod.ErrorMessage);
+        approvedFiling = await filings.GetFilingAsync(draft.Id);
+        Assert.True((await filings.ReopenFilingAsync(new ReopenPayrollFilingRequest(draft.Id, "Regenerate after correction", approvedFiling!.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var run = await db.PayrollRuns.SingleAsync(item => item.Id == firstRun.Id);
+            Assert.True((await transactions.ReversePayrollRunAsync(new ReversePayrollRunRequest(run.Id, new DateOnly(2026, 6, 10), "Quarter correction", run.ConcurrencyToken))).Succeeded);
+        }
+
+        var w2 = await filings.SaveDraftAsync(new SavePayrollFilingDraftRequest(null, "W2/W3", 2026));
+        Assert.True(w2.Succeeded, w2.ErrorMessage);
+        var w2Filing = await filings.GetFilingAsync(w2.Id!.Value);
+        var w2Employees = w2Filing!.Data.GetProperty("Employees");
+        Assert.NotEmpty(w2Employees.EnumerateArray());
+        Assert.Equal("123456789", w2Employees.EnumerateArray().First().GetProperty("SocialSecurityNumber").GetString());
+        Assert.Equal(w2Filing.Data.GetProperty("W3Box1Total").GetDecimal(), w2Employees.EnumerateArray().Sum(item => item.GetProperty("Box1WagesTipsOtherCompensation").GetDecimal()));
+    }
+
+    [Fact]
     public async Task EmployeeProtectedDetails_AreValidatedEncryptedMaskedAndConcurrencyControlled()
     {
         using var services = CreateServiceProvider();

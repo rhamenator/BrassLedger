@@ -1033,6 +1033,7 @@ public sealed class AccountingTransactionService(
             return null;
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        if (await IsPayrollPeriodLockedAsync(db, companyId, request.PayDate, cancellationToken)) return null;
         var expansion = await ExpandApprovedTimecardsAsync(db, companyId, request, cancellationToken);
         if (expansion.Request is null || expansion.Request.Employees.Any(line => ResolveGrossPay(line) <= 0)) return null;
         return await CalculateEmployeePayrollAsync(db, companyId, expansion.Request, cancellationToken);
@@ -1068,6 +1069,7 @@ public sealed class AccountingTransactionService(
         if (runType is not ("Regular" or "OffCycle" or "Correction" or "Adjustment")) return TransactionResult.Failure("Payroll run type must be Regular, OffCycle, Correction, or Adjustment.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        if (await IsPayrollPeriodLockedAsync(db, companyId, request.PayDate, cancellationToken)) return TransactionResult.Failure("Reopen the approved payroll filing or closed payroll period before preparing payroll for this pay date.");
         var expansion = await ExpandApprovedTimecardsAsync(db, companyId, request, cancellationToken);
         if (expansion.Request is null) return TransactionResult.Failure(expansion.ErrorMessage);
         var expandedRequest = expansion.Request;
@@ -1146,6 +1148,7 @@ public sealed class AccountingTransactionService(
         if (run is null) return TransactionResult.Failure("Payroll run not found.");
         if (run.Status != "Approved") return TransactionResult.Failure("Only an approved payroll run can be posted.");
         if (!string.Equals(run.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll run changed after it was approved. Refresh and review it again.");
+        if (await IsPayrollPeriodLockedAsync(db, companyId, run.PayDate, cancellationToken)) return TransactionResult.Failure("Reopen the approved payroll filing or closed payroll period before posting payroll for this pay date.");
         var bank = await db.BankAccounts.SingleOrDefaultAsync(account => account.Id == run.BankAccountId && account.CompanyId == companyId, cancellationToken);
         if (bank is null) return TransactionResult.Failure("Payroll funding account not found.");
         if (bank.CurrentBalance < run.NetPay) return TransactionResult.Failure("Payroll funding account does not have sufficient book balance for net pay.");
@@ -1350,6 +1353,7 @@ public sealed class AccountingTransactionService(
         if (run.Status != "Posted" || !run.JournalEntryId.HasValue || run.ReversalJournalEntryId.HasValue) return TransactionResult.Failure("Only an unreversed posted payroll run can be reversed.");
         if (!string.Equals(run.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll run changed after it was opened. Refresh and try again.");
         if (request.ReversalDate < run.PayDate) return TransactionResult.Failure("A payroll reversal cannot precede the original pay date.");
+        if (await IsPayrollPeriodLockedAsync(db, companyId, run.PayDate, cancellationToken)) return TransactionResult.Failure("Reopen the approved payroll filing or closed payroll period before reversing payroll for this pay date.");
         if (await IsInCompletedReconciliationAsync(db, run.JournalEntryId.Value, cancellationToken)) return TransactionResult.Failure("Reopen the bank reconciliation before reversing this payroll run.");
         var liabilities = await db.PayrollLiabilities.Where(liability => liability.CompanyId == companyId && liability.PayrollRunId == run.Id).ToListAsync(cancellationToken);
         var employeePayments = await db.PayrollEmployeePayments.Where(payment => payment.CompanyId == companyId && payment.PayrollRunId == run.Id).ToListAsync(cancellationToken);
@@ -2029,6 +2033,12 @@ public sealed class AccountingTransactionService(
 
     private static Task<bool> IsClosedPeriodAsync(BrassLedgerDbContext db, Guid companyId, DateOnly date, CancellationToken cancellationToken) =>
         db.AccountingPeriods.AnyAsync(period => period.CompanyId == companyId && period.Status == "Closed" && period.StartsOn <= date && period.EndsOn >= date, cancellationToken);
+
+    private static async Task<bool> IsPayrollPeriodLockedAsync(BrassLedgerDbContext db, Guid companyId, DateOnly date, CancellationToken cancellationToken)
+    {
+        if (await db.PayrollClosePeriods.AnyAsync(period => period.CompanyId == companyId && period.Status == "Closed" && period.PeriodStart <= date && period.PeriodEnd >= date, cancellationToken)) return true;
+        return await db.PayrollFilings.AnyAsync(filing => filing.CompanyId == companyId && filing.Status == "Approved" && filing.PeriodStart <= date && filing.PeriodEnd >= date, cancellationToken);
+    }
 
     private Guid? ResolveUserId()
     {

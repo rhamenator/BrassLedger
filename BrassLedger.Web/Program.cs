@@ -95,6 +95,12 @@ app.MapGet("/payroll/reports/{payrollRunId:guid}/register.csv", async (Guid payr
     return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"payroll-register-{payrollRunId:N}.csv");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.AccessPayroll);
 
+app.MapGet("/payroll/filings/{filingId:guid}/data.json", async (Guid filingId, BrassLedger.Application.Accounting.IPayrollFilingService service, CancellationToken cancellationToken) =>
+{
+    var filing = await service.GetFilingAsync(filingId, cancellationToken);
+    return filing is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(filing.Data.GetRawText()), "application/json", $"payroll-{filing.FormCode.ToLowerInvariant()}-{filing.TaxYear}{(filing.Quarter.HasValue ? $"-q{filing.Quarter}" : string.Empty)}.json");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

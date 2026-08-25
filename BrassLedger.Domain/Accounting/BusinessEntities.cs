@@ -827,6 +827,52 @@ public sealed class PayrollEmployeePayment
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
+public sealed class PayrollFiling
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string FormCode { get; set; } = string.Empty;
+    public int TaxYear { get; set; }
+    public int? Quarter { get; set; }
+    public string PeriodKey { get; set; } = string.Empty;
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    public string Status { get; set; } = "Draft";
+    public string DataJson { get; set; } = "{}";
+    public string SummaryJson { get; set; } = "{}";
+    public string SourcePayrollRunIdsJson { get; set; } = "[]";
+    public string SourceDigestSha256 { get; set; } = string.Empty;
+    public string OfficialSourceUrl { get; set; } = string.Empty;
+    public string ContentVersion { get; set; } = string.Empty;
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? ReopenedByUserId { get; set; }
+    public DateTimeOffset? ReopenedAtUtc { get; set; }
+    public string ReopenReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollClosePeriod
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string PeriodType { get; set; } = "Quarter";
+    public int TaxYear { get; set; }
+    public int? Quarter { get; set; }
+    public string PeriodKey { get; set; } = string.Empty;
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    public string Status { get; set; } = "Closed";
+    public Guid? ClosedByUserId { get; set; }
+    public DateTimeOffset ClosedAtUtc { get; set; }
+    public Guid? ReopenedByUserId { get; set; }
+    public DateTimeOffset? ReopenedAtUtc { get; set; }
+    public string ReopenReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
 public sealed class TaxRuleSet
 {
     public Guid Id { get; set; }

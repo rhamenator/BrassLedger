@@ -3,6 +3,8 @@
 @inject IBusinessWorkspaceService WorkspaceService
 @inject IAccountingTransactionService TransactionService
 @inject IPayrollReportingService PayrollReportingService
+@inject IPayrollFilingService PayrollFilingService
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Payroll</PageTitle>
 
@@ -42,6 +44,34 @@ else
                 <span class="stat-label">Employer-specific rates</span>
             </article>
         </section>
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData"><Authorized Context="payrollFilingContext">
+        <section class="panel">
+            <h2>Federal filing data and payroll close</h2>
+            <p class="page-intro">Generate source-locked 2026 Form 941, Form 940, or W-2/W-3 data from posted, unreversed payroll. Approval freezes the source digest and locks affected payroll until the filing is reopened. JSON output is preparation data for professional review; it is not an electronically transmitted return.</p>
+            <div class="content-grid">
+                <div class="field-group"><label class="field-label">Form</label><InputSelect aria-label="Payroll filing form" class="field-input" @bind-Value="FilingForm.FormCode"><option value="941">941 quarterly</option><option value="940">940 annual FUTA</option><option value="W2">W-2 / W-3 annual</option></InputSelect></div>
+                <div class="field-group"><label class="field-label">Tax year</label><InputNumber aria-label="Payroll filing tax year" class="field-input" @bind-Value="FilingForm.TaxYear" /></div>
+                @if (FilingForm.FormCode == "941") { <div class="field-group"><label class="field-label">Quarter</label><InputSelect aria-label="Payroll filing quarter" class="field-input" @bind-Value="FilingForm.Quarter"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></InputSelect></div> }
+            </div>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PreparePayroll"><Authorized Context="filingPrepareContext"><button class="action-primary" type="button" @onclick="GenerateFilingAsync">Generate filing draft</button></Authorized></AuthorizeView>
+            @if (PayrollFilings.Count > 0)
+            {
+                <div class="table-scroll"><table class="data-table"><thead><tr><th>Form</th><th>Period</th><th>Status</th><th>Generated</th><th>Source digest</th><th>Official source</th><th>Actions</th></tr></thead><tbody>
+                @foreach (var filing in PayrollFilings)
+                {
+                    <tr><td>@filing.FormCode</td><td>@filing.TaxYear@(filing.Quarter.HasValue ? $" Q{filing.Quarter}" : "")</td><td>@filing.Status</td><td>@filing.PreparedAtUtc.ToLocalTime().ToString("g")</td><td><code>@filing.SourceDigestSha256[..12]</code></td><td><a href="@filing.OfficialSourceUrl" target="_blank" rel="noopener">IRS guidance</a></td><td><a class="action-secondary" href="@($"/payroll/filings/{filing.Id}/data.json")">Download JSON</a>@if (filing.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PreparePayroll"><Authorized Context="filingRegenerateContext"><button class="action-secondary" type="button" @onclick="() => RegenerateFilingAsync(filing)">Regenerate</button></Authorized></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="filingApproveContext"><button class="action-primary" type="button" @onclick="() => ApproveFilingAsync(filing)">Approve</button></Authorized></AuthorizeView> } else if (filing.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="filingReopenContext"><button class="action-secondary" type="button" @onclick="() => ReopenFilingAsync(filing)">Reopen</button></Authorized></AuthorizeView> }</td></tr>
+                }
+                </tbody></table></div>
+            }
+            else { <p>No federal filing-data drafts have been generated.</p> }
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="filingReasonContext"><div class="field-group"><label class="field-label">Reopen reason</label><InputText aria-label="Payroll filing reopen reason" class="field-input" @bind-Value="FilingReopenReason" /></div></Authorized></AuthorizeView>
+            <h3>Close payroll period</h3>
+            <div class="content-grid"><div class="field-group"><label class="field-label">Period type</label><InputSelect aria-label="Payroll close period type" class="field-input" @bind-Value="CloseForm.PeriodType"><option>Quarter</option><option>Year</option></InputSelect></div><div class="field-group"><label class="field-label">Tax year</label><InputNumber aria-label="Payroll close tax year" class="field-input" @bind-Value="CloseForm.TaxYear" /></div>@if (CloseForm.PeriodType == "Quarter") { <div class="field-group"><label class="field-label">Quarter</label><InputSelect aria-label="Payroll close quarter" class="field-input" @bind-Value="CloseForm.Quarter"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></InputSelect></div> }</div>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostPayroll"><Authorized Context="periodCloseContext"><button class="action-primary" type="button" @onclick="ClosePayrollPeriodAsync">Close payroll period</button></Authorized></AuthorizeView>
+            @if (PayrollClosePeriods.Count > 0) { <div class="table-scroll"><table class="data-table"><thead><tr><th>Period</th><th>Status</th><th>Closed</th><th>Reason</th><th></th></tr></thead><tbody>@foreach (var period in PayrollClosePeriods) { <tr><td>@period.TaxYear @(period.PeriodType == "Quarter" ? $"Q{period.Quarter}" : "Year")</td><td>@period.Status</td><td>@period.ClosedAtUtc.ToLocalTime().ToString("g")</td><td>@period.ReopenReason</td><td>@if (period.Status == "Closed") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="periodReopenContext"><button class="action-secondary" type="button" @onclick="() => ReopenPayrollPeriodAsync(period)">Reopen</button></Authorized></AuthorizeView> }</td></tr> }</tbody></table></div> }
+        </section>
+        </Authorized></AuthorizeView>
 
         <section class="panel">
             <h2>Timecards and variable earnings</h2>
@@ -368,6 +398,11 @@ else
     private PayrollRunEstimate? Preview;
     private PayrollRegister? SelectedRegister;
     private PayrollPayStatement? SelectedPayStatement;
+    private List<PayrollFilingSnapshot> PayrollFilings { get; set; } = [];
+    private List<PayrollClosePeriodSnapshot> PayrollClosePeriods { get; set; } = [];
+    private PayrollFilingEditor FilingForm { get; } = new();
+    private PayrollCloseEditor CloseForm { get; } = new();
+    private string FilingReopenReason = string.Empty;
     private string ReversalReason = string.Empty;
     private JurisdictionRuleEditor JurisdictionRuleForm { get; } = new();
     private Guid SelectedPayrollSetupEmployeeId;
@@ -398,6 +433,9 @@ else
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)) PayrollFilings = (await PayrollFilingService.GetFilingsAsync()).ToList();
+        PayrollClosePeriods = (await PayrollFilingService.GetClosePeriodsAsync()).ToList();
         foreach (var employee in Workspace.Payroll.Employees)
         {
             RunLines[employee.Id] = decimal.Round(employee.MonthlyBasePay / 2m, 2);
@@ -411,6 +449,15 @@ else
         LoadEmploymentEditor();
         ResetTimecardEditor();
     }
+
+    private async Task GenerateFilingAsync() => await SaveFilingAsync(new SavePayrollFilingDraftRequest(null, FilingForm.FormCode, FilingForm.TaxYear, FilingForm.FormCode == "941" ? FilingForm.Quarter : null));
+    private async Task RegenerateFilingAsync(PayrollFilingSnapshot filing) => await SaveFilingAsync(new SavePayrollFilingDraftRequest(filing.Id, filing.FormCode, filing.TaxYear, filing.Quarter, filing.ConcurrencyToken));
+    private async Task SaveFilingAsync(SavePayrollFilingDraftRequest request) { var result = await PayrollFilingService.SaveDraftAsync(request); StatusMessage = result.Succeeded ? "Payroll filing draft generated from posted payroll; professional review is still required." : result.ErrorMessage; await RefreshPayrollFilingsAsync(); }
+    private async Task ApproveFilingAsync(PayrollFilingSnapshot filing) { var result = await PayrollFilingService.ApproveAsync(new ApprovePayrollFilingRequest(filing.Id, filing.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Payroll filing data approved and its source period locked." : result.ErrorMessage; await RefreshPayrollFilingsAsync(); }
+    private async Task ReopenFilingAsync(PayrollFilingSnapshot filing) { if (string.IsNullOrWhiteSpace(FilingReopenReason)) { StatusMessage = "Enter a reopen reason first."; return; } var result = await PayrollFilingService.ReopenFilingAsync(new ReopenPayrollFilingRequest(filing.Id, FilingReopenReason, filing.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Payroll filing reopened for regeneration." : result.ErrorMessage; if (result.Succeeded) FilingReopenReason = string.Empty; await RefreshPayrollFilingsAsync(); }
+    private async Task ClosePayrollPeriodAsync() { var result = await PayrollFilingService.ClosePeriodAsync(new ClosePayrollPeriodRequest(CloseForm.PeriodType, CloseForm.TaxYear, CloseForm.PeriodType == "Quarter" ? CloseForm.Quarter : null)); StatusMessage = result.Succeeded ? "Payroll period closed after required filing approval." : result.ErrorMessage; await RefreshPayrollFilingsAsync(); }
+    private async Task ReopenPayrollPeriodAsync(PayrollClosePeriodSnapshot period) { if (string.IsNullOrWhiteSpace(FilingReopenReason)) { StatusMessage = "Enter a reopen reason first."; return; } var result = await PayrollFilingService.ReopenPeriodAsync(new ReopenPayrollPeriodRequest(period.Id, FilingReopenReason, period.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Payroll period reopened with its audit history preserved." : result.ErrorMessage; if (result.Succeeded) FilingReopenReason = string.Empty; await RefreshPayrollFilingsAsync(); }
+    private async Task RefreshPayrollFilingsAsync() { PayrollFilings = (await PayrollFilingService.GetFilingsAsync()).ToList(); PayrollClosePeriods = (await PayrollFilingService.GetClosePeriodsAsync()).ToList(); }
 
     private void ResetTimecardEditor()
     {
@@ -595,6 +642,8 @@ else
     }
 
     private sealed class PayrollRunEditor { public Guid BankAccountId { get; set; } public DateOnly PayDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly PeriodStart { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(-13)); public DateOnly PeriodEnd { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string RunType { get; set; } = "Regular"; public string Reference { get; set; } = $"PR-{DateTime.Today:yyyyMMdd}"; }
+    private sealed class PayrollFilingEditor { public string FormCode { get; set; } = "941"; public int TaxYear { get; set; } = 2026; public int Quarter { get; set; } = ((DateTime.Today.Month - 1) / 3) + 1; }
+    private sealed class PayrollCloseEditor { public string PeriodType { get; set; } = "Quarter"; public int TaxYear { get; set; } = 2026; public int Quarter { get; set; } = ((DateTime.Today.Month - 1) / 3) + 1; }
     private sealed class PayrollTimecardEditor { public Guid? Id { get; set; } public Guid EmployeeId { get; set; } public DateOnly PeriodStart { get; set; } public DateOnly PeriodEnd { get; set; } public string Notes { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; public List<PayrollTimeEntryEditor> Entries { get; set; } = []; }
     private sealed class PayrollTimeEntryEditor { public DateOnly WorkDate { get; set; } public string EarningCode { get; set; } = "REG"; public string EarningType { get; set; } = "Regular"; public decimal Hours { get; set; } public decimal Rate { get; set; } public decimal Amount { get; set; } public bool IsTaxable { get; set; } = true; public string WorkState { get; set; } = string.Empty; public string WorkCounty { get; set; } = string.Empty; public string WorkCity { get; set; } = string.Empty; public string WorkSchoolDistrict { get; set; } = string.Empty; public Guid? ProjectJobId { get; set; } public string Notes { get; set; } = string.Empty; }
     private sealed class PayrollLiabilityPaymentEditor { public Guid BankAccountId { get; set; } public DateOnly PaymentDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = $"TAX-{DateTime.Today:yyyyMMdd}"; public string Payee { get; set; } = string.Empty; public string Method { get; set; } = "EFT"; public void Reset() { Reference = $"TAX-{DateTime.Today:yyyyMMdd}"; Payee = string.Empty; } }
