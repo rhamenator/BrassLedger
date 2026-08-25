@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ga",
+  "capturedAtUtc": "2026-08-25T05:28:00Z",
+  "sources": [
+    { "url": "https://dor.georgia.gov/document/document/2026-employers-tax-guide-updated-june-2026/download", "title": "2026 Georgia Employer's Tax Guide — updated June 2026", "retrievedAtUtc": "2026-08-25T05:28:00Z", "mediaType": "application/pdf", "sha256": "bb8fc0ce2e3d6f208f5215eb0ed65e875bee1bb8105f313589856b78c9852cb0", "bytes": 3434407 },
+    { "url": "https://dor.georgia.gov/employers-tax-guide", "title": "Georgia Employer's Tax Guide index", "retrievedAtUtc": "2026-08-25T05:28:00Z", "mediaType": "text/html", "sha256": "de1e3aa47c4b6edb9e7e24ad556ea74114d332b51c96f7065264fbbae3ecf974", "bytes": 99624 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "Form G-4", "dataType": "enum", "values": ["SingleOrHeadOfHousehold", "MarriedFilingJointlyOneSpouseWorking", "MarriedFilingSeparatelyOrBothWorking"] },
+    { "code": "dependentAllowances", "source": "Form G-4", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Form G-4", "dataType": "money", "minimum": 0 },
+    { "code": "georgiaWages", "dataType": "money", "minimum": 0 },
+    { "code": "totalEarnedIncome", "dataType": "money", "minimum": 0 }
+  ],
+  "calculationVersions": [
+    { "code": "PRE-HB463", "effectiveOn": "2026-01-01", "effectiveThrough": "2026-05-10", "rate": 0.0519, "formulaInputStatus": "Archived pre-change standard-deduction and allowance table not captured in current guide", "activationAllowed": false },
+    { "code": "POST-HB463", "effectiveOn": "2026-05-11", "effectiveThrough": "2026-12-31", "rate": 0.0499, "annualStandardDeduction": { "MarriedFilingJointlyOneSpouseWorking": 30000, "SingleOrHeadOfHousehold": 15000, "MarriedFilingSeparatelyOrBothWorking": 15000 }, "annualDependentAllowance": 5000, "activationAllowed": false }
+  ],
+  "calculation": {
+    "methods": ["WageBracket", "Percentage"],
+    "percentageFormulaForPostHb463": "max(0, taxableWages - periodicStandardDeduction - dependentAllowances * periodicDependentAllowance) * 0.0499 + additionalPeriodicWithholding",
+    "postHb463PeriodicDeductions": [
+      { "frequency": "Weekly", "marriedJointOneSpouse": 576.92, "singleHeadOrMarriedSeparate": 288.46, "dependent": 96.15 },
+      { "frequency": "Biweekly", "marriedJointOneSpouse": 1153.85, "singleHeadOrMarriedSeparate": 576.92, "dependent": 192.31 },
+      { "frequency": "Semimonthly", "marriedJointOneSpouse": 1250, "singleHeadOrMarriedSeparate": 625, "dependent": 208.33 },
+      { "frequency": "Monthly", "marriedJointOneSpouse": 2500, "singleHeadOrMarriedSeparate": 1250, "dependent": 416.67 },
+      { "frequency": "Quarterly", "marriedJointOneSpouse": 7500, "singleHeadOrMarriedSeparate": 3750, "dependent": 1250 },
+      { "frequency": "Semiannual", "marriedJointOneSpouse": 15000, "singleHeadOrMarriedSeparate": 7500, "dependent": 2500 },
+      { "frequency": "Annual", "marriedJointOneSpouse": 30000, "singleHeadOrMarriedSeparate": 15000, "dependent": 5000 },
+      { "frequency": "DailyOrMiscellaneous", "marriedJointOneSpouse": 82.19, "singleHeadOrMarriedSeparate": 41.10, "dependent": 13.70 }
+    ],
+    "officialExamples": [
+      { "filingStatus": "MarriedFilingJointlyOneSpouseWorking", "frequency": "Semimonthly", "taxableWages": 2000, "dependents": 1, "standardDeduction": 1250, "dependentDeduction": 208.33, "wagesSubjectToWithholding": 541.67, "rate": 0.0499, "withholding": 27.03 },
+      { "filingStatus": "SingleOrHeadOfHousehold", "frequency": "Biweekly", "taxableWages": 935, "dependents": 2, "standardDeduction": 576.92, "dependentDeduction": 384.62, "wagesSubjectToWithholding": 0, "withholding": 0 }
+    ],
+    "supplementalWages": { "rateBefore2026-05-11": 0.0519, "rateOnOrAfter2026-05-11": 0.0499 },
+    "missingCertificate": "Use sufficient federal W-4 information when available; otherwise single with zero allowances.",
+    "tableAndFormulaDifference": "Published tables use income ranges and may differ slightly from the exact percentage method."
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Withhold on Georgia residents for services inside or outside Georgia, except when the other work state requires withholding.",
+    "nonresidentThreshold": "Withhold when more than 5% of total earned income is attributable to Georgia or more than $5,000 of wages is attributable to Georgia.",
+    "percentageThreshold": 0.05,
+    "dollarThreshold": 5000,
+    "multiStateAllocationRequired": true
+  },
+  "filing": {
+    "lookbackPeriod": "Twelve months ending June 30 of immediately preceding calendar year",
+    "frequencies": [
+      { "frequency": "Annual", "condition": "$800 or less per year after approved request" },
+      { "frequency": "Quarterly", "condition": "$200 or less per month and more than $800 per year" },
+      { "frequency": "Monthly", "condition": "More than $200 per month and no semiweekly assignment" },
+      { "frequency": "Semiweekly", "condition": "More than $50,000 during lookback period" }
+    ],
+    "oneDayRule": { "paydayLiabilityAtLeast": 100000, "due": "Next banking day", "electronic": true },
+    "generalElectronicThreshold": 500,
+    "forms": ["GA-V", "G-7", "G-7 Schedule B", "G-1003", "W-2"]
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The June guide establishes a May 11 withholding-rate change but does not reproduce the archived pre-change percentage inputs; the January 1 through May 10 branch is therefore incomplete.",
+    "The income-tax changes are retroactive for annual tax purposes, while employers were instructed to keep 5.19% withholding before May 11; payroll must use payment-date versioning rather than retroactively rewriting checks.",
+    "The complete wage-bracket matrices are retained in the checksummed guide and not duplicated here.",
+    "No explicit rounding instruction was located for the percentage method."
+  ],
+  "review": { "postChangeFormulaTranscribed": true, "preChangeFormulaTranscribed": false, "officialExamplesTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": true, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Capture the archived pre-May guide and exact deductions, verify payment-date boundaries and rounding, import table boundaries, and add executable cases spanning May 10 and May 11." }
+}

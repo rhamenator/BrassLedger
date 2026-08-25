@@ -551,6 +551,61 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task DistrictOfColumbiaSourceCapture_DoesNotPromoteLegacyTablesAs2026Rules()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/dc/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal("MissingOfficialPublication", calculation.GetProperty("current2026FormulaStatus").GetString());
+        Assert.False(calculation.GetProperty("legacyPublicationMayBeExecuted").GetBoolean());
+        Assert.False(calculation.GetProperty("current2026BracketsTranscribed").GetBoolean());
+        Assert.Equal(2016, root.GetProperty("sources")[1].GetProperty("publicationYear").GetInt32());
+        Assert.True(root.GetProperty("filing").GetProperty("monthlyOrQuarterly").GetProperty("electronicFilingRequired").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GeorgiaSourceCapture_PreservesMayRateBoundaryAndNonresidentDualThreshold()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ga/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var versions = root.GetProperty("calculationVersions").EnumerateArray().ToArray();
+
+        Assert.Equal(2, versions.Length);
+        Assert.Equal("2026-05-10", versions[0].GetProperty("effectiveThrough").GetString());
+        Assert.Equal(0.0519m, versions[0].GetProperty("rate").GetDecimal());
+        Assert.Equal("2026-05-11", versions[1].GetProperty("effectiveOn").GetString());
+        Assert.Equal(0.0499m, versions[1].GetProperty("rate").GetDecimal());
+        Assert.Equal(8, root.GetProperty("calculation").GetProperty("postHb463PeriodicDeductions").GetArrayLength());
+        Assert.Equal(0.05m, root.GetProperty("residencyAndWorkRules").GetProperty("percentageThreshold").GetDecimal());
+        Assert.Equal(5000, root.GetProperty("residencyAndWorkRules").GetProperty("dollarThreshold").GetInt32());
+        Assert.False(root.GetProperty("review").GetProperty("preChangeFormulaTranscribed").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task HawaiiSourceCapture_PreservesAnnualBracketsAndConditionalSixtyDayRule()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/hi/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(1144, calculation.GetProperty("annualRegularAllowance").GetInt32());
+        Assert.Equal(4350, calculation.GetProperty("annualExtraLumpSumAllowance").GetInt32());
+        Assert.Equal(8, calculation.GetProperty("annualBrackets").GetProperty("SingleOrHeadOfHousehold").GetArrayLength());
+        Assert.Equal(8, calculation.GetProperty("annualBrackets").GetProperty("Married").GetArrayLength());
+        Assert.Equal(9.58m, calculation.GetProperty("officialAnnualizedExample").GetProperty("periodicWithholding").GetDecimal());
+        Assert.Equal(60, root.GetProperty("residencyAndWorkRules").GetProperty("qualifyingNonresidentDayLimit").GetInt32());
+        Assert.Equal(5, root.GetProperty("residencyAndWorkRules").GetProperty("shortTermConditions").GetArrayLength());
+        Assert.All(root.GetProperty("sources").EnumerateArray(), source => Assert.Matches("^[a-f0-9]{64}$", source.GetProperty("sha256").GetString()));
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();
