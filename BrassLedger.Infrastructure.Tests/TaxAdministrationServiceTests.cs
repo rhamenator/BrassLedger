@@ -606,6 +606,58 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task IowaSourceCapture_PreservesCertificateGenerationsFormulaAndReciprocity()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ia/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(0.038m, calculation.GetProperty("rate").GetDecimal());
+        Assert.Equal(40, calculation.GetProperty("legacyCertificate").GetProperty("annualAllowanceDollarsPerClaimedAllowance").GetInt32());
+        Assert.Equal(6, calculation.GetProperty("modernPeriodicStandardDeductions").GetArrayLength());
+        Assert.Equal(59.26m, calculation.GetProperty("officialExamples")[0].GetProperty("withholding").GetDecimal());
+        Assert.Equal("IL", root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates")[0].GetString());
+        Assert.All(root.GetProperty("sources").EnumerateArray(), source => Assert.Matches("^[a-f0-9]{64}$", source.GetProperty("sha256").GetString()));
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task KansasSourceCapture_PreservesPercentageSchedulesResidentCreditAndAllocation()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ks/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(8, calculation.GetProperty("percentageTables").GetArrayLength());
+        Assert.Equal(0.0558m, calculation.GetProperty("percentageTables")[7].GetProperty("married").GetProperty("topRate").GetDecimal());
+        Assert.Equal(9160, calculation.GetProperty("allowances").GetProperty("singleHeadOrMarriedSeparate").GetInt32());
+        Assert.Equal(41, calculation.GetProperty("officialExample").GetProperty("roundedWithholding").GetInt32());
+        Assert.Equal(120, root.GetProperty("residencyAndWorkRules").GetProperty("officialExamples")[0].GetProperty("kansasWithholding").GetInt32());
+        Assert.Equal(5, root.GetProperty("filing").GetProperty("frequencies").GetArrayLength());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task KentuckySourceCapture_PreservesFormulaConditionalReciprocityAndPublishedDiscrepancy()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ky/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+
+        Assert.Equal(3360, calculation.GetProperty("annualStandardDeduction").GetInt32());
+        Assert.Equal(0.035m, calculation.GetProperty("rate").GetDecimal());
+        Assert.Equal(35640, calculation.GetProperty("officialExamples")[1].GetProperty("statedAnnualTaxableWages").GetInt32());
+        Assert.Equal(35730, calculation.GetProperty("officialExamples")[1].GetProperty("formulaExampleThenUsesAnnualTaxableWages").GetInt32());
+        Assert.Equal(7, root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates").GetArrayLength());
+        Assert.True(root.GetProperty("localWithholding").GetProperty("separateLocalOccupationalTaxSupportRequired").GetBoolean());
+        Assert.True(root.GetProperty("review").GetProperty("exampleDiscrepancyRecorded").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ks",
+  "capturedAtUtc": "2026-08-25T06:30:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.ksrevenue.gov/pdf/kw100.pdf", "title": "KW-100 Kansas Withholding Tax Guide", "revision": "October 2024", "mediaType": "application/pdf", "sha256": "7e521f216548a12e5afc42faff6d3aa170327e9061582ce8e431ed86c67f8fdd", "bytes": 1946195 }
+  ],
+  "employeeInputs": [
+    { "code": "maritalClass", "source": "Form K-4", "dataType": "enum", "values": ["SingleIncludingHeadOfHousehold", "Married"] },
+    { "code": "dependentAllowances", "source": "Form K-4", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Form K-4 line 5", "dataType": "money", "minimum": 0 },
+    { "code": "kansasServiceFraction", "source": "Form K-4C or supportable payroll allocation", "dataType": "decimal", "minimum": 0, "maximum": 1 },
+    { "code": "otherStateWithholding", "dataType": "money", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["Percentage", "WageBracket"],
+    "allowances": { "singleHeadOrMarriedSeparate": 9160, "marriedJoint": 18320, "headOfHouseholdAdditional": 2320, "eachDependent": 2320 },
+    "percentageTablesEffectiveOn": "2024-07-01",
+    "percentageTables": [
+      { "frequency": "Weekly", "single": { "zeroThrough": 69, "secondThrough": 512, "secondRate": 0.052, "topBase": 23, "topRate": 0.0558 }, "married": { "zeroThrough": 158, "secondThrough": 1043, "secondRate": 0.052, "topBase": 46, "topRate": 0.0558 } },
+      { "frequency": "Biweekly", "single": { "zeroThrough": 139, "secondThrough": 1023, "secondRate": 0.052, "topBase": 46, "topRate": 0.0558 }, "married": { "zeroThrough": 317, "secondThrough": 2086, "secondRate": 0.052, "topBase": 92, "topRate": 0.0558 } },
+      { "frequency": "Semimonthly", "single": { "zeroThrough": 150, "secondThrough": 1109, "secondRate": 0.052, "topBase": 49.83, "topRate": 0.0558 }, "married": { "zeroThrough": 343, "secondThrough": 2260, "secondRate": 0.052, "topBase": 99.67, "topRate": 0.0558 } },
+      { "frequency": "Monthly", "single": { "zeroThrough": 300, "secondThrough": 2217, "secondRate": 0.052, "topBase": 99.67, "topRate": 0.0558 }, "married": { "zeroThrough": 687, "secondThrough": 4520, "secondRate": 0.052, "topBase": 199.33, "topRate": 0.0558 } },
+      { "frequency": "Quarterly", "single": { "zeroThrough": 901, "secondThrough": 6651, "secondRate": 0.052, "topBase": 299, "topRate": 0.0558 }, "married": { "zeroThrough": 2060, "secondThrough": 13560, "secondRate": 0.052, "topBase": 598, "topRate": 0.0558 } },
+      { "frequency": "Semiannual", "single": { "zeroThrough": 1803, "secondThrough": 13303, "secondRate": 0.052, "topBase": 598, "topRate": 0.0558 }, "married": { "zeroThrough": 4120, "secondThrough": 27120, "secondRate": 0.052, "topBase": 1196, "topRate": 0.0558 } },
+      { "frequency": "Annual", "single": { "zeroThrough": 3605, "secondThrough": 26605, "secondRate": 0.052, "topBase": 1196, "topRate": 0.0558 }, "married": { "zeroThrough": 8240, "secondThrough": 54240, "secondRate": 0.052, "topBase": 2392, "topRate": 0.0558 } },
+      { "frequency": "DailyOrMiscellaneous", "single": { "zeroThrough": 14, "secondThrough": 102, "secondRate": 0.052, "topBase": 4.60, "topRate": 0.0558 }, "married": { "zeroThrough": 32, "secondThrough": 209, "secondRate": 0.052, "topBase": 9.20, "topRate": 0.0558 } }
+    ],
+    "formula": "Subtract the frequency-adjusted exemption amount from gross wages; apply the matching filing-class percentage table to net wages; add requested periodic withholding.",
+    "rounding": { "optional": true, "unit": 1, "mode": "NearestWholeDollarHalfUp" },
+    "supplementalWages": { "combined": "Apply the regular method to combined wages.", "separatelyStatedFlatRate": 0.05 },
+    "officialExample": { "frequency": "Semimonthly", "maritalClass": "Married", "grossWages": 2000, "allowanceAmount": 860, "netWages": 1140, "unroundedWithholding": 41.44, "roundedWithholding": 41 }
+  },
+  "residencyAndWorkRules": {
+    "residentOutsideKansas": "Compute Kansas tax on total wages and subtract withholding required by the other work state, not below zero.",
+    "residentMultipleStates": "Compute Kansas tax on total wages and multiply by Kansas services divided by total services.",
+    "nonresidentFullTimeKansas": "Withhold on total wages as for a resident.",
+    "nonresidentMultipleStates": "Compute on total wages, then multiply by Kansas services divided by total services.",
+    "allocationMethods": ["Hours", "Workdays", "Kansas commissions divided by total commissions", "Games, performances, or service events", "Other logical method that fairly reflects Kansas-source income"],
+    "allocationCertificate": "K-4C",
+    "officialExamples": [
+      { "case": "ResidentOutsideKansasCredit", "kansasWithholdingBeforeCredit": 250, "otherStateWithholding": 130, "kansasWithholding": 120 },
+      { "case": "NonresidentHourlyAllocation", "kansasHours": 33, "totalHours": 80, "publishedFraction": 0.41, "totalWageKansasWithholding": 34, "kansasWithholding": 14 },
+      { "case": "NonresidentCommissionAllocation", "kansasFraction": 0.20, "totalWageKansasWithholding": 116, "kansasWithholding": 23 }
+    ],
+    "multiStateAllocationRequired": true
+  },
+  "filing": {
+    "frequencies": [
+      { "frequency": "Annual", "annualWithholdingThrough": 200, "due": "January 25" },
+      { "frequency": "Quarterly", "annualWithholdingFrom": 200.01, "annualWithholdingThrough": 1200, "due": "25th after quarter" },
+      { "frequency": "Monthly", "annualWithholdingFrom": 1200.01, "annualWithholdingThrough": 8000, "due": "15th of following month" },
+      { "frequency": "Semimonthly", "annualWithholdingFrom": 8000.01, "annualWithholdingThrough": 100000, "due": "25th for days 1-15; 10th of following month for remainder" },
+      { "frequency": "QuadMonthly", "annualWithholdingFrom": 100000.01, "due": "Within three banking days after the 7th, 15th, 21st, and month end" }
+    ],
+    "forms": ["KW-5", "KW-3", "W-2", "1099"],
+    "zeroReturnsRequired": true,
+    "electronicFilingAndPaymentRequired": true
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The current agency guide is revised October 2024 and labels its percentage tables effective July 1, 2024; no separately dated 2026 publication was located, so unchanged 2026 applicability must be independently confirmed.",
+    "The full wage-bracket matrices are retained in the checksummed guide and are not duplicated here.",
+    "The publication rounds its allocation examples to whole percentage points before multiplying; executable policy must verify whether payroll software must use that published rounding or a more precise allocation fraction."
+  ],
+  "review": { "percentageTablesTranscribed": true, "allowancesTranscribed": true, "roundingTranscribed": true, "officialExamplesTranscribed": true, "supplementalMethodsTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": true, "completeWageBracketTablesTranscribed": false, "unchanged2026ApplicabilityVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Confirm the October 2024 guide remains authoritative for every 2026 payroll, import wage-bracket matrices, resolve allocation-fraction rounding, and add boundary and multi-state executable tests." }
+}

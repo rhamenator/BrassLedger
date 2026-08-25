@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ky",
+  "capturedAtUtc": "2026-08-25T06:30:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://revenue.ky.gov/Software-Developer/Software%20Development%20Documents/2026%20Withholding%20Tax%20Tables%20-%20Computer%20Formula%2042A003%20%28TCF%29%2810-2025%29%282026%29.pdf", "title": "2026 Kentucky Withholding Tax Tables — Computer Formula 42A003 (TCF)", "revision": "October 2025", "mediaType": "application/pdf", "sha256": "901358099eaa0d017be2cec20d2ee0e87b7e8bf1088fb3b8d35b8edcaa492d07", "bytes": 645817 },
+    { "url": "https://revenue.ky.gov/Business/Pages/Employer-Payroll-Withholding.aspx?capture=2026", "title": "Kentucky Employer Payroll Withholding", "retrievedAtUtc": "2026-08-25T06:30:00Z", "mediaType": "text/html", "sha256": "467c607270cd6fffa5b8339213db9c866d4260fae1ef38caa743aef43ab36f31", "bytes": 112684 },
+    { "url": "https://revenue.ky.gov/Forms/42A804%20%28K-4%29%20%282026%29.pdf?download=1", "title": "2026 Form K-4 Kentucky's Withholding Certificate", "mediaType": "application/pdf", "sha256": "a5e53c48675549ac9958296790fddbba64262a881605e9d67e44a23366fbb4cd", "bytes": 317322 },
+    { "url": "https://revenue.ky.gov/Forms/42A809.pdf?download=1", "title": "Form 42A809 Certificate of Nonresidence", "mediaType": "application/pdf", "sha256": "4aa08a2aa75b5c60f667551995309384fa42c4e214965e75749f05f51024cfcb", "bytes": 70098 }
+  ],
+  "employeeInputs": [
+    { "code": "additionalPeriodicWithholding", "source": "2026 Form K-4", "dataType": "money", "minimum": 0 },
+    { "code": "exemptionReason", "source": "2026 Form K-4", "dataType": "enum", "values": ["None", "NoExpectedLiability", "FortCampbell", "NonresidentMilitarySpouse", "ReciprocalState"] },
+    { "code": "reciprocalState", "source": "Forms K-4 and 42A809", "dataType": "jurisdiction-reference" },
+    { "code": "kentuckyServiceFraction", "dataType": "decimal", "minimum": 0, "maximum": 1 }
+  ],
+  "calculation": {
+    "methods": ["AnnualizedPercentage", "WageBracket"],
+    "annualStandardDeduction": 3360,
+    "rate": 0.035,
+    "payPeriodsPerYear": { "Daily": 260, "Weekly": 52, "Biweekly": 26, "Semimonthly": 24, "Monthly": 12, "Annual": 1 },
+    "formula": "max(0, ((periodWages * payPeriodsPerYear - 3360) * 0.035) / payPeriodsPerYear) + additionalPeriodicWithholding",
+    "officialExamples": [
+      { "frequency": "Monthly", "wages": 3270, "annualWages": 39240, "annualTaxableWages": 35880, "annualTax": 1255.80, "periodicWithholding": 104.65 },
+      { "frequency": "Biweekly", "wages": 1500, "annualWages": 39000, "statedAnnualTaxableWages": 35640, "formulaExampleThenUsesAnnualTaxableWages": 35730, "statedAnnualTax": 1247.40, "statedPeriodicWithholding": 47 }
+    ],
+    "publishedTableUpperRules": [
+      { "frequency": "Daily", "over": 214, "baseTax": 7.13, "rate": 0.035 },
+      { "frequency": "Weekly", "over": 1530, "baseTax": 51.11, "rate": 0.035 },
+      { "frequency": "Biweekly", "over": 3060, "baseTax": 102.23, "rate": 0.035 },
+      { "frequency": "Semimonthly", "over": 3260, "baseTax": 108.85, "rate": 0.035 },
+      { "frequency": "Monthly", "over": 6320, "baseTax": 210.70, "rate": 0.035 }
+    ],
+    "supplementalWages": { "status": "NotLocatedIn2026FormulaPublication", "activationAllowed": false }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Kentucky requires withholding for resident wages unless an exemption applies; work-state obligations and credits require separate multi-state handling.",
+    "nonresidentRule": "Nonresident wages are subject to Kentucky withholding to the extent paid for Kentucky services unless a reciprocal-state or other statutory exemption is documented.",
+    "reciprocalStates": ["IL", "IN", "MI", "OH", "VA", "WV", "WI"],
+    "reciprocityConditions": {
+      "IL_IN_MI_WV_WI": "Employee resides in the reciprocal state and did not reside in Kentucky during the taxable year.",
+      "VA": "Employee resides in Virginia and commutes daily to the Kentucky workplace.",
+      "OH": "Employee is not a shareholder-employee owning directly or indirectly 20% or more of an S corporation."
+    },
+    "reciprocityCertificate": "42A809",
+    "fortCampbellExemption": true,
+    "nonresidentMilitarySpouseExemption": true,
+    "multiStateAllocationRequired": true
+  },
+  "filing": {
+    "electronicFilingAndPaymentRequiredForAllFrequenciesIn2026": true,
+    "portal": "MyTaxes",
+    "forms": ["K-1", "K-3", "K-5", "W-2", "W-2G", "1099"],
+    "twiceMonthlyThreshold": { "annualWithholdingAtLeast": 50000 },
+    "twiceMonthlyDuePattern": "Days 1-15 due the 25th; days 16-end due the 10th of the next month, subject to year-end rules.",
+    "annualStatementsDue": "January 31"
+  },
+  "localWithholding": {
+    "stateFormulaDependsOnLocalJurisdiction": false,
+    "localIncomeTaxCaptureRequiredForThisStateFormula": false,
+    "separateLocalOccupationalTaxSupportRequired": true,
+    "administration": "Kentucky DOR does not administer city, county, or other local occupational and license taxes.",
+    "requiredDimensions": ["Work city", "Work county", "Residence city", "Residence county", "Tax district", "Workdays or wages by location"]
+  },
+  "captureWarnings": [
+    "The official biweekly example is internally inconsistent: it first computes $35,640 taxable wages, then uses $35,730 in the next line; $1,247.40 corresponds to $35,640 at 3.5%. The published $47 periodic result is whole-dollar and does not equal the exact unrounded quotient.",
+    "The 2026 formula publication does not state a general rounding sequence or a separately stated supplemental-wage method.",
+    "Only upper wage-table rules are transcribed; complete daily, weekly, biweekly, semimonthly, and monthly matrices remain in the checksummed publication.",
+    "Kentucky local occupational taxes are a separate, potentially residence-and-work-dependent subsystem and must not be inferred from the state formula."
+  ],
+  "review": { "annualFormulaTranscribed": true, "publishedUpperTableRulesTranscribed": true, "completeWageBracketTablesTranscribed": false, "officialExamplesTranscribed": true, "exampleDiscrepancyRecorded": true, "supplementalMethodTranscribed": false, "residencyAndWorkRulesTranscribed": true, "localDependencyRecorded": true, "rawSourcesChecksummed": true, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Resolve the official biweekly example discrepancy and rounding, capture supplemental wages and all table matrices, implement conditional reciprocity and Kentucky local occupational-tax selection, and add executable regression tests before activation." }
+}
