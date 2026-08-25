@@ -1,0 +1,94 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-co",
+  "capturedAtUtc": "2026-08-25T04:01:58Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    {
+      "url": "https://tax.colorado.gov/sites/tax/files/documents/DR_1098_Colorado_Withholding_Worksheet_for_Employees.pdf",
+      "title": "2026 Colorado Withholding Worksheet for Employers, DR 1098",
+      "revision": "10/21/25",
+      "rawCaptureStatus": "Official publication rendered, but direct byte retrieval returned HTTP 403 on August 25, 2026; checksum pending"
+    },
+    {
+      "url": "https://tax.colorado.gov/sites/tax/files/documents/DR_0004_2026.pdf",
+      "title": "2026 Colorado Employee Withholding Certificate, DR 0004",
+      "revision": "10/29/25",
+      "rawCaptureStatus": "Official publication rendered, but direct byte retrieval returned HTTP 403 on August 25, 2026; checksum pending"
+    },
+    {
+      "url": "https://tax.colorado.gov/withholding-tax-filing-requirements",
+      "title": "Colorado Withholding Tax Filing Requirements"
+    },
+    {
+      "url": "https://tax.colorado.gov/withholding-tax-guide",
+      "title": "Colorado Wage Withholding Tax Guide",
+      "rawCaptureStatus": "Official page returned HTTP 403 during direct retrieval"
+    }
+  ],
+  "employeeInputs": [
+    { "code": "annualReduction", "source": "DR 0004 Line 2 or W-4 filing-status default", "dataType": "money", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "DR 0004 Line 3", "dataType": "money", "minimum": 0 },
+    { "code": "federalExpectedFilingStatus", "source": "IRS Form W-4 Step 1(c)", "dataType": "enum", "values": ["MarriedFilingJointly", "QualifyingSurvivingSpouse", "Other"] },
+    { "code": "federalExempt", "source": "IRS Form W-4", "dataType": "boolean" },
+    { "code": "coloradoResident", "dataType": "boolean" },
+    { "code": "servicesPerformedInColorado", "dataType": "time-allocation" }
+  ],
+  "calculation": {
+    "method": "annualized-wages-flat-rate-with-certificate-adjustments",
+    "rate": 0.044,
+    "defaultAnnualReduction": { "MarriedFilingJointly": 11000, "QualifyingSurvivingSpouse": 11000, "Other": 5500, "MissingCertificates": 5500 },
+    "payPeriodsPerYear": { "Annually": 1, "Semiannually": 2, "Quarterly": 4, "Monthly": 12, "Semimonthly": 24, "Biweekly": 26, "Weekly": 52, "Daily": 260 },
+    "steps": [
+      "annualizedWages = taxableWagesThisPeriod * payPeriodsPerYear",
+      "annualReduction = DR 0004 Line 2, including zero, when supplied; otherwise 11000 for married filing jointly or qualifying surviving spouse and 5500 for all other W-4 filing statuses",
+      "annualTaxableWages = max(0, annualizedWages - annualReduction)",
+      "annualWithholding = annualTaxableWages * 0.044",
+      "periodicWithholding = annualWithholding / payPeriodsPerYear + additionalPeriodicWithholding"
+    ],
+    "certificatePrecedence": [
+      "A submitted DR 0004 controls Lines 2 and 3, including an explicit zero.",
+      "Without DR 0004, use the W-4 filing-status default.",
+      "A W-4 claiming exemption produces zero withholding unless the Department adjusts the claim.",
+      "Without either certificate, use the single-status 5500 annual reduction."
+    ],
+    "certificateReplacementRule": "A new W-4 without a new DR 0004 revokes the prior DR 0004 and any pre-2022 additional-withholding request.",
+    "outsideAdjustmentAllowed": false,
+    "taxableWagesIncludeOvertime": true,
+    "separateSupplementalMethodStatus": "No distinct supplemental-wage method was located in the captured 2026 worksheet."
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Withhold from federally taxable Colorado wages paid to a Colorado resident whether the work is performed inside or outside Colorado.",
+    "nonresidentRule": "Withhold from federally taxable wages paid to a nonresident for services physically performed in Colorado.",
+    "reciprocalStates": [],
+    "multiStateAllocationRequired": true
+  },
+  "filing": {
+    "return": "DR 1094",
+    "frequenciesIdentifiedByCurrentGuide": ["Quarterly", "Monthly", "Weekly"],
+    "frequencySelectionBasis": "Total annual Colorado wage withholding liability",
+    "forms": ["IRS W-4", "DR 0004", "DR 1094", "DR 1093"],
+    "currentThresholdsIndependentlyVerified": false
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "Colorado rejected direct retrieval of both 2026 calculation PDFs with HTTP 403, so raw-source checksums are pending.",
+    "The 2026 worksheet contains no official worked example and does not prescribe an explicit intermediate or final rounding sequence.",
+    "Current filing-frequency dollar thresholds require a retrievable current guide or independent official confirmation before activation."
+  ],
+  "review": {
+    "formulaTranscribed": true,
+    "certificatePrecedenceTranscribed": true,
+    "residencyAndWorkRulesTranscribed": true,
+    "officialExamplesAvailable": false,
+    "rawSourcesChecksummed": false,
+    "roundingIndependentlyVerified": false,
+    "filingThresholdsIndependentlyVerified": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Obtain and checksum the raw 2026 PDFs, verify rounding and filing-frequency thresholds, create independently calculated boundary cases, and implement them in the tax engine before activation."
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-il",
+  "capturedAtUtc": "2026-08-25T04:01:58Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    {
+      "url": "https://tax.illinois.gov/forms/withholding/currentyear/il-700-t-withholding-guide-tables.html",
+      "title": "2026 IL-700-T Illinois Withholding Tax Tables",
+      "retrievedAtUtc": "2026-08-25T04:01:58Z",
+      "mediaType": "text/html",
+      "sha256": "481ab6a624306b5ed66808ea694971de173eb6e7831c0c6f801620c95a90212a",
+      "bytes": 126765
+    },
+    {
+      "url": "https://tax.illinois.gov/research/publications/pubs/who-is-required-to-withhold-illinois-income-tax/withholding-illinois-income-tax-for-my-employees.html",
+      "title": "Publication 130 — Withholding Illinois Income Tax for My Employees",
+      "revision": "Current official HTML viewed August 25, 2026",
+      "retrievedAtUtc": "2026-08-25T04:01:58Z",
+      "mediaType": "text/html",
+      "sha256": "0300fa7c41db0cb99dfba28b7152fc8dc1cef8c692ce082e84edabd7c06322db",
+      "bytes": 100856
+    },
+    {
+      "url": "https://tax.illinois.gov/content/dam/soi/en/web/tax/research/publications/pubs/documents/pub-131.pdf",
+      "title": "Publication 131 — Withholding Income Tax Payment and Filing Requirements",
+      "revision": "R-01/26",
+      "retrievedAtUtc": "2026-08-25T04:01:58Z",
+      "mediaType": "application/pdf",
+      "sha256": "fcc79784ab661bdb803e5c1aba58b058b9ed5fe2910f68e9a1907de18f970477",
+      "bytes": 727309
+    }
+  ],
+  "employeeInputs": [
+    { "code": "line1Allowances", "source": "IL-W-4 Line 1", "dataType": "integer", "minimum": 0 },
+    { "code": "line2Allowances", "source": "IL-W-4 Line 2", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalWithholding", "source": "IL-W-4 Line 3", "dataType": "money", "minimum": 0 },
+    { "code": "reciprocalStateResidence", "source": "IL-W-5-NR", "dataType": "jurisdiction" },
+    { "code": "illinoisWorkingDays", "source": "IL-W-6 or time and attendance system", "dataType": "integer", "minimum": 0 },
+    { "code": "totalWorkingDays", "source": "IL-W-6 or time and attendance system", "dataType": "integer", "minimum": 1 }
+  ],
+  "calculation": {
+    "method": "periodic-allowance-deduction-flat-rate",
+    "rate": 0.0495,
+    "annualLine1AllowanceValue": 2925,
+    "annualLine2AllowanceValue": 1000,
+    "formula": "max(0, wages - (((line1Allowances * 2925) + (line2Allowances * 1000)) / payPeriodsPerYear)) * 0.0495 + additionalWithholding",
+    "payrollFrequenciesWithPublishedTables": ["Daily", "Weekly", "Biweekly", "Semimonthly", "Monthly"],
+    "missingInvalidOrDisregardedCertificate": "Withhold from the entire compensation with zero allowances.",
+    "officialTableExample": {
+      "frequency": "Weekly",
+      "wages": 300,
+      "line1Allowances": 2,
+      "line2Allowances": 1,
+      "additionalWithholding": 0,
+      "method": "Published wage-bracket table",
+      "withholding": 8.38
+    },
+    "tableAndFormulaDifference": "The published wage-bracket tables group wages into ranges; the optional exact formula can therefore differ slightly from the table result.",
+    "supplementalCompensation": {
+      "items": ["Bonus", "Overtime", "Commission"],
+      "capturedRule": "These items are employee compensation subject to Illinois withholding; no separate 2026 supplemental flat-rate method was located in the captured publications.",
+      "separateMethodVerified": false
+    }
+  },
+  "residencyAndWorkRules": {
+    "localization": "Compensation is paid in Illinois when all service is in Illinois or out-of-state service is incidental to principally Illinois service.",
+    "residentFallback": "When compensation is not localized under the primary rules, an Illinois resident is subject to Illinois withholding if no other state's tax is withheld.",
+    "nonlocalizedThirtyDayThreshold": 30,
+    "thresholdEffect": "For significant nonincidental Illinois service exceeding 30 working days, allocate compensation by Illinois working days divided by total working days.",
+    "officialAllocationExample": { "annualWages": 60000, "illinoisWorkingDays": 35, "totalWorkingDays": 250, "illinoisFraction": 0.14, "illinoisWages": 8400 },
+    "reciprocalStates": ["IA", "KY", "MI", "WI"],
+    "disasterResponseDaysExcluded": true,
+    "specialWorkerBranches": ["Surface Transportation Board workers", "Air carrier employees", "Vessel workers", "Professional athletic teams", "Military spouses"]
+  },
+  "filing": {
+    "return": "IL-941",
+    "returnFrequency": "Quarterly",
+    "returnElectronicFilingRequired": true,
+    "paymentFrequencies": ["Monthly", "Semiweekly"],
+    "annualReconciliationReturn": false,
+    "forms": ["IL-W-4", "IL-W-5-NR", "IL-W-6", "IL-941", "IL-501"]
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The official HTML formula does not state a rounding sequence; table and formula results may differ because tables use wage ranges.",
+    "No distinct supplemental-wage calculation was located; bonus, overtime, and commission are identified as ordinary employee compensation.",
+    "The complete wage-bracket matrix is represented by its official source and example, not duplicated into this source capture."
+  ],
+  "review": {
+    "formulaTranscribed": true,
+    "residencyAndWorkRulesTranscribed": true,
+    "officialExamplesTranscribed": true,
+    "rawSourcesChecksummed": true,
+    "roundingIndependentlyVerified": false,
+    "supplementalMethodIndependentlyVerified": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Verify formula rounding and supplemental-pay treatment, compare calculated results to boundary rows in every published payroll table, and add executable engine cases before activation."
+  }
+}

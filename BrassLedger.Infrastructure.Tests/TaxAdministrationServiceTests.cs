@@ -365,6 +365,78 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task IllinoisSourceCapture_PreservesAllowanceClassesAndMultiStateAllocation()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/il/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+        var workRules = root.GetProperty("residencyAndWorkRules");
+
+        Assert.Equal("jurisdiction-us-il", root.GetProperty("jurisdictionId").GetString());
+        Assert.Equal(0.0495m, calculation.GetProperty("rate").GetDecimal());
+        Assert.Equal(2925, calculation.GetProperty("annualLine1AllowanceValue").GetInt32());
+        Assert.Equal(1000, calculation.GetProperty("annualLine2AllowanceValue").GetInt32());
+        Assert.Equal(8.38m, calculation.GetProperty("officialTableExample").GetProperty("withholding").GetDecimal());
+        Assert.Equal(30, workRules.GetProperty("nonlocalizedThirtyDayThreshold").GetInt32());
+        Assert.Equal(0.14m, workRules.GetProperty("officialAllocationExample").GetProperty("illinoisFraction").GetDecimal());
+        Assert.Equal(4, workRules.GetProperty("reciprocalStates").GetArrayLength());
+        Assert.All(root.GetProperty("sources").EnumerateArray(), source => Assert.Matches("^[a-f0-9]{64}$", source.GetProperty("sha256").GetString()));
+        Assert.False(root.GetProperty("review").GetProperty("roundingIndependentlyVerified").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ColoradoSourceCapture_PreservesCertificatePrecedenceAndAnnualizedFormula()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/co/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+        var defaults = calculation.GetProperty("defaultAnnualReduction");
+        var periods = calculation.GetProperty("payPeriodsPerYear");
+
+        Assert.Equal("jurisdiction-us-co", root.GetProperty("jurisdictionId").GetString());
+        Assert.Equal(0.044m, calculation.GetProperty("rate").GetDecimal());
+        Assert.Equal(11000, defaults.GetProperty("MarriedFilingJointly").GetInt32());
+        Assert.Equal(5500, defaults.GetProperty("Other").GetInt32());
+        Assert.Equal(5500, defaults.GetProperty("MissingCertificates").GetInt32());
+        Assert.Equal(52, periods.GetProperty("Weekly").GetInt32());
+        Assert.Equal(260, periods.GetProperty("Daily").GetInt32());
+        Assert.Equal(4, calculation.GetProperty("certificatePrecedence").GetArrayLength());
+        Assert.False(calculation.GetProperty("outsideAdjustmentAllowed").GetBoolean());
+        Assert.Empty(root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates").EnumerateArray());
+        Assert.False(root.GetProperty("review").GetProperty("rawSourcesChecksummed").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task NorthCarolinaSourceCapture_PreservesRoundingSupplementalAndNonresidentAlienBranches()
+    {
+        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/nc/2026-source-capture.json"));
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var calculation = root.GetProperty("calculation");
+        var periods = calculation.GetProperty("percentageMethodPeriods").EnumerateArray().ToArray();
+        var nonresidentAlien = root.GetProperty("nonresidentAlienBranch");
+
+        Assert.Equal("jurisdiction-us-nc", root.GetProperty("jurisdictionId").GetString());
+        Assert.Equal(0.0399m, calculation.GetProperty("individualIncomeTaxRate").GetDecimal());
+        Assert.Equal(0.0409m, calculation.GetProperty("withholdingRate").GetDecimal());
+        Assert.Equal(2500, calculation.GetProperty("annualAllowanceValue").GetInt32());
+        Assert.Equal(4, periods.Length);
+        Assert.Contains(periods, period => period.GetProperty("frequency").GetString() == "Weekly" && period.GetProperty("allowanceValue").GetDecimal() == 48.08m);
+        Assert.Contains(periods, period => period.GetProperty("frequency").GetString() == "Monthly" && period.GetProperty("standardDeduction").GetProperty("HeadOfHousehold").GetDecimal() == 1593.75m);
+        Assert.Equal(4, calculation.GetProperty("officialPercentageExample").GetProperty("withholding").GetDecimal());
+        Assert.Equal(2, calculation.GetProperty("supplementalWages").GetProperty("whenRegularWagesHadWithholding").GetArrayLength());
+        Assert.Equal(44, nonresidentAlien.GetProperty("additionalWithholding").GetProperty("Monthly").GetInt32());
+        Assert.Equal(21, nonresidentAlien.GetProperty("officialLowWageExample").GetProperty("limitedWithholding").GetInt32());
+        Assert.Equal(3, root.GetProperty("filing").GetProperty("frequencies").GetArrayLength());
+        Assert.Matches("^[a-f0-9]{64}$", root.GetProperty("sources")[0].GetProperty("sha256").GetString());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();

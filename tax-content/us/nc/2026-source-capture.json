@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-nc",
+  "capturedAtUtc": "2026-08-25T04:01:58Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    {
+      "url": "https://www.ncdor.gov/income-tax-withholding-tables-and-instructions-employers/open",
+      "title": "2026 Income Tax Withholding Tables and Instructions for Employers, NC-30",
+      "revision": "11-25",
+      "pages": 57,
+      "retrievedAtUtc": "2026-08-25T04:01:58Z",
+      "mediaType": "application/pdf",
+      "sha256": "56a00f942c48c51019c3b78d72da1f1cc04969890678c107fe9d0386c5d655be",
+      "bytes": 570759
+    }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "NC-4, NC-4 EZ, NC-4 NRA, or NC-4P", "dataType": "enum", "values": ["Single", "Married", "SurvivingSpouse", "HeadOfHousehold"] },
+    { "code": "allowances", "source": "North Carolina withholding certificate", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalWithholding", "source": "North Carolina withholding certificate", "dataType": "money", "minimum": 0 },
+    { "code": "nonresidentAlien", "dataType": "boolean" },
+    { "code": "residentOfIndiaStudentOrBusinessApprentice", "dataType": "boolean" },
+    { "code": "northCarolinaResident", "dataType": "boolean" },
+    { "code": "servicesPerformedInNorthCarolina", "dataType": "time-allocation" }
+  ],
+  "calculation": {
+    "availableMethods": ["Percentage", "AnnualizedWages", "WageBracket", "SubstantiallyEquivalentEmployerMethod"],
+    "individualIncomeTaxRate": 0.0399,
+    "withholdingAdjustment": 0.001,
+    "withholdingRate": 0.0409,
+    "rounding": "Round the final percentage-method or annualized-method withholding to the nearest whole dollar.",
+    "annualAllowanceValue": 2500,
+    "annualStandardDeduction": { "SingleMarriedOrSurvivingSpouse": 12750, "HeadOfHousehold": 19125 },
+    "percentageMethodPeriods": [
+      { "frequency": "Weekly", "periodsPerYear": 52, "allowanceValue": 48.08, "standardDeduction": { "SingleMarriedOrSurvivingSpouse": 245.19, "HeadOfHousehold": 367.79 } },
+      { "frequency": "Biweekly", "periodsPerYear": 26, "allowanceValue": 96.15, "standardDeduction": { "SingleMarriedOrSurvivingSpouse": 490.38, "HeadOfHousehold": 735.58 } },
+      { "frequency": "Semimonthly", "periodsPerYear": 24, "allowanceValue": 104.17, "standardDeduction": { "SingleMarriedOrSurvivingSpouse": 531.25, "HeadOfHousehold": 796.88 } },
+      { "frequency": "Monthly", "periodsPerYear": 12, "allowanceValue": 208.33, "standardDeduction": { "SingleMarriedOrSurvivingSpouse": 1062.50, "HeadOfHousehold": 1593.75 } }
+    ],
+    "percentageFormula": "roundWholeDollar(max(0, wages - periodStandardDeduction - (allowances * periodAllowanceValue)) * 0.0409) + additionalWithholding",
+    "annualizedFormula": "roundWholeDollar((max(0, wages * periodsPerYear - annualStandardDeduction - (allowances * 2500)) * 0.0409) / periodsPerYear) + additionalWithholding",
+    "officialPercentageExample": {
+      "frequency": "Weekly",
+      "filingStatus": "Single",
+      "wages": 450,
+      "allowances": 2,
+      "standardDeduction": 245.19,
+      "allowanceDeduction": 96.16,
+      "netWages": 108.65,
+      "withholding": 4
+    },
+    "supplementalWages": {
+      "whenRegularWagesHadWithholding": ["Apply 4.09% to separately identified supplemental wages", "Or aggregate supplemental and most recent regular wages, compute combined withholding, and subtract withholding already taken from regular wages"],
+      "whenRegularWagesHadNoWithholding": "The aggregate method is required.",
+      "vacationPay": "Treat as regular wages unless paid in addition to regular wages, in which case treat it as supplemental wages.",
+      "tips": "Treat reported tips as supplemental wages."
+    }
+  },
+  "certificateRules": {
+    "forms": ["NC-4", "NC-4 EZ", "NC-4 NRA", "NC-4P"],
+    "missingCertificate": "Withhold as single with zero allowances.",
+    "federalCertificateAccepted": false,
+    "priorYearExemptionExpires": "Begin withholding on February 16 as single with zero allowances unless a new current-year certificate is supplied.",
+    "militarySpouseAnnualRenewalRequired": true
+  },
+  "nonresidentAlienBranch": {
+    "filingStatus": "Single",
+    "standardDeductionGenerallyAllowed": false,
+    "additionalWithholding": { "Weekly": 11, "Biweekly": 21, "Semimonthly": 22, "Monthly": 44 },
+    "lowWageCaps": { "Weekly": 245, "Biweekly": 490, "Semimonthly": 531, "Monthly": 1062 },
+    "lowWageRule": "When annualized wages do not exceed 12750, limit additional withholding to the lesser of the certificate amount or 4.09% of period wages.",
+    "officialLowWageExample": { "frequency": "Monthly", "wages": 500, "certificateAdditionalWithholding": 44, "limitedWithholding": 21 },
+    "indiaStudentOrBusinessApprenticeAdditionalWithholding": 0
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "North Carolina residents are generally subject on all wages wherever earned, but North Carolina withholding is not required for out-of-state services when that state requires withholding.",
+    "nonresidentRule": "Nonresidents are subject on wages allocated to services physically performed in North Carolina.",
+    "physicalWorkLocationControls": true,
+    "reciprocalStates": [],
+    "specialWorkerBranches": ["Interstate railroad workers", "Interstate motor carrier workers", "Airline employees with 50-percent scheduled-flight-time test"]
+  },
+  "filing": {
+    "frequencies": [
+      { "frequency": "Quarterly", "averageMonthlyWithholding": { "lessThan": 250 }, "return": "NC-5" },
+      { "frequency": "Monthly", "averageMonthlyWithholding": { "atLeast": 250, "lessThan": 2000 }, "return": "NC-5" },
+      { "frequency": "Semiweekly", "averageMonthlyWithholding": { "atLeast": 2000 }, "returns": ["NC-5P", "NC-5Q"] }
+    ],
+    "annualReconciliation": "NC-3",
+    "recordsRetentionYears": 10
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The 36 pages of wage-bracket matrices are retained in the checksummed official source rather than duplicated into this source capture.",
+    "An executable implementation must preserve the prescribed whole-dollar final rounding and the separate nonresident-alien low-wage cap branch."
+  ],
+  "review": {
+    "formulaTranscribed": true,
+    "supplementalRulesTranscribed": true,
+    "residencyAndWorkRulesTranscribed": true,
+    "nonresidentAlienBranchTranscribed": true,
+    "officialExamplesTranscribed": true,
+    "rawSourcesChecksummed": true,
+    "wageBracketMatricesTranscribed": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Implement percentage, annualized, supplemental, and nonresident-alien branches; test official and rounding-boundary examples; and independently compare representative wage-bracket rows before activation."
+  }
+}
