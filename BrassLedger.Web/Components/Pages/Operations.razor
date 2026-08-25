@@ -1,6 +1,7 @@
 @page "/operations"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageOperations)]
 @inject IBusinessWorkspaceService WorkspaceService
+@inject IAccountingTransactionService TransactionService
 
 <PageTitle>Operations</PageTitle>
 
@@ -44,6 +45,12 @@ else
         </section>
 
         <section class="content-grid">
+            <article class="panel">
+                <h2>Inventory adjustment</h2>
+                <p class="page-intro">Use documented count adjustments only. The system posts the inventory value and offset automatically; it will reject closed-period postings and negative on-hand quantity.</p>
+                @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status">@StatusMessage</p> }
+                <EditForm Model="AdjustmentForm" OnValidSubmit="RecordAdjustmentAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Item</label><InputSelect aria-label="Inventory adjustment item" class="field-input" @bind-Value="AdjustmentForm.InventoryItemId"><option value="@Guid.Empty">Select item</option>@foreach (var item in Workspace.Operations.InventoryItems) { <option value="@item.Id">@item.Sku — @item.Description</option> }</InputSelect></div><div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Inventory adjustment date" class="field-input" @bind-Value="AdjustmentForm.OccurredOn" /></div><div class="field-group"><label class="field-label">Quantity change</label><InputNumber aria-label="Inventory quantity change" class="field-input" @bind-Value="AdjustmentForm.QuantityChange" /></div><div class="field-group"><label class="field-label">Unit cost</label><InputNumber aria-label="Inventory adjustment unit cost" class="field-input" @bind-Value="AdjustmentForm.UnitCost" /></div><div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Inventory adjustment reference" class="field-input" @bind-Value="AdjustmentForm.Reference" /></div><div class="field-group"><label class="field-label">Description</label><InputText aria-label="Inventory adjustment description" class="field-input" @bind-Value="AdjustmentForm.Description" /></div><button class="action-primary" type="submit">Post adjustment</button></div></EditForm>
+            </article>
             <article class="panel">
                 <h2>Inventory</h2>
                 <table class="data-table">
@@ -130,10 +137,16 @@ else
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private string? StatusMessage;
+    private InventoryAdjustmentEditor AdjustmentForm { get; } = new();
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
+    private async Task RecordAdjustmentAsync()
+    {
+        var result = await TransactionService.RecordInventoryAdjustmentAsync(new RecordInventoryAdjustmentRequest(AdjustmentForm.InventoryItemId, AdjustmentForm.OccurredOn, AdjustmentForm.QuantityChange, AdjustmentForm.UnitCost, AdjustmentForm.Reference, AdjustmentForm.Description)); StatusMessage = result.Succeeded ? "Inventory adjustment posted." : result.ErrorMessage; if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+    private sealed class InventoryAdjustmentEditor { public Guid InventoryItemId { get; set; } public DateOnly OccurredOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal QuantityChange { get; set; } public decimal UnitCost { get; set; } public string Reference { get; set; } = $"INV-{DateTime.Today:yyyyMMdd}"; public string Description { get; set; } = "Inventory count adjustment"; }
 }
-

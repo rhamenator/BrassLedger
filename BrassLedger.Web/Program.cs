@@ -70,6 +70,25 @@ app.UseAuthorization();
 app.UseAntiforgery();
 app.MapBrassLedgerAuthenticationEndpoints();
 
+app.MapGet("/interchange/quickbooks-online/{entity}.csv", async (string entity, BrassLedger.Application.Accounting.IAccountingInterchangeService service, CancellationToken cancellationToken) =>
+{
+    var export = await service.ExportQuickBooksOnlineCsvAsync(entity, cancellationToken);
+    return export is null ? Results.NotFound() : Results.File(export.Content, export.ContentType, export.FileName);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+
+app.MapGet("/reports/{code}.csv", async (string code, BrassLedger.Application.Accounting.IBusinessWorkspaceService workspaceService, CancellationToken cancellationToken) =>
+{
+    var workspace = await workspaceService.GetWorkspaceAsync(cancellationToken);
+    var csv = code.ToUpperInvariant() switch
+    {
+        "TRIAL-BALANCE" => "Account,Type,Balance\n" + string.Join("\n", workspace.GeneralLedger.Accounts.Select(x => $"\"{x.Number}\",\"{x.Type}\",{x.Balance:0.00}")),
+        "AR-AGING" => "Invoice,Customer,Invoice Date,Due Date,Status,Balance Due\n" + string.Join("\n", workspace.Receivables.Invoices.Select(x => $"\"{x.InvoiceNumber}\",\"{x.CustomerName.Replace("\"", "\"\"")}\",{x.InvoiceDate:yyyy-MM-dd},{x.DueDate:yyyy-MM-dd},\"{x.Status}\",{x.BalanceDue:0.00}")),
+        "AP-AGING" => "Bill,Vendor,Bill Date,Due Date,Status,Balance Due\n" + string.Join("\n", workspace.Payables.Bills.Select(x => $"\"{x.BillNumber}\",\"{x.VendorName.Replace("\"", "\"\"")}\",{x.BillDate:yyyy-MM-dd},{x.DueDate:yyyy-MM-dd},\"{x.Status}\",{x.BalanceDue:0.00}")),
+        _ => string.Empty
+    };
+    return string.IsNullOrEmpty(csv) ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"{code.ToLowerInvariant()}.csv");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

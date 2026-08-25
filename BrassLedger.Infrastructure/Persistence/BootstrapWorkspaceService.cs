@@ -36,6 +36,12 @@ public sealed class BootstrapWorkspaceService(
             return BootstrapWorkspaceResult.AlreadyConfigured();
         }
 
+        var normalizedUserName = request.AdminUserName.Trim().ToUpperInvariant();
+        if (await dbContext.Users.AnyAsync(user => user.UserName.ToUpper() == normalizedUserName, cancellationToken))
+        {
+            return BootstrapWorkspaceResult.Invalid("That administrator username is already in use.");
+        }
+
         var companyId = Guid.NewGuid();
         var company = new Company
         {
@@ -70,6 +76,10 @@ public sealed class BootstrapWorkspaceService(
         adminUser.PasswordHash = passwordHasher.HashPassword(adminUser, request.AdminPassword);
 
         await dbContext.Users.AddAsync(adminUser, cancellationToken);
+        await dbContext.CompanyMemberships.AddAsync(new CompanyMembership { Id = Guid.NewGuid(), UserId = adminUser.Id, CompanyId = companyId, Role = adminRole.Name, IsOwner = true, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow }, cancellationToken);
+        var accounts = DefaultAccountingSetup.CreateAccounts(companyId);
+        await dbContext.Accounts.AddRangeAsync(accounts, cancellationToken);
+        await dbContext.BankAccounts.AddAsync(DefaultAccountingSetup.CreateOperatingBankAccount(companyId, accounts.Single(account => account.Number == "1000").Id), cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return BootstrapWorkspaceResult.Created(new AuthenticatedUser(
@@ -82,6 +92,7 @@ public sealed class BootstrapWorkspaceService(
             adminUser.SecurityStamp,
             adminRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
     }
+
 
     private static string Validate(BootstrapWorkspaceRequest request)
     {

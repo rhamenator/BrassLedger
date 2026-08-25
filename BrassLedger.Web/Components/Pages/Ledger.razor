@@ -1,6 +1,8 @@
 @page "/ledger"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageLedger)]
 @inject IBusinessWorkspaceService WorkspaceService
+@inject IAccountingTransactionService TransactionService
+@inject IAccountingInterchangeService InterchangeService
 
 <PageTitle>Ledger</PageTitle>
 
@@ -41,6 +43,53 @@ else
                 <span class="stat-value">@Workspace.GeneralLedger.Expenses.ToString("C0")</span>
                 <span class="stat-label">Expenses</span>
             </article>
+        </section>
+
+        <section class="panel">
+            <h2>Post balanced journal entry</h2>
+            <p class="page-intro">Every entry must balance before it can change account balances. Receivables, payables, inventory, and payroll control accounts are posted through their dedicated workflows.</p>
+            @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
+            <EditForm Model="JournalForm" OnValidSubmit="PostJournalAsync">
+                <div class="content-grid">
+                    <div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Journal entry date" class="field-input" @bind-Value="JournalForm.Date" /></div>
+                    <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Journal entry reference" class="field-input" @bind-Value="JournalForm.Reference" /></div>
+                    <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Journal entry description" class="field-input" @bind-Value="JournalForm.Description" /></div>
+                </div>
+                <table class="data-table">
+                    <thead><tr><th>Account</th><th>Line description</th><th>Debit</th><th>Credit</th><th><span class="sr-only">Remove line</span></th></tr></thead>
+                    <tbody>
+                        @foreach (var line in JournalForm.Lines)
+                        {
+                            <tr @key="line.Key">
+                                <td><InputSelect aria-label="Journal entry account" class="field-input" @bind-Value="line.AccountNumber"><option value="">Select account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></td>
+                                <td><InputText aria-label="Journal entry line description" class="field-input" @bind-Value="line.Description" /></td>
+                                <td><InputNumber aria-label="Journal entry debit" class="field-input" @bind-Value="line.Debit" /></td>
+                                <td><InputNumber aria-label="Journal entry credit" class="field-input" @bind-Value="line.Credit" /></td>
+                                <td><button class="action-secondary" type="button" aria-label="Remove journal entry line" @onclick="() => RemoveJournalLine(line)">Remove</button></td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot><tr><th colspan="2">Totals</th><th>@JournalForm.Lines.Sum(line => line.Debit).ToString("C")</th><th>@JournalForm.Lines.Sum(line => line.Credit).ToString("C")</th><th></th></tr></tfoot>
+                </table>
+                <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddJournalLine">Add line</button><button class="action-primary" type="submit">Post entry</button></div>
+            </EditForm>
+        </section>
+
+        <section class="panel">
+            <h2>QuickBooks Online interchange</h2>
+            <p class="page-intro">Exchange QuickBooks Online master lists and non-control general journal entries. Imports are validated as a complete batch before anything is saved; invoices, bills, and payments retain their dedicated audited workflows.</p>
+            <div class="hero-actions">
+                <a class="action-primary" href="/interchange/quickbooks-online/chart-of-accounts.csv">Chart of accounts CSV</a>
+                <a class="action-secondary" href="/interchange/quickbooks-online/customers.csv">Customers CSV</a>
+                <a class="action-secondary" href="/interchange/quickbooks-online/vendors.csv">Vendors CSV</a>
+                <a class="action-secondary" href="/interchange/quickbooks-online/journal-entries.csv">General journals CSV</a>
+            </div>
+            <div class="content-grid interchange-import">
+                <div class="field-group"><label class="field-label">Data to import</label><InputSelect aria-label="QuickBooks data to import" class="field-input" @bind-Value="QuickBooksImport.Entity"><option value="chart-of-accounts">Chart of accounts</option><option value="customers">Customers</option><option value="vendors">Vendors</option><option value="journal-entries">General journal entries</option></InputSelect></div>
+                <div class="field-group"><label class="field-label">QuickBooks CSV file</label><InputFile aria-label="QuickBooks CSV file" class="field-input" accept=".csv,text/csv" OnChange="SelectQuickBooksFile" /></div>
+                <div class="field-group import-action"><span class="field-label">Import selected file</span><button class="action-primary" type="button" disabled="@(QuickBooksImport.File is null)" @onclick="ImportQuickBooksAsync">Import CSV</button></div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(QuickBooksImport.FileName)) { <p class="muted-copy">Selected: @QuickBooksImport.FileName</p> }
         </section>
 
         <section class="content-grid">
@@ -99,11 +148,51 @@ else
 
         <section class="panel">
             <h2>Treasury positions</h2>
+            <div class="content-grid">
+                <EditForm Model="ReconciliationForm" OnValidSubmit="ReconcileAsync">
+                    <div class="auth-form"><h3>Reconcile bank statement</h3>
+                        <div class="field-group"><label class="field-label">Bank account</label><InputSelect aria-label="Reconciliation bank account" class="field-input" @bind-Value="ReconciliationForm.BankAccountId" @bind-Value:after="ResetReconciliationSelections"><option value="@Guid.Empty">Select account</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div>
+                        <div class="field-group"><label class="field-label">Statement date</label><InputDate aria-label="Reconciliation statement date" class="field-input" @bind-Value="ReconciliationForm.StatementDate" @bind-Value:after="ResetReconciliationSelections" /></div>
+                        <div class="field-group"><label class="field-label">Statement closing balance</label><InputNumber aria-label="Reconciliation statement closing balance" class="field-input" @bind-Value="ReconciliationForm.StatementBalance" /></div>
+                        @if (ReconciliationForm.BankAccountId != Guid.Empty)
+                        {
+                            <div class="field-group">
+                                <span class="field-label">Cleared statement activity</span>
+                                @if (!VisibleReconciliationCandidates.Any())
+                                {
+                                    <p class="muted-copy">No unreconciled bank activity falls on or before this statement date.</p>
+                                }
+                                else
+                                {
+                                    <div class="checkbox-list">
+                                        @foreach (var candidate in VisibleReconciliationCandidates)
+                                        {
+                                            <label class="checkbox-row" @key="candidate.JournalEntryId">
+                                                <input aria-label="Clear @candidate.Reference" type="checkbox" checked="@ReconciliationForm.SelectedEntryIds.Contains(candidate.JournalEntryId)" @onchange="args => SetReconciliationSelection(candidate.JournalEntryId, args.Value is true)" />
+                                                <span>@candidate.PostedOn.ToString("MMM d") · @candidate.Reference · @candidate.Description (@candidate.SignedAmount.ToString("C"))</span>
+                                            </label>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                        <button class="action-primary" type="submit">Reconcile</button>
+                    </div>
+                </EditForm>
+                <EditForm Model="BankMappingForm" OnValidSubmit="UpdateBankMappingAsync">
+                    <div class="auth-form"><h3>Map bank to GL cash account</h3>
+                        <div class="field-group"><label class="field-label">Bank account</label><InputSelect aria-label="Bank account to map" class="field-input" @bind-Value="BankMappingForm.BankAccountId"><option value="@Guid.Empty">Select bank account</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name — currently @bank.LedgerAccountNumber</option> }</InputSelect></div>
+                        <div class="field-group"><label class="field-label">GL cash account</label><InputSelect aria-label="GL account for bank mapping" class="field-input" @bind-Value="BankMappingForm.LedgerAccountNumber"><option value="">Select asset account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => account.Type == "Asset" && !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                        <button class="action-primary" type="submit">Save mapping</button>
+                    </div>
+                </EditForm>
+            </div>
             <table class="data-table">
                 <thead>
                     <tr>
                         <th>Account</th>
                         <th>Masked number</th>
+                        <th>GL cash account</th>
                         <th>Balance</th>
                         <th>Unreconciled</th>
                         <th>Last reconciled</th>
@@ -115,6 +204,7 @@ else
                         <tr>
                             <td>@account.Name</td>
                             <td>@account.AccountNumberMasked</td>
+                            <td>@account.LedgerAccountNumber</td>
                             <td>@account.CurrentBalance.ToString("C")</td>
                             <td>@account.UnreconciledAmount.ToString("C")</td>
                             <td>@account.LastReconciledOn.ToString("MMM d, yyyy")</td>
@@ -128,9 +218,76 @@ else
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private string? StatusMessage;
+    private JournalEditor JournalForm { get; } = new();
+    private ReconciliationEditor ReconciliationForm { get; } = new();
+    private BankMappingEditor BankMappingForm { get; } = new();
+    private QuickBooksImportEditor QuickBooksImport { get; } = new();
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
+
+    private async Task PostJournalAsync()
+    {
+        var result = await TransactionService.PostJournalEntryAsync(new PostJournalEntryRequest(JournalForm.Date, JournalForm.Reference, JournalForm.Description,
+            JournalForm.Lines.Select(line => new JournalLineRequest(line.AccountNumber, line.Debit, line.Credit, line.Description)).ToArray()));
+        StatusMessage = result.Succeeded ? "Journal entry posted." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private async Task ReconcileAsync()
+    {
+        var result = await TransactionService.ReconcileBankAccountAsync(new ReconcileBankAccountRequest(ReconciliationForm.BankAccountId, ReconciliationForm.StatementDate, ReconciliationForm.StatementBalance, ReconciliationForm.SelectedEntryIds.ToArray()));
+        StatusMessage = result.Succeeded ? "Bank account reconciled." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private async Task UpdateBankMappingAsync()
+    {
+        var result = await TransactionService.UpdateBankLedgerMappingAsync(new UpdateBankLedgerMappingRequest(BankMappingForm.BankAccountId, BankMappingForm.LedgerAccountNumber));
+        StatusMessage = result.Succeeded ? "Bank ledger mapping saved." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private void SelectQuickBooksFile(InputFileChangeEventArgs args)
+    {
+        QuickBooksImport.File = args.File;
+        QuickBooksImport.FileName = args.File.Name;
+    }
+
+    private async Task ImportQuickBooksAsync()
+    {
+        if (QuickBooksImport.File is null) return;
+        try
+        {
+            await using var content = QuickBooksImport.File.OpenReadStream(2 * 1024 * 1024);
+            var result = await InterchangeService.ImportQuickBooksOnlineCsvAsync(QuickBooksImport.Entity, content);
+            StatusMessage = result.Succeeded
+                ? $"Imported {result.ImportedCount} QuickBooks {QuickBooksImport.Entity} record(s)."
+                : string.Join(" ", result.Errors);
+            if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+        }
+        catch (IOException)
+        {
+            StatusMessage = "The selected file could not be read. Choose a CSV no larger than 2 MB.";
+        }
+    }
+
+    private void AddJournalLine() => JournalForm.Lines.Add(new JournalLineEditor());
+    private void RemoveJournalLine(JournalLineEditor line) { if (JournalForm.Lines.Count > 2) JournalForm.Lines.Remove(line); }
+    private IEnumerable<BankReconciliationCandidateSnapshot> VisibleReconciliationCandidates => Workspace?.Treasury.ReconciliationCandidates?.Where(candidate => candidate.BankAccountId == ReconciliationForm.BankAccountId && candidate.PostedOn <= ReconciliationForm.StatementDate) ?? [];
+    private void ResetReconciliationSelections() => ReconciliationForm.SelectedEntryIds = VisibleReconciliationCandidates.Select(candidate => candidate.JournalEntryId).ToHashSet();
+    private void SetReconciliationSelection(Guid entryId, bool selected)
+    {
+        if (selected) ReconciliationForm.SelectedEntryIds.Add(entryId);
+        else ReconciliationForm.SelectedEntryIds.Remove(entryId);
+    }
+
+    private sealed class JournalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public List<JournalLineEditor> Lines { get; } = [new(), new()]; }
+    private sealed class JournalLineEditor { public Guid Key { get; } = Guid.NewGuid(); public string AccountNumber { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public decimal Debit { get; set; } public decimal Credit { get; set; } }
+    private sealed class ReconciliationEditor { public Guid BankAccountId { get; set; } public DateOnly StatementDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal StatementBalance { get; set; } public HashSet<Guid> SelectedEntryIds { get; set; } = []; }
+    private sealed class BankMappingEditor { public Guid BankAccountId { get; set; } public string LedgerAccountNumber { get; set; } = string.Empty; }
+    private sealed class QuickBooksImportEditor { public string Entity { get; set; } = "chart-of-accounts"; public IBrowserFile? File { get; set; } public string FileName { get; set; } = string.Empty; }
 }

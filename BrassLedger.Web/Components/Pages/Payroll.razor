@@ -1,6 +1,7 @@
 @page "/payroll"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManagePayroll)]
 @inject IBusinessWorkspaceService WorkspaceService
+@inject IAccountingTransactionService TransactionService
 
 <PageTitle>Payroll</PageTitle>
 
@@ -18,10 +19,7 @@ else
                 <p class="eyebrow">Payroll and Time</p>
                 <h1>Employees, labor cost, and tax-ready setup.</h1>
             </div>
-            <p class="page-intro">
-                Payroll is no longer hidden behind expiring tax tables or module locks. The model is open, seeded,
-                and ready for a rules-driven tax engine.
-            </p>
+            <p class="page-intro">Calculate payroll employee by employee, using each employee’s work state, elections, benefit deductions, and the effective tax profiles your team maintains.</p>
         </header>
 
         <section class="stats-grid">
@@ -43,6 +41,21 @@ else
             </article>
         </section>
 
+        <section class="panel">
+            <h2>Employee payroll run</h2>
+            <p class="page-intro">Enter gross pay for each employee included in this run. Select Preview to review net pay, withholdings, deductions, and employer taxes before posting.</p>
+            @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
+            <EditForm Model="RunForm" OnValidSubmit="PreviewPayrollAsync"><div class="content-grid">
+                <div class="field-group"><label class="field-label">Pay date</label><InputDate aria-label="Payroll pay date" class="field-input" @bind-Value="RunForm.PayDate" /></div>
+                <div class="field-group"><label class="field-label">Run reference</label><InputText aria-label="Payroll run reference" class="field-input" @bind-Value="RunForm.Reference" /></div>
+                <div class="field-group"><label class="field-label">Funding account</label><InputSelect aria-label="Payroll funding account" class="field-input" @bind-Value="RunForm.BankAccountId"><option value="@Guid.Empty">Select bank account</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name — @bank.CurrentBalance.ToString("C")</option> }</InputSelect></div>
+            </div>
+            <table class="data-table"><thead><tr><th>Employee</th><th>Work state</th><th>Gross pay</th></tr></thead><tbody>@foreach (var employee in Workspace.Payroll.Employees.Where(employee => employee.IsActive)) { <tr><td>@employee.FullName</td><td>@employee.State</td><td><InputNumber aria-label="@($"Gross pay for {employee.FullName}")" class="field-input" @bind-Value="RunLines[employee.Id]" /></td></tr> }</tbody></table>
+            <button class="action-secondary" type="submit">Preview payroll</button>
+            @if (Preview is not null) { <button class="action-primary" type="button" @onclick="PostPayrollAsync">Post reviewed payroll</button> }</EditForm>
+            @if (Preview is not null) { <table class="data-table"><thead><tr><th>Employee</th><th>Gross</th><th>Pre-tax benefits</th><th>Withholding</th><th>Post-tax benefits</th><th>Employer taxes</th><th>Net pay</th></tr></thead><tbody>@foreach (var line in Preview.Employees) { <tr><td>@line.EmployeeName (@line.WorkState)</td><td>@line.GrossPay.ToString("C")</td><td>@line.PreTaxDeductions.ToString("C")</td><td>@line.EmployeeWithholdings.ToString("C")</td><td>@line.PostTaxDeductions.ToString("C")</td><td>@line.EmployerPayrollTaxes.ToString("C")</td><td>@line.NetPay.ToString("C")</td></tr> }</tbody></table> }
+        </section>
+
         <section class="content-grid">
             <article class="panel">
                 <h2>Employees</h2>
@@ -51,7 +64,8 @@ else
                         <tr>
                             <th>Employee</th>
                             <th>Department</th>
-                            <th>State</th>
+                            <th>Work location</th>
+                            <th>Residence location</th>
                             <th>Pay type</th>
                             <th>Monthly base</th>
                         </tr>
@@ -62,13 +76,27 @@ else
                             <tr>
                                 <td>@employee.EmployeeNumber - @employee.FullName</td>
                                 <td>@employee.Department</td>
-                                <td>@employee.State</td>
+                                <td>@employee.State@(string.IsNullOrWhiteSpace(employee.WorkCity) ? "" : $" · {employee.WorkCity}")</td>
+                                <td>@employee.ResidenceState@(string.IsNullOrWhiteSpace(employee.ResidenceCity) ? "" : $" · {employee.ResidenceCity}")</td>
                                 <td>@employee.PayType</td>
                                 <td>@employee.MonthlyBasePay.ToString("C")</td>
                             </tr>
                         }
                     </tbody>
                 </table>
+            </article>
+
+            <article class="panel">
+                <h2>Employee tax elections and benefits</h2>
+                <p class="page-intro">Record W-4-style elections, benefits, and both locations. Payroll applies configured Federal, work-state/work-city, and residence-state/residence-city profiles once each.</p>
+                <table class="data-table"><thead><tr><th>Employee</th><th>Work state/city</th><th>Residence state/city</th><th>Filing status</th><th>Allowances</th><th>Additional withholding</th><th>Pre-tax benefits</th><th>Post-tax benefits</th><th></th></tr></thead><tbody>@foreach (var employee in Workspace.Payroll.Employees) { var setup = EmployeeSetups[employee.Id]; <tr><td>@employee.FullName</td><td><InputText aria-label="@($"Work state for {employee.FullName}")" class="field-input" @bind-Value="setup.WorkState" /><InputText aria-label="@($"Work city for {employee.FullName}")" class="field-input" @bind-Value="setup.WorkCity" /></td><td><InputText aria-label="@($"Residence state for {employee.FullName}")" class="field-input" @bind-Value="setup.ResidenceState" /><InputText aria-label="@($"Residence city for {employee.FullName}")" class="field-input" @bind-Value="setup.ResidenceCity" /></td><td><InputSelect aria-label="@($"Filing status for {employee.FullName}")" class="field-input" @bind-Value="setup.FilingStatus"><option>Single</option><option>Married filing jointly</option><option>Head of household</option></InputSelect></td><td><InputNumber aria-label="@($"Allowances for {employee.FullName}")" class="field-input" @bind-Value="setup.Allowances" /></td><td><InputNumber aria-label="@($"Additional withholding for {employee.FullName}")" class="field-input" @bind-Value="setup.AdditionalWithholding" /></td><td><InputNumber aria-label="@($"Pre-tax benefits for {employee.FullName}")" class="field-input" @bind-Value="setup.PreTaxBenefitDeductions" /></td><td><InputNumber aria-label="@($"Post-tax benefits for {employee.FullName}")" class="field-input" @bind-Value="setup.PostTaxBenefitDeductions" /></td><td><button class="action-secondary" type="button" @onclick="async () => await SaveSetupAsync(employee.Id, setup)">Save</button></td></tr> }</tbody></table>
+            </article>
+
+            <article class="panel">
+                <h2>Residence/work tax rules</h2>
+                <p class="page-intro">Configure a reciprocity exemption when work-location withholding should not apply, or a resident credit percentage against configured residence withholding. Use the jurisdiction names exactly as they appear in Tax profiles (for example, Arizona or a city name).</p>
+                <EditForm Model="JurisdictionRuleForm" OnValidSubmit="SaveJurisdictionRuleAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Residence jurisdiction</label><InputText aria-label="Residence jurisdiction" class="field-input" @bind-Value="JurisdictionRuleForm.ResidenceJurisdiction" /></div><div class="field-group"><label class="field-label">Work jurisdiction</label><InputText aria-label="Work jurisdiction" class="field-input" @bind-Value="JurisdictionRuleForm.WorkJurisdiction" /></div><div class="field-group"><label class="field-label">Resident credit rate</label><InputNumber aria-label="Resident credit rate" class="field-input" @bind-Value="JurisdictionRuleForm.ResidentCreditRate" /></div><div class="field-group"><label class="field-label"><InputCheckbox @bind-Value="JurisdictionRuleForm.ExemptWorkWithholding" /> Exempt work withholding</label></div><div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Jurisdiction rule notes" class="field-input" @bind-Value="JurisdictionRuleForm.Notes" /></div></div><button class="action-primary" type="submit">Save jurisdiction rule</button></EditForm>
+                @if (Workspace.Payroll.JurisdictionRules?.Count > 0) { <table class="data-table"><thead><tr><th>Residence</th><th>Work</th><th>Work exemption</th><th>Resident credit</th><th>Notes</th></tr></thead><tbody>@foreach (var rule in Workspace.Payroll.JurisdictionRules) { <tr><td>@rule.ResidenceJurisdiction</td><td>@rule.WorkJurisdiction</td><td>@(rule.ExemptWorkWithholding ? "Yes" : "No")</td><td>@rule.ResidentCreditRate.ToString("P0")</td><td>@rule.Notes</td></tr> }</tbody></table> }
             </article>
 
             <article class="panel">
@@ -103,9 +131,49 @@ else
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private string? StatusMessage;
+    private PayrollRunEditor RunForm { get; } = new();
+    private readonly Dictionary<Guid, decimal> RunLines = [];
+    private readonly Dictionary<Guid, EmployeePayrollEditor> EmployeeSetups = [];
+    private PayrollRunEstimate? Preview;
+    private JurisdictionRuleEditor JurisdictionRuleForm { get; } = new();
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        foreach (var employee in Workspace.Payroll.Employees)
+        {
+            RunLines[employee.Id] = decimal.Round(employee.MonthlyBasePay / 2m, 2);
+            EmployeeSetups[employee.Id] = new EmployeePayrollEditor(employee.FilingStatus, employee.Allowances, employee.AdditionalWithholding, employee.PreTaxBenefitDeductions, employee.PostTaxBenefitDeductions, employee.ResidenceState, employee.ResidenceCity, employee.State, employee.WorkCity);
+        }
     }
+
+    private PostEmployeePayrollRunRequest BuildRequest() => new(RunForm.BankAccountId, RunForm.PayDate, RunForm.Reference, RunLines.Where(line => line.Value > 0).Select(line => new EmployeePayrollInput(line.Key, line.Value)).ToArray());
+    private async Task PreviewPayrollAsync()
+    {
+        Preview = await TransactionService.PreviewEmployeePayrollRunAsync(BuildRequest());
+        StatusMessage = Preview is null ? "Payroll could not be calculated. Confirm every employee has positive gross pay and applicable tax profiles." : "Review the calculated employee payroll before posting.";
+    }
+    private async Task PostPayrollAsync()
+    {
+        var result = await TransactionService.PostEmployeePayrollRunAsync(BuildRequest());
+        StatusMessage = result.Succeeded ? "Payroll run posted." : result.ErrorMessage;
+        if (result.Succeeded) { Preview = null; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    }
+    private async Task SaveSetupAsync(Guid employeeId, EmployeePayrollEditor setup)
+    {
+        var result = await TransactionService.SaveEmployeePayrollSetupAsync(new SaveEmployeePayrollSetupRequest(employeeId, setup.FilingStatus, setup.Allowances, setup.AdditionalWithholding, setup.PreTaxBenefitDeductions, setup.PostTaxBenefitDeductions, setup.ResidenceState, setup.ResidenceCity, setup.WorkState, setup.WorkCity));
+        StatusMessage = result.Succeeded ? "Employee payroll setup saved." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+    private async Task SaveJurisdictionRuleAsync()
+    {
+        var result = await TransactionService.SavePayrollJurisdictionRuleAsync(new SavePayrollJurisdictionRuleRequest(null, JurisdictionRuleForm.ResidenceJurisdiction, JurisdictionRuleForm.WorkJurisdiction, JurisdictionRuleForm.ExemptWorkWithholding, JurisdictionRuleForm.ResidentCreditRate, true, JurisdictionRuleForm.Notes));
+        StatusMessage = result.Succeeded ? "Residence/work tax rule saved." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private sealed class PayrollRunEditor { public Guid BankAccountId { get; set; } public DateOnly PayDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = $"PR-{DateTime.Today:yyyyMMdd}"; }
+    private sealed class EmployeePayrollEditor(string filingStatus, int allowances, decimal additionalWithholding, decimal preTaxBenefitDeductions, decimal postTaxBenefitDeductions, string residenceState, string residenceCity, string workState, string workCity) { public string FilingStatus { get; set; } = filingStatus; public int Allowances { get; set; } = allowances; public decimal AdditionalWithholding { get; set; } = additionalWithholding; public decimal PreTaxBenefitDeductions { get; set; } = preTaxBenefitDeductions; public decimal PostTaxBenefitDeductions { get; set; } = postTaxBenefitDeductions; public string ResidenceState { get; set; } = residenceState; public string ResidenceCity { get; set; } = residenceCity; public string WorkState { get; set; } = workState; public string WorkCity { get; set; } = workCity; }
+    private sealed class JurisdictionRuleEditor { public string ResidenceJurisdiction { get; set; } = string.Empty; public string WorkJurisdiction { get; set; } = string.Empty; public bool ExemptWorkWithholding { get; set; } public decimal ResidentCreditRate { get; set; } public string Notes { get; set; } = string.Empty; }
 }

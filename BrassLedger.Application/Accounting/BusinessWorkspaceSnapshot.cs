@@ -76,7 +76,8 @@ public sealed record CustomerSnapshot(
     string Name,
     string State,
     decimal CreditLimit,
-    decimal OpenBalance);
+    decimal OpenBalance,
+    Guid Id = default);
 
 public sealed record InvoiceSnapshot(
     string InvoiceNumber,
@@ -85,7 +86,8 @@ public sealed record InvoiceSnapshot(
     DateOnly DueDate,
     string Status,
     decimal TotalAmount,
-    decimal BalanceDue);
+    decimal BalanceDue,
+    Guid Id = default);
 
 public sealed record PayablesWorkspace(
     decimal OpenBalance,
@@ -98,7 +100,8 @@ public sealed record VendorSnapshot(
     string Name,
     string State,
     string PaymentTerms,
-    decimal OpenBalance);
+    decimal OpenBalance,
+    Guid Id = default);
 
 public sealed record BillSnapshot(
     string BillNumber,
@@ -107,7 +110,8 @@ public sealed record BillSnapshot(
     DateOnly DueDate,
     string Status,
     decimal TotalAmount,
-    decimal BalanceDue);
+    decimal BalanceDue,
+    Guid Id = default);
 
 public sealed record OperationsWorkspace(
     int InventoryItemCount,
@@ -123,7 +127,8 @@ public sealed record InventoryItemSnapshot(
     string Description,
     decimal UnitPrice,
     decimal QuantityOnHand,
-    decimal ReorderPoint);
+    decimal ReorderPoint,
+    Guid Id = default);
 
 public sealed record SalesOrderSnapshot(
     string OrderNumber,
@@ -142,19 +147,35 @@ public sealed record PurchaseOrderSnapshot(
 public sealed record TreasuryWorkspace(
     decimal CashOnHand,
     decimal UnreconciledBalance,
-    IReadOnlyList<BankAccountSnapshot> BankAccounts);
+    IReadOnlyList<BankAccountSnapshot> BankAccounts,
+    IReadOnlyList<BankReconciliationCandidateSnapshot>? ReconciliationCandidates = null);
 
 public sealed record BankAccountSnapshot(
     string Name,
     string AccountNumberMasked,
     decimal CurrentBalance,
     decimal UnreconciledAmount,
-    DateOnly LastReconciledOn);
+    DateOnly LastReconciledOn,
+    Guid Id = default,
+    string LedgerAccountNumber = "",
+    decimal LastReconciledBalance = 0m);
+
+public sealed record BankReconciliationCandidateSnapshot(
+    Guid BankAccountId,
+    Guid JournalEntryId,
+    DateOnly PostedOn,
+    string Reference,
+    string Description,
+    string SourceModule,
+    decimal SignedAmount);
 
 public sealed record PayrollWorkspace(
     int ActiveEmployees,
     decimal MonthlyGross,
-    IReadOnlyList<EmployeeSnapshot> Employees);
+    IReadOnlyList<EmployeeSnapshot> Employees,
+    IReadOnlyList<PayrollJurisdictionRuleSnapshot>? JurisdictionRules = null);
+
+public sealed record PayrollJurisdictionRuleSnapshot(Guid Id, string ResidenceJurisdiction, string WorkJurisdiction, bool ExemptWorkWithholding, decimal ResidentCreditRate, bool IsActive, string Notes);
 
 public sealed record EmployeeSnapshot(
     string EmployeeNumber,
@@ -163,7 +184,16 @@ public sealed record EmployeeSnapshot(
     string State,
     string PayType,
     decimal MonthlyBasePay,
-    bool IsActive);
+    bool IsActive,
+    Guid Id = default,
+    string FilingStatus = "Single",
+    int Allowances = 0,
+    decimal AdditionalWithholding = 0m,
+    decimal PreTaxBenefitDeductions = 0m,
+    decimal PostTaxBenefitDeductions = 0m,
+    string ResidenceState = "",
+    string ResidenceCity = "",
+    string WorkCity = "");
 
 public sealed record ProjectsWorkspace(
     int OpenJobs,

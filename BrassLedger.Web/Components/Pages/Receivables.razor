@@ -1,6 +1,7 @@
 @page "/receivables"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageReceivables)]
 @inject IBusinessWorkspaceService WorkspaceService
+@inject IAccountingTransactionService TransactionService
 
 <PageTitle>Receivables</PageTitle>
 
@@ -41,6 +42,33 @@ else
                 <span class="stat-value">@Workspace.Receivables.PastDueCount</span>
                 <span class="stat-label">Past due</span>
             </article>
+        </section>
+
+        <section class="panel">
+            <h2>Create and post invoice</h2>
+            @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
+            <EditForm Model="InvoiceForm" OnValidSubmit="CreateInvoiceAsync">
+                <div class="content-grid">
+                    <div class="field-group"><label class="field-label">Customer</label><InputSelect aria-label="Invoice customer" class="field-input" @bind-Value="InvoiceForm.CustomerId"><option value="@Guid.Empty">Select customer</option>@foreach (var customer in Workspace.Receivables.Customers) { <option value="@customer.Id">@customer.CustomerNumber — @customer.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Invoice number</label><InputText aria-label="Invoice number" class="field-input" @bind-Value="InvoiceForm.Number" /></div>
+                    <div class="field-group"><label class="field-label">Invoice date</label><InputDate aria-label="Invoice date" class="field-input" @bind-Value="InvoiceForm.Date" /></div>
+                    <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Invoice due date" class="field-input" @bind-Value="InvoiceForm.DueDate" /></div>
+                    <div class="field-group"><label class="field-label">Subtotal</label><InputNumber aria-label="Invoice subtotal" class="field-input" @bind-Value="InvoiceForm.Subtotal" /></div>
+                    <div class="field-group"><label class="field-label">Tax</label><InputNumber aria-label="Invoice tax" class="field-input" @bind-Value="InvoiceForm.Tax" /></div>
+                    <div class="field-group"><label class="field-label">Revenue account</label><InputSelect aria-label="Invoice revenue account" class="field-input" @bind-Value="InvoiceForm.RevenueAccount"><option value="4000">4000 — Product Revenue</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(x => x.Type == "Revenue")) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                </div>
+                <button class="action-primary" type="submit">Post invoice</button>
+            </EditForm>
+        </section>
+
+        <section class="panel">
+            <h2>Apply customer payment</h2>
+            <EditForm Model="PaymentForm" OnValidSubmit="ApplyPaymentAsync"><div class="content-grid">
+                <div class="field-group"><label class="field-label">Invoice</label><InputSelect aria-label="Payment invoice" class="field-input" @bind-Value="PaymentForm.InvoiceId"><option value="@Guid.Empty">Select invoice</option>@foreach (var invoice in Workspace.Receivables.Invoices.Where(x => x.BalanceDue > 0)) { <option value="@invoice.Id">@invoice.InvoiceNumber — @invoice.BalanceDue.ToString("C")</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Deposit account</label><InputSelect aria-label="Payment deposit account" class="field-input" @bind-Value="PaymentForm.BankId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Amount</label><InputNumber aria-label="Payment amount" class="field-input" @bind-Value="PaymentForm.Amount" /></div>
+                <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Payment reference" class="field-input" @bind-Value="PaymentForm.Reference" /></div>
+            </div><button class="action-primary" type="submit">Apply payment</button></EditForm>
         </section>
 
         <section class="content-grid">
@@ -101,9 +129,29 @@ else
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private string? StatusMessage;
+    private InvoiceEditor InvoiceForm { get; } = new();
+    private PaymentEditor PaymentForm { get; } = new();
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
+
+    private async Task CreateInvoiceAsync()
+    {
+        var result = await TransactionService.CreateInvoiceAsync(new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, InvoiceForm.Subtotal, InvoiceForm.Tax, InvoiceForm.RevenueAccount, $"Invoice {InvoiceForm.Number}"));
+        StatusMessage = result.Succeeded ? "Invoice posted." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private async Task ApplyPaymentAsync()
+    {
+        var result = await TransactionService.ApplyInvoicePaymentAsync(new ApplyInvoicePaymentRequest(PaymentForm.InvoiceId, PaymentForm.BankId, DateOnly.FromDateTime(DateTime.Today), PaymentForm.Amount, PaymentForm.Reference));
+        StatusMessage = result.Succeeded ? "Customer payment applied." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private sealed class InvoiceEditor { public Guid CustomerId { get; set; } public string Number { get; set; } = string.Empty; public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); public decimal Subtotal { get; set; } public decimal Tax { get; set; } public string RevenueAccount { get; set; } = "4000"; }
+    private sealed class PaymentEditor { public Guid InvoiceId { get; set; } public Guid BankId { get; set; } public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; }
 }

@@ -1,5 +1,5 @@
 @page "/taxes"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageTaxes)]
 @using BrassLedger.Application.Taxation
 @using BrassLedger.Infrastructure.Auth
 @inject IBusinessWorkspaceService WorkspaceService
@@ -82,6 +82,18 @@ else
             </article>
         </section>
 
+        <section class="panel">
+            <div class="section-heading"><h2>Manual tax-source intake</h2><button class="action-primary" type="button" @onclick="ImportTaxLocusAsync">Import TaxLocus payroll reference data</button></div>
+            <p class="page-intro">This is an on-demand capture, never a scheduled update. TaxLocus is imported as a draft package with checksummed raw files. It does not become withholding logic or an active package until you complete review, rules, and regression cases.</p>
+            <div class="content-grid"><div class="auth-form"><div class="field-group"><label class="field-label">State or locality code</label><InputText class="field-input" @bind-Value="SourceCaptureForm.JurisdictionCode" /></div><div class="field-group"><label class="field-label">Official HTTPS source URL</label><InputText class="field-input" @bind-Value="SourceCaptureForm.SourceUrl" /></div><div class="field-group"><label class="field-label">Review notes</label><InputTextArea class="field-input" @bind-Value="SourceCaptureForm.Notes" /></div><button class="action-secondary" type="button" @onclick="CaptureStateSourceAsync">Capture source for review</button><div class="field-group"><label class="field-label">Versioned rule-content JSON (manual or LLM draft)</label><InputTextArea class="field-input field-input-large" @bind-Value="RuleContentJson" /></div><button class="action-secondary" type="button" @onclick="ImportRuleContentAsync">Import draft rule content</button></div><div><table class="data-table"><thead><tr><th>Captured</th><th>Source</th><th>Jurisdiction</th><th>Evidence</th></tr></thead><tbody>@foreach (var capture in TaxSnapshot.SourceCaptures.Take(12)) { <tr><td>@capture.CapturedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td><td><a href="@capture.SourceUrl" target="_blank" rel="noopener noreferrer">@capture.SourceKind</a></td><td>@(string.IsNullOrWhiteSpace(capture.JurisdictionCode) ? "Dataset" : capture.JurisdictionCode)</td><td>@capture.ContentLength.ToString("N0") bytes · @capture.ContentSha256[..Math.Min(12, capture.ContentSha256.Length)]</td></tr> }</tbody></table></div></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-heading"><h2>Versioned tax-content packages</h2><button class="action-secondary" type="button" @onclick="CreateNewPackage">New package</button></div>
+            <p class="page-intro">Draft package versions remain inactive until their linked rule tests pass the activation gate. Approved versions are snapshotted with payroll runs.</p>
+            <div class="content-grid"><div class="auth-form">@if (IsApprovedPackage) { <p class="page-intro">This approved version is read-only. Create a new package version for any tax data or business-logic change.</p> }<fieldset disabled="@IsApprovedPackage"><div class="field-group"><label class="field-label">Package code</label><InputText aria-label="Tax package code" class="field-input" @bind-Value="PackageForm.PackageCode" /></div><div class="field-group"><label class="field-label">Version</label><InputText aria-label="Tax package version" class="field-input" @bind-Value="PackageForm.Version" /></div><div class="field-group"><label class="field-label">Effective date</label><InputDate aria-label="Tax package effective date" class="field-input" @bind-Value="PackageForm.EffectiveOn" /></div><div class="field-group"><label class="field-label">Minimum engine</label><InputText aria-label="Tax package minimum engine" class="field-input" @bind-Value="PackageForm.MinimumEngineVersion" /></div><div class="field-group"><label class="field-label">Status</label><InputSelect aria-label="Tax package status" class="field-input" @bind-Value="PackageForm.Status"><option>Draft</option><option>Validated</option><option>Approved</option><option>Superseded</option></InputSelect></div><div class="field-group"><label class="field-label">Manifest JSON</label><InputTextArea aria-label="Tax package manifest" class="field-input" @bind-Value="PackageForm.ManifestJson" /></div><div class="field-group"><label class="field-label">Change summary</label><InputText aria-label="Tax package change summary" class="field-input" @bind-Value="PackageForm.ChangeSummary" /></div><button class="action-primary" type="button" @onclick="SavePackageAsync">Save package</button>@if (PackageForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ActivatePackageAsync">Validate and activate</button> }</fieldset></div><div><table class="data-table"><thead><tr><th>Package</th><th>Effective</th><th>Status</th><th>Minimum engine</th></tr></thead><tbody>@foreach (var package in TaxSnapshot.Packages) { <tr><td><button class="action-secondary" type="button" @onclick="() => SelectPackage(package.Id)">@package.PackageCode @package.Version</button></td><td>@package.EffectiveOn</td><td>@package.Status</td><td>@package.MinimumEngineVersion</td></tr> }</tbody></table></div></div>
+        </section>
+
         <section class="content-grid">
             <article class="panel">
                 <h2>Current tax profiles</h2>
@@ -148,6 +160,11 @@ else
                             </div>
 
                             <div class="field-group">
+                                <label class="field-label" for="stateJurisdiction">State jurisdiction catalog</label>
+                                <select id="stateJurisdiction" class="field-input" @onchange="SetStateJurisdiction"><option value="">Select a state or enter a custom locality</option>@foreach (var state in TaxSnapshot.StateJurisdictions) { <option value="@state.Code">@state.Code — @state.Name</option> }</select>
+                            </div>
+
+                            <div class="field-group">
                                 <label class="field-label" for="taxJurisdictionName">Jurisdiction name</label>
                                 <InputText id="taxJurisdictionName" class="field-input" @bind-Value="RuleForm.JurisdictionName" />
                             </div>
@@ -196,6 +213,9 @@ else
                                 <label class="field-label" for="taxNotes">Notes</label>
                                 <InputTextArea id="taxNotes" class="field-input field-input-large" @bind-Value="RuleForm.Notes" />
                             </div>
+                            <div class="field-group"><label class="field-label">Content package</label><InputSelect aria-label="Tax rule content package" class="field-input" @bind-Value="RuleForm.TaxContentPackageId"><option value="@Guid.Empty">No package (legacy fallback)</option>@foreach (var package in TaxSnapshot.Packages) { <option value="@package.Id">@package.PackageCode @package.Version</option> }</InputSelect></div>
+                            <div class="field-group"><label class="field-label">Content version</label><InputText aria-label="Tax rule content version" class="field-input" @bind-Value="RuleForm.ContentVersion" /></div>
+                            <div class="field-group"><label class="field-label">Minimum engine version</label><InputText aria-label="Tax rule minimum engine version" class="field-input" @bind-Value="RuleForm.MinimumEngineVersion" /></div>
 
                             <div class="tax-checkbox-grid">
                                 <label><InputCheckbox @bind-Value="RuleForm.IsEmployerSpecific" /> Employer-specific</label>
@@ -333,6 +353,17 @@ else
                         </tbody>
                     </table>
                 </section>
+
+                <section class="panel">
+                    <div class="section-heading"><h2>Flexible rule fields</h2><button class="action-secondary" type="button" @onclick="AddFieldDefinitionRow">Add field</button></div>
+                    <table class="data-table"><thead><tr><th>Code</th><th>Label</th><th>Type</th><th>Required</th><th>Default JSON</th><th>Validation JSON</th><th></th></tr></thead><tbody>@foreach (var field in FieldDefinitionEditors) { <tr><td><InputText class="field-input tax-grid-input" @bind-Value="field.FieldCode" /></td><td><InputText class="field-input tax-grid-input" @bind-Value="field.Label" /></td><td><InputSelect class="field-input tax-grid-input" @bind-Value="field.DataType"><option>text</option><option>number</option><option>bool</option><option>date</option></InputSelect></td><td><InputCheckbox @bind-Value="field.IsRequired" /></td><td><InputText class="field-input tax-grid-input" @bind-Value="field.DefaultValueJson" /></td><td><InputText class="field-input tax-grid-input" @bind-Value="field.ValidationJson" /></td><td><button class="action-secondary" type="button" @onclick="() => SaveFieldDefinitionAsync(field)">Save</button></td></tr> }</tbody></table>
+                </section>
+
+                <section class="panel">
+                    <div class="section-heading"><h2>Activation regression cases</h2><button class="action-secondary" type="button" @onclick="AddTestCaseRow">Add case</button></div>
+                    <p class="page-intro">Each required case must specify JSON input with <code>grossPay</code> and expected <code>amount</code> or <code>withholding</code>; package activation executes these cases.</p>
+                    <table class="data-table"><thead><tr><th>Name</th><th>Input JSON</th><th>Expected JSON</th><th>Required</th><th></th></tr></thead><tbody>@foreach (var testCase in TestCaseEditors) { <tr><td><InputText class="field-input tax-grid-input" @bind-Value="testCase.Name" /></td><td><InputText class="field-input tax-grid-input" @bind-Value="testCase.InputJson" /></td><td><InputText class="field-input tax-grid-input" @bind-Value="testCase.ExpectedOutputJson" /></td><td><InputCheckbox @bind-Value="testCase.IsRequiredForActivation" /></td><td><button class="action-secondary" type="button" @onclick="() => SaveTestCaseAsync(testCase)">Save</button></td></tr> }</tbody></table>
+                </section>
             </Authorized>
             <NotAuthorized>
                 <section class="panel">
@@ -368,6 +399,11 @@ else
     private List<TaxParameterEditor> ParameterEditors { get; set; } = [];
     private List<TaxBracketEditor> BracketEditors { get; set; } = [];
     private List<TaxFormRequirementEditor> FormRequirementEditors { get; set; } = [];
+    private List<TaxFieldDefinitionEditor> FieldDefinitionEditors { get; set; } = [];
+    private List<TaxTestCaseEditor> TestCaseEditors { get; set; } = [];
+    private TaxContentPackageEditor PackageForm { get; set; } = new();
+    private TaxSourceCaptureEditor SourceCaptureForm { get; set; } = new();
+    private string RuleContentJson { get; set; } = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -408,6 +444,15 @@ else
         ParameterEditors = [];
         BracketEditors = [];
         FormRequirementEditors = [];
+        FieldDefinitionEditors = [];
+        TestCaseEditors = [];
+    }
+
+    private void SetStateJurisdiction(ChangeEventArgs args)
+    {
+        var code = args.Value?.ToString();
+        var state = TaxSnapshot?.StateJurisdictions.SingleOrDefault(item => item.Code == code);
+        if (state is not null) { RuleForm.JurisdictionCode = state.Code; RuleForm.JurisdictionName = state.Name; RuleForm.JurisdictionType = "State"; }
     }
 
     private async Task SaveRuleAsync()
@@ -427,7 +472,10 @@ else
             RuleForm.IsEmployerSpecific,
             RuleForm.SupportsBracketTable,
             RuleForm.SupportsParameterEditing,
-            RuleForm.IsActive));
+            RuleForm.IsActive,
+            RuleForm.TaxContentPackageId == Guid.Empty ? null : RuleForm.TaxContentPackageId,
+            RuleForm.ContentVersion,
+            RuleForm.MinimumEngineVersion));
 
         StatusMessage = result.Succeeded ? "Tax rule set saved." : result.ErrorMessage;
         if (result.Succeeded)
@@ -436,6 +484,22 @@ else
             await ReloadTaxSnapshotAsync();
         }
     }
+
+    private void CreateNewPackage() => PackageForm = new TaxContentPackageEditor { EffectiveOn = DateOnly.FromDateTime(DateTime.Today), Status = "Draft", MinimumEngineVersion = "1.0", ManifestJson = "{}" };
+    private void SelectPackage(Guid id)
+    {
+        var package = TaxSnapshot?.Packages.Single(item => item.Id == id); if (package is not null) PackageForm = new TaxContentPackageEditor { Id = package.Id, PackageCode = package.PackageCode, Version = package.Version, EffectiveOn = package.EffectiveOn, Status = package.Status, MinimumEngineVersion = package.MinimumEngineVersion, ManifestJson = package.ManifestJson, Source = package.Source, ChangeSummary = package.ChangeSummary };
+    }
+    private async Task SavePackageAsync()
+    {
+        var result = await TaxAdministrationService.SaveContentPackageAsync(new SaveTaxContentPackageRequest(PackageForm.Id, PackageForm.PackageCode, PackageForm.Version, PackageForm.EffectiveOn, PackageForm.Status, PackageForm.MinimumEngineVersion, PackageForm.ManifestJson, PackageForm.Source, PackageForm.ChangeSummary)); StatusMessage = result.Succeeded ? "Tax content package saved." : result.ErrorMessage; if (result.Succeeded) { PackageForm.Id = result.SavedId; await ReloadTaxSnapshotAsync(); }
+    }
+    private async Task ActivatePackageAsync()
+    {
+        var result = await TaxAdministrationService.ActivateContentPackageAsync(PackageForm.Id!.Value); StatusMessage = result.Succeeded ? "Tax content package validated and activated." : result.ErrorMessage; if (result.Succeeded) await ReloadTaxSnapshotAsync();
+    }
+
+    private bool IsApprovedPackage => string.Equals(PackageForm.Status, "Approved", StringComparison.Ordinal);
 
     private async Task SaveParameterAsync(TaxParameterEditor editor)
     {
@@ -516,6 +580,20 @@ else
         }
     }
 
+    private async Task SaveFieldDefinitionAsync(TaxFieldDefinitionEditor editor)
+    {
+        var rule = GetSelectedRule(); if (rule is null) { StatusMessage = "Save the rule set before adding fields."; return; }
+        var result = await TaxAdministrationService.SaveFieldDefinitionAsync(new SaveTaxRuleFieldDefinitionRequest(rule.Id, editor.Id, editor.FieldCode, editor.Label, editor.DataType, editor.IsRequired, editor.DefaultValueJson, editor.ValidationJson, editor.DisplayOrder, editor.HelpText));
+        StatusMessage = result.Succeeded ? "Flexible field saved." : result.ErrorMessage; if (result.Succeeded) await ReloadTaxSnapshotAsync();
+    }
+
+    private async Task SaveTestCaseAsync(TaxTestCaseEditor editor)
+    {
+        var rule = GetSelectedRule(); if (rule is null) { StatusMessage = "Save the rule set before adding regression cases."; return; }
+        var result = await TaxAdministrationService.SaveTestCaseAsync(new SaveTaxRuleTestCaseRequest(rule.Id, editor.Id, editor.Name, editor.InputJson, editor.ExpectedOutputJson, editor.IsRequiredForActivation));
+        StatusMessage = result.Succeeded ? "Tax regression case saved." : result.ErrorMessage; if (result.Succeeded) await ReloadTaxSnapshotAsync();
+    }
+
     private void AddParameterRow()
     {
         ParameterEditors.Add(new TaxParameterEditor
@@ -541,6 +619,8 @@ else
             FilingFrequency = "Quarterly"
         });
     }
+    private void AddFieldDefinitionRow() => FieldDefinitionEditors.Add(new TaxFieldDefinitionEditor { DataType = "text", DefaultValueJson = "null", ValidationJson = "{}", DisplayOrder = FieldDefinitionEditors.Count == 0 ? 10 : FieldDefinitionEditors.Max(field => field.DisplayOrder) + 10 });
+    private void AddTestCaseRow() => TestCaseEditors.Add(new TaxTestCaseEditor { InputJson = "{\"grossPay\":0}", ExpectedOutputJson = "{\"amount\":0}", IsRequiredForActivation = true });
 
     private async Task ReloadTaxSnapshotAsync()
     {
@@ -551,6 +631,27 @@ else
         }
 
         LoadSelectedRuleEditors();
+    }
+
+    private async Task ImportTaxLocusAsync()
+    {
+        var result = await TaxAdministrationService.ImportTaxLocusAsync();
+        StatusMessage = result.Succeeded ? "TaxLocus payroll reference files were captured in a new draft package (or the identical package was already present)." : result.ErrorMessage;
+        if (result.Succeeded) await ReloadTaxSnapshotAsync();
+    }
+
+    private async Task CaptureStateSourceAsync()
+    {
+        var result = await TaxAdministrationService.CaptureStateSourceAsync(new CaptureTaxSourceRequest(SourceCaptureForm.JurisdictionCode, SourceCaptureForm.SourceUrl, SourceCaptureForm.Notes));
+        StatusMessage = result.Succeeded ? "Official source captured with a content checksum for review." : result.ErrorMessage;
+        if (result.Succeeded) { SourceCaptureForm = new(); await ReloadTaxSnapshotAsync(); }
+    }
+
+    private async Task ImportRuleContentAsync()
+    {
+        var result = await TaxAdministrationService.ImportTaxContentDocumentAsync(RuleContentJson);
+        StatusMessage = result.Succeeded ? "Draft tax-content package imported. It remains inactive until validation and approval." : result.ErrorMessage;
+        if (result.Succeeded) { RuleContentJson = string.Empty; await ReloadTaxSnapshotAsync(); }
     }
 
     private void LoadSelectedRuleEditors()
@@ -579,6 +680,7 @@ else
             SupportsBracketTable = selectedRule.SupportsBracketTable,
             SupportsParameterEditing = selectedRule.SupportsParameterEditing,
             IsActive = selectedRule.IsActive
+            , TaxContentPackageId = selectedRule.TaxContentPackageId ?? Guid.Empty, ContentVersion = selectedRule.ContentVersion, MinimumEngineVersion = selectedRule.MinimumEngineVersion
         };
         ParameterEditors = selectedRule.Parameters
             .Select(parameter => new TaxParameterEditor
@@ -617,6 +719,8 @@ else
                 Notes = form.Notes
             })
             .ToList();
+        FieldDefinitionEditors = selectedRule.FieldDefinitions.Select(field => new TaxFieldDefinitionEditor { Id = field.Id, FieldCode = field.FieldCode, Label = field.Label, DataType = field.DataType, IsRequired = field.IsRequired, DefaultValueJson = field.DefaultValueJson, ValidationJson = field.ValidationJson, DisplayOrder = field.DisplayOrder, HelpText = field.HelpText }).ToList();
+        TestCaseEditors = selectedRule.TestCases.Select(testCase => new TaxTestCaseEditor { Id = testCase.Id, Name = testCase.Name, InputJson = testCase.InputJson, ExpectedOutputJson = testCase.ExpectedOutputJson, IsRequiredForActivation = testCase.IsRequiredForActivation }).ToList();
     }
 
     private sealed class TaxRuleEditor
@@ -636,6 +740,9 @@ else
         public bool SupportsBracketTable { get; set; }
         public bool SupportsParameterEditing { get; set; } = true;
         public bool IsActive { get; set; } = true;
+        public Guid TaxContentPackageId { get; set; }
+        public string ContentVersion { get; set; } = "1.0";
+        public string MinimumEngineVersion { get; set; } = "1.0";
     }
 
     private sealed class TaxParameterEditor
@@ -671,4 +778,8 @@ else
         public string DueRule { get; set; } = string.Empty;
         public string Notes { get; set; } = string.Empty;
     }
+    private sealed class TaxFieldDefinitionEditor { public Guid? Id { get; set; } public string FieldCode { get; set; } = string.Empty; public string Label { get; set; } = string.Empty; public string DataType { get; set; } = "text"; public bool IsRequired { get; set; } public string DefaultValueJson { get; set; } = "null"; public string ValidationJson { get; set; } = "{}"; public int DisplayOrder { get; set; } public string HelpText { get; set; } = string.Empty; }
+    private sealed class TaxTestCaseEditor { public Guid? Id { get; set; } public string Name { get; set; } = string.Empty; public string InputJson { get; set; } = "{}"; public string ExpectedOutputJson { get; set; } = "{}"; public bool IsRequiredForActivation { get; set; } = true; }
+    private sealed class TaxSourceCaptureEditor { public string JurisdictionCode { get; set; } = string.Empty; public string SourceUrl { get; set; } = string.Empty; public string Notes { get; set; } = string.Empty; }
+    private sealed class TaxContentPackageEditor { public Guid? Id { get; set; } public string PackageCode { get; set; } = string.Empty; public string Version { get; set; } = "1.0"; public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Status { get; set; } = "Draft"; public string MinimumEngineVersion { get; set; } = "1.0"; public string ManifestJson { get; set; } = "{}"; public string Source { get; set; } = string.Empty; public string ChangeSummary { get; set; } = string.Empty; }
 }

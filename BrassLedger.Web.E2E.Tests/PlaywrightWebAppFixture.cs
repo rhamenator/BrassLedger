@@ -275,16 +275,20 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
 
     private static bool TryResolveChromiumExecutablePath(out string executablePath)
     {
-        var relativeExecutablePath = OperatingSystem.IsWindows()
-            ? Path.Combine("chrome-win", "chrome.exe")
+        var relativeExecutablePaths = OperatingSystem.IsWindows()
+            ? new[] { Path.Combine("chrome-win", "chrome.exe") }
             : OperatingSystem.IsMacOS()
-                ? Path.Combine("chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium")
-                : Path.Combine("chrome-linux", "chrome");
+                ? new[] { Path.Combine("chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium") }
+                : new[]
+                {
+                    Path.Combine("chrome-linux", "chrome"),
+                    Path.Combine("chrome-linux64", "chrome")
+                };
 
         executablePath = Directory.Exists(ResolveBrowserRoot())
             ? Directory
                 .EnumerateDirectories(ResolveBrowserRoot(), "chromium-*", SearchOption.TopDirectoryOnly)
-                .Select(path => Path.Combine(path, relativeExecutablePath))
+                .SelectMany(path => relativeExecutablePaths.Select(relativePath => Path.Combine(path, relativePath)))
                 .FirstOrDefault(File.Exists) ?? string.Empty
             : string.Empty;
         return !string.IsNullOrWhiteSpace(executablePath);
@@ -309,4 +313,3 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         return !string.IsNullOrWhiteSpace(executablePath);
     }
 }
-

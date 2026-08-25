@@ -1,5 +1,5 @@
 @page "/help/reporting"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ViewWorkspace)]
 
 <PageTitle>Reports And Forms</PageTitle>
 

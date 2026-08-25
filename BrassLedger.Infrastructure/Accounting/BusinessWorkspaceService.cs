@@ -18,7 +18,9 @@ public sealed class BusinessWorkspaceService(
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var claimValue = httpContextAccessor.HttpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
+        var httpContext = httpContextAccessor.HttpContext;
+        var claimValue = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
+        if (httpContext is not null && !Guid.TryParse(claimValue, out _)) throw new UnauthorizedAccessException("An authenticated company context is required.");
         var companies = dbContext.Companies.AsNoTracking();
         var company = Guid.TryParse(claimValue, out var companyId)
             ? await companies.SingleAsync(x => x.Id == companyId, cancellationToken)
@@ -34,7 +36,16 @@ public sealed class BusinessWorkspaceService(
         var salesOrders = await dbContext.SalesOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
         var purchaseOrders = await dbContext.PurchaseOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
         var bankAccounts = await dbContext.BankAccounts.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Name).ToListAsync(cancellationToken);
+        var bankEntryCandidates = await dbContext.JournalEntries.AsNoTracking()
+            .Where(entry => entry.CompanyId == company.Id && entry.BankAccountId != null && entry.IsPosted)
+            .OrderBy(entry => entry.PostedOn)
+            .ToListAsync(cancellationToken);
+        var bankEntryIds = bankEntryCandidates.Select(entry => entry.Id).ToArray();
+        var bankEntryLines = bankEntryIds.Length == 0
+            ? new List<JournalEntryLine>()
+            : await dbContext.JournalEntryLines.AsNoTracking().Where(line => bankEntryIds.Contains(line.JournalEntryId)).ToListAsync(cancellationToken);
         var employees = await dbContext.Employees.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.EmployeeNumber).ToListAsync(cancellationToken);
+        var payrollJurisdictionRules = await dbContext.PayrollJurisdictionRules.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.ResidenceJurisdiction).ThenBy(x => x.WorkJurisdiction).ToListAsync(cancellationToken);
         var projectJobs = await dbContext.ProjectJobs.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.JobNumber).ToListAsync(cancellationToken);
         var taxProfiles = await dbContext.TaxProfiles.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Jurisdiction).ThenBy(x => x.TaxType).ToListAsync(cancellationToken);
         var reports = await dbContext.ReportCatalogItems.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Category).ThenBy(x => x.Name).ToListAsync(cancellationToken);
@@ -99,7 +110,7 @@ public sealed class BusinessWorkspaceService(
             Receivables: new ReceivablesWorkspace(
                 OpenBalance: invoices.Sum(x => x.BalanceDue),
                 PastDueCount: invoices.Count(x => x.DueDate < DateOnly.FromDateTime(DateTime.Today) && x.BalanceDue > 0m),
-                Customers: customers.Select(x => new CustomerSnapshot(x.CustomerNumber, x.Name, x.State, x.CreditLimit, x.OpenBalance)).ToArray(),
+                Customers: customers.Select(x => new CustomerSnapshot(x.CustomerNumber, x.Name, x.State, x.CreditLimit, x.OpenBalance, x.Id)).ToArray(),
                 Invoices: invoices.Select(x => new InvoiceSnapshot(
                     x.InvoiceNumber,
                     customerNames.GetValueOrDefault(x.CustomerId, "Unknown customer"),
@@ -107,11 +118,12 @@ public sealed class BusinessWorkspaceService(
                     x.DueDate,
                     x.Status,
                     x.TotalAmount,
-                    x.BalanceDue)).ToArray()),
+                    x.BalanceDue,
+                    x.Id)).ToArray()),
             Payables: new PayablesWorkspace(
                 OpenBalance: vendorBills.Sum(x => x.BalanceDue),
                 DueThisWeekCount: vendorBills.Count(x => x.DueDate <= DateOnly.FromDateTime(DateTime.Today.AddDays(7)) && x.BalanceDue > 0m),
-                Vendors: vendors.Select(x => new VendorSnapshot(x.VendorNumber, x.Name, x.State, x.PaymentTerms, x.OpenBalance)).ToArray(),
+                Vendors: vendors.Select(x => new VendorSnapshot(x.VendorNumber, x.Name, x.State, x.PaymentTerms, x.OpenBalance, x.Id)).ToArray(),
                 Bills: vendorBills.Select(x => new BillSnapshot(
                     x.BillNumber,
                     vendorNames.GetValueOrDefault(x.VendorId, "Unknown vendor"),
@@ -119,13 +131,14 @@ public sealed class BusinessWorkspaceService(
                     x.DueDate,
                     x.Status,
                     x.TotalAmount,
-                    x.BalanceDue)).ToArray()),
+                    x.BalanceDue,
+                    x.Id)).ToArray()),
             Operations: new OperationsWorkspace(
                 InventoryItemCount: inventoryItems.Count,
                 ReorderAlerts: inventoryItems.Count(x => x.QuantityOnHand <= x.ReorderPoint),
                 OpenSalesOrderCount: salesOrders.Count(x => x.Status is "Open" or "Picking" or "Allocated"),
                 OpenPurchaseOrderCount: purchaseOrders.Count(x => x.Status is "Issued" or "Approved"),
-                InventoryItems: inventoryItems.Select(x => new InventoryItemSnapshot(x.Sku, x.Description, x.UnitPrice, x.QuantityOnHand, x.ReorderPoint)).ToArray(),
+                InventoryItems: inventoryItems.Select(x => new InventoryItemSnapshot(x.Sku, x.Description, x.UnitPrice, x.QuantityOnHand, x.ReorderPoint, x.Id)).ToArray(),
                 SalesOrders: salesOrders.Select(x => new SalesOrderSnapshot(
                     x.OrderNumber,
                     customerNames.GetValueOrDefault(x.CustomerId, "Unknown customer"),
@@ -141,7 +154,19 @@ public sealed class BusinessWorkspaceService(
             Treasury: new TreasuryWorkspace(
                 CashOnHand: bankAccounts.Sum(x => x.CurrentBalance),
                 UnreconciledBalance: bankAccounts.Sum(x => x.UnreconciledAmount),
-                BankAccounts: bankAccounts.Select(x => new BankAccountSnapshot(x.Name, x.AccountNumberMasked, x.CurrentBalance, x.UnreconciledAmount, x.LastReconciledOn)).ToArray()),
+                BankAccounts: bankAccounts.Select(x => new BankAccountSnapshot(x.Name, x.AccountNumberMasked, x.CurrentBalance, x.UnreconciledAmount, x.LastReconciledOn, x.Id, accounts.FirstOrDefault(account => account.Id == x.LedgerAccountId)?.Number ?? "Unmapped", x.LastReconciledBalance)).ToArray(),
+                ReconciliationCandidates: bankEntryCandidates
+                    .Where(entry => entry.BankAccountId is not null)
+                    .Where(entry => entry.PostedOn > bankAccounts.Single(bank => bank.Id == entry.BankAccountId!.Value).LastReconciledOn)
+                    .Select(entry => new BankReconciliationCandidateSnapshot(
+                        entry.BankAccountId!.Value,
+                        entry.Id,
+                        entry.PostedOn,
+                        entry.Reference,
+                        entry.Description,
+                        entry.SourceModule,
+                        bankEntryLines.Where(line => line.JournalEntryId == entry.Id && line.AccountId == bankAccounts.Single(bank => bank.Id == entry.BankAccountId!.Value).LedgerAccountId).Sum(line => line.Debit - line.Credit)))
+                    .ToArray()),
             Payroll: new PayrollWorkspace(
                 ActiveEmployees: employees.Count(x => x.IsActive),
                 MonthlyGross: employees.Where(x => x.IsActive).Sum(x => x.MonthlyBasePay),
@@ -152,7 +177,17 @@ public sealed class BusinessWorkspaceService(
                     x.State,
                     x.PayType,
                     x.MonthlyBasePay,
-                    x.IsActive)).ToArray()),
+                    x.IsActive,
+                    x.Id,
+                    x.FilingStatus,
+                    x.Allowances,
+                    x.AdditionalWithholding,
+                    x.PreTaxBenefitDeductions,
+                    x.PostTaxBenefitDeductions,
+                    string.IsNullOrWhiteSpace(x.ResidenceState) ? x.State : x.ResidenceState,
+                    x.ResidenceCity,
+                    x.WorkCity)).ToArray(),
+                JurisdictionRules: payrollJurisdictionRules.Select(rule => new PayrollJurisdictionRuleSnapshot(rule.Id, rule.ResidenceJurisdiction, rule.WorkJurisdiction, rule.ExemptWorkWithholding, rule.ResidentCreditRate, rule.IsActive, rule.Notes)).ToArray()),
             Projects: new ProjectsWorkspace(
                 OpenJobs: projectJobs.Count(x => x.Status is "Open" or "Billing"),
                 BudgetAmount: projectJobs.Sum(x => x.BudgetAmount),
@@ -217,4 +252,3 @@ public sealed class BusinessWorkspaceService(
         return "***";
     }
 }
-

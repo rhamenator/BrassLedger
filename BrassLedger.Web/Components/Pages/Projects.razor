@@ -1,5 +1,5 @@
 @page "/projects"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageProjects)]
 @inject IBusinessWorkspaceService WorkspaceService
 
 <PageTitle>Projects</PageTitle>

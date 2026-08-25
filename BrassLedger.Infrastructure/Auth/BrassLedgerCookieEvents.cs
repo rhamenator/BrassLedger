@@ -38,6 +38,13 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
         var user = await dbContext.Users
             .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == userId, context.HttpContext.RequestAborted);
+        var currentRole = user is null
+            ? null
+            : await dbContext.AccessRoles.AsNoTracking().SingleOrDefaultAsync(role => role.CompanyId == user.CompanyId && role.IsActive && role.Name == user.Role, context.HttpContext.RequestAborted);
+        var claimedPermissions = context.Principal?.FindAll(BrassLedgerAuthenticationDefaults.PermissionClaimType).Select(claim => claim.Value).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+        var currentPermissions = currentRole is null
+            ? BrassLedgerRoleTemplates.GetPermissionsForRoleName(user?.Role ?? string.Empty).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : currentRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var isValid = user is not null
             && user.IsActive
@@ -45,7 +52,8 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
             && string.Equals(user.SecurityStamp, securityStamp, StringComparison.Ordinal)
             && string.Equals(user.Role, roleValue, StringComparison.Ordinal)
             && Guid.TryParse(companyIdValue, out var companyId)
-            && companyId == user.CompanyId;
+            && companyId == user.CompanyId
+            && claimedPermissions.SetEquals(currentPermissions);
 
         if (isValid)
         {

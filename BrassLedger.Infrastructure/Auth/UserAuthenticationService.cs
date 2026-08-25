@@ -115,17 +115,30 @@ public sealed class UserAuthenticationService(
             "The operator signed in successfully.",
             cancellationToken);
 
-        var permissions = await ResolvePermissionsAsync(dbContext, user, cancellationToken);
+        var membership = await ResolveMembershipAsync(dbContext, user, user.CompanyId, cancellationToken);
+        if (membership is null) return new AuthenticationResult(AuthenticationOutcome.InvalidCredentials);
+        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
 
         return new AuthenticationResult(AuthenticationOutcome.Succeeded, new AuthenticatedUser(
             user.Id,
-            user.CompanyId,
+            membership.CompanyId,
             user.UserName,
             user.DisplayName,
             user.Email,
-            user.Role,
+            membership.Role,
             user.SecurityStamp,
             permissions));
+    }
+
+    public async Task<AuthenticatedUser?> SwitchCompanyAsync(Guid userId, Guid companyId, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var user = await dbContext.Users.SingleOrDefaultAsync(candidate => candidate.Id == userId && candidate.IsActive, cancellationToken);
+        if (user is null) return null;
+        var membership = await ResolveMembershipAsync(dbContext, user, companyId, cancellationToken);
+        if (membership is null) return null;
+        var permissions = await ResolvePermissionsAsync(dbContext, membership.CompanyId, membership.Role, cancellationToken);
+        return new AuthenticatedUser(user.Id, membership.CompanyId, user.UserName, user.DisplayName, user.Email, membership.Role, user.SecurityStamp, permissions);
     }
 
     private static string EnsureSecurityStamp(string currentSecurityStamp)
@@ -137,15 +150,16 @@ public sealed class UserAuthenticationService(
 
     private static async Task<IReadOnlyList<string>> ResolvePermissionsAsync(
         BrassLedgerDbContext dbContext,
-        AppUser user,
+        Guid companyId,
+        string role,
         CancellationToken cancellationToken)
     {
         var accessRole = await dbContext.AccessRoles
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                candidate => candidate.CompanyId == user.CompanyId
+                candidate => candidate.CompanyId == companyId
                     && candidate.IsActive
-                    && candidate.Name == user.Role,
+                    && candidate.Name == role,
                 cancellationToken);
 
         if (accessRole is not null)
@@ -153,7 +167,18 @@ public sealed class UserAuthenticationService(
             return ParsePermissions(accessRole.Permissions);
         }
 
-        return BrassLedgerRoleTemplates.GetPermissionsForRoleName(user.Role);
+        return BrassLedgerRoleTemplates.GetPermissionsForRoleName(role);
+    }
+
+    private static async Task<CompanyMembership?> ResolveMembershipAsync(BrassLedgerDbContext dbContext, AppUser user, Guid companyId, CancellationToken cancellationToken)
+    {
+        var membership = await dbContext.CompanyMemberships.SingleOrDefaultAsync(item => item.UserId == user.Id && item.CompanyId == companyId && item.IsActive, cancellationToken);
+        if (membership is not null) return membership;
+        if (user.CompanyId != companyId) return null;
+        membership = new CompanyMembership { Id = Guid.NewGuid(), UserId = user.Id, CompanyId = user.CompanyId, Role = user.Role, IsOwner = true, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow };
+        dbContext.CompanyMemberships.Add(membership);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return membership;
     }
 
     private static IReadOnlyList<string> ParsePermissions(string permissions)

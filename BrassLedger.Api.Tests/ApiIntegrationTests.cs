@@ -109,6 +109,91 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task TrialBalanceReport_ReturnsCsvForReportingUser()
+    {
+        using var client = await CreateAuthenticatedClientAsync();
+
+        var response = await client.GetAsync("/api/reports/trial-balance.csv");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/csv", response.Content.Headers.ContentType?.MediaType);
+        var csv = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Account,Type,Balance", csv);
+        Assert.Contains("1000", csv);
+    }
+
+    [Fact]
+    public async Task CreateInvoice_PostsAndUpdatesReceivablesWorkspace()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var before = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.NotNull(before);
+        var customer = before!.Receivables.Customers.First();
+
+        var response = await client.PostAsJsonAsync("/api/invoices", new CreateInvoiceRequest(
+            customer.Id,
+            "INV-API-TEST-1",
+            new DateOnly(2026, 5, 1),
+            new DateOnly(2026, 5, 31),
+            125m,
+            0m,
+            "4000",
+            "API workflow test"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var after = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.NotNull(after);
+        Assert.Equal(before.Receivables.OpenBalance + 125m, after!.Receivables.OpenBalance);
+        Assert.Contains(after.Receivables.Invoices, invoice => invoice.InvoiceNumber == "INV-API-TEST-1" && invoice.BalanceDue == 125m);
+
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+        var posting = await dbContext.JournalEntries.SingleAsync(entry => entry.Reference == "INV-API-TEST-1");
+        Assert.NotNull(posting.PostedByUserId);
+        Assert.True(posting.PostedAtUtc > DateTimeOffset.MinValue);
+    }
+
+    [Fact]
+    public async Task QuickBooksOnlineInterchange_ExportsAndImportsCoreLists()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+
+        var export = await client.GetAsync("/api/interchange/quickbooks-online/chart-of-accounts.csv");
+        Assert.Equal(HttpStatusCode.OK, export.StatusCode);
+        var exportedCsv = await export.Content.ReadAsStringAsync();
+        Assert.Contains("\"Name\",\"Type\",\"Detail Type\",\"Number\"", exportedCsv);
+        Assert.Contains("\"Accounts Receivable\",\"Accounts Receivable\",\"Accounts Receivable\",\"1100\"", exportedCsv);
+        Assert.Contains("\"Sales Tax Payable\",\"Other Current Liability\",\"Sales tax payable\",\"2100\"", exportedCsv);
+
+        var token = await client.GetFromJsonAsync<Dictionary<string, string>>("/api/antiforgery/token");
+        Assert.NotNull(token);
+        using var form = new MultipartFormDataContent();
+        form.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        form.Add(new StringContent("Display Name,Company Name,Email,Customer Number\r\n\"QuickBooks\nImport Co\",QuickBooks Import Co,import@example.test,QBO-IMPORT-1"), "file", "quickbooks-customers.csv");
+        var import = await client.PostAsync("/api/interchange/quickbooks-online/customers", form);
+        Assert.True(import.StatusCode == HttpStatusCode.OK, await import.Content.ReadAsStringAsync());
+        var workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.NotNull(workspace);
+        Assert.Contains(workspace!.Receivables.Customers, customer => customer.CustomerNumber == "QBO-IMPORT-1" && customer.Name == "QuickBooks\nImport Co");
+
+        using var journalForm = new MultipartFormDataContent();
+        journalForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        journalForm.Add(new StringContent("Journal Number,Journal Date,Reference,Description,Account Number,Debit,Credit,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,1000,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,4000,0.00,25.00,Revenue"), "file", "quickbooks-journals.csv");
+        var journalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", journalForm);
+        Assert.True(journalImport.StatusCode == HttpStatusCode.OK, await journalImport.Content.ReadAsStringAsync());
+        using var duplicateJournalForm = new MultipartFormDataContent();
+        duplicateJournalForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
+        duplicateJournalForm.Add(new StringContent("Journal Number,Journal Date,Reference,Description,Account Number,Debit,Credit,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,1000,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,4000,0.00,25.00,Revenue"), "file", "quickbooks-journals-retry.csv");
+        var duplicateJournalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", duplicateJournalForm);
+        Assert.Equal(HttpStatusCode.BadRequest, duplicateJournalImport.StatusCode);
+        var journalExport = await client.GetStringAsync("/api/interchange/quickbooks-online/journal-entries.csv");
+        Assert.Contains("QBO-JE-1", journalExport);
+    }
+
     private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null)
     {
         var testFactory = factory ?? _factory;

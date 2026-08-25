@@ -2,6 +2,7 @@ using System.Security.Claims;
 using BrassLedger.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -12,25 +13,30 @@ public static class AuthenticationEndpointRouteBuilderExtensions
 {
     public static IEndpointRouteBuilder MapBrassLedgerAuthenticationEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        Delegate formLoginHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleFormLoginAsync;
-        Delegate formLogoutHandler = (Func<HttpContext, Task<IResult>>)HandleFormLogoutAsync;
-        Delegate bootstrapHandler = (Func<HttpContext, IBootstrapWorkspaceService, Task<IResult>>)HandleBootstrapAsync;
+        Delegate formLoginHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleFormLoginAsync;
+        Delegate formLogoutHandler = (Func<HttpContext, IAntiforgery, Task<IResult>>)HandleFormLogoutAsync;
+        Delegate formSwitchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleFormSwitchCompanyAsync;
+        Delegate bootstrapHandler = (Func<HttpContext, IBootstrapWorkspaceService, IAntiforgery, Task<IResult>>)HandleBootstrapAsync;
         Delegate apiLoginHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleApiLoginAsync;
         Delegate apiLogoutHandler = (Func<HttpContext, Task<IResult>>)HandleApiLogoutAsync;
+        Delegate switchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleSwitchCompanyAsync;
 
         endpoints.MapPost("/account/login", formLoginHandler).AllowAnonymous();
         endpoints.MapPost("/account/logout", formLogoutHandler).RequireAuthorization();
+        endpoints.MapPost("/account/active-company", formSwitchCompanyHandler).RequireAuthorization();
         endpoints.MapPost("/account/bootstrap", bootstrapHandler).AllowAnonymous();
 
         endpoints.MapPost("/api/auth/login", apiLoginHandler).AllowAnonymous();
         endpoints.MapPost("/api/auth/logout", apiLogoutHandler).RequireAuthorization();
         endpoints.MapGet("/api/auth/me", (ClaimsPrincipal principal) => Results.Ok(ToResponse(principal))).RequireAuthorization();
+        endpoints.MapPost("/api/auth/active-company", switchCompanyHandler).RequireAuthorization();
 
         return endpoints;
     }
 
-    private static async Task<IResult> HandleFormLoginAsync(HttpContext context, IUserAuthenticationService authenticationService)
+    private static async Task<IResult> HandleFormLoginAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
     {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         var form = await context.Request.ReadFormAsync();
         var userName = form["userName"].ToString();
         var password = form["password"].ToString();
@@ -95,8 +101,9 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         return Results.Ok(ToResponse(authenticationResult.User));
     }
 
-    private static async Task<IResult> HandleBootstrapAsync(HttpContext context, IBootstrapWorkspaceService bootstrapWorkspaceService)
+    private static async Task<IResult> HandleBootstrapAsync(HttpContext context, IBootstrapWorkspaceService bootstrapWorkspaceService, IAntiforgery antiforgery)
     {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         var form = await context.Request.ReadFormAsync();
         var request = new BootstrapWorkspaceRequest(
             form["companyName"].ToString(),
@@ -130,16 +137,46 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         return Results.LocalRedirect("/");
     }
 
-    private static async Task<IResult> HandleFormLogoutAsync(HttpContext context)
+    private static async Task<IResult> HandleFormLogoutAsync(HttpContext context, IAntiforgery antiforgery)
     {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         await context.SignOutAsync(BrassLedgerAuthenticationDefaults.Scheme);
         return Results.LocalRedirect("/login");
+    }
+
+    private static async Task<IResult> HandleFormSwitchCompanyAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
+    {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
+        var form = await context.Request.ReadFormAsync();
+        var returnUrl = SanitizeReturnUrl(form["returnUrl"].ToString());
+        if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || !Guid.TryParse(form["companyId"].ToString(), out var companyId)) return Results.BadRequest();
+        var user = await authenticationService.SwitchCompanyAsync(userId, companyId, context.RequestAborted);
+        if (user is null) return Results.Forbid();
+        await context.SignInAsync(BrassLedgerAuthenticationDefaults.Scheme, CreatePrincipal(user), CreateAuthenticationProperties());
+        return Results.LocalRedirect(returnUrl);
     }
 
     private static async Task<IResult> HandleApiLogoutAsync(HttpContext context)
     {
         await context.SignOutAsync(BrassLedgerAuthenticationDefaults.Scheme);
         return Results.NoContent();
+    }
+
+    private static async Task<bool> IsAntiforgeryRequestValidAsync(HttpContext context, IAntiforgery antiforgery)
+    {
+        try { await antiforgery.ValidateRequestAsync(context); return true; }
+        catch (AntiforgeryValidationException) { return false; }
+    }
+
+    private static async Task<IResult> HandleSwitchCompanyAsync(HttpContext context, IUserAuthenticationService authenticationService)
+    {
+        var request = await context.Request.ReadFromJsonAsync<SwitchCompanyRequest>(cancellationToken: context.RequestAborted);
+        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (request is null || !Guid.TryParse(userId, out var parsedUserId) || request.CompanyId == Guid.Empty) return Results.BadRequest();
+        var user = await authenticationService.SwitchCompanyAsync(parsedUserId, request.CompanyId, context.RequestAborted);
+        if (user is null) return Results.Forbid();
+        await context.SignInAsync(BrassLedgerAuthenticationDefaults.Scheme, CreatePrincipal(user), CreateAuthenticationProperties());
+        return Results.Ok(ToResponse(user));
     }
 
     private static ClaimsPrincipal CreatePrincipal(AuthenticatedUser authenticatedUser)
@@ -219,4 +256,5 @@ public static class AuthenticationEndpointRouteBuilderExtensions
     }
 
     private sealed record LoginRequest(string UserName, string Password);
+    private sealed record SwitchCompanyRequest(Guid CompanyId);
 }

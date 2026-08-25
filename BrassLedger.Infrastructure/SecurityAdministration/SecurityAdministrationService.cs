@@ -62,6 +62,7 @@ public sealed class SecurityAdministrationService(
 
     public async Task<SecurityOperationResult> CreateRoleAsync(CreateAccessRoleRequest request, CancellationToken cancellationToken = default)
     {
+        if (!CanManage(BrassLedgerPermissions.RoleManage)) return SecurityOperationResult.Failure("You are not authorized to manage roles.");
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             return SecurityOperationResult.Failure("Enter a role name.");
@@ -106,6 +107,7 @@ public sealed class SecurityAdministrationService(
 
     public async Task<SecurityOperationResult> CreateOperatorAsync(CreateOperatorRequest request, CancellationToken cancellationToken = default)
     {
+        if (!CanManage(BrassLedgerPermissions.UserManage)) return SecurityOperationResult.Failure("You are not authorized to manage operator accounts.");
         if (string.IsNullOrWhiteSpace(request.UserName))
         {
             return SecurityOperationResult.Failure("Enter a username.");
@@ -142,9 +144,11 @@ public sealed class SecurityAdministrationService(
         await EnsureBuiltInRolesAsync(dbContext, companyId, cancellationToken);
 
         var trimmedUserName = request.UserName.Trim();
-        if (await dbContext.Users.AnyAsync(user => user.UserName == trimmedUserName, cancellationToken))
+        if (await dbContext.Users.AnyAsync(
+                user => user.UserName.ToUpper() == trimmedUserName.ToUpper(),
+                cancellationToken))
         {
-            return SecurityOperationResult.Failure("That username is already in use.");
+            return SecurityOperationResult.Failure("That username is already in use (usernames are case-insensitive).");
         }
 
         var role = await dbContext.AccessRoles
@@ -229,17 +233,28 @@ public sealed class SecurityAdministrationService(
 
     private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
     {
-        var claimValue = httpContextAccessor.HttpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
+        var httpContext = httpContextAccessor.HttpContext;
+        var claimValue = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         if (Guid.TryParse(claimValue, out var companyId))
         {
             return companyId;
         }
 
+        if (httpContext is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
         return await dbContext.Companies
             .AsNoTracking()
             .OrderBy(company => company.Name)
             .Select(company => company.Id)
             .FirstAsync(cancellationToken);
+    }
+
+    private bool CanManage(string permission)
+    {
+        var user = httpContextAccessor.HttpContext?.User;
+        return user is null
+            || user.IsInRole("Administrator")
+            || user.IsInRole("Owner/CEO")
+            || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission);
     }
 
     private static IReadOnlyList<string> ParsePermissions(string permissions)

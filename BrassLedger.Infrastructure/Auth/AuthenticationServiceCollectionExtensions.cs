@@ -30,12 +30,35 @@ public static class AuthenticationServiceCollectionExtensions
 
         services.AddAuthorization(options =>
         {
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ViewWorkspace, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.WorkspaceView));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageLedger, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.LedgerManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageReceivables, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManagePayables, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageOperations, policy =>
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage)));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManagePayroll, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageProjects, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectsManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageReporting, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManagePublishing, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PublishManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageUsers, policy =>
+                policy.RequireAssertion(context => IsSystemAdministrator(context.User) || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageRoles, policy =>
+                policy.RequireAssertion(context => IsSystemAdministrator(context.User) || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage)));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.AdministerSystem, policy =>
             {
                 policy.RequireAuthenticatedUser();
                 policy.RequireAssertion(context =>
-                    context.User.IsInRole("Administrator")
-                    || context.User.IsInRole("Owner/CEO")
+                    IsSystemAdministrator(context.User)
                     || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage)
                     || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage));
             });
@@ -52,4 +75,7 @@ public static class AuthenticationServiceCollectionExtensions
 
         return services;
     }
+
+    private static bool IsSystemAdministrator(System.Security.Claims.ClaimsPrincipal user) =>
+        user.IsInRole("Administrator") || user.IsInRole("Owner/CEO");
 }

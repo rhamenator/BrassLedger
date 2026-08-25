@@ -8,4 +8,5 @@ public interface IUserAuthenticationService
         string ipAddress,
         string userAgent,
         CancellationToken cancellationToken = default);
+    Task<AuthenticatedUser?> SwitchCompanyAsync(Guid userId, Guid companyId, CancellationToken cancellationToken = default);
 }

@@ -63,12 +63,22 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddHttpContextAccessor();
+        services.AddHttpClient("TaxSourceCapture", client => client.Timeout = TimeSpan.FromSeconds(45))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddSingleton(new BrassLedgerStoragePaths(dataDirectory, keysDirectory));
         services.AddSingleton(Options.Create(BuildBootstrapOptions(configuration, seedSampleData)));
         services.AddSingleton<ISensitiveDataProtector, SensitiveDataProtector>();
         services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
         services.AddScoped<IUserAuthenticationService, UserAuthenticationService>();
         services.AddScoped<IBootstrapWorkspaceService, BootstrapWorkspaceService>();
         services.AddScoped<IBusinessWorkspaceService, BusinessWorkspaceService>();
+        services.AddScoped<ICompanyManagementService, CompanyManagementService>();
+        services.AddScoped<IConsolidationService, ConsolidationService>();
+        services.AddScoped<IAccountingPeriodService, AccountingPeriodService>();
+        services.AddScoped<IBackupService, BackupService>();
+        services.AddScoped<IIntegrationService, IntegrationService>();
+        services.AddScoped<IAccountingTransactionService, AccountingTransactionService>();
+        services.AddScoped<IAccountingInterchangeService, QuickBooksOnlineInterchangeService>();
         services.AddScoped<ISecurityAdministrationService, SecurityAdministrationService>();
         services.AddScoped<ITaxAdministrationService, TaxAdministrationService>();
         services.AddScoped<IFakeDataPopulationService, FakeDataPopulationService>();
@@ -83,11 +93,17 @@ public static class ServiceCollectionExtensions
         var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<AppUser>>();
         var bootstrapOptions = scope.ServiceProvider.GetRequiredService<IOptions<BootstrapOptions>>().Value;
+        // Force creation of the persisted key ring during initialization, before the first backup can run.
+        _ = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>()
+            .CreateProtector("BrassLedger.KeyRingInitialization.v1")
+            .Protect("initialized");
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await dbContext.Database.EnsureCreatedAsync(cancellationToken);
         await EnsureLegacySchemaCompatibilityAsync(dbContext, cancellationToken);
+        await EnsureCaseInsensitiveUserNameUniquenessAsync(dbContext, cancellationToken);
         await BrassLedgerSeedData.SeedAsync(dbContext, passwordHasher, bootstrapOptions, cancellationToken);
+        await DefaultAccountingSetup.EnsureMinimumSetupAsync(dbContext, cancellationToken);
     }
 
     private static BootstrapOptions BuildBootstrapOptions(IConfiguration configuration, bool seedSampleData)
@@ -181,6 +197,26 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync(
                 @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccessRoles_CompanyId_Name"" ON ""AccessRoles"" (""CompanyId"", ""Name"");",
                 cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""CompanyMemberships"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""UserId"" TEXT NOT NULL, ""CompanyId"" TEXT NOT NULL, ""Role"" TEXT NOT NULL, ""IsOwner"" INTEGER NOT NULL, ""IsActive"" INTEGER NOT NULL, ""GrantedAtUtc"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CompanyMemberships_UserId_CompanyId"" ON ""CompanyMemberships"" (""UserId"", ""CompanyId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""AccountingPeriods"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""StartsOn"" TEXT NOT NULL, ""EndsOn"" TEXT NOT NULL, ""Status"" TEXT NOT NULL, ""ClosedByUserId"" TEXT NULL, ""ClosedAtUtc"" TEXT NULL, ""Notes"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccountingPeriods_CompanyId_StartsOn_EndsOn"" ON ""AccountingPeriods"" (""CompanyId"", ""StartsOn"", ""EndsOn"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""BusinessAuditEntries"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""UserId"" TEXT NULL, ""Action"" TEXT NOT NULL, ""EntityType"" TEXT NOT NULL, ""EntityId"" TEXT NULL, ""DetailJson"" TEXT NOT NULL, ""OccurredAtUtc"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_BusinessAuditEntries_CompanyId_OccurredAtUtc"" ON ""BusinessAuditEntries"" (""CompanyId"", ""OccurredAtUtc"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""IntegrationConnections"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""ProviderCode"" TEXT NOT NULL, ""Name"" TEXT NOT NULL, ""Status"" TEXT NOT NULL, ""SettingsJson"" TEXT NOT NULL, ""CredentialsJson"" TEXT NOT NULL, ""LastValidatedAtUtc"" TEXT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_IntegrationConnections_CompanyId_ProviderCode_Name"" ON ""IntegrationConnections"" (""CompanyId"", ""ProviderCode"", ""Name"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""InventoryTransactions"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""InventoryItemId"" TEXT NOT NULL, ""OccurredOn"" TEXT NOT NULL, ""TransactionType"" TEXT NOT NULL, ""QuantityChange"" TEXT NOT NULL, ""UnitCost"" TEXT NOT NULL, ""TotalCost"" TEXT NOT NULL, ""Reference"" TEXT NOT NULL, ""JournalEntryId"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_InventoryTransactions_CompanyId_InventoryItemId_OccurredOn"" ON ""InventoryTransactions"" (""CompanyId"", ""InventoryItemId"", ""OccurredOn"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""CurrencyExchangeRates"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""BaseCurrency"" TEXT NOT NULL, ""QuoteCurrency"" TEXT NOT NULL, ""Rate"" TEXT NOT NULL, ""EffectiveOn"" TEXT NOT NULL, ""Source"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CurrencyExchangeRates_CompanyId_BaseCurrency_QuoteCurrency_EffectiveOn"" ON ""CurrencyExchangeRates"" (""CompanyId"", ""BaseCurrency"", ""QuoteCurrency"", ""EffectiveOn"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""ConsolidationGroups"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""Name"" TEXT NOT NULL, ""ReportingCurrency"" TEXT NOT NULL, ""IsActive"" INTEGER NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_ConsolidationGroups_CompanyId_Name"" ON ""ConsolidationGroups"" (""CompanyId"", ""Name"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""ConsolidationGroupCompanies"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""ConsolidationGroupId"" TEXT NOT NULL, ""MemberCompanyId"" TEXT NOT NULL, ""OwnershipPercentage"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_ConsolidationGroupCompanies_ConsolidationGroupId_MemberCompanyId"" ON ""ConsolidationGroupCompanies"" (""ConsolidationGroupId"", ""MemberCompanyId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""BankReconciliations"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""BankAccountId"" TEXT NOT NULL, ""StatementDate"" TEXT NOT NULL, ""StatementClosingBalance"" TEXT NOT NULL, ""BookBalance"" TEXT NOT NULL, ""ReconciledByUserId"" TEXT NULL, ""ReconciledAtUtc"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_BankReconciliations_BankAccountId_StatementDate"" ON ""BankReconciliations"" (""BankAccountId"", ""StatementDate"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""BankReconciliationItems"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""BankReconciliationId"" TEXT NOT NULL, ""JournalEntryId"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_BankReconciliationItems_BankReconciliationId_JournalEntryId"" ON ""BankReconciliationItems"" (""BankReconciliationId"", ""JournalEntryId"");", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Users", "UserName", @"ALTER TABLE ""Users"" ADD COLUMN ""UserName"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Users", "PasswordHash", @"ALTER TABLE ""Users"" ADD COLUMN ""PasswordHash"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Users", "SecurityStamp", @"ALTER TABLE ""Users"" ADD COLUMN ""SecurityStamp"" TEXT NOT NULL DEFAULT '';", cancellationToken);
@@ -189,6 +225,17 @@ public static class ServiceCollectionExtensions
             await EnsureSqliteColumnAsync(dbContext, "Users", "LockoutEndUtc", @"ALTER TABLE ""Users"" ADD COLUMN ""LockoutEndUtc"" TEXT NULL;", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Users", "LastSuccessfulSignInUtc", @"ALTER TABLE ""Users"" ADD COLUMN ""LastSuccessfulSignInUtc"" TEXT NULL;", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "Users", "LastPasswordChangedUtc", @"ALTER TABLE ""Users"" ADD COLUMN ""LastPasswordChangedUtc"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "BankAccounts", "LedgerAccountId", @"ALTER TABLE ""BankAccounts"" ADD COLUMN ""LedgerAccountId"" TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "BankAccounts", "LastReconciledBalance", @"ALTER TABLE ""BankAccounts"" ADD COLUMN ""LastReconciledBalance"" TEXT NOT NULL DEFAULT '0';", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"UPDATE ""BankAccounts"" SET ""LastReconciledBalance"" = ""CurrentBalance"" WHERE ""LastReconciledBalance"" = 0 AND ""CurrentBalance"" <> 0 AND NOT EXISTS (SELECT 1 FROM ""BankReconciliations"" WHERE ""BankReconciliations"".""BankAccountId"" = ""BankAccounts"".""Id"");", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "PostedByUserId", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""PostedByUserId"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "PostedAtUtc", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""PostedAtUtc"" TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "BankAccountId", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""BankAccountId"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "SourceDocumentId", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""SourceDocumentId"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "SourceDocumentType", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""SourceDocumentType"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "SalesInvoices", "ConcurrencyToken", @"ALTER TABLE ""SalesInvoices"" ADD COLUMN ""ConcurrencyToken"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "VendorBills", "ConcurrencyToken", @"ALTER TABLE ""VendorBills"" ADD COLUMN ""ConcurrencyToken"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "BankAccounts", "ConcurrencyToken", @"ALTER TABLE ""BankAccounts"" ADD COLUMN ""ConcurrencyToken"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 @"CREATE TABLE IF NOT EXISTS ""AuthenticationAuditEntries"" (
                     ""Id"" TEXT NOT NULL CONSTRAINT ""PK_AuthenticationAuditEntries"" PRIMARY KEY,
@@ -272,6 +319,36 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync(
                 @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxFormRequirements_TaxRuleSetId_FormCode"" ON ""TaxFormRequirements"" (""TaxRuleSetId"", ""FormCode"");",
                 cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "TaxContentPackageId", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""TaxContentPackageId"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "ContentVersion", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""ContentVersion"" TEXT NOT NULL DEFAULT '1.0';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "MinimumEngineVersion", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""MinimumEngineVersion"" TEXT NOT NULL DEFAULT '1.0';", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxContentPackages"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""PackageCode"" TEXT NOT NULL, ""Version"" TEXT NOT NULL, ""EffectiveOn"" TEXT NOT NULL, ""Status"" TEXT NOT NULL, ""MinimumEngineVersion"" TEXT NOT NULL, ""ManifestJson"" TEXT NOT NULL, ""Source"" TEXT NOT NULL, ""ChangeSummary"" TEXT NOT NULL, ""CreatedAtUtc"" TEXT NOT NULL, ""ApprovedAtUtc"" TEXT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxContentPackages_CompanyId_PackageCode_Version"" ON ""TaxContentPackages"" (""CompanyId"", ""PackageCode"", ""Version"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxSourceCaptures"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""TaxContentPackageId"" TEXT NULL, ""SourceKind"" TEXT NOT NULL, ""JurisdictionCode"" TEXT NOT NULL, ""SourceUrl"" TEXT NOT NULL, ""ContentType"" TEXT NOT NULL, ""ContentSha256"" TEXT NOT NULL, ""RawContent"" TEXT NOT NULL, ""CapturedAtUtc"" TEXT NOT NULL, ""Notes"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_TaxSourceCaptures_CompanyId_CapturedAtUtc"" ON ""TaxSourceCaptures"" (""CompanyId"", ""CapturedAtUtc"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxRuleFieldDefinitions"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""TaxRuleSetId"" TEXT NOT NULL, ""FieldCode"" TEXT NOT NULL, ""Label"" TEXT NOT NULL, ""DataType"" TEXT NOT NULL, ""IsRequired"" INTEGER NOT NULL, ""DefaultValueJson"" TEXT NOT NULL, ""ValidationJson"" TEXT NOT NULL, ""DisplayOrder"" INTEGER NOT NULL, ""HelpText"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxRuleFieldDefinitions_TaxRuleSetId_FieldCode"" ON ""TaxRuleFieldDefinitions"" (""TaxRuleSetId"", ""FieldCode"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxRuleTestCases"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""TaxRuleSetId"" TEXT NOT NULL, ""Name"" TEXT NOT NULL, ""InputJson"" TEXT NOT NULL, ""ExpectedOutputJson"" TEXT NOT NULL, ""IsRequiredForActivation"" INTEGER NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxRuleTestCases_TaxRuleSetId_Name"" ON ""TaxRuleTestCases"" (""TaxRuleSetId"", ""Name"");", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "FilingStatus", @"ALTER TABLE ""Employees"" ADD COLUMN ""FilingStatus"" TEXT NOT NULL DEFAULT 'Single';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "Allowances", @"ALTER TABLE ""Employees"" ADD COLUMN ""Allowances"" INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "AdditionalWithholding", @"ALTER TABLE ""Employees"" ADD COLUMN ""AdditionalWithholding"" TEXT NOT NULL DEFAULT '0';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "PreTaxBenefitDeductions", @"ALTER TABLE ""Employees"" ADD COLUMN ""PreTaxBenefitDeductions"" TEXT NOT NULL DEFAULT '0';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "PostTaxBenefitDeductions", @"ALTER TABLE ""Employees"" ADD COLUMN ""PostTaxBenefitDeductions"" TEXT NOT NULL DEFAULT '0';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "ResidenceState", @"ALTER TABLE ""Employees"" ADD COLUMN ""ResidenceState"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "ResidenceCity", @"ALTER TABLE ""Employees"" ADD COLUMN ""ResidenceCity"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "Employees", "WorkCity", @"ALTER TABLE ""Employees"" ADD COLUMN ""WorkCity"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxProfiles", "AnnualWageBase", @"ALTER TABLE ""TaxProfiles"" ADD COLUMN ""AnnualWageBase"" TEXT NULL;", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollRuns"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""BankAccountId"" TEXT NOT NULL, ""PayDate"" TEXT NOT NULL, ""Reference"" TEXT NOT NULL, ""GrossPayroll"" TEXT NOT NULL, ""PreTaxDeductions"" TEXT NOT NULL, ""EmployeeWithholdings"" TEXT NOT NULL, ""PostTaxDeductions"" TEXT NOT NULL, ""EmployerPayrollTaxes"" TEXT NOT NULL, ""NetPay"" TEXT NOT NULL, ""PostedAtUtc"" TEXT NOT NULL);", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "PayrollRuns", "TaxContentSnapshotJson", @"ALTER TABLE ""PayrollRuns"" ADD COLUMN ""TaxContentSnapshotJson"" TEXT NOT NULL DEFAULT '[]';", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollRuns_CompanyId_Reference"" ON ""PayrollRuns"" (""CompanyId"", ""Reference"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollRunEmployeeLines"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""PayrollRunId"" TEXT NOT NULL, ""EmployeeId"" TEXT NOT NULL, ""WorkState"" TEXT NOT NULL, ""FilingStatus"" TEXT NOT NULL, ""GrossPay"" TEXT NOT NULL, ""PreTaxDeductions"" TEXT NOT NULL, ""EmployeeWithholdings"" TEXT NOT NULL, ""PostTaxDeductions"" TEXT NOT NULL, ""EmployerPayrollTaxes"" TEXT NOT NULL, ""NetPay"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollRunEmployeeLines_PayrollRunId_EmployeeId"" ON ""PayrollRunEmployeeLines"" (""PayrollRunId"", ""EmployeeId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollJurisdictionRules"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""ResidenceJurisdiction"" TEXT NOT NULL, ""WorkJurisdiction"" TEXT NOT NULL, ""ExemptWorkWithholding"" INTEGER NOT NULL, ""ResidentCreditRate"" TEXT NOT NULL, ""IsActive"" INTEGER NOT NULL, ""Notes"" TEXT NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollJurisdictionRules_CompanyId_ResidenceJurisdiction_WorkJurisdiction"" ON ""PayrollJurisdictionRules"" (""CompanyId"", ""ResidenceJurisdiction"", ""WorkJurisdiction"");", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "PayrollRunEmployeeLines", "WorkCity", @"ALTER TABLE ""PayrollRunEmployeeLines"" ADD COLUMN ""WorkCity"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "PayrollRunEmployeeLines", "ResidenceState", @"ALTER TABLE ""PayrollRunEmployeeLines"" ADD COLUMN ""ResidenceState"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "PayrollRunEmployeeLines", "ResidenceCity", @"ALTER TABLE ""PayrollRunEmployeeLines"" ADD COLUMN ""ResidenceCity"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             return;
         }
 
@@ -292,8 +369,40 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync(
                 @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccessRoles_CompanyId_Name"" ON ""AccessRoles"" (""CompanyId"", ""Name"");",
                 cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""CompanyMemberships"" (""Id"" uuid NOT NULL PRIMARY KEY, ""UserId"" uuid NOT NULL, ""CompanyId"" uuid NOT NULL, ""Role"" text NOT NULL, ""IsOwner"" boolean NOT NULL, ""IsActive"" boolean NOT NULL, ""GrantedAtUtc"" timestamptz NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CompanyMemberships_UserId_CompanyId"" ON ""CompanyMemberships"" (""UserId"", ""CompanyId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""AccountingPeriods"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""StartsOn"" date NOT NULL, ""EndsOn"" date NOT NULL, ""Status"" text NOT NULL, ""ClosedByUserId"" uuid NULL, ""ClosedAtUtc"" timestamptz NULL, ""Notes"" text NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccountingPeriods_CompanyId_StartsOn_EndsOn"" ON ""AccountingPeriods"" (""CompanyId"", ""StartsOn"", ""EndsOn"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""BusinessAuditEntries"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""UserId"" uuid NULL, ""Action"" text NOT NULL, ""EntityType"" text NOT NULL, ""EntityId"" uuid NULL, ""DetailJson"" text NOT NULL, ""OccurredAtUtc"" timestamptz NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_BusinessAuditEntries_CompanyId_OccurredAtUtc"" ON ""BusinessAuditEntries"" (""CompanyId"", ""OccurredAtUtc"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""IntegrationConnections"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""ProviderCode"" text NOT NULL, ""Name"" text NOT NULL, ""Status"" text NOT NULL, ""SettingsJson"" text NOT NULL, ""CredentialsJson"" text NOT NULL, ""LastValidatedAtUtc"" timestamptz NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_IntegrationConnections_CompanyId_ProviderCode_Name"" ON ""IntegrationConnections"" (""CompanyId"", ""ProviderCode"", ""Name"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""InventoryTransactions"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""InventoryItemId"" uuid NOT NULL, ""OccurredOn"" date NOT NULL, ""TransactionType"" text NOT NULL, ""QuantityChange"" numeric(18,2) NOT NULL, ""UnitCost"" numeric(18,2) NOT NULL, ""TotalCost"" numeric(18,2) NOT NULL, ""Reference"" text NOT NULL, ""JournalEntryId"" uuid NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_InventoryTransactions_CompanyId_InventoryItemId_OccurredOn"" ON ""InventoryTransactions"" (""CompanyId"", ""InventoryItemId"", ""OccurredOn"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""CurrencyExchangeRates"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""BaseCurrency"" text NOT NULL, ""QuoteCurrency"" text NOT NULL, ""Rate"" numeric(18,8) NOT NULL, ""EffectiveOn"" date NOT NULL, ""Source"" text NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CurrencyExchangeRates_CompanyId_BaseCurrency_QuoteCurrency_EffectiveOn"" ON ""CurrencyExchangeRates"" (""CompanyId"", ""BaseCurrency"", ""QuoteCurrency"", ""EffectiveOn"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""ConsolidationGroups"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""Name"" text NOT NULL, ""ReportingCurrency"" text NOT NULL, ""IsActive"" boolean NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_ConsolidationGroups_CompanyId_Name"" ON ""ConsolidationGroups"" (""CompanyId"", ""Name"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""ConsolidationGroupCompanies"" (""Id"" uuid NOT NULL PRIMARY KEY, ""ConsolidationGroupId"" uuid NOT NULL, ""MemberCompanyId"" uuid NOT NULL, ""OwnershipPercentage"" numeric(9,6) NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_ConsolidationGroupCompanies_ConsolidationGroupId_MemberCompanyId"" ON ""ConsolidationGroupCompanies"" (""ConsolidationGroupId"", ""MemberCompanyId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""BankReconciliations"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""BankAccountId"" uuid NOT NULL, ""StatementDate"" date NOT NULL, ""StatementClosingBalance"" numeric(18,2) NOT NULL, ""BookBalance"" numeric(18,2) NOT NULL, ""ReconciledByUserId"" uuid NULL, ""ReconciledAtUtc"" timestamptz NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_BankReconciliations_BankAccountId_StatementDate"" ON ""BankReconciliations"" (""BankAccountId"", ""StatementDate"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""BankReconciliationItems"" (""Id"" uuid NOT NULL PRIMARY KEY, ""BankReconciliationId"" uuid NOT NULL, ""JournalEntryId"" uuid NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_BankReconciliationItems_BankReconciliationId_JournalEntryId"" ON ""BankReconciliationItems"" (""BankReconciliationId"", ""JournalEntryId"");", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "UserName" text NOT NULL DEFAULT '';""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "BankAccounts" ADD COLUMN IF NOT EXISTS "LastReconciledBalance" numeric(18,2) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "SourceDocumentId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "SourceDocumentType" text NOT NULL DEFAULT '';""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """UPDATE "BankAccounts" SET "LastReconciledBalance" = "CurrentBalance" WHERE "LastReconciledBalance" = 0 AND "CurrentBalance" <> 0 AND NOT EXISTS (SELECT 1 FROM "BankReconciliations" WHERE "BankReconciliations"."BankAccountId" = "BankAccounts"."Id");""",
                 cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "PasswordHash" text NOT NULL DEFAULT '';""",
@@ -316,6 +425,21 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "LastPasswordChangedUtc" timestamptz NULL;""",
                 cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "BankAccounts" ADD COLUMN IF NOT EXISTS "LedgerAccountId" uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "PostedByUserId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "PostedAtUtc" timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00+00:00';""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "BankAccountId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "SalesInvoices" ADD COLUMN IF NOT EXISTS "ConcurrencyToken" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "VendorBills" ADD COLUMN IF NOT EXISTS "ConcurrencyToken" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "BankAccounts" ADD COLUMN IF NOT EXISTS "ConcurrencyToken" text NOT NULL DEFAULT '';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 @"CREATE TABLE IF NOT EXISTS ""AuthenticationAuditEntries"" (
                     ""Id"" uuid NOT NULL PRIMARY KEY,
@@ -399,6 +523,67 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync(
                 @"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxFormRequirements_TaxRuleSetId_FormCode"" ON ""TaxFormRequirements"" (""TaxRuleSetId"", ""FormCode"");",
                 cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "TaxContentPackageId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "ContentVersion" text NOT NULL DEFAULT '1.0';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "MinimumEngineVersion" text NOT NULL DEFAULT '1.0';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxContentPackages"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""PackageCode"" text NOT NULL, ""Version"" text NOT NULL, ""EffectiveOn"" date NOT NULL, ""Status"" text NOT NULL, ""MinimumEngineVersion"" text NOT NULL, ""ManifestJson"" text NOT NULL, ""Source"" text NOT NULL, ""ChangeSummary"" text NOT NULL, ""CreatedAtUtc"" timestamptz NOT NULL, ""ApprovedAtUtc"" timestamptz NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxContentPackages_CompanyId_PackageCode_Version"" ON ""TaxContentPackages"" (""CompanyId"", ""PackageCode"", ""Version"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxSourceCaptures"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""TaxContentPackageId"" uuid NULL, ""SourceKind"" text NOT NULL, ""JurisdictionCode"" text NOT NULL, ""SourceUrl"" text NOT NULL, ""ContentType"" text NOT NULL, ""ContentSha256"" text NOT NULL, ""RawContent"" text NOT NULL, ""CapturedAtUtc"" timestamptz NOT NULL, ""Notes"" text NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_TaxSourceCaptures_CompanyId_CapturedAtUtc"" ON ""TaxSourceCaptures"" (""CompanyId"", ""CapturedAtUtc"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxRuleFieldDefinitions"" (""Id"" uuid NOT NULL PRIMARY KEY, ""TaxRuleSetId"" uuid NOT NULL, ""FieldCode"" text NOT NULL, ""Label"" text NOT NULL, ""DataType"" text NOT NULL, ""IsRequired"" boolean NOT NULL, ""DefaultValueJson"" text NOT NULL, ""ValidationJson"" text NOT NULL, ""DisplayOrder"" integer NOT NULL, ""HelpText"" text NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxRuleFieldDefinitions_TaxRuleSetId_FieldCode"" ON ""TaxRuleFieldDefinitions"" (""TaxRuleSetId"", ""FieldCode"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxRuleTestCases"" (""Id"" uuid NOT NULL PRIMARY KEY, ""TaxRuleSetId"" uuid NOT NULL, ""Name"" text NOT NULL, ""InputJson"" text NOT NULL, ""ExpectedOutputJson"" text NOT NULL, ""IsRequiredForActivation"" boolean NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxRuleTestCases_TaxRuleSetId_Name"" ON ""TaxRuleTestCases"" (""TaxRuleSetId"", ""Name"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "FilingStatus" text NOT NULL DEFAULT 'Single';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "Allowances" integer NOT NULL DEFAULT 0;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "AdditionalWithholding" numeric(18,2) NOT NULL DEFAULT 0;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "PreTaxBenefitDeductions" numeric(18,2) NOT NULL DEFAULT 0;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "PostTaxBenefitDeductions" numeric(18,2) NOT NULL DEFAULT 0;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "ResidenceState" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "ResidenceCity" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Employees" ADD COLUMN IF NOT EXISTS "WorkCity" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxProfiles" ADD COLUMN IF NOT EXISTS "AnnualWageBase" numeric(18,2) NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollRuns"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""BankAccountId"" uuid NOT NULL, ""PayDate"" date NOT NULL, ""Reference"" text NOT NULL, ""GrossPayroll"" numeric(18,2) NOT NULL, ""PreTaxDeductions"" numeric(18,2) NOT NULL, ""EmployeeWithholdings"" numeric(18,2) NOT NULL, ""PostTaxDeductions"" numeric(18,2) NOT NULL, ""EmployerPayrollTaxes"" numeric(18,2) NOT NULL, ""NetPay"" numeric(18,2) NOT NULL, ""PostedAtUtc"" timestamptz NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "PayrollRuns" ADD COLUMN IF NOT EXISTS "TaxContentSnapshotJson" text NOT NULL DEFAULT '[]';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollRuns_CompanyId_Reference"" ON ""PayrollRuns"" (""CompanyId"", ""Reference"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollRunEmployeeLines"" (""Id"" uuid NOT NULL PRIMARY KEY, ""PayrollRunId"" uuid NOT NULL, ""EmployeeId"" uuid NOT NULL, ""WorkState"" text NOT NULL, ""FilingStatus"" text NOT NULL, ""GrossPay"" numeric(18,2) NOT NULL, ""PreTaxDeductions"" numeric(18,2) NOT NULL, ""EmployeeWithholdings"" numeric(18,2) NOT NULL, ""PostTaxDeductions"" numeric(18,2) NOT NULL, ""EmployerPayrollTaxes"" numeric(18,2) NOT NULL, ""NetPay"" numeric(18,2) NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollRunEmployeeLines_PayrollRunId_EmployeeId"" ON ""PayrollRunEmployeeLines"" (""PayrollRunId"", ""EmployeeId"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""PayrollJurisdictionRules"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""ResidenceJurisdiction"" text NOT NULL, ""WorkJurisdiction"" text NOT NULL, ""ExemptWorkWithholding"" boolean NOT NULL, ""ResidentCreditRate"" numeric(9,5) NOT NULL, ""IsActive"" boolean NOT NULL, ""Notes"" text NOT NULL);", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PayrollJurisdictionRules_CompanyId_ResidenceJurisdiction_WorkJurisdiction"" ON ""PayrollJurisdictionRules"" (""CompanyId"", ""ResidenceJurisdiction"", ""WorkJurisdiction"");", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "PayrollRunEmployeeLines" ADD COLUMN IF NOT EXISTS "WorkCity" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "PayrollRunEmployeeLines" ADD COLUMN IF NOT EXISTS "ResidenceState" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "PayrollRunEmployeeLines" ADD COLUMN IF NOT EXISTS "ResidenceCity" text NOT NULL DEFAULT '';""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureCaseInsensitiveUserNameUniquenessAsync(
+        BrassLedgerDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var duplicateUserNames = await dbContext.Users
+            .AsNoTracking()
+            .GroupBy(user => user.UserName.ToUpper())
+            .AnyAsync(group => group.Count() > 1, cancellationToken);
+
+        if (duplicateUserNames)
+        {
+            throw new InvalidOperationException(
+                "BrassLedger cannot start because two operator usernames differ only by letter case. Rename one of the duplicate accounts before restarting.");
+        }
+
+        if (dbContext.Database.IsSqlite())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Users_UserName_CaseInsensitive" ON "Users" ("UserName" COLLATE NOCASE);""",
+                cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Users_UserName_CaseInsensitive" ON "Users" (LOWER("UserName"));""",
+                cancellationToken);
         }
     }
 
@@ -442,4 +627,3 @@ public static class ServiceCollectionExtensions
         }
     }
 }
-

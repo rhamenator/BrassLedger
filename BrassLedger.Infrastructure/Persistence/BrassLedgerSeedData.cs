@@ -57,10 +57,13 @@ internal static class BrassLedgerSeedData
 
         var accounts = new[]
         {
-            new GeneralLedgerAccount { Id = Guid.Parse("945d6fcb-28fb-427c-9910-1d2ae0c90f0b"), CompanyId = CompanyId, Number = "1000", Name = "Operating Cash", Type = AccountType.Asset, CurrentBalance = 112540.32m, IsControlAccount = false, IsActive = true },
+            new GeneralLedgerAccount { Id = Guid.Parse("945d6fcb-28fb-427c-9910-1d2ae0c90f0b"), CompanyId = CompanyId, Number = "1000", Name = "Operating Cash", Type = AccountType.Asset, CurrentBalance = 96580.11m, IsControlAccount = false, IsActive = true },
+            new GeneralLedgerAccount { Id = Guid.Parse("9de93f5f-b061-44c8-9c63-3b6e6bdb982b"), CompanyId = CompanyId, Number = "1010", Name = "Payroll Clearing", Type = AccountType.Asset, CurrentBalance = 15960.21m, IsControlAccount = false, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("bdb4983d-0b35-44ab-a9f0-723b9184d288"), CompanyId = CompanyId, Number = "1100", Name = "Accounts Receivable", Type = AccountType.Asset, CurrentBalance = 48215.90m, IsControlAccount = true, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("7d7fd728-81de-4ad4-b417-77ad7193882f"), CompanyId = CompanyId, Number = "1200", Name = "Inventory Asset", Type = AccountType.Asset, CurrentBalance = 27680.15m, IsControlAccount = true, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("7b2df519-fd50-4ca5-8704-6bfbe83cf322"), CompanyId = CompanyId, Number = "2000", Name = "Accounts Payable", Type = AccountType.Liability, CurrentBalance = 31844.77m, IsControlAccount = true, IsActive = true },
+            new GeneralLedgerAccount { Id = Guid.Parse("0c34d5fd-6946-4dd6-8e55-d1c784a6ace8"), CompanyId = CompanyId, Number = "2100", Name = "Sales Tax Payable", Type = AccountType.Liability, CurrentBalance = 0m, IsControlAccount = true, IsActive = true },
+            new GeneralLedgerAccount { Id = Guid.Parse("6e7d8f0a-4e9a-4c5e-9a9a-96e2e3d33de2"), CompanyId = CompanyId, Number = "2200", Name = "Payroll Liabilities", Type = AccountType.Liability, CurrentBalance = 0m, IsControlAccount = true, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("01d8733f-fac4-47c7-b31c-c6585e97ff40"), CompanyId = CompanyId, Number = "3000", Name = "Owner Equity", Type = AccountType.Equity, CurrentBalance = 95000.00m, IsControlAccount = false, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("8218f913-99cc-41f1-9d13-952de1911091"), CompanyId = CompanyId, Number = "4000", Name = "Product Revenue", Type = AccountType.Revenue, CurrentBalance = 640225.18m, IsControlAccount = false, IsActive = true },
             new GeneralLedgerAccount { Id = Guid.Parse("2dc7fd59-72b4-447a-8718-a08fef58b2db"), CompanyId = CompanyId, Number = "5100", Name = "Cost of Goods Sold", Type = AccountType.Expense, CurrentBalance = 354901.45m, IsControlAccount = false, IsActive = true },
@@ -123,8 +126,8 @@ internal static class BrassLedgerSeedData
 
         var bankAccounts = new[]
         {
-            new BankAccount { Id = Guid.Parse("3f98e4ef-6591-433f-8d5f-0c065c42fa3f"), CompanyId = CompanyId, Name = "Primary Operating", AccountNumberMasked = "****1044", CurrentBalance = 96580.11m, UnreconciledAmount = 1840.60m, LastReconciledOn = new DateOnly(2026, 3, 31) },
-            new BankAccount { Id = Guid.Parse("03dac36a-b7ba-4361-b277-1f25517e53c8"), CompanyId = CompanyId, Name = "Payroll Clearing", AccountNumberMasked = "****2281", CurrentBalance = 15960.21m, UnreconciledAmount = 0m, LastReconciledOn = new DateOnly(2026, 3, 31) }
+            new BankAccount { Id = Guid.Parse("3f98e4ef-6591-433f-8d5f-0c065c42fa3f"), CompanyId = CompanyId, Name = "Primary Operating", AccountNumberMasked = "****1044", LedgerAccountId = accounts[0].Id, CurrentBalance = 96580.11m, UnreconciledAmount = 1840.60m, LastReconciledOn = new DateOnly(2026, 3, 31), LastReconciledBalance = 96580.11m },
+            new BankAccount { Id = Guid.Parse("03dac36a-b7ba-4361-b277-1f25517e53c8"), CompanyId = CompanyId, Name = "Payroll Clearing", AccountNumberMasked = "****2281", LedgerAccountId = accounts[1].Id, CurrentBalance = 15960.21m, UnreconciledAmount = 0m, LastReconciledOn = new DateOnly(2026, 3, 31), LastReconciledBalance = 15960.21m }
         };
 
         var employees = new[]
@@ -277,6 +280,9 @@ internal static class BrassLedgerSeedData
         adminUser.PasswordHash = passwordHasher.HashPassword(adminUser, bootstrapOptions.AdminPassword);
 
         await dbContext.Users.AddAsync(adminUser, cancellationToken);
+        var accounts = DefaultAccountingSetup.CreateAccounts(companyId);
+        await dbContext.Accounts.AddRangeAsync(accounts, cancellationToken);
+        await dbContext.BankAccounts.AddAsync(DefaultAccountingSetup.CreateOperatingBankAccount(companyId, accounts.Single(account => account.Number == "1000").Id), cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         await TaxAdministrationService.EnsureBaselineTaxRulesAsync(dbContext, companyId, cancellationToken);
     }

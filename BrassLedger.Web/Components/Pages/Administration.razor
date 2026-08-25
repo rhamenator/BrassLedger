@@ -1,6 +1,11 @@
 @page "/administration"
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.AdministerSystem)]
 @inject ISecurityAdministrationService SecurityAdministrationService
+@inject IIntegrationService IntegrationService
+@inject ICompanyManagementService CompanyManagementService
+@inject IConsolidationService ConsolidationService
+@inject IAccountingPeriodService AccountingPeriodService
+@inject IBackupService BackupService
 
 <PageTitle>Administration</PageTitle>
 
@@ -63,6 +68,7 @@ else
                 </div>
             </article>
 
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageRoles" Context="roleAuthorization">
             <article class="panel">
                 <h2>Create custom role</h2>
                 <EditForm Model="RoleForm" OnSubmit="CreateRoleAsync">
@@ -97,9 +103,11 @@ else
                     </div>
                 </EditForm>
             </article>
+            </AuthorizeView>
         </section>
 
         <section class="content-grid">
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageUsers" Context="userAuthorization">
             <article class="panel">
                 <h2>Operators</h2>
                 <div class="detail-grid">
@@ -158,6 +166,73 @@ else
                     </div>
                 </EditForm>
             </article>
+            </AuthorizeView>
+        </section>
+
+        <section class="panel">
+            <h2>Companies</h2>
+            <p class="page-intro">Each company has isolated books, roles, bank accounts, tax content, and reporting currency. Use the active-company API endpoint to switch sessions after creating a company.</p>
+            <div class="detail-grid">@foreach (var company in Companies) { <div><span class="detail-label">@company.Role@(company.IsOwner ? " · Owner" : "")</span><strong>@company.Name</strong><p>@company.LegalName · @company.BaseCurrency</p></div> }</div>
+            <form method="post" action="/account/active-company" class="auth-form"><AntiforgeryToken /><input type="hidden" name="returnUrl" value="/" /><div class="field-group"><label class="field-label" for="activeCompany">Switch active company</label><select id="activeCompany" name="companyId" class="field-input">@foreach (var company in Companies) { <option value="@company.CompanyId">@company.Name — @company.BaseCurrency</option> }</select></div><button class="action-secondary" type="submit">Switch company</button></form>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageUsers" Context="companyAuthorization"><EditForm Model="CompanyForm" OnValidSubmit="CreateCompanyAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Company name</label><InputText aria-label="Company name" class="field-input" @bind-Value="CompanyForm.Name" /></div><div class="field-group"><label class="field-label">Legal name</label><InputText aria-label="Company legal name" class="field-input" @bind-Value="CompanyForm.LegalName" /></div><div class="field-group"><label class="field-label">Tax ID</label><InputText aria-label="Company tax ID" class="field-input" @bind-Value="CompanyForm.TaxId" /></div><div class="field-group"><label class="field-label">Base currency</label><InputText aria-label="Company base currency" class="field-input" @bind-Value="CompanyForm.BaseCurrency" /></div><div class="field-group"><label class="field-label">Fiscal-year start month</label><InputNumber aria-label="Fiscal year start month" class="field-input" @bind-Value="CompanyForm.FiscalYearStartMonth" /></div></div><button class="action-primary" type="submit">Create company</button></EditForm></AuthorizeView>
+        </section>
+
+        <section class="panel">
+            <h2>Backup and recovery rehearsal</h2>
+            <p class="page-intro">SQLite backups are consistent snapshots with the data-protection key ring. Verification checks integrity; the restore rehearsal opens an isolated copy and never writes over the live database.</p>
+            <div class="hero-actions"><button class="action-primary" type="button" @onclick="CreateBackupAsync">Create backup</button>@if (LatestBackup?.BackupId is { } backupId) { <button class="action-secondary" type="button" @onclick="VerifyBackupAsync">Verify backup</button><button class="action-secondary" type="button" @onclick="RehearseRestoreAsync">Rehearse restore</button> }</div>
+            @if (LatestBackup is not null) { <p class="muted-copy">@(LatestBackup.Succeeded ? $"Latest backup: {LatestBackup.BackupId} at {LatestBackup.CreatedAtUtc:u}" : LatestBackup.ErrorMessage)</p> }
+            @if (BackupVerification is not null) { <p class="muted-copy">@(BackupVerification.Succeeded ? $"Verified at {BackupVerification.VerifiedAtUtc:u}" : BackupVerification.ErrorMessage)</p> }
+            @if (RecoveryRehearsal is not null) { <p class="muted-copy">@(RecoveryRehearsal.Succeeded ? $"Restore rehearsal passed: {RecoveryRehearsal.CompanyCount} company(ies), {RecoveryRehearsal.JournalEntryCount} journals, {RecoveryRehearsal.PayrollRunCount} payroll runs, and {RecoveryRehearsal.DataProtectionKeyCount} key file(s)." : RecoveryRehearsal.ErrorMessage)</p> }
+        </section>
+
+        <section class="panel">
+            <h2>Accounting controls and audit trail</h2>
+            <p class="page-intro">Close a period only after review. Every journal posting and period status change is retained as business audit evidence for the active company.</p>
+            <EditForm Model="AccountingPeriodForm" OnValidSubmit="SaveAccountingPeriodAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Period starts</label><InputDate aria-label="Accounting period start" class="field-input" @bind-Value="AccountingPeriodForm.StartsOn" /></div><div class="field-group"><label class="field-label">Period ends</label><InputDate aria-label="Accounting period end" class="field-input" @bind-Value="AccountingPeriodForm.EndsOn" /></div><div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Accounting period notes" class="field-input" @bind-Value="AccountingPeriodForm.Notes" /></div></div><button class="action-secondary" type="submit">Save accounting period</button></EditForm>
+            @if (AccountingControls.Periods.Count > 0) { <table class="data-table"><thead><tr><th>Period</th><th>Status</th><th>Closed by</th><th></th></tr></thead><tbody>@foreach (var period in AccountingControls.Periods) { <tr><td>@period.StartsOn to @period.EndsOn<br />@period.Notes</td><td>@period.Status</td><td>@(period.ClosedBy ?? "—") @period.ClosedAtUtc</td><td><button class="action-secondary" type="button" @onclick="() => TogglePeriodStatusAsync(period)">@(period.Status == "Closed" ? "Reopen" : "Close")</button></td></tr> }</tbody></table> }
+            <h3>Recent business audit events</h3>
+            @if (AccountingControls.AuditEntries.Count == 0) { <p class="page-intro">No audited business events have been recorded yet.</p> }
+            else { <table class="data-table"><thead><tr><th>When</th><th>Action</th><th>Entity</th><th>Operator</th></tr></thead><tbody>@foreach (var audit in AccountingControls.AuditEntries) { <tr><td>@audit.OccurredAtUtc.LocalDateTime</td><td>@audit.Action</td><td>@audit.EntityType</td><td>@(audit.PerformedBy ?? "System")</td></tr> }</tbody></table> }
+        </section>
+
+        <section class="panel">
+            <h2>Consolidation and currencies</h2>
+            <p class="page-intro">Consolidations convert each member company’s balances at the latest effective rate, then apply the ownership percentage. Intercompany eliminations remain controlled journal adjustments and are not automatic.</p>
+            <div class="content-grid">
+                <EditForm Model="ExchangeRateForm" OnValidSubmit="SaveExchangeRateAsync">
+                    <div class="auth-form"><h3>Effective exchange rate</h3><div class="field-group"><label class="field-label">Base currency</label><InputText aria-label="Exchange rate base currency" class="field-input" @bind-Value="ExchangeRateForm.BaseCurrency" /></div><div class="field-group"><label class="field-label">Quote currency</label><InputText aria-label="Exchange rate quote currency" class="field-input" @bind-Value="ExchangeRateForm.QuoteCurrency" /></div><div class="field-group"><label class="field-label">Rate</label><InputNumber aria-label="Exchange rate" class="field-input" @bind-Value="ExchangeRateForm.Rate" /></div><div class="field-group"><label class="field-label">Effective date</label><InputDate aria-label="Exchange rate effective date" class="field-input" @bind-Value="ExchangeRateForm.EffectiveOn" /></div><div class="field-group"><label class="field-label">Source</label><InputText aria-label="Exchange rate source" class="field-input" @bind-Value="ExchangeRateForm.Source" /></div><button class="action-secondary" type="submit">Save exchange rate</button></div>
+                </EditForm>
+                <EditForm Model="ConsolidationForm" OnValidSubmit="SaveConsolidationGroupAsync">
+                    <div class="auth-form"><h3>Consolidation group</h3><div class="field-group"><label class="field-label">Group name</label><InputText aria-label="Consolidation group name" class="field-input" @bind-Value="ConsolidationForm.Name" /></div><div class="field-group"><label class="field-label">Reporting currency</label><InputText aria-label="Consolidation reporting currency" class="field-input" @bind-Value="ConsolidationForm.ReportingCurrency" /></div><span class="field-label">Member companies and ownership</span>@foreach (var company in Companies) { <div class="field-group"><label><input type="checkbox" checked="@ConsolidationForm.MemberCompanyIds.Contains(company.CompanyId)" @onchange="args => ToggleConsolidationMember(company.CompanyId, args.Value)" /> @company.Name (@company.BaseCurrency)</label><InputNumber aria-label="@($"{company.Name} ownership percentage")" class="field-input" @bind-Value="ConsolidationForm.OwnershipPercentages[company.CompanyId]" disabled="@(!ConsolidationForm.MemberCompanyIds.Contains(company.CompanyId))" /></div> }<button class="action-primary" type="submit">Save consolidation group</button></div>
+                </EditForm>
+            </div>
+            @if (ConsolidationGroups.Count > 0)
+            {
+                <table class="data-table"><thead><tr><th>Group</th><th>Members</th><th>Reporting currency</th><th></th></tr></thead><tbody>@foreach (var group in ConsolidationGroups) { <tr><td>@group.Name</td><td>@string.Join(", ", group.Members.Select(member => $"{member.CompanyName} ({member.OwnershipPercentage:P0})"))</td><td>@group.ReportingCurrency</td><td><button class="action-secondary" type="button" @onclick="() => LoadConsolidatedBalanceAsync(group.Id)">View balance</button></td></tr> }</tbody></table>
+            }
+            @if (ConsolidatedBalance is not null)
+            {
+                <h3>@ConsolidatedBalance.GroupName consolidated balance — @ConsolidatedBalance.AsOf</h3>
+                @if (ConsolidatedBalance.Warnings.Count > 0) { <ul class="feature-list">@foreach (var warning in ConsolidatedBalance.Warnings) { <li>@warning</li> }</ul> }
+                <table class="data-table"><thead><tr><th>Account</th><th>Type</th><th>Balance (@ConsolidatedBalance.ReportingCurrency)</th></tr></thead><tbody>@foreach (var account in ConsolidatedBalance.Accounts) { <tr><td>@account.AccountNumber · @account.AccountName</td><td>@account.AccountType</td><td>@account.ConvertedBalance.ToString("N2")</td></tr> }</tbody></table>
+            }
+        </section>
+
+        <section class="panel">
+            <h2>Integration catalog</h2>
+            <p class="page-intro">Connection credentials are encrypted at rest and never shown again after saving. A configured connection records its intended provider boundary; live synchronization remains unavailable until the relevant provider adapter is deployed and validated.</p>
+            <EditForm Model="IntegrationForm" OnValidSubmit="SaveIntegrationConnectionAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Provider</label><InputSelect aria-label="Integration provider" class="field-input" @bind-Value="IntegrationForm.ProviderCode"><option value="">Select provider</option>@foreach (var provider in Providers) { <option value="@provider.Code">@provider.Name — @provider.Category</option> }</InputSelect></div><div class="field-group"><label class="field-label">Connection name</label><InputText aria-label="Integration connection name" class="field-input" @bind-Value="IntegrationForm.Name" /></div><div class="field-group"><label class="field-label">Settings JSON</label><InputTextArea aria-label="Integration settings JSON" class="field-input" @bind-Value="IntegrationForm.SettingsJson" /></div><div class="field-group"><label class="field-label">Credentials JSON</label><InputTextArea aria-label="Integration credentials JSON" class="field-input" autocomplete="off" @bind-Value="IntegrationForm.CredentialsJson" /></div><div class="field-group"><label><InputCheckbox aria-label="Enable integration connection" @bind-Value="IntegrationForm.Enable" /> Enable after adapter validation</label></div></div><button class="action-secondary" type="submit">Save connection profile</button></EditForm>
+            <table class="data-table">
+                <thead><tr><th>Provider</th><th>Category</th><th>Capability</th><th>Connection status</th></tr></thead>
+                <tbody>
+                    @foreach (var provider in Providers)
+                    {
+                        var connections = Connections.Where(connection => connection.ProviderCode == provider.Code).ToArray();
+                        <tr><td>@provider.Name</td><td>@provider.Category</td><td>@provider.Description</td><td>@(connections.Length == 0 ? "Not configured" : string.Join(", ", connections.Select(connection => $"{connection.Name}: {connection.Status}"))) @foreach (var connection in connections.Where(connection => connection.Status != "Disabled")) { <button class="action-secondary" type="button" @onclick="() => DisableIntegrationConnectionAsync(connection)">Disable @connection.Name</button> }</td></tr>
+                    }
+                </tbody>
+            </table>
         </section>
     </section>
 }
@@ -168,6 +243,20 @@ else
     private CreateRoleForm RoleForm { get; set; } = new();
     private CreateOperatorForm OperatorForm { get; set; } = new();
     private Dictionary<string, string> PermissionLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<IntegrationProviderSnapshot> Providers { get; set; } = [];
+    private IReadOnlyList<IntegrationConnectionSnapshot> Connections { get; set; } = [];
+    private IReadOnlyList<CompanyMembershipSnapshot> Companies { get; set; } = [];
+    private CreateCompanyForm CompanyForm { get; set; } = new();
+    private ExchangeRateEditor ExchangeRateForm { get; set; } = new();
+    private ConsolidationGroupEditor ConsolidationForm { get; set; } = new();
+    private IReadOnlyList<ConsolidationGroupSnapshot> ConsolidationGroups { get; set; } = [];
+    private ConsolidatedBalanceReport? ConsolidatedBalance { get; set; }
+    private AccountingControlsSnapshot AccountingControls { get; set; } = new([], []);
+    private AccountingPeriodEditor AccountingPeriodForm { get; set; } = new();
+    private IntegrationConnectionEditor IntegrationForm { get; set; } = new();
+    private BackupResult? LatestBackup { get; set; }
+    private BackupVerificationResult? BackupVerification { get; set; }
+    private BackupRecoveryRehearsalResult? RecoveryRehearsal { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -206,6 +295,91 @@ else
         }
     }
 
+    private async Task CreateCompanyAsync()
+    {
+        var result = await CompanyManagementService.CreateCompanyAsync(new CreateCompanyRequest(CompanyForm.Name, CompanyForm.LegalName, CompanyForm.TaxId, CompanyForm.BaseCurrency, CompanyForm.FiscalYearStartMonth));
+        StatusMessage = result.Succeeded ? "Company created. Switch the active company session to begin working in its separate books." : result.ErrorMessage;
+        if (result.Succeeded) { CompanyForm = new CreateCompanyForm(); Companies = await CompanyManagementService.GetMyCompaniesAsync(); }
+    }
+
+    private async Task SaveExchangeRateAsync()
+    {
+        var result = await ConsolidationService.SaveExchangeRateAsync(new SaveExchangeRateRequest(ExchangeRateForm.BaseCurrency, ExchangeRateForm.QuoteCurrency, ExchangeRateForm.Rate, ExchangeRateForm.EffectiveOn, ExchangeRateForm.Source));
+        StatusMessage = result.Succeeded ? "Exchange rate saved." : result.ErrorMessage;
+    }
+
+    private async Task SaveIntegrationConnectionAsync()
+    {
+        var result = await IntegrationService.SaveConnectionAsync(new SaveIntegrationConnectionRequest(null, IntegrationForm.ProviderCode, IntegrationForm.Name, IntegrationForm.SettingsJson, IntegrationForm.CredentialsJson, IntegrationForm.Enable));
+        StatusMessage = result.Succeeded ? "Integration connection profile saved. Credentials are not displayed after saving." : result.ErrorMessage;
+        if (result.Succeeded) { IntegrationForm = new IntegrationConnectionEditor(); Connections = await IntegrationService.GetConnectionsAsync(); }
+    }
+
+    private async Task CreateBackupAsync()
+    {
+        LatestBackup = await BackupService.CreateBackupAsync();
+        BackupVerification = null; RecoveryRehearsal = null;
+        StatusMessage = LatestBackup.Succeeded ? "Backup created. Verify it, then run a restore rehearsal before relying on it operationally." : LatestBackup.ErrorMessage;
+    }
+
+    private async Task VerifyBackupAsync()
+    {
+        if (LatestBackup?.BackupId is null) return;
+        BackupVerification = await BackupService.VerifyBackupAsync(LatestBackup.BackupId);
+        StatusMessage = BackupVerification.Succeeded ? "Backup integrity verification passed." : BackupVerification.ErrorMessage;
+    }
+
+    private async Task RehearseRestoreAsync()
+    {
+        if (LatestBackup?.BackupId is null) return;
+        RecoveryRehearsal = await BackupService.RehearseRestoreAsync(LatestBackup.BackupId);
+        StatusMessage = RecoveryRehearsal.Succeeded ? "Isolated restore rehearsal passed; live data was not changed." : RecoveryRehearsal.ErrorMessage;
+    }
+
+    private async Task DisableIntegrationConnectionAsync(IntegrationConnectionSnapshot connection)
+    {
+        var result = await IntegrationService.SaveConnectionAsync(new SaveIntegrationConnectionRequest(connection.Id, connection.ProviderCode, connection.Name, connection.SettingsJson, string.Empty, false));
+        StatusMessage = result.Succeeded ? $"{connection.Name} was disabled; its credentials were retained securely for a future authorized re-enable." : result.ErrorMessage;
+        if (result.Succeeded) Connections = await IntegrationService.GetConnectionsAsync();
+    }
+
+    private async Task SaveAccountingPeriodAsync()
+    {
+        var result = await AccountingPeriodService.SavePeriodAsync(new SaveAccountingPeriodRequest(null, AccountingPeriodForm.StartsOn, AccountingPeriodForm.EndsOn, AccountingPeriodForm.Notes));
+        StatusMessage = result.Succeeded ? "Accounting period saved." : result.ErrorMessage;
+        if (result.Succeeded) { AccountingPeriodForm = new AccountingPeriodEditor(); AccountingControls = await AccountingPeriodService.GetSnapshotAsync(); }
+    }
+
+    private async Task SetPeriodStatusAsync(Guid periodId, bool close)
+    {
+        var result = await AccountingPeriodService.SetPeriodStatusAsync(periodId, close, close ? "Closed from administration." : "Reopened from administration.");
+        StatusMessage = result.Succeeded ? (close ? "Accounting period closed." : "Accounting period reopened.") : result.ErrorMessage;
+        if (result.Succeeded) AccountingControls = await AccountingPeriodService.GetSnapshotAsync();
+    }
+
+    private Task TogglePeriodStatusAsync(AccountingPeriodSnapshot period) => SetPeriodStatusAsync(period.Id, period.Status != "Closed");
+
+    private async Task SaveConsolidationGroupAsync()
+    {
+        var members = ConsolidationForm.MemberCompanyIds.Select(companyId => new ConsolidationMemberRequest(companyId, ConsolidationForm.OwnershipPercentages.GetValueOrDefault(companyId, 1m))).ToArray();
+        var result = await ConsolidationService.SaveGroupAsync(new SaveConsolidationGroupRequest(null, ConsolidationForm.Name, ConsolidationForm.ReportingCurrency, members));
+        StatusMessage = result.Succeeded ? "Consolidation group saved." : result.ErrorMessage;
+        if (result.Succeeded) { ConsolidationForm = new ConsolidationGroupEditor(); await ReloadSnapshotAsync(); }
+    }
+
+    private void ToggleConsolidationMember(Guid companyId, object? value)
+    {
+        var selected = value is bool boolValue ? boolValue : string.Equals(value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        if (selected) { ConsolidationForm.MemberCompanyIds.Add(companyId); ConsolidationForm.OwnershipPercentages.TryAdd(companyId, 1m); }
+        else ConsolidationForm.MemberCompanyIds.Remove(companyId);
+    }
+
+    private async Task LoadConsolidatedBalanceAsync(Guid groupId)
+    {
+        ConsolidatedBalance = await ConsolidationService.GetBalanceReportAsync(groupId, DateOnly.FromDateTime(DateTime.Today));
+        StatusMessage = ConsolidatedBalance is null ? "The consolidation report is unavailable to this session." : null;
+    }
+
     private void TogglePermission(string permissionCode, object? value)
     {
         var selected = value switch
@@ -227,6 +401,11 @@ else
     private async Task ReloadSnapshotAsync()
     {
         Snapshot = await SecurityAdministrationService.GetSnapshotAsync();
+        Providers = await IntegrationService.GetCatalogAsync();
+        Connections = await IntegrationService.GetConnectionsAsync();
+        Companies = await CompanyManagementService.GetMyCompaniesAsync();
+        ConsolidationGroups = await ConsolidationService.GetGroupsAsync();
+        AccountingControls = await AccountingPeriodService.GetSnapshotAsync();
         PermissionLabels = Snapshot.Permissions.ToDictionary(permission => permission.Code, permission => permission.Name, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -246,4 +425,9 @@ else
         public string Password { get; set; } = string.Empty;
         public string ConfirmPassword { get; set; } = string.Empty;
     }
+    private sealed class CreateCompanyForm { public string Name { get; set; } = string.Empty; public string LegalName { get; set; } = string.Empty; public string TaxId { get; set; } = string.Empty; public string BaseCurrency { get; set; } = "USD"; public int FiscalYearStartMonth { get; set; } = 1; }
+    private sealed class ExchangeRateEditor { public string BaseCurrency { get; set; } = "USD"; public string QuoteCurrency { get; set; } = "CAD"; public decimal Rate { get; set; } = 1m; public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Source { get; set; } = string.Empty; }
+    private sealed class ConsolidationGroupEditor { public string Name { get; set; } = string.Empty; public string ReportingCurrency { get; set; } = "USD"; public HashSet<Guid> MemberCompanyIds { get; } = []; public Dictionary<Guid, decimal> OwnershipPercentages { get; } = []; }
+    private sealed class AccountingPeriodEditor { public DateOnly StartsOn { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly EndsOn { get; set; } = new(DateTime.Today.Year, 12, 31); public string Notes { get; set; } = string.Empty; }
+    private sealed class IntegrationConnectionEditor { public string ProviderCode { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public string SettingsJson { get; set; } = "{}"; public string CredentialsJson { get; set; } = "{}"; public bool Enable { get; set; } }
 }

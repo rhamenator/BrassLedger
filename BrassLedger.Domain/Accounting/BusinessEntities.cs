@@ -37,6 +37,95 @@ public sealed class AppUser
     public DateTimeOffset? LastPasswordChangedUtc { get; set; }
 }
 
+public sealed class CompanyMembership
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid CompanyId { get; set; }
+    public string Role { get; set; } = string.Empty;
+    public bool IsOwner { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset GrantedAtUtc { get; set; }
+}
+
+public sealed class CurrencyExchangeRate
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string BaseCurrency { get; set; } = string.Empty;
+    public string QuoteCurrency { get; set; } = string.Empty;
+    public decimal Rate { get; set; }
+    public DateOnly EffectiveOn { get; set; }
+    public string Source { get; set; } = string.Empty;
+}
+
+public sealed class ConsolidationGroup
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string ReportingCurrency { get; set; } = "USD";
+    public bool IsActive { get; set; } = true;
+}
+
+public sealed class ConsolidationGroupCompany
+{
+    public Guid Id { get; set; }
+    public Guid ConsolidationGroupId { get; set; }
+    public Guid MemberCompanyId { get; set; }
+    public decimal OwnershipPercentage { get; set; } = 1m;
+}
+
+public sealed class AccountingPeriod
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public DateOnly StartsOn { get; set; }
+    public DateOnly EndsOn { get; set; }
+    public string Status { get; set; } = "Open";
+    public Guid? ClosedByUserId { get; set; }
+    public DateTimeOffset? ClosedAtUtc { get; set; }
+    public string Notes { get; set; } = string.Empty;
+}
+
+public sealed class BusinessAuditEntry
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid? UserId { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public Guid? EntityId { get; set; }
+    public string DetailJson { get; set; } = "{}";
+    public DateTimeOffset OccurredAtUtc { get; set; }
+}
+
+public sealed class IntegrationConnection
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string ProviderCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Status { get; set; } = "Disabled";
+    public string SettingsJson { get; set; } = "{}";
+    public string CredentialsJson { get; set; } = "{}";
+    public DateTimeOffset? LastValidatedAtUtc { get; set; }
+}
+
+public sealed class InventoryTransaction
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public DateOnly OccurredOn { get; set; }
+    public string TransactionType { get; set; } = string.Empty;
+    public decimal QuantityChange { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TotalCost { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public Guid JournalEntryId { get; set; }
+}
+
 public sealed class AccessRole
 {
     public Guid Id { get; set; }
@@ -79,6 +168,9 @@ public sealed class JournalEntry
 {
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
+    public Guid? BankAccountId { get; set; }
+    public Guid? SourceDocumentId { get; set; }
+    public string SourceDocumentType { get; set; } = string.Empty;
     public string EntryNumber { get; set; } = string.Empty;
     public DateOnly PostedOn { get; set; }
     public string SourceModule { get; set; } = string.Empty;
@@ -86,6 +178,8 @@ public sealed class JournalEntry
     public string Description { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
     public bool IsPosted { get; set; }
+    public Guid? PostedByUserId { get; set; }
+    public DateTimeOffset PostedAtUtc { get; set; }
 }
 
 public sealed class JournalEntryLine
@@ -96,6 +190,25 @@ public sealed class JournalEntryLine
     public string Description { get; set; } = string.Empty;
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
+}
+
+public sealed class BankReconciliation
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid BankAccountId { get; set; }
+    public DateOnly StatementDate { get; set; }
+    public decimal StatementClosingBalance { get; set; }
+    public decimal BookBalance { get; set; }
+    public Guid? ReconciledByUserId { get; set; }
+    public DateTimeOffset ReconciledAtUtc { get; set; }
+}
+
+public sealed class BankReconciliationItem
+{
+    public Guid Id { get; set; }
+    public Guid BankReconciliationId { get; set; }
+    public Guid JournalEntryId { get; set; }
 }
 
 public sealed class Customer
@@ -123,6 +236,7 @@ public sealed class SalesInvoice
     public decimal TaxAmount { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal BalanceDue { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
 public sealed class Vendor
@@ -148,6 +262,7 @@ public sealed class VendorBill
     public string Status { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
     public decimal BalanceDue { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
 public sealed class InventoryItem
@@ -190,9 +305,12 @@ public sealed class BankAccount
     public Guid CompanyId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string AccountNumberMasked { get; set; } = string.Empty;
+    public Guid LedgerAccountId { get; set; }
     public decimal CurrentBalance { get; set; }
     public decimal UnreconciledAmount { get; set; }
     public DateOnly LastReconciledOn { get; set; }
+    public decimal LastReconciledBalance { get; set; }
+    public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
 public sealed class Employee
@@ -204,8 +322,16 @@ public sealed class Employee
     public string LastName { get; set; } = string.Empty;
     public string Department { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
+    public string ResidenceState { get; set; } = string.Empty;
+    public string ResidenceCity { get; set; } = string.Empty;
+    public string WorkCity { get; set; } = string.Empty;
     public string PayType { get; set; } = string.Empty;
     public decimal MonthlyBasePay { get; set; }
+    public string FilingStatus { get; set; } = "Single";
+    public int Allowances { get; set; }
+    public decimal AdditionalWithholding { get; set; }
+    public decimal PreTaxBenefitDeductions { get; set; }
+    public decimal PostTaxBenefitDeductions { get; set; }
     public bool IsActive { get; set; }
 }
 
@@ -228,9 +354,57 @@ public sealed class TaxProfile
     public string Jurisdiction { get; set; } = string.Empty;
     public string TaxType { get; set; } = string.Empty;
     public decimal Rate { get; set; }
+    public decimal? AnnualWageBase { get; set; }
     public DateOnly EffectiveOn { get; set; }
     public string Source { get; set; } = string.Empty;
     public bool IsEmployerSpecific { get; set; }
+}
+
+public sealed class PayrollRun
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid BankAccountId { get; set; }
+    public DateOnly PayDate { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public decimal GrossPayroll { get; set; }
+    public decimal PreTaxDeductions { get; set; }
+    public decimal EmployeeWithholdings { get; set; }
+    public decimal PostTaxDeductions { get; set; }
+    public decimal EmployerPayrollTaxes { get; set; }
+    public decimal NetPay { get; set; }
+    public DateTimeOffset PostedAtUtc { get; set; }
+    public string TaxContentSnapshotJson { get; set; } = "[]";
+}
+
+public sealed class PayrollJurisdictionRule
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string ResidenceJurisdiction { get; set; } = string.Empty;
+    public string WorkJurisdiction { get; set; } = string.Empty;
+    public bool ExemptWorkWithholding { get; set; }
+    public decimal ResidentCreditRate { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string Notes { get; set; } = string.Empty;
+}
+
+public sealed class PayrollRunEmployeeLine
+{
+    public Guid Id { get; set; }
+    public Guid PayrollRunId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string WorkState { get; set; } = string.Empty;
+    public string WorkCity { get; set; } = string.Empty;
+    public string ResidenceState { get; set; } = string.Empty;
+    public string ResidenceCity { get; set; } = string.Empty;
+    public string FilingStatus { get; set; } = string.Empty;
+    public decimal GrossPay { get; set; }
+    public decimal PreTaxDeductions { get; set; }
+    public decimal EmployeeWithholdings { get; set; }
+    public decimal PostTaxDeductions { get; set; }
+    public decimal EmployerPayrollTaxes { get; set; }
+    public decimal NetPay { get; set; }
 }
 
 public sealed class TaxRuleSet
@@ -251,6 +425,64 @@ public sealed class TaxRuleSet
     public bool SupportsBracketTable { get; set; }
     public bool SupportsParameterEditing { get; set; }
     public bool IsActive { get; set; }
+    public Guid? TaxContentPackageId { get; set; }
+    public string ContentVersion { get; set; } = "1.0";
+    public string MinimumEngineVersion { get; set; } = "1.0";
+}
+
+public sealed class TaxContentPackage
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string PackageCode { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    public DateOnly EffectiveOn { get; set; }
+    public string Status { get; set; } = "Draft";
+    public string MinimumEngineVersion { get; set; } = "1.0";
+    public string ManifestJson { get; set; } = "{}";
+    public string Source { get; set; } = string.Empty;
+    public string ChangeSummary { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+}
+
+public sealed class TaxSourceCapture
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid? TaxContentPackageId { get; set; }
+    public string SourceKind { get; set; } = string.Empty;
+    public string JurisdictionCode { get; set; } = string.Empty;
+    public string SourceUrl { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public string ContentSha256 { get; set; } = string.Empty;
+    public string RawContent { get; set; } = string.Empty;
+    public DateTimeOffset CapturedAtUtc { get; set; }
+    public string Notes { get; set; } = string.Empty;
+}
+
+public sealed class TaxRuleFieldDefinition
+{
+    public Guid Id { get; set; }
+    public Guid TaxRuleSetId { get; set; }
+    public string FieldCode { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string DataType { get; set; } = "text";
+    public bool IsRequired { get; set; }
+    public string DefaultValueJson { get; set; } = "null";
+    public string ValidationJson { get; set; } = "{}";
+    public int DisplayOrder { get; set; }
+    public string HelpText { get; set; } = string.Empty;
+}
+
+public sealed class TaxRuleTestCase
+{
+    public Guid Id { get; set; }
+    public Guid TaxRuleSetId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string InputJson { get; set; } = "{}";
+    public string ExpectedOutputJson { get; set; } = "{}";
+    public bool IsRequiredForActivation { get; set; } = true;
 }
 
 public sealed class TaxRuleParameter

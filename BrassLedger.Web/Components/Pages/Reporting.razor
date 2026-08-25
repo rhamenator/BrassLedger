@@ -1,5 +1,5 @@
 @page "/reporting"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageReporting)]
 @inject IBusinessWorkspaceService WorkspaceService
 @inject IProductCatalogService AssessmentService
 
@@ -50,6 +50,15 @@ else
         </section>
 
         <section class="content-grid">
+            <article class="panel">
+                <h2>Run current reports</h2>
+                <p>Download live CSV output for review, spreadsheet analysis, or controlled distribution.</p>
+                <div class="hero-actions">
+                    <a class="action-primary" href="/reports/trial-balance.csv">Trial balance</a>
+                    <a class="action-secondary" href="/reports/ar-aging.csv">A/R aging</a>
+                    <a class="action-secondary" href="/reports/ap-aging.csv">A/P aging</a>
+                </div>
+            </article>
             <article class="panel">
                 <h2>Report stance</h2>
                 <p><strong>Preferred designer:</strong> @Workspace.Reporting.PreferredDesigner</p>
@@ -135,5 +144,3 @@ else
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
 }
-
-

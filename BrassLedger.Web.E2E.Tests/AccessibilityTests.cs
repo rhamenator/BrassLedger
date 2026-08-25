@@ -19,7 +19,7 @@ public sealed class AccessibilityTests
         await using var session = await _fixture.CreateSessionAsync(browserKind);
         await session.SignInAsync();
 
-        foreach (var route in new[] { "/", "/ledger", "/receivables", "/reporting", "/publish" })
+        foreach (var route in new[] { "/", "/ledger", "/receivables", "/payables", "/payroll", "/reporting", "/publish" })
         {
             await session.GotoAsync(route);
             await session.AssertSingleVisibleHeadingAsync();

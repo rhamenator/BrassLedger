@@ -813,3 +813,41 @@ button.action-secondary {
 .step-list li {
     margin-bottom: 0.8rem;
 }
+
+.checkbox-list {
+    display: grid;
+    gap: 0.55rem;
+    max-height: 13rem;
+    overflow: auto;
+    padding: 0.75rem;
+    border: 1px solid rgba(23, 60, 67, 0.14);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.58);
+}
+
+.checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    color: var(--ink-strong);
+    cursor: pointer;
+}
+
+.checkbox-row input {
+    margin-top: 0.25rem;
+    accent-color: var(--teal);
+}
+
+.muted-copy {
+    margin: 0;
+    color: #5d6d71;
+}
+
+.interchange-import {
+    align-items: end;
+    margin-top: 1rem;
+}
+
+.import-action {
+    align-self: end;
+}

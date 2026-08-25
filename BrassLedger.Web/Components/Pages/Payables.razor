@@ -1,6 +1,7 @@
 @page "/payables"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManagePayables)]
 @inject IBusinessWorkspaceService WorkspaceService
+@inject IAccountingTransactionService TransactionService
 
 <PageTitle>Payables</PageTitle>
 
@@ -40,6 +41,32 @@ else
                 <span class="stat-value">@Workspace.Payables.DueThisWeekCount</span>
                 <span class="stat-label">Due within 7 days</span>
             </article>
+        </section>
+
+        <section class="panel">
+            <h2>Enter and post vendor bill</h2>
+            @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
+            <EditForm Model="BillForm" OnValidSubmit="CreateBillAsync">
+                <div class="content-grid">
+                    <div class="field-group"><label class="field-label">Vendor</label><InputSelect aria-label="Bill vendor" class="field-input" @bind-Value="BillForm.VendorId"><option value="@Guid.Empty">Select vendor</option>@foreach (var vendor in Workspace.Payables.Vendors) { <option value="@vendor.Id">@vendor.VendorNumber — @vendor.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Bill number</label><InputText aria-label="Bill number" class="field-input" @bind-Value="BillForm.Number" /></div>
+                    <div class="field-group"><label class="field-label">Bill date</label><InputDate aria-label="Bill date" class="field-input" @bind-Value="BillForm.Date" /></div>
+                    <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Bill due date" class="field-input" @bind-Value="BillForm.DueDate" /></div>
+                    <div class="field-group"><label class="field-label">Amount</label><InputNumber aria-label="Bill amount" class="field-input" @bind-Value="BillForm.Amount" /></div>
+                    <div class="field-group"><label class="field-label">Expense account</label><InputSelect aria-label="Bill expense account" class="field-input" @bind-Value="BillForm.ExpenseAccount"><option value="5100">5100 — Cost of Goods Sold</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(x => x.Type == "Expense")) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                </div>
+                <button class="action-primary" type="submit">Post bill</button>
+            </EditForm>
+        </section>
+
+        <section class="panel">
+            <h2>Apply vendor payment</h2>
+            <EditForm Model="PaymentForm" OnValidSubmit="ApplyPaymentAsync"><div class="content-grid">
+                <div class="field-group"><label class="field-label">Bill</label><InputSelect aria-label="Payment bill" class="field-input" @bind-Value="PaymentForm.BillId"><option value="@Guid.Empty">Select bill</option>@foreach (var bill in Workspace.Payables.Bills.Where(x => x.BalanceDue > 0)) { <option value="@bill.Id">@bill.BillNumber — @bill.BalanceDue.ToString("C")</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Payment account</label><InputSelect aria-label="Payment account" class="field-input" @bind-Value="PaymentForm.BankId"><option value="@Guid.Empty">Select bank</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Amount</label><InputNumber aria-label="Payment amount" class="field-input" @bind-Value="PaymentForm.Amount" /></div>
+                <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Payment reference" class="field-input" @bind-Value="PaymentForm.Reference" /></div>
+            </div><button class="action-primary" type="submit">Apply payment</button></EditForm>
         </section>
 
         <section class="content-grid">
@@ -100,9 +127,29 @@ else
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private string? StatusMessage;
+    private BillEditor BillForm { get; } = new();
+    private PaymentEditor PaymentForm { get; } = new();
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
+
+    private async Task CreateBillAsync()
+    {
+        var result = await TransactionService.CreateVendorBillAsync(new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, BillForm.Amount, BillForm.ExpenseAccount, $"Bill {BillForm.Number}"));
+        StatusMessage = result.Succeeded ? "Vendor bill posted." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private async Task ApplyPaymentAsync()
+    {
+        var result = await TransactionService.ApplyBillPaymentAsync(new ApplyBillPaymentRequest(PaymentForm.BillId, PaymentForm.BankId, DateOnly.FromDateTime(DateTime.Today), PaymentForm.Amount, PaymentForm.Reference));
+        StatusMessage = result.Succeeded ? "Vendor payment applied." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private sealed class BillEditor { public Guid VendorId { get; set; } public string Number { get; set; } = string.Empty; public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); public decimal Amount { get; set; } public string ExpenseAccount { get; set; } = "5100"; }
+    private sealed class PaymentEditor { public Guid BillId { get; set; } public Guid BankId { get; set; } public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; }
 }
