@@ -322,6 +322,12 @@ public static class ServiceCollectionExtensions
             await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "TaxContentPackageId", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""TaxContentPackageId"" TEXT NULL;", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "ContentVersion", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""ContentVersion"" TEXT NOT NULL DEFAULT '1.0';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "MinimumEngineVersion", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""MinimumEngineVersion"" TEXT NOT NULL DEFAULT '1.0';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "ParentJurisdictionCode", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""ParentJurisdictionCode"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "ObligationCode", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""ObligationCode"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "CalculationVariant", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""CalculationVariant"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "ExclusiveGroup", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""ExclusiveGroup"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "VariantPriority", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""VariantPriority"" INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "TaxRuleSets", "ApplicabilityJson", @"ALTER TABLE ""TaxRuleSets"" ADD COLUMN ""ApplicabilityJson"" TEXT NOT NULL DEFAULT '{}';", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxContentPackages"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""PackageCode"" TEXT NOT NULL, ""Version"" TEXT NOT NULL, ""EffectiveOn"" TEXT NOT NULL, ""Status"" TEXT NOT NULL, ""MinimumEngineVersion"" TEXT NOT NULL, ""ManifestJson"" TEXT NOT NULL, ""Source"" TEXT NOT NULL, ""ChangeSummary"" TEXT NOT NULL, ""CreatedAtUtc"" TEXT NOT NULL, ""ApprovedAtUtc"" TEXT NULL);", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxContentPackages_CompanyId_PackageCode_Version"" ON ""TaxContentPackages"" (""CompanyId"", ""PackageCode"", ""Version"");", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxSourceCaptures"" (""Id"" TEXT NOT NULL PRIMARY KEY, ""CompanyId"" TEXT NOT NULL, ""TaxContentPackageId"" TEXT NULL, ""SourceKind"" TEXT NOT NULL, ""JurisdictionCode"" TEXT NOT NULL, ""SourceUrl"" TEXT NOT NULL, ""ContentType"" TEXT NOT NULL, ""ContentSha256"" TEXT NOT NULL, ""RawContent"" TEXT NOT NULL, ""CapturedAtUtc"" TEXT NOT NULL, ""Notes"" TEXT NOT NULL);", cancellationToken);
@@ -528,6 +534,12 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "TaxContentPackageId" uuid NULL;""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "ContentVersion" text NOT NULL DEFAULT '1.0';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "MinimumEngineVersion" text NOT NULL DEFAULT '1.0';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "ParentJurisdictionCode" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "ObligationCode" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "CalculationVariant" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "ExclusiveGroup" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "VariantPriority" integer NOT NULL DEFAULT 0;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "TaxRuleSets" ADD COLUMN IF NOT EXISTS "ApplicabilityJson" text NOT NULL DEFAULT '{}';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxContentPackages"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""PackageCode"" text NOT NULL, ""Version"" text NOT NULL, ""EffectiveOn"" date NOT NULL, ""Status"" text NOT NULL, ""MinimumEngineVersion"" text NOT NULL, ""ManifestJson"" text NOT NULL, ""Source"" text NOT NULL, ""ChangeSummary"" text NOT NULL, ""CreatedAtUtc"" timestamptz NOT NULL, ""ApprovedAtUtc"" timestamptz NULL);", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TaxContentPackages_CompanyId_PackageCode_Version"" ON ""TaxContentPackages"" (""CompanyId"", ""PackageCode"", ""Version"");", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(@"CREATE TABLE IF NOT EXISTS ""TaxSourceCaptures"" (""Id"" uuid NOT NULL PRIMARY KEY, ""CompanyId"" uuid NOT NULL, ""TaxContentPackageId"" uuid NULL, ""SourceKind"" text NOT NULL, ""JurisdictionCode"" text NOT NULL, ""SourceUrl"" text NOT NULL, ""ContentType"" text NOT NULL, ""ContentSha256"" text NOT NULL, ""RawContent"" text NOT NULL, ""CapturedAtUtc"" timestamptz NOT NULL, ""Notes"" text NOT NULL);", cancellationToken);
@@ -620,7 +632,9 @@ public static class ServiceCollectionExtensions
                 }
             }
 
-            await dbContext.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
+            using var alterCommand = connection.CreateCommand();
+            alterCommand.CommandText = alterSql;
+            await alterCommand.ExecuteNonQueryAsync(cancellationToken);
         }
         finally
         {

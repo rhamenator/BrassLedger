@@ -156,6 +156,33 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NewYorkRuntimePackage_UsesParentedObligationsAndExclusiveValidatedVariants()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<ITaxAdministrationService>();
+        var packagePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ny/2026-runtime-package.json"));
+
+        var import = await service.ImportTaxContentDocumentAsync(await File.ReadAllTextAsync(packagePath));
+
+        Assert.True(import.Succeeded, import.ErrorMessage);
+        var validation = await service.ValidateContentPackageAsync(import.SavedId!.Value);
+        Assert.True(validation.Succeeded, string.Join("; ", validation.Errors));
+        var activation = await service.ActivateContentPackageAsync(import.SavedId.Value);
+        Assert.True(activation.Succeeded, activation.ErrorMessage);
+
+        var rules = (await service.GetSnapshotAsync()).RuleSets.Where(rule => rule.TaxContentPackageId == import.SavedId).ToArray();
+        Assert.Equal(11, rules.Length);
+        Assert.All(rules, rule => Assert.True(rule.IsActive));
+        Assert.Contains(rules, rule => rule.ParentJurisdictionCode == "NY" && rule.JurisdictionCode == "NY-NYC" && rule.ObligationCode == "NYC-RESIDENT-WITHHOLDING");
+        Assert.Equal(4, rules.Count(rule => rule.ExclusiveGroup == "NY-STATE-WITHHOLDING"));
+        Assert.Contains(rules, rule => rule.CalculationMethod == "whole-wage-annualized" && rule.VariantPriority == 200);
+        Assert.Contains(rules, rule => rule.CalculationMethod == "annualized-exclusion-rate" && rule.JurisdictionCode == "NY-YON-NR");
+        Assert.All(rules, rule => Assert.StartsWith("{", rule.ApplicabilityJson));
+    }
+
+    [Fact]
     public async Task StateReferenceCatalog_CoversEveryStateAndDcWithStableRelationships()
     {
         var catalogPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/state-reference-2026.json"));
@@ -406,8 +433,18 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.Equal(260, periods.GetProperty("Daily").GetInt32());
         Assert.Equal(4, calculation.GetProperty("certificatePrecedence").GetArrayLength());
         Assert.False(calculation.GetProperty("outsideAdjustmentAllowed").GetBoolean());
+        Assert.Equal("$#,##0", calculation.GetProperty("rounding").GetProperty("moneyCellNumberFormat").GetString());
+        Assert.False(calculation.GetProperty("rounding").GetProperty("intermediateRounding").GetBoolean());
+        Assert.Equal(0, calculation.GetProperty("rounding").GetProperty("finalDigits").GetInt32());
+        Assert.Equal(4, calculation.GetProperty("workbookDerivedRegressionCases").GetArrayLength());
+        Assert.Equal(200, calculation.GetProperty("workbookDerivedRegressionCases")[1].GetProperty("displayedWithholding").GetInt32());
         Assert.Empty(root.GetProperty("residencyAndWorkRules").GetProperty("reciprocalStates").EnumerateArray());
+        var calculator = root.GetProperty("sources").EnumerateArray().Single(source => source.GetProperty("title").GetString()!.Contains("Calculator", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("7addcab146b9eeb9d3056016fbb5f4753488905fdfd19e91a07084ac6ba32cd0", calculator.GetProperty("manualCapture").GetProperty("sha256").GetString());
+        Assert.Equal(3, root.GetProperty("filing").GetProperty("frequencyThresholds").GetArrayLength());
+        Assert.Contains("both", root.GetProperty("filing").GetProperty("exactlyFiftyThousandAmbiguity").GetString(), StringComparison.OrdinalIgnoreCase);
         Assert.False(root.GetProperty("review").GetProperty("rawSourcesChecksummed").GetBoolean());
+        Assert.True(root.GetProperty("review").GetProperty("roundingIndependentlyVerified").GetBoolean());
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
@@ -840,6 +877,10 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.Equal(12, calculation.GetProperty("annualExactSchedules").GetProperty("Married").GetArrayLength());
         Assert.Equal(0.1045m, calculation.GetProperty("topIncomeWholeWageRates").GetProperty("bands")[0].GetProperty("rateOnAllAnnualizedNetWages").GetDecimal());
         Assert.Contains("not an ordinary marginal", calculation.GetProperty("topIncomeWholeWageRates").GetProperty("warning").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(258.50m, calculation.GetProperty("rounding").GetProperty("resolvedTableResults")[0].GetProperty("withholding").GetDecimal());
+        Assert.Equal(248.12m, calculation.GetProperty("rounding").GetProperty("resolvedTableResults")[1].GetProperty("withholding").GetDecimal());
+        Assert.True(root.GetProperty("review").GetProperty("roundingPolicyApproved").GetBoolean());
+        Assert.False(root.GetProperty("review").GetProperty("roundingConflictBlocksActivation").GetBoolean());
         Assert.Equal("2026-local-source-capture.json", root.GetProperty("localWithholding").GetProperty("sourceCapture").GetString());
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }

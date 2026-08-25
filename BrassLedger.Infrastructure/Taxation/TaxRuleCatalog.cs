@@ -15,6 +15,9 @@ internal static class TaxRuleCatalog
     public static IReadOnlyList<TaxCalculationMethodDefinition> Methods { get; } =
     [
         new("progressive-annualized", "Progressive annualized", "Annualize wages by pay frequency, apply brackets, then de-annualize withholding."),
+        new("base-plus-rate-schedule", "Base plus rate schedule", "Select the payroll-period schedule, add its base tax to the rate applied above the bracket floor, and optionally apply an obligation multiplier."),
+        new("whole-wage-annualized", "Whole-wage annualized", "Annualize net wages and apply the selected rate to the entire amount rather than only the bracket excess."),
+        new("annualized-exclusion-rate", "Annualized exclusion rate", "Annualize wages, subtract the schedule's exclusion, apply the rate, and de-annualize the result."),
         new("wage-bracket", "Wage bracket", "Use bracket thresholds and fixed amounts from the editable tax tables."),
         new("employer-rate-wage-base", "Employer rate with wage base", "Apply an employer rate until a wage-base ceiling is reached."),
         new("exemption-credit", "Exemption credit", "Apply a flat rate and reduce tax through per-exemption credits or allowances."),

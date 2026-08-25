@@ -11,6 +11,7 @@ version="$2"
 output_dir="$3"
 
 package_root="$(mktemp -d)"
+trap 'rm -rf "$package_root"' EXIT
 install_root="$package_root/opt/brassledger"
 bin_root="$package_root/usr/local/bin"
 debian_root="$package_root/DEBIAN"
@@ -34,12 +35,11 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: BrassLedger Contributors <opensource@brassledger.local>
-Depends: libc6, libgcc-s1, libicu72 | libicu71 | libicu70 | libicu69, libssl3 | libssl1.1, zlib1g
+Depends: libc6, libgcc-s1, libicu78 | libicu76 | libicu74 | libicu72 | libicu71 | libicu70 | libicu69, libssl3 | libssl1.1, zlib1g
 Description: BrassLedger accounting platform
  Cross-platform accounting application packaged as a self-contained .NET runtime.
 Installed-Size: $installed_size_kb
 EOF
 
 chmod 755 "$package_root" "$install_root" "$bin_root"
-dpkg-deb --build "$package_root" "$output_dir/brassledger_${version}_amd64.deb"
-rm -rf "$package_root"
+dpkg-deb --root-owner-group --build "$package_root" "$output_dir/brassledger_${version}_amd64.deb"

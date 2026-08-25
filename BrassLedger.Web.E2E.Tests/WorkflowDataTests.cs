@@ -50,17 +50,20 @@ public sealed class WorkflowDataTests
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task OperationsAndReportingPages_ShowExpectedOperationalArtifacts(BrowserKind browserKind)
     {
-        await using var session = await _fixture.CreateSessionAsync(browserKind);
-        await session.SignInAsync();
-        var operations = new OperationsPage(session);
-        var reporting = new ReportingPage(session);
+        await using var operationsSession = await _fixture.CreateSessionAsync(browserKind);
+        await operationsSession.SignInAsync("operations");
+        var operations = new OperationsPage(operationsSession);
 
         await operations.OpenAsync();
         await operations.AssertOperationsDataAsync();
-        await session.AssertNoUiFailuresAsync("operations workflow");
+        await operationsSession.AssertNoUiFailuresAsync("operations workflow");
+
+        await using var reportingSession = await _fixture.CreateSessionAsync(browserKind);
+        await reportingSession.SignInAsync();
+        var reporting = new ReportingPage(reportingSession);
 
         await reporting.OpenAsync();
         await reporting.AssertReportingCatalogAsync();
-        await session.AssertNoUiFailuresAsync("reporting workflow");
+        await reportingSession.AssertNoUiFailuresAsync("reporting workflow");
     }
 }

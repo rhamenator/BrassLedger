@@ -38,9 +38,44 @@ jobs:
           echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
           echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
 
+  quality:
+    name: Release quality gate
+    needs: metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore and build
+        run: |
+          dotnet restore BrassLedger.slnx
+          dotnet build BrassLedger.slnx --configuration Release --no-restore --nologo
+
+      - name: Test API and infrastructure
+        run: |
+          dotnet test BrassLedger.Api.Tests/BrassLedger.Api.Tests.csproj --configuration Release --no-build --nologo
+          dotnet test BrassLedger.Infrastructure.Tests/BrassLedger.Infrastructure.Tests.csproj --configuration Release --no-build --nologo
+
+      - name: Test UI and browser journeys
+        shell: pwsh
+        run: ./run-ui-tests.ps1 -InstallBrowsers -Configuration Release
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-quality-browser-diagnostics
+          path: BrassLedger.Web.E2E.Tests/Snapshots/chromium-linux
+          if-no-files-found: warn
+
   windows-installer:
     name: Windows installer
-    needs: metadata
+    needs: [metadata, quality]
     runs-on: windows-latest
     env:
       APP_VERSION: ${{ needs.metadata.outputs.version }}
@@ -111,7 +146,7 @@ jobs:
 
   macos-installer:
     name: macOS installer (${{ matrix.runtime }})
-    needs: metadata
+    needs: [metadata, quality]
     strategy:
       fail-fast: false
       matrix:
@@ -160,7 +195,7 @@ jobs:
 
   linux-installer:
     name: Linux installer
-    needs: metadata
+    needs: [metadata, quality]
     runs-on: ubuntu-24.04
     env:
       APP_VERSION: ${{ needs.metadata.outputs.version }}
@@ -203,6 +238,7 @@ jobs:
     name: Publish GitHub release
     needs:
       - metadata
+      - quality
       - windows-installer
       - macos-installer
       - linux-installer

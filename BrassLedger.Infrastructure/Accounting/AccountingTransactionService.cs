@@ -318,16 +318,23 @@ public sealed class AccountingTransactionService(
             var applicable = profiles.Where(profile => jurisdictions.Contains(profile.Jurisdiction, StringComparer.OrdinalIgnoreCase)).ToArray();
             if (rules.Any(rule => rule.ExemptWorkWithholding))
                 applicable = applicable.Where(profile => !profile.TaxType.Contains("withholding", StringComparison.OrdinalIgnoreCase) || !workJurisdictions.Contains(profile.Jurisdiction, StringComparer.OrdinalIgnoreCase) || residenceJurisdictions.Contains(profile.Jurisdiction, StringComparer.OrdinalIgnoreCase)).ToArray();
-            var applicableRules = contentRules.Where(rule => jurisdictions.Contains(rule.JurisdictionCode, StringComparer.OrdinalIgnoreCase) || jurisdictions.Contains(rule.JurisdictionName, StringComparer.OrdinalIgnoreCase) || (string.Equals(rule.JurisdictionCode, "US", StringComparison.OrdinalIgnoreCase) && jurisdictions.Contains("Federal", StringComparer.OrdinalIgnoreCase))).ToArray();
-            if (applicable.Length == 0 && applicableRules.Length == 0) return null;
             var preTax = Math.Min(input.GrossPay, Math.Max(0, employee.PreTaxBenefitDeductions));
             var taxable = input.GrossPay - preTax;
+            var evaluationContext = new TaxRuleEvaluationContext(taxable, employee.Allowances, employee.FilingStatus, employee.PayrollFrequency, string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState, employee.ResidenceCity, employee.State, employee.WorkCity);
+            var matchedRules = contentRules.Where(rule => jurisdictions.Contains(rule.JurisdictionCode, StringComparer.OrdinalIgnoreCase) || jurisdictions.Contains(rule.JurisdictionName, StringComparer.OrdinalIgnoreCase) || (string.Equals(rule.JurisdictionCode, "US", StringComparison.OrdinalIgnoreCase) && jurisdictions.Contains("Federal", StringComparer.OrdinalIgnoreCase)))
+                .Where(rule => TaxRuleEvaluator.IsApplicable(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), evaluationContext))
+                .ToArray();
+            var applicableRules = matchedRules
+                .GroupBy(rule => string.IsNullOrWhiteSpace(rule.ExclusiveGroup) ? $"rule:{rule.Id}" : $"exclusive:{rule.ExclusiveGroup}", StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderByDescending(rule => rule.VariantPriority).ThenBy(rule => rule.Code).First())
+                .ToArray();
+            if (applicable.Length == 0 && applicableRules.Length == 0) return null;
             decimal employeeTaxes = 0, residentEmployeeTaxes = 0, employerTaxes = 0;
             if (applicableRules.Length > 0)
             {
                 foreach (var rule in applicableRules)
                 {
-                    var amount = CalculateTaxRuleAmount(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), contentBrackets.Where(bracket => bracket.TaxRuleSetId == rule.Id), taxable, employee.Allowances, employee.FilingStatus, employee.PayrollFrequency);
+                    var amount = TaxRuleEvaluator.Evaluate(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), contentBrackets.Where(bracket => bracket.TaxRuleSetId == rule.Id), evaluationContext);
                     if (rule.TaxType.Contains("withholding", StringComparison.OrdinalIgnoreCase) || rule.TaxType.Contains("employee", StringComparison.OrdinalIgnoreCase)) { employeeTaxes += amount; if (residenceJurisdictions.Contains(rule.JurisdictionCode, StringComparer.OrdinalIgnoreCase) || residenceJurisdictions.Contains(rule.JurisdictionName, StringComparer.OrdinalIgnoreCase)) residentEmployeeTaxes += amount; }
                     else employerTaxes += amount;
                 }
@@ -350,50 +357,6 @@ public sealed class AccountingTransactionService(
     }
 
     private static string StateJurisdiction(string state) => TaxRuleCatalog.StateJurisdictions.FirstOrDefault(jurisdiction => string.Equals(jurisdiction.Code, state.Trim(), StringComparison.OrdinalIgnoreCase))?.Name ?? state.Trim();
-
-    private static decimal CalculateTaxRuleAmount(TaxRuleSet rule, IEnumerable<TaxRuleParameter> parameters, IEnumerable<TaxRuleBracket> brackets, decimal taxablePay, int allowances, string filingStatus, string payrollFrequency)
-    {
-        var values = parameters.Where(parameter => parameter.NumericValue.HasValue).ToDictionary(parameter => parameter.ParameterCode, parameter => parameter.NumericValue!.Value, StringComparer.OrdinalIgnoreCase);
-        var annualization = values.GetValueOrDefault("annualization-factor", 1m);
-        var adjustedPay = Math.Max(0, taxablePay - (allowances * values.GetValueOrDefault("allowance-per-pay", 0m)));
-        decimal amount;
-        if (string.Equals(rule.CalculationMethod, "allowance-phaseout", StringComparison.OrdinalIgnoreCase))
-        {
-            var statusKey = string.Equals(filingStatus, "Married filing jointly", StringComparison.OrdinalIgnoreCase) ? "married" : "single";
-            var frequencyKey = payrollFrequency.Trim().ToLowerInvariant();
-            var baseAllowance = values.GetValueOrDefault($"{frequencyKey}-{statusKey}-base");
-            var threshold = values.GetValueOrDefault($"{frequencyKey}-{statusKey}-threshold");
-            var roundingDigits = (int)values.GetValueOrDefault("rounding-digits", 2m);
-            var tentative = decimal.Round(taxablePay * values.GetValueOrDefault("withholding-rate"), roundingDigits, MidpointRounding.AwayFromZero);
-            var phaseout = decimal.Round(Math.Max(0, taxablePay - threshold) * values.GetValueOrDefault("allowance-phaseout-rate"), roundingDigits, MidpointRounding.AwayFromZero);
-            amount = Math.Max(0, tentative - Math.Max(0, baseAllowance - phaseout));
-        }
-        else if (string.Equals(rule.CalculationMethod, "progressive-annualized", StringComparison.OrdinalIgnoreCase))
-        {
-            var annualPay = adjustedPay * annualization; var previous = 0m; amount = 0m;
-            foreach (var bracket in brackets.OrderBy(bracket => bracket.Sequence)) { var ceiling = bracket.UpperBoundAmount <= 0 ? annualPay : bracket.UpperBoundAmount; if (annualPay > previous) amount += Math.Max(0, Math.Min(annualPay, ceiling) - previous) * bracket.Rate; previous = ceiling; if (annualPay <= ceiling) break; }
-            amount /= annualization;
-        }
-        else if (string.Equals(rule.CalculationMethod, "wage-bracket", StringComparison.OrdinalIgnoreCase))
-        {
-            var annualPay = adjustedPay * annualization; var bracket = brackets.OrderBy(bracket => bracket.Sequence).FirstOrDefault(item => item.UpperBoundAmount <= 0 || annualPay <= item.UpperBoundAmount); amount = bracket is null ? 0m : bracket.FixedAmount / annualization;
-        }
-        else if (string.Equals(rule.CalculationMethod, "local-code-e", StringComparison.OrdinalIgnoreCase))
-        {
-            var standardAllowance = Math.Clamp(taxablePay * values.GetValueOrDefault("allowance-percent", 0m), values.GetValueOrDefault("allowance-minimum", 0m), values.GetValueOrDefault("allowance-maximum", decimal.MaxValue));
-            var localTaxable = Math.Max(0, taxablePay - standardAllowance - allowances * values.GetValueOrDefault("dependent-allowance", 0m));
-            amount = Math.Min(localTaxable, values.GetValueOrDefault("wage-base", decimal.MaxValue)) * values.GetValueOrDefault("tax-rate", values.GetValueOrDefault("rate", 0m));
-        }
-        else if (string.Equals(rule.CalculationMethod, "hourly-assessment", StringComparison.OrdinalIgnoreCase))
-        {
-            amount = Math.Max(0, values.GetValueOrDefault("hours-per-pay", 0m)) * values.GetValueOrDefault("hourly-rate", values.GetValueOrDefault("rate", 0m));
-        }
-        else
-        {
-            var rate = values.GetValueOrDefault("flat-rate", values.GetValueOrDefault("employer-rate", values.GetValueOrDefault("tax-rate", values.GetValueOrDefault("rate", 0m)))); var wageBase = values.GetValueOrDefault("wage-base", decimal.MaxValue); amount = Math.Min(adjustedPay, wageBase) * rate;
-        }
-        return RoundCurrency(Math.Max(0, amount - (allowances * values.GetValueOrDefault("allowance-credit", 0m))));
-    }
 
     private async Task<TransactionResult> ApplyPaymentAsync(Guid documentId, Guid bankAccountId, DateOnly date, decimal amount, string reference, bool receivable, CancellationToken cancellationToken)
     {

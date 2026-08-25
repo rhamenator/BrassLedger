@@ -115,7 +115,8 @@ public sealed class TaxAdministrationService(
                             form.Notes))
                         .ToArray(),
                     fieldDefinitions.Where(field => field.TaxRuleSetId == rule.Id).Select(field => new TaxRuleFieldDefinitionSnapshot(field.Id, field.FieldCode, field.Label, field.DataType, field.IsRequired, field.DefaultValueJson, field.ValidationJson, field.DisplayOrder, field.HelpText)).ToArray(),
-                    testCases.Where(testCase => testCase.TaxRuleSetId == rule.Id).Select(testCase => new TaxRuleTestCaseSnapshot(testCase.Id, testCase.Name, testCase.InputJson, testCase.ExpectedOutputJson, testCase.IsRequiredForActivation)).ToArray()))
+                    testCases.Where(testCase => testCase.TaxRuleSetId == rule.Id).Select(testCase => new TaxRuleTestCaseSnapshot(testCase.Id, testCase.Name, testCase.InputJson, testCase.ExpectedOutputJson, testCase.IsRequiredForActivation)).ToArray(),
+                    rule.ParentJurisdictionCode, rule.ObligationCode, rule.CalculationVariant, rule.ExclusiveGroup, rule.VariantPriority, rule.ApplicabilityJson))
                 .ToArray(),
             packages.Select(package => new TaxContentPackageSnapshot(package.Id, package.PackageCode, package.Version, package.EffectiveOn, package.Status, package.MinimumEngineVersion, package.ManifestJson, package.Source, package.ChangeSummary, package.CreatedAtUtc, package.ApprovedAtUtc)).ToArray(),
             captures.Select(capture => new TaxSourceCaptureSnapshot(capture.Id, capture.TaxContentPackageId, capture.SourceKind, capture.JurisdictionCode, capture.SourceUrl, capture.ContentType, capture.ContentSha256, capture.RawContent.Length, capture.CapturedAtUtc, capture.Notes)).ToArray());
@@ -141,6 +142,16 @@ public sealed class TaxAdministrationService(
         if (string.IsNullOrWhiteSpace(request.CalculationMethod))
         {
             return TaxAdministrationResult.Failure("Choose a calculation method.");
+        }
+
+        if (!IsJsonObject(request.ApplicabilityJson))
+        {
+            return TaxAdministrationResult.Failure("Applicability must be valid JSON.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ExclusiveGroup) && string.IsNullOrWhiteSpace(request.ObligationCode))
+        {
+            return TaxAdministrationResult.Failure("An exclusive calculation variant must identify its tax obligation.");
         }
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -201,6 +212,12 @@ public sealed class TaxAdministrationService(
         entity.TaxContentPackageId = request.TaxContentPackageId;
         entity.ContentVersion = string.IsNullOrWhiteSpace(request.ContentVersion) ? "1.0" : request.ContentVersion.Trim();
         entity.MinimumEngineVersion = string.IsNullOrWhiteSpace(request.MinimumEngineVersion) ? "1.0" : request.MinimumEngineVersion.Trim();
+        entity.ParentJurisdictionCode = request.ParentJurisdictionCode.Trim().ToUpperInvariant();
+        entity.ObligationCode = request.ObligationCode.Trim().ToUpperInvariant();
+        entity.CalculationVariant = request.CalculationVariant.Trim();
+        entity.ExclusiveGroup = request.ExclusiveGroup.Trim().ToUpperInvariant();
+        entity.VariantPriority = request.VariantPriority;
+        entity.ApplicabilityJson = IsJson(request.ApplicabilityJson) ? request.ApplicabilityJson : "{}";
 
         if (request.Id is null)
         {
@@ -437,6 +454,8 @@ public sealed class TaxAdministrationService(
         foreach (var rule in rules)
         {
             if (!IsCompatibleWithCurrentEngine(rule.MinimumEngineVersion)) errors.Add($"Rule {rule.Code} requires engine {rule.MinimumEngineVersion}.");
+            if (!IsJsonObject(rule.ApplicabilityJson)) errors.Add($"Rule {rule.Code} has invalid applicability JSON.");
+            if (!string.IsNullOrWhiteSpace(rule.ExclusiveGroup) && string.IsNullOrWhiteSpace(rule.ObligationCode)) errors.Add($"Rule {rule.Code} has an exclusive group but no obligation code.");
             if (!tests.Any(test => test.TaxRuleSetId == rule.Id)) errors.Add($"Rule {rule.Code} has no required activation test case.");
         }
         foreach (var test in tests)
@@ -450,7 +469,7 @@ public sealed class TaxAdministrationService(
             var payrollFrequency = inputDocument.RootElement.TryGetProperty("payrollFrequency", out var frequencyElement) ? frequencyElement.GetString() ?? "Biweekly" : "Biweekly";
             var otherStateWithholding = TryReadNumber(test.InputJson, "otherStateWithholding", out var otherStateValue) ? otherStateValue : 0m;
             var actualAmount = EvaluateRule(rule, parameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), brackets.Where(bracket => bracket.TaxRuleSetId == rule.Id), grossPay, allowances, filingStatus, payrollFrequency, otherStateWithholding);
-            if (actualAmount != decimal.Round(expectedAmount, 2, MidpointRounding.AwayFromZero)) errors.Add($"Test case {test.Name} expected {expectedAmount:0.00} but calculated {actualAmount:0.00}.");
+            if (actualAmount != decimal.Round(expectedAmount, 2, MidpointRounding.AwayFromZero)) errors.Add($"Test case {test.Name} for {rule.Code} ({rule.CalculationMethod}, brackets: {string.Join(", ", brackets.Where(bracket => bracket.TaxRuleSetId == rule.Id).OrderBy(bracket => bracket.Sequence).Select(bracket => $"{bracket.UpperBoundAmount:0.##}/{bracket.FixedAmount:0.##}/{bracket.Rate:0.#####}"))}) expected {expectedAmount:0.00} but calculated {actualAmount:0.00}.");
         }
         return errors.Count == 0 ? TaxContentValidationResult.Success() : new(false, errors);
     }
@@ -462,7 +481,13 @@ public sealed class TaxAdministrationService(
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var package = await db.TaxContentPackages.SingleAsync(item => item.CompanyId == companyId && item.Id == packageId, cancellationToken);
         package.Status = "Approved"; package.ApprovedAtUtc = DateTimeOffset.UtcNow;
-        await db.TaxContentPackages.Where(item => item.CompanyId == companyId && item.PackageCode == package.PackageCode && item.Id != package.Id && item.Status == "Approved" && item.EffectiveOn <= package.EffectiveOn).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Status, "Superseded"), cancellationToken);
+        var supersededPackageIds = await db.TaxContentPackages.Where(item => item.CompanyId == companyId && item.PackageCode == package.PackageCode && item.Id != package.Id && item.Status == "Approved" && item.EffectiveOn <= package.EffectiveOn).Select(item => item.Id).ToArrayAsync(cancellationToken);
+        if (supersededPackageIds.Length > 0)
+        {
+            await db.TaxRuleSets.Where(rule => rule.CompanyId == companyId && rule.TaxContentPackageId.HasValue && supersededPackageIds.Contains(rule.TaxContentPackageId.Value)).ExecuteUpdateAsync(setters => setters.SetProperty(rule => rule.IsActive, false), cancellationToken);
+            await db.TaxContentPackages.Where(item => supersededPackageIds.Contains(item.Id)).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Status, "Superseded"), cancellationToken);
+        }
+        await db.TaxRuleSets.Where(rule => rule.CompanyId == companyId && rule.TaxContentPackageId == package.Id).ExecuteUpdateAsync(setters => setters.SetProperty(rule => rule.IsActive, true), cancellationToken);
         await db.SaveChangesAsync(cancellationToken); return TaxAdministrationResult.Success(package.Id);
     }
 
@@ -580,10 +605,10 @@ public sealed class TaxAdministrationService(
         {
             if (string.IsNullOrWhiteSpace(importedRule.Code) || string.IsNullOrWhiteSpace(importedRule.JurisdictionName) || string.IsNullOrWhiteSpace(importedRule.CalculationMethod))
                 return TaxAdministrationResult.Failure("Each imported rule needs code, jurisdiction name, and calculation method.");
-            var rule = new TaxRuleSet { Id = Guid.NewGuid(), CompanyId = companyId, TaxContentPackageId = package.Id, Code = importedRule.Code.Trim().ToUpperInvariant(), JurisdictionCode = importedRule.JurisdictionCode?.Trim().ToUpperInvariant() ?? string.Empty, JurisdictionName = importedRule.JurisdictionName.Trim(), JurisdictionType = string.IsNullOrWhiteSpace(importedRule.JurisdictionType) ? "State" : importedRule.JurisdictionType.Trim(), TaxType = importedRule.TaxType?.Trim() ?? "Employee withholding", CalculationMethod = importedRule.CalculationMethod.Trim(), WithholdingFrequency = importedRule.WithholdingFrequency?.Trim() ?? "Per payroll", EffectiveOn = document.EffectiveOn, Source = package.Source, Notes = "Imported draft tax content; review source evidence and activation tests before use.", IsEmployerSpecific = importedRule.IsEmployerSpecific, SupportsBracketTable = importedRule.CalculationMethod is "progressive-annualized" or "wage-bracket", SupportsParameterEditing = true, IsActive = false, ContentVersion = version, MinimumEngineVersion = CurrentTaxEngineVersion };
+            var rule = new TaxRuleSet { Id = Guid.NewGuid(), CompanyId = companyId, TaxContentPackageId = package.Id, Code = importedRule.Code.Trim().ToUpperInvariant(), JurisdictionCode = importedRule.JurisdictionCode?.Trim().ToUpperInvariant() ?? string.Empty, JurisdictionName = importedRule.JurisdictionName.Trim(), JurisdictionType = string.IsNullOrWhiteSpace(importedRule.JurisdictionType) ? "State" : importedRule.JurisdictionType.Trim(), TaxType = importedRule.TaxType?.Trim() ?? "Employee withholding", CalculationMethod = importedRule.CalculationMethod.Trim(), WithholdingFrequency = importedRule.WithholdingFrequency?.Trim() ?? "Per payroll", EffectiveOn = document.EffectiveOn, Source = package.Source, Notes = "Imported draft tax content; review source evidence and activation tests before use.", IsEmployerSpecific = importedRule.IsEmployerSpecific, SupportsBracketTable = importedRule.Brackets?.Count > 0, SupportsParameterEditing = true, IsActive = false, ContentVersion = version, MinimumEngineVersion = CurrentTaxEngineVersion, ParentJurisdictionCode = importedRule.ParentJurisdictionCode?.Trim().ToUpperInvariant() ?? string.Empty, ObligationCode = importedRule.ObligationCode?.Trim().ToUpperInvariant() ?? importedRule.Code.Trim().ToUpperInvariant(), CalculationVariant = importedRule.CalculationVariant?.Trim() ?? importedRule.CalculationMethod.Trim(), ExclusiveGroup = importedRule.ExclusiveGroup?.Trim().ToUpperInvariant() ?? string.Empty, VariantPriority = importedRule.VariantPriority, ApplicabilityJson = importedRule.Applicability?.GetRawText() ?? "{}" };
             db.TaxRuleSets.Add(rule);
             var parameterOrder = 0;
-            foreach (var parameter in importedRule.Parameters ?? []) db.TaxRuleParameters.Add(new TaxRuleParameter { Id = Guid.NewGuid(), TaxRuleSetId = rule.Id, ParameterCode = parameter.Code.Trim().ToLowerInvariant(), Label = parameter.Label?.Trim() ?? parameter.Code.Trim(), ValueType = parameter.Number.HasValue ? "number" : parameter.Boolean.HasValue ? "bool" : "text", NumericValue = parameter.Number, TextValue = parameter.Text?.Trim() ?? string.Empty, BooleanValue = parameter.Boolean, Notes = parameter.Notes?.Trim() ?? string.Empty, DisplayOrder = parameterOrder += 10 });
+            foreach (var parameter in importedRule.Parameters ?? []) db.TaxRuleParameters.Add(new TaxRuleParameter { Id = Guid.NewGuid(), TaxRuleSetId = rule.Id, ParameterCode = parameter.Code.Trim().ToLowerInvariant(), Label = parameter.Label?.Trim() ?? parameter.Code.Trim(), ValueType = parameter.Number.HasValue ? "number" : parameter.Boolean.HasValue ? "bool" : parameter.Json.HasValue ? "json" : "text", NumericValue = parameter.Number, TextValue = parameter.Json?.GetRawText() ?? parameter.Text?.Trim() ?? string.Empty, BooleanValue = parameter.Boolean, Notes = parameter.Notes?.Trim() ?? string.Empty, DisplayOrder = parameterOrder += 10 });
             var fieldOrder = 0;
             foreach (var field in importedRule.Fields ?? []) db.TaxRuleFieldDefinitions.Add(new TaxRuleFieldDefinition { Id = Guid.NewGuid(), TaxRuleSetId = rule.Id, FieldCode = field.Code.Trim().ToLowerInvariant(), Label = field.Label.Trim(), DataType = field.DataType.Trim().ToLowerInvariant(), IsRequired = field.Required, DefaultValueJson = field.Default?.GetRawText() ?? "null", ValidationJson = field.Validation?.GetRawText() ?? "{}", DisplayOrder = fieldOrder += 10, HelpText = field.HelpText?.Trim() ?? string.Empty });
             foreach (var bracket in importedRule.Brackets ?? []) db.TaxRuleBrackets.Add(new TaxRuleBracket { Id = Guid.NewGuid(), TaxRuleSetId = rule.Id, Sequence = bracket.Sequence, UpperBoundAmount = bracket.UpperBoundAmount, FixedAmount = bracket.FixedAmount, Rate = bracket.Rate, Notes = bracket.Notes?.Trim() ?? string.Empty });
@@ -634,23 +659,10 @@ public sealed class TaxAdministrationService(
     private static bool IsCompatibleWithCurrentEngine(string minimumVersion) => Version.TryParse(minimumVersion, out var required) && Version.TryParse(CurrentTaxEngineVersion, out var current) && required <= current;
     private static bool TryReadNumber(string json, string property, out decimal value) { value = 0; using var document = System.Text.Json.JsonDocument.Parse(json); return document.RootElement.TryGetProperty(property, out var element) && element.TryGetDecimal(out value); }
     private static decimal EvaluateRule(TaxRuleSet rule, IEnumerable<TaxRuleParameter> parameters, IEnumerable<TaxRuleBracket> brackets, decimal grossPay, int allowances, string filingStatus = "Single", string payrollFrequency = "Biweekly", decimal otherStateWithholding = 0m)
-    {
-        var values = parameters.Where(parameter => parameter.NumericValue.HasValue).ToDictionary(parameter => parameter.ParameterCode, parameter => parameter.NumericValue!.Value, StringComparer.OrdinalIgnoreCase); var annualization = values.GetValueOrDefault("annualization-factor", 1m); var pay = Math.Max(0, grossPay - allowances * values.GetValueOrDefault("allowance-per-pay", 0m)); decimal amount;
-        if (rule.CalculationMethod == "allowance-phaseout") { var statusKey = string.Equals(filingStatus, "Married filing jointly", StringComparison.OrdinalIgnoreCase) ? "married" : "single"; var frequencyKey = payrollFrequency.Trim().ToLowerInvariant(); var baseAllowance = values.GetValueOrDefault($"{frequencyKey}-{statusKey}-base"); var threshold = values.GetValueOrDefault($"{frequencyKey}-{statusKey}-threshold"); var roundingDigits = (int)values.GetValueOrDefault("rounding-digits", 2m); var tentative = decimal.Round(grossPay * values.GetValueOrDefault("withholding-rate"), roundingDigits, MidpointRounding.AwayFromZero); var phaseout = decimal.Round(Math.Max(0, grossPay - threshold) * values.GetValueOrDefault("allowance-phaseout-rate"), roundingDigits, MidpointRounding.AwayFromZero); amount = Math.Max(0, tentative - Math.Max(0, baseAllowance - phaseout) - Math.Max(0, otherStateWithholding)); }
-        else if (rule.CalculationMethod == "wage-bracket") { var annualPay = pay * annualization; var bracket = brackets.OrderBy(item => item.Sequence).FirstOrDefault(item => item.UpperBoundAmount <= 0 || annualPay <= item.UpperBoundAmount); amount = bracket is null ? 0 : bracket.FixedAmount / annualization; }
-        else if (rule.CalculationMethod == "progressive-annualized") { var annualPay = pay * annualization; var previous = 0m; amount = 0; foreach (var bracket in brackets.OrderBy(item => item.Sequence)) { var ceiling = bracket.UpperBoundAmount <= 0 ? annualPay : bracket.UpperBoundAmount; amount += Math.Max(0, Math.Min(annualPay, ceiling) - previous) * bracket.Rate; previous = ceiling; if (annualPay <= ceiling) break; } amount /= annualization; }
-        else if (rule.CalculationMethod == "local-code-e")
-        {
-            var standardAllowance = Math.Clamp(grossPay * values.GetValueOrDefault("allowance-percent", 0m), values.GetValueOrDefault("allowance-minimum", 0m), values.GetValueOrDefault("allowance-maximum", decimal.MaxValue));
-            var localTaxable = Math.Max(0, grossPay - standardAllowance - allowances * values.GetValueOrDefault("dependent-allowance", 0m));
-            amount = Math.Min(localTaxable, values.GetValueOrDefault("wage-base", decimal.MaxValue)) * values.GetValueOrDefault("tax-rate", values.GetValueOrDefault("rate", 0m));
-        }
-        else if (rule.CalculationMethod == "hourly-assessment") amount = Math.Max(0, values.GetValueOrDefault("hours-per-pay", 0m)) * values.GetValueOrDefault("hourly-rate", values.GetValueOrDefault("rate", 0m));
-        else amount = Math.Min(pay, values.GetValueOrDefault("wage-base", decimal.MaxValue)) * values.GetValueOrDefault("flat-rate", values.GetValueOrDefault("employer-rate", values.GetValueOrDefault("tax-rate", values.GetValueOrDefault("rate", 0m))));
-        return decimal.Round(Math.Max(0, amount - allowances * values.GetValueOrDefault("allowance-credit", 0m)), 2, MidpointRounding.AwayFromZero);
-    }
+        => TaxRuleEvaluator.Evaluate(rule, parameters, brackets, new TaxRuleEvaluationContext(grossPay, allowances, filingStatus, payrollFrequency, OtherStateWithholding: otherStateWithholding));
 
     private static bool IsJson(string value) { try { using var _ = System.Text.Json.JsonDocument.Parse(value); return true; } catch { return false; } }
+    private static bool IsJsonObject(string value) { try { using var document = JsonDocument.Parse(value); return document.RootElement.ValueKind == JsonValueKind.Object; } catch { return false; } }
 
     internal static async Task EnsureBaselineTaxRulesAsync(
         BrassLedgerDbContext dbContext,

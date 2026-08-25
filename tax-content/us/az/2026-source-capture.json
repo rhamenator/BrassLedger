@@ -34,7 +34,8 @@
     {
       "url": "https://azdor.gov/business/withholding-tax/employer-withholding-filing-obligations",
       "title": "Arizona Employer Withholding Filing Obligations",
-      "rawCaptureStatus": "Official page returned HTTP 403 during direct retrieval on August 25, 2026"
+      "rawCaptureStatus": "Official page returned HTTP 403 during direct retrieval on August 25, 2026; a browser PDF print was captured manually",
+      "manualCapture": { "fileName": "Employer Withholding Filing Obligations _ Arizona Department of Revenue.pdf", "mediaType": "application/pdf", "sha256": "3242ffd6657ad1b45099bd14e61f76715ac147f8d04ccb41073bbeeaec78f059", "bytes": 329680 }
     }
   ],
   "employeeInputs": [
@@ -89,7 +90,7 @@
   },
   "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
   "captureWarnings": [
-    "The official filing-obligations page rejected direct retrieval with HTTP 403, so its raw checksum is pending.",
+    "The official filing-obligations page rejected direct retrieval with HTTP 403; its manually printed PDF is checksummed separately because it is not byte-identical to the HTML source.",
     "No explicit rounding instruction or distinct supplemental-wage method was located in the captured 2026 A-4 publications.",
     "The unusual December employer election must be modeled as an employer-level effective-period override, not as an employee tax rate."
   ],
@@ -101,6 +102,6 @@
     "supplementalMethodIndependentlyVerified": false,
     "executableRegressionTests": false,
     "activationAllowed": false,
-    "requiredNextStep": "Checksum the filing source, verify rounding and supplemental treatment, implement conditional day counting and the December employer election, and add boundary tests before activation."
+    "requiredNextStep": "Verify rounding and supplemental treatment, implement conditional day counting and the December employer election, and add boundary tests before activation."
   }
 }

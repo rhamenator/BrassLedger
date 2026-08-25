@@ -7,8 +7,8 @@
   "effectiveOn": "2026-01-01",
   "effectiveThrough": "2026-12-31",
   "sources": [
-    { "url": "https://www.mass.gov/doc/massachusetts-circular-m-income-tax-withholding-tables-at-50-effective-january-1-2026/download", "title": "Massachusetts Circular M — Income Tax Withholding Tables at 5.0%, effective January 1, 2026", "revision": "December 2025", "mediaType": "application/pdf", "retrievalStatus": "Official content indexed and reviewed; direct byte retrieval returned HTTP 403", "sha256": null, "bytes": null },
-    { "url": "https://www.mass.gov/guides/withholding-taxes-on-wages", "title": "Massachusetts Withholding Taxes on Wages", "updated": "2026-04-23", "mediaType": "text/html", "retrievalStatus": "Official content indexed and reviewed; direct byte retrieval returned HTTP 403", "sha256": null, "bytes": null }
+    { "url": "https://www.mass.gov/doc/massachusetts-circular-m-income-tax-withholding-tables-at-50-effective-january-1-2026/download", "title": "Massachusetts Circular M — Income Tax Withholding Tables at 5.0%, effective January 1, 2026", "revision": "December 2025", "mediaType": "application/pdf", "retrievalStatus": "Manually downloaded after direct byte retrieval returned HTTP 403", "sha256": "d3f12716311bb9977c9597de25c89a79523d50a5bdc293ab7e68368a453f79a8", "bytes": 279731 },
+    { "url": "https://www.mass.gov/guides/withholding-taxes-on-wages", "title": "Massachusetts Withholding Taxes on Wages", "updated": "2026-04-23", "mediaType": "text/html", "retrievalStatus": "Official HTML returned HTTP 403; a browser PDF print was captured manually", "sha256": null, "bytes": null, "manualCapture": { "fileName": "Withholding Taxes on Wages _ Mass.gov.pdf", "mediaType": "application/pdf", "sha256": "68f7263a22174a46830f312b07136cb63ac3c4d74c73db434ae0971206aa7b13", "bytes": 625299 } }
   ],
   "employeeInputs": [
     { "code": "exemptions", "source": "Form M-4", "dataType": "integer", "minimum": 0 },
@@ -72,10 +72,10 @@
   },
   "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
   "captureWarnings": [
-    "Mass.gov returned HTTP 403 for direct retrieval of the final Circular M and guidance page; official indexed content was reviewed, but raw bytes and checksums remain unavailable on this machine.",
+    "Mass.gov returned HTTP 403 for direct retrieval; the original Circular M and a browser PDF print of the guidance page are now manually captured and checksummed.",
     "The full wage-bracket matrices are not transcribed.",
     "No generalized final or intermediate rounding instruction was located in the reviewed material.",
     "The $2,000 retirement-contribution deduction is a year-to-date stateful cap and cannot be implemented as a stateless per-check deduction."
   ],
-  "review": { "annualizedFormulaTranscribed": true, "surtaxThresholdTranscribed": true, "exemptionFactorsTranscribed": true, "supplementalMethodTranscribed": true, "officialExampleTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": false, "completeWageBracketTablesTranscribed": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Obtain and checksum final official bytes, import wage-bracket matrices, implement year-to-date retirement-cap and workday state, verify rounding, and add threshold and supplemental regression tests before activation." }
+  "review": { "annualizedFormulaTranscribed": true, "surtaxThresholdTranscribed": true, "exemptionFactorsTranscribed": true, "supplementalMethodTranscribed": true, "officialExampleTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": false, "completeWageBracketTablesTranscribed": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import wage-bracket matrices, implement year-to-date retirement-cap and workday state, verify rounding, and add threshold and supplemental regression tests before activation." }
 }

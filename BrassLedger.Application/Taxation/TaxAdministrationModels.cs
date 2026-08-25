@@ -29,8 +29,8 @@ public sealed record TaxContentPackageSnapshot(Guid Id, string PackageCode, stri
 public sealed record TaxSourceCaptureSnapshot(Guid Id, Guid? TaxContentPackageId, string SourceKind, string JurisdictionCode, string SourceUrl, string ContentType, string ContentSha256, int ContentLength, DateTimeOffset CapturedAtUtc, string Notes);
 public sealed record CaptureTaxSourceRequest(string JurisdictionCode, string SourceUrl, string Notes);
 public sealed record TaxContentImportDocument(string PackageCode, string Version, DateOnly EffectiveOn, string Source, string ChangeSummary, IReadOnlyList<TaxContentImportRule> Rules);
-public sealed record TaxContentImportRule(string Code, string JurisdictionCode, string JurisdictionName, string JurisdictionType, string TaxType, string CalculationMethod, string WithholdingFrequency, bool IsEmployerSpecific, IReadOnlyList<TaxContentImportParameter> Parameters, IReadOnlyList<TaxContentImportTest> Tests, IReadOnlyList<TaxContentImportField>? Fields = null, IReadOnlyList<TaxContentImportBracket>? Brackets = null, IReadOnlyList<TaxContentImportForm>? Forms = null);
-public sealed record TaxContentImportParameter(string Code, string Label, decimal? Number, string? Text, bool? Boolean, string Notes);
+public sealed record TaxContentImportRule(string Code, string JurisdictionCode, string JurisdictionName, string JurisdictionType, string TaxType, string CalculationMethod, string WithholdingFrequency, bool IsEmployerSpecific, IReadOnlyList<TaxContentImportParameter> Parameters, IReadOnlyList<TaxContentImportTest> Tests, IReadOnlyList<TaxContentImportField>? Fields = null, IReadOnlyList<TaxContentImportBracket>? Brackets = null, IReadOnlyList<TaxContentImportForm>? Forms = null, string? ParentJurisdictionCode = null, string? ObligationCode = null, string? CalculationVariant = null, string? ExclusiveGroup = null, int VariantPriority = 0, System.Text.Json.JsonElement? Applicability = null);
+public sealed record TaxContentImportParameter(string Code, string Label, decimal? Number, string? Text, bool? Boolean, string Notes, System.Text.Json.JsonElement? Json = null);
 public sealed record TaxContentImportTest(string Name, string InputJson, string ExpectedOutputJson);
 public sealed record TaxContentImportField(string Code, string Label, string DataType, bool Required, System.Text.Json.JsonElement? Default, System.Text.Json.JsonElement? Validation, string? HelpText = null);
 public sealed record TaxContentImportBracket(int Sequence, decimal UpperBoundAmount, decimal FixedAmount, decimal Rate, string? Notes = null);
@@ -71,7 +71,13 @@ public sealed record TaxRuleSetSnapshot(
     IReadOnlyList<TaxRuleBracketSnapshot> Brackets,
     IReadOnlyList<TaxFormRequirementSnapshot> FormRequirements,
     IReadOnlyList<TaxRuleFieldDefinitionSnapshot> FieldDefinitions,
-    IReadOnlyList<TaxRuleTestCaseSnapshot> TestCases);
+    IReadOnlyList<TaxRuleTestCaseSnapshot> TestCases,
+    string ParentJurisdictionCode = "",
+    string ObligationCode = "",
+    string CalculationVariant = "",
+    string ExclusiveGroup = "",
+    int VariantPriority = 0,
+    string ApplicabilityJson = "{}");
 
 public sealed record TaxRuleFieldDefinitionSnapshot(Guid Id, string FieldCode, string Label, string DataType, bool IsRequired, string DefaultValueJson, string ValidationJson, int DisplayOrder, string HelpText);
 public sealed record TaxRuleTestCaseSnapshot(Guid Id, string Name, string InputJson, string ExpectedOutputJson, bool IsRequiredForActivation);
@@ -122,7 +128,13 @@ public sealed record SaveTaxRuleSetRequest(
     bool IsActive,
     Guid? TaxContentPackageId = null,
     string ContentVersion = "1.0",
-    string MinimumEngineVersion = "1.0");
+    string MinimumEngineVersion = "1.0",
+    string ParentJurisdictionCode = "",
+    string ObligationCode = "",
+    string CalculationVariant = "",
+    string ExclusiveGroup = "",
+    int VariantPriority = 0,
+    string ApplicabilityJson = "{}");
 
 public sealed record SaveTaxContentPackageRequest(Guid? Id, string PackageCode, string Version, DateOnly EffectiveOn, string Status, string MinimumEngineVersion, string ManifestJson, string Source, string ChangeSummary);
 public sealed record SaveTaxRuleFieldDefinitionRequest(Guid RuleSetId, Guid? Id, string FieldCode, string Label, string DataType, bool IsRequired, string DefaultValueJson, string ValidationJson, int DisplayOrder, string HelpText);

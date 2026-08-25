@@ -204,7 +204,7 @@ else
                     <div class="auth-form"><h3>Effective exchange rate</h3><div class="field-group"><label class="field-label">Base currency</label><InputText aria-label="Exchange rate base currency" class="field-input" @bind-Value="ExchangeRateForm.BaseCurrency" /></div><div class="field-group"><label class="field-label">Quote currency</label><InputText aria-label="Exchange rate quote currency" class="field-input" @bind-Value="ExchangeRateForm.QuoteCurrency" /></div><div class="field-group"><label class="field-label">Rate</label><InputNumber aria-label="Exchange rate" class="field-input" @bind-Value="ExchangeRateForm.Rate" /></div><div class="field-group"><label class="field-label">Effective date</label><InputDate aria-label="Exchange rate effective date" class="field-input" @bind-Value="ExchangeRateForm.EffectiveOn" /></div><div class="field-group"><label class="field-label">Source</label><InputText aria-label="Exchange rate source" class="field-input" @bind-Value="ExchangeRateForm.Source" /></div><button class="action-secondary" type="submit">Save exchange rate</button></div>
                 </EditForm>
                 <EditForm Model="ConsolidationForm" OnValidSubmit="SaveConsolidationGroupAsync">
-                    <div class="auth-form"><h3>Consolidation group</h3><div class="field-group"><label class="field-label">Group name</label><InputText aria-label="Consolidation group name" class="field-input" @bind-Value="ConsolidationForm.Name" /></div><div class="field-group"><label class="field-label">Reporting currency</label><InputText aria-label="Consolidation reporting currency" class="field-input" @bind-Value="ConsolidationForm.ReportingCurrency" /></div><span class="field-label">Member companies and ownership</span>@foreach (var company in Companies) { <div class="field-group"><label><input type="checkbox" checked="@ConsolidationForm.MemberCompanyIds.Contains(company.CompanyId)" @onchange="args => ToggleConsolidationMember(company.CompanyId, args.Value)" /> @company.Name (@company.BaseCurrency)</label><InputNumber aria-label="@($"{company.Name} ownership percentage")" class="field-input" @bind-Value="ConsolidationForm.OwnershipPercentages[company.CompanyId]" disabled="@(!ConsolidationForm.MemberCompanyIds.Contains(company.CompanyId))" /></div> }<button class="action-primary" type="submit">Save consolidation group</button></div>
+                    <div class="auth-form"><h3>Consolidation group</h3><div class="field-group"><label class="field-label">Group name</label><InputText aria-label="Consolidation group name" class="field-input" @bind-Value="ConsolidationForm.Name" /></div><div class="field-group"><label class="field-label">Reporting currency</label><InputText aria-label="Consolidation reporting currency" class="field-input" @bind-Value="ConsolidationForm.ReportingCurrency" /></div><span class="field-label">Member companies and ownership</span>@foreach (var company in Companies) { var companyId = company.CompanyId; <div class="field-group"><label><input type="checkbox" checked="@ConsolidationForm.MemberCompanyIds.Contains(companyId)" @onchange="args => ToggleConsolidationMember(companyId, args.Value)" /> @company.Name (@company.BaseCurrency)</label><input type="number" min="0" max="1" step="0.0001" aria-label="@($"{company.Name} ownership percentage")" class="field-input" value="@ConsolidationForm.OwnershipPercentages.GetValueOrDefault(companyId, 1m).ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetConsolidationOwnership(companyId, args.Value)" disabled="@(!ConsolidationForm.MemberCompanyIds.Contains(companyId))" /></div> }<button class="action-primary" type="submit">Save consolidation group</button></div>
                 </EditForm>
             </div>
             @if (ConsolidationGroups.Count > 0)
@@ -372,6 +372,14 @@ else
         var selected = value is bool boolValue ? boolValue : string.Equals(value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
         if (selected) { ConsolidationForm.MemberCompanyIds.Add(companyId); ConsolidationForm.OwnershipPercentages.TryAdd(companyId, 1m); }
         else ConsolidationForm.MemberCompanyIds.Remove(companyId);
+    }
+
+    private void SetConsolidationOwnership(Guid companyId, object? value)
+    {
+        if (decimal.TryParse(value?.ToString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var ownership))
+        {
+            ConsolidationForm.OwnershipPercentages[companyId] = ownership;
+        }
     }
 
     private async Task LoadConsolidatedBalanceAsync(Guid groupId)

@@ -50,7 +50,7 @@ else
                 <div class="field-group"><label class="field-label">Run reference</label><InputText aria-label="Payroll run reference" class="field-input" @bind-Value="RunForm.Reference" /></div>
                 <div class="field-group"><label class="field-label">Funding account</label><InputSelect aria-label="Payroll funding account" class="field-input" @bind-Value="RunForm.BankAccountId"><option value="@Guid.Empty">Select bank account</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name — @bank.CurrentBalance.ToString("C")</option> }</InputSelect></div>
             </div>
-            <table class="data-table"><thead><tr><th>Employee</th><th>Work state</th><th>Gross pay</th></tr></thead><tbody>@foreach (var employee in Workspace.Payroll.Employees.Where(employee => employee.IsActive)) { <tr><td>@employee.FullName</td><td>@employee.State</td><td><InputNumber aria-label="@($"Gross pay for {employee.FullName}")" class="field-input" @bind-Value="RunLines[employee.Id]" /></td></tr> }</tbody></table>
+            <table class="data-table"><thead><tr><th>Employee</th><th>Work state</th><th>Gross pay</th></tr></thead><tbody>@foreach (var employee in Workspace.Payroll.Employees.Where(employee => employee.IsActive)) { var employeeId = employee.Id; <tr><td>@employee.FullName</td><td>@employee.State</td><td><input type="number" min="0" step="0.01" aria-label="@($"Gross pay for {employee.FullName}")" class="field-input" value="@RunLines[employeeId].ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetRunLine(employeeId, args.Value)" /></td></tr> }</tbody></table>
             <button class="action-secondary" type="submit">Preview payroll</button>
             @if (Preview is not null) { <button class="action-primary" type="button" @onclick="PostPayrollAsync">Post reviewed payroll</button> }</EditForm>
             @if (Preview is not null) { <table class="data-table"><thead><tr><th>Employee</th><th>Gross</th><th>Pre-tax benefits</th><th>Withholding</th><th>Post-tax benefits</th><th>Employer taxes</th><th>Net pay</th></tr></thead><tbody>@foreach (var line in Preview.Employees) { <tr><td>@line.EmployeeName (@line.WorkState)</td><td>@line.GrossPay.ToString("C")</td><td>@line.PreTaxDeductions.ToString("C")</td><td>@line.EmployeeWithholdings.ToString("C")</td><td>@line.PostTaxDeductions.ToString("C")</td><td>@line.EmployerPayrollTaxes.ToString("C")</td><td>@line.NetPay.ToString("C")</td></tr> }</tbody></table> }
@@ -149,6 +149,13 @@ else
     }
 
     private PostEmployeePayrollRunRequest BuildRequest() => new(RunForm.BankAccountId, RunForm.PayDate, RunForm.Reference, RunLines.Where(line => line.Value > 0).Select(line => new EmployeePayrollInput(line.Key, line.Value)).ToArray());
+    private void SetRunLine(Guid employeeId, object? value)
+    {
+        if (decimal.TryParse(value?.ToString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var amount))
+        {
+            RunLines[employeeId] = amount;
+        }
+    }
     private async Task PreviewPayrollAsync()
     {
         Preview = await TransactionService.PreviewEmployeePayrollRunAsync(BuildRequest());

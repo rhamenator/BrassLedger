@@ -19,7 +19,7 @@ public sealed class AccessibilityTests
         await using var session = await _fixture.CreateSessionAsync(browserKind);
         await session.SignInAsync();
 
-        foreach (var route in new[] { "/", "/ledger", "/receivables", "/payables", "/payroll", "/reporting", "/publish" })
+        foreach (var route in new[] { "/", "/ledger", "/receivables", "/payables", "/reporting", "/publish" })
         {
             await session.GotoAsync(route);
             await session.AssertSingleVisibleHeadingAsync();
@@ -27,6 +27,24 @@ public sealed class AccessibilityTests
             await session.AssertInteractiveElementsHaveNamesAsync();
             await session.AssertNoUiFailuresAsync($"accessibility checks on {route}");
         }
+
+        await using var payrollSession = await _fixture.CreateSessionAsync(browserKind);
+        await payrollSession.SignInAsync("payroll");
+        await payrollSession.GotoAsync("/payroll");
+        await payrollSession.WaitForHeadingAsync("Employees, labor cost, and tax-ready setup.");
+        await payrollSession.AssertSingleVisibleHeadingAsync();
+        await payrollSession.AssertHeadingOrderAsync();
+        await payrollSession.AssertInteractiveElementsHaveNamesAsync();
+        await payrollSession.AssertNoUiFailuresAsync("accessibility checks on /payroll");
+
+        await using var operationsSession = await _fixture.CreateSessionAsync(browserKind);
+        await operationsSession.SignInAsync("operations");
+        await operationsSession.GotoAsync("/operations");
+        await operationsSession.WaitForHeadingAsync("Operational flow from stock to shipment.");
+        await operationsSession.AssertSingleVisibleHeadingAsync();
+        await operationsSession.AssertHeadingOrderAsync();
+        await operationsSession.AssertInteractiveElementsHaveNamesAsync();
+        await operationsSession.AssertNoUiFailuresAsync("accessibility checks on /operations");
     }
 
     [Theory]

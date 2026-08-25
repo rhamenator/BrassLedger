@@ -11,13 +11,17 @@
       "url": "https://tax.colorado.gov/sites/tax/files/documents/DR_1098_Colorado_Withholding_Worksheet_for_Employees.pdf",
       "title": "2026 Colorado Withholding Worksheet for Employers, DR 1098",
       "revision": "10/21/25",
-      "rawCaptureStatus": "Official publication rendered, but direct byte retrieval returned HTTP 403 on August 25, 2026; checksum pending"
+      "rawCaptureStatus": "Manually downloaded after direct byte retrieval returned HTTP 403 on August 25, 2026",
+      "sha256": "b6376eaa0f531162e81fb9ddb7782295f5f50f5ba8823e27361c02aac8a279b5",
+      "bytes": 493272
     },
     {
       "url": "https://tax.colorado.gov/sites/tax/files/documents/DR_0004_2026.pdf",
       "title": "2026 Colorado Employee Withholding Certificate, DR 0004",
       "revision": "10/29/25",
-      "rawCaptureStatus": "Official publication rendered, but direct byte retrieval returned HTTP 403 on August 25, 2026; checksum pending"
+      "rawCaptureStatus": "Manually downloaded after direct byte retrieval returned HTTP 403 on August 25, 2026",
+      "sha256": "1a80db7f68059e0cf337740bcf82fab9939f743b4d5078111c2c9880a38ba48a",
+      "bytes": 246310
     },
     {
       "url": "https://tax.colorado.gov/withholding-tax-filing-requirements",
@@ -27,7 +31,15 @@
     {
       "url": "https://tax.colorado.gov/withholding-tax-guide",
       "title": "Colorado Wage Withholding Tax Guide",
-      "rawCaptureStatus": "Official page returned HTTP 403 during direct retrieval"
+      "rawCaptureStatus": "Official page returned HTTP 403 during direct retrieval; its linked January 2026 guide was downloaded manually",
+      "manualCapture": { "fileName": "Wage_Withholding_Tax_Guide_Jan_2026.pdf", "mediaType": "application/pdf", "sha256": "0f5d1e72ba39d0c443aa866c89364920878bb1b0a5b324ffa50054d33838ca76", "bytes": 1150762 }
+    },
+    {
+      "url": "https://tax.colorado.gov/DR1098",
+      "title": "DR 1098 Withholding Calculator for 2026",
+      "revision": "November 2025 revision for 2026",
+      "rawCaptureStatus": "Manually downloaded from the official DR 1098 page",
+      "manualCapture": { "fileName": "DR_1098_Withholding_Calculator_Nov_2025_Revision_for_2026.xlsx", "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "sha256": "7addcab146b9eeb9d3056016fbb5f4753488905fdfd19e91a07084ac6ba32cd0", "bytes": 63064 }
     }
   ],
   "employeeInputs": [
@@ -59,7 +71,21 @@
     "certificateReplacementRule": "A new W-4 without a new DR 0004 revokes the prior DR 0004 and any pre-2022 additional-withholding request.",
     "outsideAdjustmentAllowed": false,
     "taxableWagesIncludeOvertime": true,
-    "separateSupplementalMethodStatus": "No distinct supplemental-wage method was located in the captured 2026 worksheet."
+    "separateSupplementalMethodStatus": "No distinct supplemental-wage method was located in the captured 2026 worksheet.",
+    "rounding": {
+      "officialWorkbookFormulaBehavior": "The workbook contains no ROUND function. It retains full precision through annualization, the 4.40% multiplication, deannualization, and addition of extra withholding.",
+      "moneyCellNumberFormat": "$#,##0",
+      "operationalRule": "Calculate all steps at decimal precision and round the final nonnegative withholding amount to the nearest whole dollar for the displayed and posted payroll result.",
+      "intermediateRounding": false,
+      "finalDigits": 0,
+      "midpointRule": "AwayFromZero"
+    },
+    "workbookDerivedRegressionCases": [
+      { "name": "Weekly single default reduction", "periodicWages": 1000, "payPeriods": 52, "annualReduction": 5500, "additionalPeriodicWithholding": 0, "unroundedResult": 39.346153846153846153846153846, "displayedWithholding": 39 },
+      { "name": "Semimonthly married default reduction", "periodicWages": 5000, "payPeriods": 24, "annualReduction": 11000, "additionalPeriodicWithholding": 0, "unroundedResult": 199.83333333333333333333333333, "displayedWithholding": 200 },
+      { "name": "Biweekly explicit zero reduction and additional withholding", "periodicWages": 1234.56, "payPeriods": 26, "annualReduction": 0, "additionalPeriodicWithholding": 10.25, "unroundedResult": 64.57064, "displayedWithholding": 65 },
+      { "name": "Annualized wages below reduction", "periodicWages": 105, "payPeriods": 52, "annualReduction": 5500, "additionalPeriodicWithholding": 0, "unroundedResult": 0, "displayedWithholding": 0 }
+    ]
   },
   "residencyAndWorkRules": {
     "residentRule": "Withhold from federally taxable Colorado wages paid to a Colorado resident whether the work is performed inside or outside Colorado.",
@@ -71,14 +97,20 @@
     "return": "DR 1094",
     "frequenciesIdentifiedByCurrentGuide": ["Quarterly", "Monthly", "Weekly"],
     "frequencySelectionBasis": "Total annual Colorado wage withholding liability",
+    "frequencyThresholds": [
+      { "frequency": "Quarterly", "annualWithholding": "Less than $7,000", "due": "Last day of the month following the calendar quarter" },
+      { "frequency": "Monthly", "annualWithholding": "At least $7,000 but not more than $50,000", "due": "15th day of the following month" },
+      { "frequency": "Weekly", "annualWithholding": "$50,000 or more", "due": "Third business day following the Friday that concludes the week" }
+    ],
+    "exactlyFiftyThousandAmbiguity": "The January 2026 guide includes exactly $50,000 in both the monthly and weekly rows; do not assign this boundary automatically until the Department supplies a tie-break or account assignment.",
     "forms": ["IRS W-4", "DR 0004", "DR 1094", "DR 1093"],
     "currentThresholdsIndependentlyVerified": false
   },
   "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
   "captureWarnings": [
-    "Colorado rejected direct retrieval of both 2026 calculation PDFs with HTTP 403, so raw-source checksums are pending.",
-    "The 2026 worksheet contains no official worked example and does not prescribe an explicit intermediate or final rounding sequence.",
-    "Current filing-frequency dollar thresholds require a retrievable current guide or independent official confirmation before activation."
+    "Colorado rejected automated direct retrieval of the official files with HTTP 403; the manually downloaded PDF, guide, certificate, and calculator workbook are now checksummed.",
+    "The official workbook resolves calculation presentation: formulas retain full precision and its money cells display whole dollars. It contains no prefilled worked example, so independently derived formula and boundary cases remain necessary.",
+    "The January 2026 guide captures current filing thresholds but assigns exactly $50,000 to both monthly and weekly frequency rows. That boundary requires agency clarification or an explicit Department account assignment."
   ],
   "review": {
     "formulaTranscribed": true,
@@ -86,10 +118,12 @@
     "residencyAndWorkRulesTranscribed": true,
     "officialExamplesAvailable": false,
     "rawSourcesChecksummed": false,
-    "roundingIndependentlyVerified": false,
+    "downloadedSourceFilesChecksummed": true,
+    "calculatorWorkbookChecksummed": true,
+    "roundingIndependentlyVerified": true,
     "filingThresholdsIndependentlyVerified": false,
     "executableRegressionTests": false,
     "activationAllowed": false,
-    "requiredNextStep": "Obtain and checksum the raw 2026 PDFs, verify rounding and filing-frequency thresholds, create independently calculated boundary cases, and implement them in the tax engine before activation."
+    "requiredNextStep": "Implement the formula and workbook-derived cases in the tax engine, test certificate and residency branches, and resolve the guide's overlapping exactly-$50,000 filing-frequency boundary before automatic filing-frequency assignment."
   }
 }

@@ -1,4 +1,5 @@
 using BrassLedger.Application.Accounting;
+using BrassLedger.Application.Taxation;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
@@ -616,6 +617,43 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(posting.Succeeded, posting.ErrorMessage);
         await using var verification = await factory.CreateDbContextAsync();
         Assert.Contains("US-TEST", (await verification.PayrollRuns.SingleAsync(run => run.Id == posting.Id)).TaxContentSnapshotJson);
+    }
+
+    [Fact]
+    public async Task EmployeePayroll_AddsNewYorkStateAndNycObligationsButSelectsOneVariantPerObligation()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var taxAdministration = scope.ServiceProvider.GetRequiredService<ITaxAdministrationService>();
+        var packagePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ny/2026-runtime-package.json"));
+        var import = await taxAdministration.ImportTaxContentDocumentAsync(await File.ReadAllTextAsync(packagePath));
+        Assert.True(import.Succeeded, import.ErrorMessage);
+        var activation = await taxAdministration.ActivateContentPackageAsync(import.SavedId!.Value);
+        Assert.True(activation.Succeeded, activation.ErrorMessage);
+
+        var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var employee = workspace.Payroll.Employees.First();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var setup = await transactions.SaveEmployeePayrollSetupAsync(new SaveEmployeePayrollSetupRequest(employee.Id, "Single", 3, 0m, 0m, 0m, "NY", "New York City", "NY", "New York City", "Weekly"));
+        Assert.True(setup.Succeeded, setup.ErrorMessage);
+
+        var preview = await transactions.PreviewEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(workspace.Treasury.BankAccounts.First().Id, new DateOnly(2026, 5, 15), "NYC-OBLIGATION-PREVIEW", [new EmployeePayrollInput(employee.Id, 400m)]));
+
+        Assert.NotNull(preview);
+        Assert.Equal(14.12m, Assert.Single(preview!.Employees).EmployeeWithholdings); // NY Method II $8.01 + NYC resident Method II $6.11.
+
+        setup = await transactions.SaveEmployeePayrollSetupAsync(new SaveEmployeePayrollSetupRequest(employee.Id, "Single", 0, 0m, 0m, 0m, "NY", "New York City", "NY", "New York City", "Annual"));
+        Assert.True(setup.Succeeded, setup.ErrorMessage);
+        preview = await transactions.PreviewEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(workspace.Treasury.BankAccounts.First().Id, new DateOnly(2026, 5, 15), "NYC-WHOLE-WAGE-PREVIEW", [new EmployeePayrollInput(employee.Id, 1_207_400m)]));
+        Assert.NotNull(preview);
+        Assert.Equal(176_188m, Assert.Single(preview!.Employees).EmployeeWithholdings); // NY Method III $125,400 + NYC resident exact $50,788; Method II is excluded.
+
+        setup = await transactions.SaveEmployeePayrollSetupAsync(new SaveEmployeePayrollSetupRequest(employee.Id, "Single", 0, 0m, 0m, 0m, "NY", "Albany", "NY", "Yonkers", "Weekly"));
+        Assert.True(setup.Succeeded, setup.ErrorMessage);
+        preview = await transactions.PreviewEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(workspace.Treasury.BankAccounts.First().Id, new DateOnly(2026, 5, 15), "YONKERS-NONRESIDENT-PREVIEW", [new EmployeePayrollInput(employee.Id, 200m)]));
+        Assert.NotNull(preview);
+        Assert.Equal(3.06m, Assert.Single(preview!.Employees).EmployeeWithholdings); // NY State $2.25 + Yonkers nonresident earnings tax $0.81.
     }
 
     [Fact]

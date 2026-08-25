@@ -216,6 +216,12 @@ else
                             <div class="field-group"><label class="field-label">Content package</label><InputSelect aria-label="Tax rule content package" class="field-input" @bind-Value="RuleForm.TaxContentPackageId"><option value="@Guid.Empty">No package (legacy fallback)</option>@foreach (var package in TaxSnapshot.Packages) { <option value="@package.Id">@package.PackageCode @package.Version</option> }</InputSelect></div>
                             <div class="field-group"><label class="field-label">Content version</label><InputText aria-label="Tax rule content version" class="field-input" @bind-Value="RuleForm.ContentVersion" /></div>
                             <div class="field-group"><label class="field-label">Minimum engine version</label><InputText aria-label="Tax rule minimum engine version" class="field-input" @bind-Value="RuleForm.MinimumEngineVersion" /></div>
+                            <div class="field-group"><label class="field-label">Parent jurisdiction code</label><InputText aria-label="Parent jurisdiction code" class="field-input" @bind-Value="RuleForm.ParentJurisdictionCode" /></div>
+                            <div class="field-group"><label class="field-label">Tax obligation code</label><InputText aria-label="Tax obligation code" class="field-input" @bind-Value="RuleForm.ObligationCode" /></div>
+                            <div class="field-group"><label class="field-label">Calculation variant</label><InputText aria-label="Calculation variant" class="field-input" @bind-Value="RuleForm.CalculationVariant" /></div>
+                            <div class="field-group"><label class="field-label">Exclusive variant group</label><InputText aria-label="Exclusive variant group" class="field-input" @bind-Value="RuleForm.ExclusiveGroup" /></div>
+                            <div class="field-group"><label class="field-label">Variant priority</label><InputNumber aria-label="Variant priority" class="field-input" @bind-Value="RuleForm.VariantPriority" /></div>
+                            <div class="field-group"><label class="field-label">Applicability JSON</label><InputTextArea aria-label="Tax rule applicability JSON" class="field-input field-input-large" @bind-Value="RuleForm.ApplicabilityJson" /><small>Use allOf/anyOf conditions for residence, work location, filing status, payroll frequency, or annualized net wages.</small></div>
 
                             <div class="tax-checkbox-grid">
                                 <label><InputCheckbox @bind-Value="RuleForm.IsEmployerSpecific" /> Employer-specific</label>
@@ -382,6 +388,9 @@ else
                     <div><span class="detail-label">Jurisdiction</span><strong>@selectedRule.JurisdictionName</strong></div>
                     <div><span class="detail-label">Type</span><strong>@selectedRule.TaxType</strong></div>
                     <div><span class="detail-label">Method</span><strong>@selectedRule.CalculationMethod</strong></div>
+                    <div><span class="detail-label">Obligation</span><strong>@(string.IsNullOrWhiteSpace(selectedRule.ObligationCode) ? "Independent rule" : selectedRule.ObligationCode)</strong></div>
+                    <div><span class="detail-label">Variant</span><strong>@(string.IsNullOrWhiteSpace(selectedRule.CalculationVariant) ? selectedRule.CalculationMethod : selectedRule.CalculationVariant)</strong></div>
+                    <div><span class="detail-label">Exclusive group</span><strong>@(string.IsNullOrWhiteSpace(selectedRule.ExclusiveGroup) ? "None" : $"{selectedRule.ExclusiveGroup} (priority {selectedRule.VariantPriority})")</strong></div>
                     <div><span class="detail-label">Parameters</span><strong>@selectedRule.Parameters.Count</strong></div>
                     <div><span class="detail-label">Filings</span><strong>@selectedRule.FormRequirements.Count</strong></div>
                 </div>
@@ -475,7 +484,13 @@ else
             RuleForm.IsActive,
             RuleForm.TaxContentPackageId == Guid.Empty ? null : RuleForm.TaxContentPackageId,
             RuleForm.ContentVersion,
-            RuleForm.MinimumEngineVersion));
+            RuleForm.MinimumEngineVersion,
+            RuleForm.ParentJurisdictionCode,
+            RuleForm.ObligationCode,
+            RuleForm.CalculationVariant,
+            RuleForm.ExclusiveGroup,
+            RuleForm.VariantPriority,
+            RuleForm.ApplicabilityJson));
 
         StatusMessage = result.Succeeded ? "Tax rule set saved." : result.ErrorMessage;
         if (result.Succeeded)
@@ -680,7 +695,9 @@ else
             SupportsBracketTable = selectedRule.SupportsBracketTable,
             SupportsParameterEditing = selectedRule.SupportsParameterEditing,
             IsActive = selectedRule.IsActive
-            , TaxContentPackageId = selectedRule.TaxContentPackageId ?? Guid.Empty, ContentVersion = selectedRule.ContentVersion, MinimumEngineVersion = selectedRule.MinimumEngineVersion
+            , TaxContentPackageId = selectedRule.TaxContentPackageId ?? Guid.Empty, ContentVersion = selectedRule.ContentVersion, MinimumEngineVersion = selectedRule.MinimumEngineVersion,
+            ParentJurisdictionCode = selectedRule.ParentJurisdictionCode, ObligationCode = selectedRule.ObligationCode, CalculationVariant = selectedRule.CalculationVariant,
+            ExclusiveGroup = selectedRule.ExclusiveGroup, VariantPriority = selectedRule.VariantPriority, ApplicabilityJson = selectedRule.ApplicabilityJson
         };
         ParameterEditors = selectedRule.Parameters
             .Select(parameter => new TaxParameterEditor
@@ -743,6 +760,12 @@ else
         public Guid TaxContentPackageId { get; set; }
         public string ContentVersion { get; set; } = "1.0";
         public string MinimumEngineVersion { get; set; } = "1.0";
+        public string ParentJurisdictionCode { get; set; } = string.Empty;
+        public string ObligationCode { get; set; } = string.Empty;
+        public string CalculationVariant { get; set; } = string.Empty;
+        public string ExclusiveGroup { get; set; } = string.Empty;
+        public int VariantPriority { get; set; }
+        public string ApplicabilityJson { get; set; } = "{}";
     }
 
     private sealed class TaxParameterEditor

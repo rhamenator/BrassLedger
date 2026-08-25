@@ -47,7 +47,17 @@
       { "filingStatus": "Married", "frequency": "Semimonthly", "grossWages": 5000, "exemptions": 3, "deductionAndExemptions": 456.20, "netWages": 4543.80, "withholding": 248.11 },
       { "filingStatus": "Married", "frequency": "QuarterlyConverted", "grossWages": 6750, "exemptions": 2, "monthlyEquivalentWages": 2250, "monthlyWithholding": 63.50, "withholding": 190.50 }
     ],
-    "rounding": { "generalInstructionLocated": false, "officialExamplesUseCents": true }
+    "rounding": {
+      "generalInstructionLocated": false,
+      "officialExamplesUseCents": true,
+      "operationalPolicy": "Use the printed Method II table rate and base amount and round the variable-rate product to cents with midpoint rounding away from zero before adding the printed base amount.",
+      "policyDecisionOn": "2026-08-25",
+      "publicationConflictDisposition": "Treat the two inconsistent semimonthly examples as agency publication errors; they do not override the printed table parameters.",
+      "resolvedTableResults": [
+        { "filingStatus": "Single", "frequency": "Semimonthly", "grossWages": 5000, "exemptions": 1, "withholding": 258.50 },
+        { "filingStatus": "Married", "frequency": "Semimonthly", "grossWages": 5000, "exemptions": 3, "withholding": 248.12 }
+      ]
+    }
   },
   "residencyAndWorkRules": {
     "residentRule": "All wages paid to a New York resident are subject to New York withholding regardless of work location or assignment duration.",
@@ -67,9 +77,11 @@
   },
   "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false, "sourceCapture": "2026-local-source-capture.json", "separateEngines": ["NewYorkCityResident", "YonkersResident", "YonkersNonresident"] },
   "captureWarnings": [
+    "The published semimonthly married example reports $248.11, while its printed line-7 rate and base amount calculate to $248.12 under the approved ordinary-cent policy. This is recorded as an agency publication error and is not an activation blocker.",
+    "The published semimonthly single example reports $258.51, while its printed line-7 rate and base amount calculate to $258.50 under the approved ordinary-cent policy. This is recorded as an agency publication error and is not an activation blocker.",
     "Method III uses whole-wage average rates rather than marginal brackets; representing it as a normal bracket would materially over- or under-withhold.",
     "The federal-allowance compatibility adjustment is explicitly inflation-sensitive and must not be frozen at the publication's 2025 federal amount.",
     "The full 14-day policy conditions and complete direct wage-bracket, dollar-to-dollar, and exact period matrices remain untranscribed."
   ],
-  "review": { "exact2026PublicationCaptured": true, "deductionsAndAnnualSchedulesTranscribed": true, "topIncomeMethodTranscribed": true, "supplementalMethodTranscribed": true, "officialExamplesTranscribed": true, "residencyAndWorkRulesTranscribed": true, "localCaptureLinked": true, "filingSchedulesTranscribed": true, "rawCalculationSourceChecksummed": true, "completeDirectTablesTranscribed": false, "shortTermPolicyFullyTranscribed": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import all direct tables, fully transcribe TSB-M-12(5)I and convenience necessity tests, implement state/local selection and whole-wage Method III, then add examples and every threshold/allocation boundary." }
+  "review": { "exact2026PublicationCaptured": true, "deductionsAndAnnualSchedulesTranscribed": true, "topIncomeMethodTranscribed": true, "supplementalMethodTranscribed": true, "officialExamplesTranscribed": true, "residencyAndWorkRulesTranscribed": true, "localCaptureLinked": true, "filingSchedulesTranscribed": true, "rawCalculationSourceChecksummed": true, "completeDirectTablesTranscribed": false, "shortTermPolicyFullyTranscribed": false, "roundingPolicyApproved": true, "roundingIndependentlyVerified": false, "roundingConflictBlocksActivation": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import all direct tables, fully transcribe TSB-M-12(5)I and convenience necessity tests, implement state/local selection and whole-wage Method III, then add examples and every threshold/allocation boundary." }
 }

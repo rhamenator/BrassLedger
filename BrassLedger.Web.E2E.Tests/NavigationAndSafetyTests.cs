@@ -26,8 +26,6 @@ public sealed class NavigationAndSafetyTests
             ("/ledger", "Core accounting balances and posting history."),
             ("/receivables", "Customers, invoices, and open-balance follow-up."),
             ("/payables", "Vendor management and outgoing cash commitments."),
-            ("/operations", "Operational flow from stock to shipment."),
-            ("/payroll", "Employees, labor cost, and tax-ready setup."),
             ("/projects", "Job tracking with room for industry-specific workflows."),
             ("/reporting", "Reports, labels, forms, and print fidelity stay in the product."),
             ("/taxes", "Keep withholdings, filing rules, and odd state behavior in editable tables instead of buried code."),
@@ -40,6 +38,18 @@ public sealed class NavigationAndSafetyTests
             await session.WaitForHeadingAsync(route.Heading);
             await session.AssertNoUiFailuresAsync(route.Path);
         }
+
+        await using var operationsSession = await _fixture.CreateSessionAsync(browserKind);
+        await operationsSession.SignInAsync("operations");
+        await operationsSession.GotoAsync("/operations");
+        await operationsSession.WaitForHeadingAsync("Operational flow from stock to shipment.");
+        await operationsSession.AssertNoUiFailuresAsync("/operations");
+
+        await using var payrollSession = await _fixture.CreateSessionAsync(browserKind);
+        await payrollSession.SignInAsync("payroll");
+        await payrollSession.GotoAsync("/payroll");
+        await payrollSession.WaitForHeadingAsync("Employees, labor cost, and tax-ready setup.");
+        await payrollSession.AssertNoUiFailuresAsync("/payroll");
     }
 
     [Theory]
@@ -53,11 +63,20 @@ public sealed class NavigationAndSafetyTests
         await shell.OpenAsync();
         await shell.NavigateMenuAsync("ledger", "Core accounting balances and posting history.");
         await shell.NavigateMenuAsync("receivables", "Customers, invoices, and open-balance follow-up.");
-        await shell.NavigateMenuAsync("operations", "Operational flow from stock to shipment.");
         await shell.NavigateMenuAsync("reporting", "Reports, labels, forms, and print fidelity stay in the product.");
         await shell.NavigateMenuAsync("publish", "One .NET web application, packaged per platform.");
 
+        Assert.Equal(0, await session.Page.Locator("a.nav-link[href='operations']").CountAsync());
+        Assert.Equal(0, await session.Page.Locator("a.nav-link[href='payroll']").CountAsync());
+
         await session.AssertNoUiFailuresAsync("sidebar navigation");
+
+        await using var operationsSession = await _fixture.CreateSessionAsync(browserKind);
+        await operationsSession.SignInAsync("operations");
+        var operationsShell = new AppShellPage(operationsSession);
+        await operationsShell.OpenAsync();
+        await operationsShell.NavigateMenuAsync("operations", "Operational flow from stock to shipment.");
+        await operationsSession.AssertNoUiFailuresAsync("operations sidebar navigation");
     }
 
     [Theory]

@@ -66,7 +66,24 @@ public sealed class UiSession : IAsyncDisposable
     public async Task WaitForHeadingAsync(string heading)
     {
         var h1 = Page.Locator("h1").Filter(new() { HasTextString = heading });
-        await h1.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 15000 });
+        try
+        {
+            await h1.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 15000 });
+        }
+        catch (TimeoutException exception)
+        {
+            var visibleHeadings = await Page.Locator("h1:visible").AllTextContentsAsync();
+            var bodyText = (await Page.Locator("body").InnerTextAsync()).Trim();
+            var serverLogTail = string.Join(
+                Environment.NewLine,
+                _fixture.GetLogs().Split(Environment.NewLine).TakeLast(30));
+            throw new TimeoutException(
+                $"Timed out waiting for heading '{heading}' at {Page.Url}. Visible headings: {string.Join(" | ", visibleHeadings)}"
+                + Environment.NewLine + $"Body: {bodyText}"
+                + Environment.NewLine + "Server log tail:"
+                + Environment.NewLine + serverLogTail,
+                exception);
+        }
     }
 
     public async Task AssertNoUiFailuresAsync(string scenario)

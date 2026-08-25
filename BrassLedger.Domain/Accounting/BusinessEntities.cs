@@ -430,6 +430,12 @@ public sealed class TaxRuleSet
     public Guid? TaxContentPackageId { get; set; }
     public string ContentVersion { get; set; } = "1.0";
     public string MinimumEngineVersion { get; set; } = "1.0";
+    public string ParentJurisdictionCode { get; set; } = string.Empty;
+    public string ObligationCode { get; set; } = string.Empty;
+    public string CalculationVariant { get; set; } = string.Empty;
+    public string ExclusiveGroup { get; set; } = string.Empty;
+    public int VariantPriority { get; set; }
+    public string ApplicabilityJson { get; set; } = "{}";
 }
 
 public sealed class TaxContentPackage

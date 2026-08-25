@@ -11,14 +11,18 @@
       "title": "2026 Michigan Income Tax Withholding Guide, Form 446",
       "revision": "02-26",
       "pages": 5,
-      "rawCaptureStatus": "Official page rendered; origin rejected direct byte retrieval with HTTP 403, so checksum is pending"
+      "rawCaptureStatus": "Manually downloaded after origin rejected direct byte retrieval with HTTP 403",
+      "sha256": "5cfe50e6842338649de7f97027f39659d830bb87e64e0c5834cf8e61b3a91b04",
+      "bytes": 417256
     },
     {
       "url": "https://www.michigan.gov/taxes/-/media/Project/Websites/taxes/Forms/City-Withholding/TY2026/5469_ty2026.pdf",
       "title": "2026 City of Detroit Income Tax Withholding Guide, Form 5469",
       "revision": "05-25",
       "pages": 4,
-      "rawCaptureStatus": "Official page rendered; origin rejected direct byte retrieval with HTTP 403, so checksum is pending"
+      "rawCaptureStatus": "Manually downloaded after origin rejected direct byte retrieval with HTTP 403",
+      "sha256": "56a4347e4149f22e20744e2bd76c3cb63ac3c4d74c73db434ae0971206aa7b13",
+      "bytes": 427731
     },
     {
       "url": "https://www.michigan.gov/taxes/citytax/what-cities-impose-an-income-tax",
@@ -94,7 +98,7 @@
   "captureWarnings": [
     "The State of Michigan identifies 24 taxing cities but administers only Detroit during 2026; each of the other 23 cities requires its own current official rate, form, filing, and boundary capture.",
     "Flint administration transfers to the Michigan Department of Treasury on January 1, 2027 for 2026 and future tax-year returns; this does not make Treasury the 2026 payroll withholding administrator.",
-    "Raw PDF checksums are pending because direct retrieval returned HTTP 403 during this capture."
+    "The two raw PDFs were downloaded manually after direct retrieval returned HTTP 403 and are now checksummed."
   ],
   "review": {
     "stateFormulaTranscribed": true,
