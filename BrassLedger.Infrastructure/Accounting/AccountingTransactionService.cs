@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using BrassLedger.Application.Accounting;
 using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
@@ -1060,6 +1061,11 @@ public sealed class AccountingTransactionService(
             return TransactionResult.Failure("Provide one unique employee for each payroll line.");
         if (request.Employees.Any(line => line.Earnings?.Any(earning => earning.Amount < 0 || earning.Hours < 0 || earning.Rate < 0) == true))
             return TransactionResult.Failure("Payroll earning amounts, hours, and rates cannot be negative.");
+        foreach (var earning in request.Employees.SelectMany(line => line.Earnings ?? []))
+        {
+            var reportingError = ValidateW2Reporting(earning.W2Reporting, earning.Amount, earning.EarningType);
+            if (reportingError.Length > 0) return TransactionResult.Failure(reportingError);
+        }
         if (request.Employees.Any(line => line.Deductions?.Any(deduction => deduction.EmployeeAmount < 0 || deduction.EmployerAmount < 0) == true))
             return TransactionResult.Failure("Payroll deduction amounts cannot be negative.");
         var periodStart = request.PeriodStart ?? request.PayDate;
@@ -1107,7 +1113,7 @@ public sealed class AccountingTransactionService(
             var line = new PayrollRunEmployeeLine { Id = Guid.NewGuid(), PayrollRunId = run.Id, EmployeeId = estimateLine.EmployeeId, WorkState = estimateLine.WorkState, WorkCity = employee.WorkCity, ResidenceState = string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState, ResidenceCity = employee.ResidenceCity, FilingStatus = estimateLine.FilingStatus, PayrollFrequency = employee.PayrollFrequency, GrossPay = estimateLine.GrossPay, TaxableWages = estimateLine.GrossPay - estimateLine.PreTaxDeductions, YearToDateGrossBefore = estimateLine.YearToDateGrossBefore, YearToDateGrossAfter = estimateLine.YearToDateGrossBefore + estimateLine.GrossPay, PreTaxDeductions = estimateLine.PreTaxDeductions, EmployeeWithholdings = estimateLine.EmployeeWithholdings, PostTaxDeductions = estimateLine.PostTaxDeductions, EmployerPayrollTaxes = estimateLine.EmployerPayrollTaxes, EmployerBenefitContributions = estimateLine.EmployerBenefitContributions, NetPay = estimateLine.NetPay };
             db.PayrollRunEmployeeLines.Add(line);
             var earnings = input.Earnings is { Count: > 0 } ? input.Earnings : [new PayrollEarningInput("REGULAR", "Regular", 0, 0, estimateLine.GrossPay, true, null, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict)];
-            db.PayrollEarningLines.AddRange(earnings.Select((earning, index) => new PayrollEarningLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, PayrollTimeEntryId = earning.SourceTimeEntryId, Sequence = index + 1, EarningCode = earning.EarningCode.Trim(), EarningType = earning.EarningType.Trim(), Hours = earning.Hours, Rate = earning.Rate, Amount = RoundCurrency(earning.Amount), IsTaxable = earning.IsTaxable, WorkedOn = earning.WorkedOn, WorkState = string.IsNullOrWhiteSpace(earning.WorkState) ? employee.State : earning.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(earning.WorkCounty) ? employee.WorkCounty : earning.WorkCounty.Trim(), WorkCity = string.IsNullOrWhiteSpace(earning.WorkCity) ? employee.WorkCity : earning.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(earning.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : earning.WorkSchoolDistrict.Trim() }));
+            db.PayrollEarningLines.AddRange(earnings.Select((earning, index) => new PayrollEarningLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, PayrollTimeEntryId = earning.SourceTimeEntryId, Sequence = index + 1, EarningCode = earning.EarningCode.Trim(), EarningType = earning.EarningType.Trim(), Hours = earning.Hours, Rate = earning.Rate, Amount = RoundCurrency(earning.Amount), IsTaxable = earning.IsTaxable, WorkedOn = earning.WorkedOn, WorkState = string.IsNullOrWhiteSpace(earning.WorkState) ? employee.State : earning.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(earning.WorkCounty) ? employee.WorkCounty : earning.WorkCounty.Trim(), WorkCity = string.IsNullOrWhiteSpace(earning.WorkCity) ? employee.WorkCity : earning.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(earning.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : earning.WorkSchoolDistrict.Trim(), W2ReportingJson = SerializeW2Reporting(earning.W2Reporting) }));
             var deductions = estimateLine.Deductions ?? [];
             db.PayrollDeductionLines.AddRange(deductions.Select((deduction, index) => new PayrollDeductionLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, PayrollDeductionPlanId = deduction.PayrollDeductionPlanId, EmployeePayrollDeductionElectionId = deduction.EmployeePayrollDeductionElectionId, DeductionCode = deduction.DeductionCode.Trim(), DeductionType = deduction.DeductionType.Trim(), EmployeeAmount = RoundCurrency(deduction.EmployeeAmount), RequestedEmployeeAmount = RoundCurrency(deduction.RequestedEmployeeAmount ?? deduction.EmployeeAmount), EmployerAmount = RoundCurrency(deduction.EmployerAmount), IsPreTax = deduction.IsPreTax, ExemptFromFederalIncomeTax = deduction.ExemptFromFederalIncomeTax, ExemptFromFica = deduction.ExemptFromFica, ExemptFromFuta = deduction.ExemptFromFuta, LiabilityAccountNumber = NormalizeLiabilityAccountNumber(deduction.LiabilityAccountNumber), LimitApplied = deduction.LimitApplied, LimitRuleCode = deduction.LimitRuleCode, CalculationTraceJson = deduction.CalculationTraceJson }));
             db.PayrollTaxLines.AddRange((estimateLine.Taxes ?? []).Select((tax, index) => new PayrollTaxLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, ObligationCode = tax.ObligationCode, JurisdictionCode = tax.JurisdictionCode, JurisdictionName = tax.JurisdictionName, TaxType = tax.TaxType, TaxableWages = tax.TaxableWages, YearToDateTaxableWagesBefore = tax.YearToDateTaxableWagesBefore, EmployeeAmount = tax.EmployeeAmount, EmployerAmount = tax.EmployerAmount, TaxRuleSetId = tax.TaxRuleSetId, TaxContentPackageId = tax.TaxContentPackageId, ContentVersion = tax.ContentVersion, Source = tax.Source, CalculationTraceJson = tax.CalculationTraceJson }));
@@ -1495,6 +1501,8 @@ public sealed class AccountingTransactionService(
             if (entry.Amount <= 0 && calculated <= 0) return TransactionResult.Failure("Each time entry must have a positive amount or positive hours and rate.");
             if (entry.Amount > 0 && entry.Hours > 0 && entry.Rate > 0 && Math.Abs(entry.Amount - calculated) > 0.01m)
                 return TransactionResult.Failure("A time entry amount must equal hours multiplied by rate when all three values are supplied.");
+            var reportingError = ValidateW2Reporting(entry.W2Reporting, entry.Amount > 0 ? entry.Amount : calculated, entry.EarningType);
+            if (reportingError.Length > 0) return TransactionResult.Failure(reportingError);
         }
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -1531,7 +1539,7 @@ public sealed class AccountingTransactionService(
             Amount = RoundCurrency(entry.Amount > 0 ? entry.Amount : entry.Hours * entry.Rate), IsTaxable = entry.IsTaxable,
             WorkState = string.IsNullOrWhiteSpace(entry.WorkState) ? employee.State : entry.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(entry.WorkCounty) ? employee.WorkCounty : entry.WorkCounty.Trim(),
             WorkCity = string.IsNullOrWhiteSpace(entry.WorkCity) ? employee.WorkCity : entry.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(entry.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : entry.WorkSchoolDistrict.Trim(),
-            ProjectJobId = entry.ProjectJobId, Notes = entry.Notes.Trim()
+            ProjectJobId = entry.ProjectJobId, Notes = entry.Notes.Trim(), W2ReportingJson = SerializeW2Reporting(entry.W2Reporting)
         }));
         AddTimecardAudit(db, companyId, "payroll-timecard.saved", timecard, new { employee.EmployeeNumber, timecard.PeriodStart, timecard.PeriodEnd, entryCount = request.Entries.Count, totalHours = request.Entries.Sum(entry => entry.Hours), totalAmount = request.Entries.Sum(entry => entry.Amount > 0 ? entry.Amount : RoundCurrency(entry.Hours * entry.Rate)) });
         try { await db.SaveChangesAsync(cancellationToken); }
@@ -1661,7 +1669,7 @@ public sealed class AccountingTransactionService(
             var earnings = input.Earnings?.ToList() ?? [];
             if (earnings.Count == 0 && employees.TryGetValue(input.EmployeeId, out var employee) && employee.PayType.Contains("Salary", StringComparison.OrdinalIgnoreCase) && input.GrossPay > 0)
                 earnings.Add(new PayrollEarningInput("SALARY", "Salary", 0, 0, input.GrossPay, true, null, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict));
-            earnings.AddRange(employeeEntries.Select(entry => new PayrollEarningInput(entry.EarningCode, entry.EarningType, entry.Hours, entry.Rate, entry.Amount, entry.IsTaxable, entry.WorkDate, entry.WorkState, entry.WorkCounty, entry.WorkCity, entry.WorkSchoolDistrict, entry.Id)));
+            earnings.AddRange(employeeEntries.Select(entry => new PayrollEarningInput(entry.EarningCode, entry.EarningType, entry.Hours, entry.Rate, entry.Amount, entry.IsTaxable, entry.WorkDate, entry.WorkState, entry.WorkCounty, entry.WorkCity, entry.WorkSchoolDistrict, entry.Id, ParseW2Reporting(entry.W2ReportingJson))));
             expandedEmployees.Add(input with { GrossPay = RoundCurrency(earnings.Sum(earning => earning.Amount)), Earnings = earnings });
         }
 
@@ -2508,6 +2516,52 @@ public sealed class AccountingTransactionService(
         return await db.Accounts.Where(account => account.CompanyId == companyId && account.Id == bank.LedgerAccountId && account.IsActive)
             .Select(account => account.Number).SingleOrDefaultAsync(ct) ?? string.Empty;
     }
+
+    private static string ValidateW2Reporting(PayrollW2ReportingInput? value, decimal earningAmount, string earningType)
+    {
+        if (value is null) return string.Empty;
+        var submittedCodes = (value.TreasuryTippedOccupationCodes ?? []).Select(code => code.Trim()).Where(code => code.Length > 0).ToArray();
+        var codes = NormalizeTippedOccupationCodes(value.TreasuryTippedOccupationCodes);
+        if (value.SocialSecurityTips < 0 || value.CashTipsReported < 0 || value.QualifiedOvertimeCompensation < 0)
+            return "W-2 reporting amounts cannot be negative.";
+        if (new[] { value.SocialSecurityTips, value.CashTipsReported, value.QualifiedOvertimeCompensation }.Any(amount => amount > RoundCurrency(earningAmount)))
+            return "Each W-2 reporting amount must not exceed its earning-line amount.";
+        if (submittedCodes.Length != codes.Count)
+            return "Treasury Tipped Occupation Codes cannot contain duplicates.";
+        if (codes.Count > 2 || codes.Any(code => code.Length != 3 || code.Any(character => !char.IsDigit(character))))
+            return "Cash-tip reporting accepts at most two distinct three-digit Treasury Tipped Occupation Codes.";
+        if (value.CashTipsReported > 0 && codes.Count == 0)
+            return "Cash tips reported in W-2 box 12 code TP require at least one Treasury Tipped Occupation Code.";
+        if (value.CashTipsReported == 0 && codes.Count > 0)
+            return "Treasury Tipped Occupation Codes require a cash-tip amount for W-2 box 12 code TP.";
+        if ((value.SocialSecurityTips > 0 || value.CashTipsReported > 0) && !earningType.Contains("tip", StringComparison.OrdinalIgnoreCase))
+            return "W-2 tip amounts must be attached to an earning type identified as tips.";
+        if (value.QualifiedOvertimeCompensation > 0 && !earningType.Contains("overtime", StringComparison.OrdinalIgnoreCase))
+            return "W-2 qualified overtime compensation must be attached to an overtime earning type.";
+        return string.Empty;
+    }
+
+    private static string SerializeW2Reporting(PayrollW2ReportingInput? value)
+    {
+        if (value is null) return "{}";
+        var normalized = value with
+        {
+            SocialSecurityTips = RoundCurrency(value.SocialSecurityTips),
+            CashTipsReported = RoundCurrency(value.CashTipsReported),
+            QualifiedOvertimeCompensation = RoundCurrency(value.QualifiedOvertimeCompensation),
+            TreasuryTippedOccupationCodes = NormalizeTippedOccupationCodes(value.TreasuryTippedOccupationCodes)
+        };
+        return JsonSerializer.Serialize(normalized);
+    }
+
+    private static PayrollW2ReportingInput ParseW2Reporting(string json)
+    {
+        try { return JsonSerializer.Deserialize<PayrollW2ReportingInput>(json) ?? throw new JsonException("The W-2 reporting payload is null."); }
+        catch (JsonException exception) { throw new InvalidOperationException("Stored W-2 reporting data is invalid; payroll processing stopped to prevent silent filing-data loss.", exception); }
+    }
+
+    private static IReadOnlyList<string> NormalizeTippedOccupationCodes(IReadOnlyList<string>? values) =>
+        (values ?? []).Select(value => value.Trim()).Where(value => value.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
 
     private static decimal RoundCurrency(decimal amount) => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 }

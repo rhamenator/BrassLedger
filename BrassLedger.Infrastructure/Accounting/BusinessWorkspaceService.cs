@@ -6,6 +6,7 @@ using BrassLedger.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace BrassLedger.Infrastructure.Accounting;
 
@@ -280,7 +281,7 @@ public sealed class BusinessWorkspaceService(
                 Timecards: payrollTimecards.Select(timecard =>
                 {
                     var employee = employeeById[timecard.EmployeeId];
-                    var entries = payrollTimeEntryLookup[timecard.Id].Select(entry => new PayrollTimeEntrySnapshot(entry.Id, entry.Sequence, entry.WorkDate, entry.EarningCode, entry.EarningType, entry.Hours, entry.Rate, entry.Amount, entry.IsTaxable, entry.WorkState, entry.WorkCounty, entry.WorkCity, entry.WorkSchoolDistrict, entry.ProjectJobId, entry.Notes)).ToArray();
+                    var entries = payrollTimeEntryLookup[timecard.Id].Select(entry => new PayrollTimeEntrySnapshot(entry.Id, entry.Sequence, entry.WorkDate, entry.EarningCode, entry.EarningType, entry.Hours, entry.Rate, entry.Amount, entry.IsTaxable, entry.WorkState, entry.WorkCounty, entry.WorkCity, entry.WorkSchoolDistrict, entry.ProjectJobId, entry.Notes, ParseW2Reporting(entry.W2ReportingJson))).ToArray();
                     return new PayrollTimecardSnapshot(timecard.Id, employee.Id, employee.EmployeeNumber, $"{employee.FirstName} {employee.LastName}", timecard.PeriodStart, timecard.PeriodEnd, timecard.Status, entries.Sum(entry => entry.Hours), entries.Sum(entry => entry.Amount), timecard.Notes, timecard.ConcurrencyToken, timecard.PayrollRunId, timecard.PreparedAtUtc, timecard.SubmittedAtUtc, timecard.ApprovedAtUtc, timecard.VoidedAtUtc, timecard.VoidReason, entries);
                 }).ToArray(),
                 Liabilities: payrollLiabilities.Select(liability =>
@@ -306,6 +307,12 @@ public sealed class BusinessWorkspaceService(
                 ProfileCount: taxProfiles.Count,
                 EmployerSpecificCount: taxProfiles.Count(x => x.IsEmployerSpecific),
                 Profiles: taxProfiles.Select(x => new TaxProfileSnapshot(x.Jurisdiction, x.TaxType, x.Rate, x.EffectiveOn, x.Source, x.IsEmployerSpecific, x.IsActive, x.IsVerified, x.VerificationNotes)).ToArray()));
+    }
+
+    private static PayrollW2ReportingInput ParseW2Reporting(string json)
+    {
+        try { return JsonSerializer.Deserialize<PayrollW2ReportingInput>(json) ?? throw new JsonException("The W-2 reporting payload is null."); }
+        catch (JsonException exception) { throw new InvalidOperationException("Stored W-2 reporting data is invalid; the payroll workspace cannot omit it silently.", exception); }
     }
 
     private static Dictionary<string, (string Status, string Summary, int RecordCount)> BuildModuleCounts(

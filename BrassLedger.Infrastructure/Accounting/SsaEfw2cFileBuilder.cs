@@ -14,8 +14,14 @@ public static class SsaEfw2cFileBuilder
         try
         {
             var records = new List<string> { BuildRca(submitter), BuildRce(package, submitter) };
-            records.AddRange(employees.Select(BuildRcw));
+            foreach (var employee in employees)
+            {
+                records.Add(BuildRcw(employee));
+                if (RequiresRco(employee)) records.Add(BuildRco(employee));
+            }
             records.Add(BuildRct(employees));
+            var optionalEmployees = employees.Where(RequiresRco).ToArray();
+            if (optionalEmployees.Length > 0) records.Add(BuildRcu(optionalEmployees));
             records.Add(BuildRcf(employees.Length));
             if (records.Any(record => Encoding.ASCII.GetByteCount(record) != 1024)) return SsaWageFileBuildResult.Failure("Every EFW2C record must contain exactly 1,024 ASCII bytes.");
             return new(true, Encoding.ASCII.GetBytes(string.Join("\r\n", records)), [], records.Count, employees.Length, submitter.SpecificationVersion);
@@ -41,8 +47,19 @@ public static class SsaEfw2cFileBuilder
             var correct = employee.CorrectInformation;
             if (Digits(correct.SocialSecurityNumber).Length != 9 || string.IsNullOrWhiteSpace(correct.FirstName) || string.IsNullOrWhiteSpace(correct.LastName)) errors.Add($"Employee {correct.EmployeeNumber} requires a nine-digit SSN and separate first and last names.");
             if (string.IsNullOrWhiteSpace(correct.AddressLine1) || string.IsNullOrWhiteSpace(correct.City) || correct.State.Trim().Length != 2 || Digits(correct.PostalCode).Length is not (5 or 9)) errors.Add($"Employee {correct.EmployeeNumber} requires a complete domestic mailing address.");
-            if (new[] { employee.PreviouslyReported.Box1WagesTipsOtherCompensation, employee.PreviouslyReported.Box2FederalIncomeTaxWithheld, employee.PreviouslyReported.Box3SocialSecurityWages, employee.PreviouslyReported.Box4SocialSecurityTaxWithheld, employee.PreviouslyReported.Box5MedicareWagesAndTips, employee.PreviouslyReported.Box6MedicareTaxWithheld, correct.Box1WagesTipsOtherCompensation, correct.Box2FederalIncomeTaxWithheld, correct.Box3SocialSecurityWages, correct.Box4SocialSecurityTaxWithheld, correct.Box5MedicareWagesAndTips, correct.Box6MedicareTaxWithheld }.Any(amount => amount < 0 || amount > 99_999_999.99m)) errors.Add($"Employee {correct.EmployeeNumber} contains a negative or overlength EFW2C money amount.");
-            if (correct.Box5MedicareWagesAndTips < correct.Box3SocialSecurityWages) errors.Add($"Employee {correct.EmployeeNumber} has Medicare wages below Social Security wages.");
+            if (MoneyValues(employee.PreviouslyReported).Concat(MoneyValues(correct)).Any(amount => amount < 0 || amount > 99_999_999.99m)) errors.Add($"Employee {correct.EmployeeNumber} contains a negative or overlength EFW2C money amount.");
+            foreach (var wageStatement in new[] { employee.PreviouslyReported, correct })
+            {
+                if (wageStatement.Box5MedicareWagesAndTips < wageStatement.Box3SocialSecurityWages + wageStatement.Box7SocialSecurityTips) errors.Add($"Employee {correct.EmployeeNumber} has Medicare wages below Social Security wages plus Social Security tips.");
+                if (package.TaxYear == 2026 && wageStatement.Box3SocialSecurityWages + wageStatement.Box7SocialSecurityTips > 184_500m) errors.Add($"Employee {correct.EmployeeNumber} exceeds the 2026 Social Security wage base across boxes 3 and 7.");
+                var box12 = wageStatement.Box12Amounts ?? [];
+                if (box12.GroupBy(item => item.Code, StringComparer.Ordinal).Any(group => group.Count() > 1) || box12.Any(item => item.Code is not ("TP" or "TT"))) errors.Add($"Employee {correct.EmployeeNumber} contains duplicate or unsupported EFW2C box 12 codes; the reviewed 2026 optional layout supports TP and TT once each.");
+                var occupations = wageStatement.TreasuryTippedOccupationCodes ?? [];
+                if (occupations.Count > 2 || occupations.Any(code => code.Length != 3 || code.Any(character => !char.IsDigit(character)))) errors.Add($"Employee {correct.EmployeeNumber} has invalid Treasury Tipped Occupation Codes.");
+                if (Box12(wageStatement, "TP") > 0 && occupations.Count == 0) errors.Add($"Employee {correct.EmployeeNumber} requires a Treasury Tipped Occupation Code when code TP cash tips are reported.");
+                if (Box12(wageStatement, "TP") == 0 && occupations.Count > 0) errors.Add($"Employee {correct.EmployeeNumber} cannot report Treasury Tipped Occupation Codes without code TP cash tips.");
+                if (package.TaxYear < 2026 && (wageStatement.Box7SocialSecurityTips != 0 || box12.Count > 0 || occupations.Count > 0)) errors.Add($"Employee {correct.EmployeeNumber} contains fields that are available only in the reviewed 2026 EFW2C layout.");
+            }
         }
         return errors.Distinct().ToList();
     }
@@ -69,7 +86,23 @@ public static class SsaEfw2cFileBuilder
         Put(record, 72, 15, current.FirstName); Put(record, 87, 15, current.MiddleName); Put(record, 102, 20, current.LastName); Put(record, 122, 22, current.AddressLine2); Put(record, 144, 22, current.AddressLine1); Put(record, 166, 22, current.City); Put(record, 188, 2, current.State); PutZip(record, 190, current.PostalCode);
         PutMoneyPair(record, 244, old.Box1WagesTipsOtherCompensation, current.Box1WagesTipsOtherCompensation, 11); PutMoneyPair(record, 266, old.Box2FederalIncomeTaxWithheld, current.Box2FederalIncomeTaxWithheld, 11);
         PutMoneyPair(record, 288, old.Box3SocialSecurityWages, current.Box3SocialSecurityWages, 11); PutMoneyPair(record, 310, old.Box4SocialSecurityTaxWithheld, current.Box4SocialSecurityTaxWithheld, 11);
-        PutMoneyPair(record, 332, old.Box5MedicareWagesAndTips, current.Box5MedicareWagesAndTips, 11); PutMoneyPair(record, 354, old.Box6MedicareTaxWithheld, current.Box6MedicareTaxWithheld, 11); return new(record);
+        PutMoneyPair(record, 332, old.Box5MedicareWagesAndTips, current.Box5MedicareWagesAndTips, 11); PutMoneyPair(record, 354, old.Box6MedicareTaxWithheld, current.Box6MedicareTaxWithheld, 11);
+        PutMoneyPair(record, 376, old.Box7SocialSecurityTips, current.Box7SocialSecurityTips, 11);
+        if (!(old.TreasuryTippedOccupationCodes ?? []).SequenceEqual(current.TreasuryTippedOccupationCodes ?? []))
+        {
+            var oldCodes = old.TreasuryTippedOccupationCodes ?? []; var currentCodes = current.TreasuryTippedOccupationCodes ?? [];
+            if (oldCodes.Count > 0) Put(record, 1009, 3, oldCodes[0]); if (currentCodes.Count > 0) Put(record, 1012, 3, currentCodes[0]);
+            if (oldCodes.Count > 1) Put(record, 1015, 3, oldCodes[1]); if (currentCodes.Count > 1) Put(record, 1018, 3, currentCodes[1]);
+        }
+        return new(record);
+    }
+
+    private static string BuildRco(W2cEmployeeData item)
+    {
+        var record = Blank(); Put(record, 1, 3, "RCO");
+        PutMoneyPair(record, 453, Box12(item.PreviouslyReported, "TP"), Box12(item.CorrectInformation, "TP"), 11);
+        PutMoneyPair(record, 475, Box12(item.PreviouslyReported, "TT"), Box12(item.CorrectInformation, "TT"), 11);
+        return new(record);
     }
 
     private static string BuildRct(IReadOnlyList<W2cEmployeeData> employees)
@@ -77,7 +110,15 @@ public static class SsaEfw2cFileBuilder
         var record = Blank(); Put(record, 1, 3, "RCT"); PutNumeric(record, 4, 7, employees.Count);
         PutTotalPair(record, 11, employees, x => x.Box1WagesTipsOtherCompensation); PutTotalPair(record, 41, employees, x => x.Box2FederalIncomeTaxWithheld);
         PutTotalPair(record, 71, employees, x => x.Box3SocialSecurityWages); PutTotalPair(record, 101, employees, x => x.Box4SocialSecurityTaxWithheld);
-        PutTotalPair(record, 131, employees, x => x.Box5MedicareWagesAndTips); PutTotalPair(record, 161, employees, x => x.Box6MedicareTaxWithheld); return new(record);
+        PutTotalPair(record, 131, employees, x => x.Box5MedicareWagesAndTips); PutTotalPair(record, 161, employees, x => x.Box6MedicareTaxWithheld);
+        PutTotalPair(record, 191, employees, x => x.Box7SocialSecurityTips); return new(record);
+    }
+
+    private static string BuildRcu(IReadOnlyList<W2cEmployeeData> employees)
+    {
+        var record = Blank(); Put(record, 1, 3, "RCU"); PutNumeric(record, 4, 7, employees.Count);
+        PutOptionalTotalPair(record, 611, employees, "TP"); PutOptionalTotalPair(record, 641, employees, "TT");
+        return new(record);
     }
 
     private static string BuildRcf(int count) { var record = Blank(); Put(record, 1, 3, "RCF"); PutNumeric(record, 4, 9, count); return new(record); }
@@ -88,5 +129,9 @@ public static class SsaEfw2cFileBuilder
     private static void PutMoney(char[] record, int start, int length, decimal value) => PutNumeric(record, start, length, checked((long)decimal.Round(value * 100m, 0, MidpointRounding.AwayFromZero)));
     private static void PutMoneyPair(char[] record, int start, decimal old, decimal current, int length) { if (old == current) return; PutMoney(record, start, length, old); PutMoney(record, start + length, length, current); }
     private static void PutTotalPair(char[] record, int start, IReadOnlyList<W2cEmployeeData> employees, Func<W2EmployeeData, decimal> select) { var changed = employees.Where(item => select(item.PreviouslyReported) != select(item.CorrectInformation)).ToArray(); if (changed.Length == 0) return; PutMoney(record, start, 15, changed.Sum(item => select(item.PreviouslyReported))); PutMoney(record, start + 15, 15, changed.Sum(item => select(item.CorrectInformation))); }
+    private static void PutOptionalTotalPair(char[] record, int start, IReadOnlyList<W2cEmployeeData> employees, string code) { var changed = employees.Where(item => Box12(item.PreviouslyReported, code) != Box12(item.CorrectInformation, code)).ToArray(); if (changed.Length == 0) return; PutMoney(record, start, 15, changed.Sum(item => Box12(item.PreviouslyReported, code))); PutMoney(record, start + 15, 15, changed.Sum(item => Box12(item.CorrectInformation, code))); }
+    private static decimal Box12(W2EmployeeData employee, string code) => (employee.Box12Amounts ?? []).Where(item => item.Code.Equals(code, StringComparison.Ordinal)).Sum(item => item.Amount);
+    private static bool RequiresRco(W2cEmployeeData item) => Box12(item.PreviouslyReported, "TP") != Box12(item.CorrectInformation, "TP") || Box12(item.PreviouslyReported, "TT") != Box12(item.CorrectInformation, "TT");
+    private static decimal[] MoneyValues(W2EmployeeData value) => [value.Box1WagesTipsOtherCompensation, value.Box2FederalIncomeTaxWithheld, value.Box3SocialSecurityWages, value.Box4SocialSecurityTaxWithheld, value.Box5MedicareWagesAndTips, value.Box6MedicareTaxWithheld, value.Box7SocialSecurityTips, .. (value.Box12Amounts ?? []).Select(item => item.Amount)];
     private static string Digits(string? value) => new((value ?? string.Empty).Where(char.IsDigit).ToArray());
 }

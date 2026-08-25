@@ -195,7 +195,7 @@ public sealed class PayrollFilingService(
             var correct = currentEmployees.GetValueOrDefault(id) ?? ZeroW2Amounts(previous);
             var federalOrIdentityChanged = FederalOrIdentityChanged(previous, correct);
             var stateLocalChanged = CanonicalW2Jurisdictions(previous) != CanonicalW2Jurisdictions(correct);
-            var addressChanged = previous.AddressLine1 != correct.AddressLine1 || previous.AddressLine2 != correct.AddressLine2 || previous.PostalCode != correct.PostalCode;
+            var addressChanged = previous.AddressLine1 != correct.AddressLine1 || previous.AddressLine2 != correct.AddressLine2 || previous.City != correct.City || previous.State != correct.State || previous.PostalCode != correct.PostalCode;
             var submit = federalOrIdentityChanged;
             var reason = submit ? "Federal wage/tax or employee identity correction" : stateLocalChanged ? "State/local-only correction; do not submit Copy A to SSA" : "Employee-address-only correction; do not submit Copy A to SSA";
             return new { Changed = federalOrIdentityChanged || stateLocalChanged || addressChanged, Item = new W2cEmployeeData(previous, correct, submit, reason) };
@@ -226,7 +226,7 @@ public sealed class PayrollFilingService(
             Explanation: explanation, EmployeeStatementsFurnished: true, EmployeeStatementEvidenceReference: evidence);
         correction.Process = "Correction"; correction.DiscoveredOn = request.DiscoveredOn; correction.Explanation = explanation;
         correction.WageStatementsCorrected = true; correction.WageStatementEvidenceReference = evidence; correction.Status = "Draft";
-        correction.DataJson = JsonSerializer.Serialize(data); correction.CorrectedSourceDigestSha256 = BuildSourceDigest(source); correction.OfficialSourceUrl = W2cSource; correction.ContentVersion = "2026-W2C-W3C-1";
+        correction.DataJson = JsonSerializer.Serialize(data); correction.CorrectedSourceDigestSha256 = BuildSourceDigest(source); correction.OfficialSourceUrl = W2cSource; correction.ContentVersion = original.TaxYear >= 2026 ? "2026-W2C-W3C-2" : "2025-W2C-W3C-1";
         correction.PreparedByUserId = ResolveUserId(); correction.PreparedAtUtc = DateTimeOffset.UtcNow; correction.ApprovedByUserId = null; correction.ApprovedAtUtc = null; correction.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddAudit(db, companyId, "payroll-w2c-correction.draft.generated", nameof(PayrollFilingCorrection), correction.Id, new { correction.OriginalPayrollFilingId, correction.Sequence, correction.TaxYear, employeeCount = changes.Length, ssaSubmissionCount = changes.Count(item => item.SubmitToSsa), correction.CorrectedSourceDigestSha256 });
         try { await db.SaveChangesAsync(cancellationToken); }
@@ -277,13 +277,23 @@ public sealed class PayrollFilingService(
         if (Digits(source.Company.TaxId).Length != 9) return TransactionResult.Failure("A valid nine-digit employer EIN is required before generating federal payroll filing data.");
         if (formCode == "W2" && source.Employees.Values.Any(employee => Digits(employee.SocialSecurityNumber).Length != 9 || string.IsNullOrWhiteSpace(employee.FirstName) || string.IsNullOrWhiteSpace(employee.LastName) || string.IsNullOrWhiteSpace(employee.AddressLine1) || string.IsNullOrWhiteSpace(employee.AddressCity) || employee.AddressState.Trim().Length != 2 || string.IsNullOrWhiteSpace(employee.PostalCode)))
             return TransactionResult.Failure("Every employee in W-2 source payroll requires a valid SSN, separate first and last name, street address, city, two-letter state, and postal code.");
-        var payload = formCode switch
+        string payload;
+        if (formCode == "W2")
         {
-            "941" => JsonSerializer.Serialize(Build941(source, request.TaxYear, request.Quarter!.Value)),
-            "940" => JsonSerializer.Serialize(Build940(source, request.TaxYear)),
-            "W2" => JsonSerializer.Serialize(BuildW2(source, request.TaxYear)),
-            _ => throw new InvalidOperationException("Unsupported payroll form.")
-        };
+            var wageStatements = BuildW2(source, request.TaxYear);
+            var validationError = ValidateW2Package(wageStatements);
+            if (validationError.Length > 0) return TransactionResult.Failure(validationError);
+            payload = JsonSerializer.Serialize(wageStatements);
+        }
+        else
+        {
+            payload = formCode switch
+            {
+                "941" => JsonSerializer.Serialize(Build941(source, request.TaxYear, request.Quarter!.Value)),
+                "940" => JsonSerializer.Serialize(Build940(source, request.TaxYear)),
+                _ => throw new InvalidOperationException("Unsupported payroll form.")
+            };
+        }
         var summary = BuildSummaryJson(formCode, source);
         var digest = BuildSourceDigest(source);
         PayrollFiling filing;
@@ -303,7 +313,7 @@ public sealed class PayrollFilingService(
         }
         filing.Status = "Draft"; filing.DataJson = payload; filing.SummaryJson = summary;
         filing.SourcePayrollRunIdsJson = JsonSerializer.Serialize(source.Runs.Select(run => run.Id).Order().ToArray());
-        filing.SourceDigestSha256 = digest; filing.OfficialSourceUrl = SourceUrl(formCode); filing.ContentVersion = $"2026-{formCode}-1";
+        filing.SourceDigestSha256 = digest; filing.OfficialSourceUrl = SourceUrl(formCode); filing.ContentVersion = formCode == "W2" && request.TaxYear >= 2026 ? "2026-W2-2" : $"{request.TaxYear}-{formCode}-1";
         filing.PreparedByUserId = ResolveUserId(); filing.PreparedAtUtc = DateTimeOffset.UtcNow; filing.ApprovedByUserId = null; filing.ApprovedAtUtc = null;
         filing.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddAudit(db, companyId, "payroll-filing.draft.generated", "PayrollFiling", filing.Id, new { filing.FormCode, filing.TaxYear, filing.Quarter, sourceRunCount = source.Runs.Count, filing.SourceDigestSha256 });
@@ -432,28 +442,36 @@ public sealed class PayrollFilingService(
     private static W2PackageData BuildW2(FilingSource source, int year)
     {
         var taxByEmployeeLine = source.TaxLines.ToLookup(line => line.PayrollRunEmployeeLineId);
+        var earningsByEmployeeLine = source.EarningLines.ToLookup(line => line.PayrollRunEmployeeLineId);
         var linesByEmployee = source.EmployeeLines.GroupBy(line => line.EmployeeId).OrderBy(group => source.Employees[group.Key].EmployeeNumber);
         var employees = new List<W2EmployeeData>();
         foreach (var group in linesByEmployee)
         {
             var employee = source.Employees[group.Key];
             var taxes = group.SelectMany(line => taxByEmployeeLine[line.Id]).ToArray();
+            var reporting = group.SelectMany(line => earningsByEmployeeLine[line.Id]).Select(line => ParseW2Reporting(line.W2ReportingJson)).ToArray();
+            var socialSecurityTips = Round(reporting.Sum(item => item.SocialSecurityTips));
+            var cashTips = Round(reporting.Sum(item => item.CashTipsReported));
+            var qualifiedOvertime = Round(reporting.Sum(item => item.QualifiedOvertimeCompensation));
+            var occupationCodes = reporting.SelectMany(item => item.TreasuryTippedOccupationCodes ?? []).Distinct(StringComparer.Ordinal).OrderBy(code => code, StringComparer.Ordinal).ToArray();
+            var box12 = new[] { new W2CodeAmount("TP", cashTips), new W2CodeAmount("TT", qualifiedOvertime) }.Where(item => item.Amount != 0).ToArray();
             var jurisdictions = taxes.Where(line => line.JurisdictionCode is not ("US" or "FEDERAL") && !line.JurisdictionName.Equals("Federal", StringComparison.OrdinalIgnoreCase) && line.EmployeeAmount != 0 && (line.TaxType.Contains("withholding", StringComparison.OrdinalIgnoreCase) || line.TaxType.Contains("income tax", StringComparison.OrdinalIgnoreCase)))
                 .GroupBy(line => new { line.JurisdictionCode, line.JurisdictionName }).Select(item => new W2JurisdictionAmount(item.Key.JurisdictionCode, item.Key.JurisdictionName, Round(item.Sum(line => line.TaxableWages)), Round(item.Sum(line => line.EmployeeAmount)))).ToArray();
             employees.Add(new W2EmployeeData(employee.Id, employee.EmployeeNumber, $"{employee.FirstName} {employee.LastName}".Trim(), employee.SocialSecurityNumber,
                 employee.AddressLine1, employee.AddressLine2, employee.PostalCode,
                 Round(taxes.Where(line => line.ObligationCode == "US-FIT").Sum(line => line.TaxableWages)),
                 Round(taxes.Where(line => line.ObligationCode is "US-FIT" or "FEDERAL-ADDITIONAL-WITHHOLDING").Sum(line => line.EmployeeAmount)),
-                Round(taxes.Where(line => line.ObligationCode == "US-OASDI-EMPLOYEE").Sum(line => line.TaxableWages)),
+                Round(Math.Max(0, taxes.Where(line => line.ObligationCode == "US-OASDI-EMPLOYEE").Sum(line => line.TaxableWages) - socialSecurityTips)),
                 Round(taxes.Where(line => line.ObligationCode == "US-OASDI-EMPLOYEE").Sum(line => line.EmployeeAmount)),
                 Round(taxes.Where(line => line.ObligationCode == "US-MEDICARE-EMPLOYEE").Sum(line => line.TaxableWages)),
                 Round(taxes.Where(line => line.ObligationCode is "US-MEDICARE-EMPLOYEE" or "US-ADDITIONAL-MEDICARE").Sum(line => line.EmployeeAmount)), jurisdictions,
-                employee.FirstName, "", employee.LastName, employee.AddressCity, employee.AddressState));
+                employee.FirstName, "", employee.LastName, employee.AddressCity, employee.AddressState, socialSecurityTips, box12, occupationCodes));
         }
         return new W2PackageData(TaxYear: year, EmployerLegalName: source.Company.LegalName, EmployerEin: source.Company.TaxId, Employees: employees,
             W3Box1Total: Round(employees.Sum(item => item.Box1WagesTipsOtherCompensation)), W3Box2Total: Round(employees.Sum(item => item.Box2FederalIncomeTaxWithheld)),
             W3Box3Total: Round(employees.Sum(item => item.Box3SocialSecurityWages)), W3Box4Total: Round(employees.Sum(item => item.Box4SocialSecurityTaxWithheld)),
-            W3Box5Total: Round(employees.Sum(item => item.Box5MedicareWagesAndTips)), W3Box6Total: Round(employees.Sum(item => item.Box6MedicareTaxWithheld)));
+            W3Box5Total: Round(employees.Sum(item => item.Box5MedicareWagesAndTips)), W3Box6Total: Round(employees.Sum(item => item.Box6MedicareTaxWithheld)),
+            W3Box7Total: Round(employees.Sum(item => item.Box7SocialSecurityTips)));
     }
 
     private static W2EmployeeData ZeroW2Amounts(W2EmployeeData source) => source with
@@ -461,20 +479,45 @@ public sealed class PayrollFilingService(
         Box1WagesTipsOtherCompensation = 0, Box2FederalIncomeTaxWithheld = 0,
         Box3SocialSecurityWages = 0, Box4SocialSecurityTaxWithheld = 0,
         Box5MedicareWagesAndTips = 0, Box6MedicareTaxWithheld = 0,
+        Box7SocialSecurityTips = 0, Box12Amounts = [], TreasuryTippedOccupationCodes = [],
         StateAndLocalAmounts = []
     };
 
+    private static string ValidateW2Package(W2PackageData package)
+    {
+        foreach (var employee in package.Employees ?? [])
+        {
+            var box12 = employee.Box12Amounts ?? [];
+            var occupations = employee.TreasuryTippedOccupationCodes ?? [];
+            if (employee.Box5MedicareWagesAndTips < employee.Box3SocialSecurityWages + employee.Box7SocialSecurityTips) return $"Employee {employee.EmployeeNumber} has Medicare wages below Social Security wages plus Social Security tips.";
+            if (package.TaxYear == 2026 && employee.Box3SocialSecurityWages + employee.Box7SocialSecurityTips > 184_500m) return $"Employee {employee.EmployeeNumber} exceeds the 2026 Social Security wage base across W-2 boxes 3 and 7.";
+            if (package.TaxYear < 2026 && (employee.Box7SocialSecurityTips != 0 || box12.Count > 0 || occupations.Count > 0)) return $"Employee {employee.EmployeeNumber} contains tip or qualified-overtime fields that require the 2026 W-2 layout.";
+            if (box12.GroupBy(item => item.Code, StringComparer.Ordinal).Any(group => group.Count() > 1) || box12.Any(item => item.Code is not ("TP" or "TT"))) return $"Employee {employee.EmployeeNumber} contains duplicate or unsupported W-2 box 12 codes.";
+            if (occupations.Count > 2 || occupations.Any(code => code.Length != 3 || code.Any(character => !char.IsDigit(character)))) return $"Employee {employee.EmployeeNumber} must have at most two distinct three-digit Treasury Tipped Occupation Codes.";
+            var cashTips = box12.Where(item => item.Code == "TP").Sum(item => item.Amount);
+            if (cashTips > 0 && occupations.Count == 0) return $"Employee {employee.EmployeeNumber} requires a Treasury Tipped Occupation Code when code TP cash tips are reported.";
+            if (cashTips == 0 && occupations.Count > 0) return $"Employee {employee.EmployeeNumber} cannot report Treasury Tipped Occupation Codes without code TP cash tips.";
+        }
+        return string.Empty;
+    }
+
     private static bool FederalOrIdentityChanged(W2EmployeeData previous, W2EmployeeData correct) =>
         previous.EmployeeNumber != correct.EmployeeNumber || previous.EmployeeName != correct.EmployeeName ||
+        previous.FirstName != correct.FirstName || previous.MiddleName != correct.MiddleName || previous.LastName != correct.LastName ||
         Digits(previous.SocialSecurityNumber) != Digits(correct.SocialSecurityNumber) ||
         previous.Box1WagesTipsOtherCompensation != correct.Box1WagesTipsOtherCompensation ||
         previous.Box2FederalIncomeTaxWithheld != correct.Box2FederalIncomeTaxWithheld ||
         previous.Box3SocialSecurityWages != correct.Box3SocialSecurityWages ||
         previous.Box4SocialSecurityTaxWithheld != correct.Box4SocialSecurityTaxWithheld ||
         previous.Box5MedicareWagesAndTips != correct.Box5MedicareWagesAndTips ||
-        previous.Box6MedicareTaxWithheld != correct.Box6MedicareTaxWithheld;
+        previous.Box6MedicareTaxWithheld != correct.Box6MedicareTaxWithheld ||
+        previous.Box7SocialSecurityTips != correct.Box7SocialSecurityTips ||
+        CanonicalBox12(previous) != CanonicalBox12(correct) ||
+        CanonicalOccupationCodes(previous) != CanonicalOccupationCodes(correct);
 
     private static string CanonicalW2Jurisdictions(W2EmployeeData value) => JsonSerializer.Serialize(value.StateAndLocalAmounts.OrderBy(item => item.JurisdictionCode).ThenBy(item => item.JurisdictionName));
+    private static string CanonicalBox12(W2EmployeeData value) => JsonSerializer.Serialize((value.Box12Amounts ?? []).OrderBy(item => item.Code, StringComparer.Ordinal).ThenBy(item => item.Amount));
+    private static string CanonicalOccupationCodes(W2EmployeeData value) => JsonSerializer.Serialize((value.TreasuryTippedOccupationCodes ?? []).OrderBy(item => item, StringComparer.Ordinal));
     private static decimal[] SumW2(IEnumerable<W2EmployeeData> employees)
     {
         var values = employees.ToArray();
@@ -538,6 +581,7 @@ public sealed class PayrollFilingService(
             runs = source.Runs.OrderBy(run => run.Id).Select(run => new { run.Id, run.Status, run.PayDate, run.ConcurrencyToken }),
             employees = source.Employees.Values.OrderBy(employee => employee.Id).Select(employee => new { employee.Id, employee.EmployeeNumber, employee.FirstName, employee.LastName, employee.SocialSecurityNumber, employee.AddressLine1, employee.AddressLine2, employee.AddressCity, employee.AddressState, employee.PostalCode, employee.ConcurrencyToken }),
             employeeLines = source.EmployeeLines.OrderBy(line => line.Id).Select(line => new { line.Id, line.PayrollRunId, line.EmployeeId, line.GrossPay, line.TaxableWages, line.PreTaxDeductions, line.EmployeeWithholdings, line.PostTaxDeductions, line.EmployerPayrollTaxes, line.EmployerBenefitContributions, line.NetPay }),
+            earningLines = source.EarningLines.OrderBy(line => line.Id).Select(line => new { line.Id, line.PayrollRunEmployeeLineId, line.Sequence, line.EarningCode, line.EarningType, line.Amount, line.W2ReportingJson }),
             taxLines = source.TaxLines.OrderBy(line => line.Id).Select(line => new { line.Id, line.PayrollRunEmployeeLineId, line.ObligationCode, line.JurisdictionCode, line.TaxableWages, line.EmployeeAmount, line.EmployerAmount, line.ContentVersion }),
             deposits = source.Deposits.OrderBy(item => item.ApplicationId).Select(item => new { item.ApplicationId, item.ObligationCode, item.Amount })
         });
@@ -551,6 +595,7 @@ public sealed class PayrollFilingService(
         var runIds = runs.Select(run => run.Id).ToArray();
         var employeeLines = runIds.Length == 0 ? [] : await db.PayrollRunEmployeeLines.AsNoTracking().Where(line => runIds.Contains(line.PayrollRunId)).ToListAsync(cancellationToken);
         var employeeLineIds = employeeLines.Select(line => line.Id).ToArray();
+        var earningLines = employeeLineIds.Length == 0 ? [] : await db.PayrollEarningLines.AsNoTracking().Where(line => employeeLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
         var taxLines = employeeLineIds.Length == 0 ? [] : await db.PayrollTaxLines.AsNoTracking().Where(line => employeeLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
         var employeeIds = employeeLines.Select(line => line.EmployeeId).Distinct().ToArray();
         var employees = employeeIds.Length == 0 ? new Dictionary<Guid, Employee>() : await db.Employees.AsNoTracking().Where(employee => employee.CompanyId == companyId && employeeIds.Contains(employee.Id)).ToDictionaryAsync(employee => employee.Id, cancellationToken);
@@ -562,7 +607,7 @@ public sealed class PayrollFilingService(
         var liabilityById = liabilities.ToDictionary(item => item.Id);
         var deposits = applications.Select(item => new FilingDeposit(item.Id, liabilityById[item.PayrollLiabilityId].ObligationCode, item.Amount)).ToArray();
         var payDateByRun = runs.ToDictionary(run => run.Id, run => run.PayDate);
-        return new FilingSource(company, runs, employeeLines, taxLines, employees, deposits, employeeLines.ToDictionary(line => line.Id, line => payDateByRun[line.PayrollRunId]));
+        return new FilingSource(company, runs, employeeLines, earningLines, taxLines, employees, deposits, employeeLines.ToDictionary(line => line.Id, line => payDateByRun[line.PayrollRunId]));
     }
 
     private static bool TryResolvePeriod(string inputFormCode, int year, int? quarter, out string formCode, out DateOnly start, out DateOnly end, out string error)
@@ -611,5 +656,11 @@ public sealed class PayrollFilingService(
     private void AddAudit(BrassLedgerDbContext db, Guid companyId, string action, string entityType, Guid entityId, object detail) => db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = entityType, EntityId = entityId, DetailJson = JsonSerializer.Serialize(detail), OccurredAtUtc = DateTimeOffset.UtcNow });
 
     private sealed record FilingDeposit(Guid ApplicationId, string ObligationCode, decimal Amount);
-    private sealed record FilingSource(Company Company, IReadOnlyList<PayrollRun> Runs, IReadOnlyList<PayrollRunEmployeeLine> EmployeeLines, IReadOnlyList<PayrollTaxLine> TaxLines, IReadOnlyDictionary<Guid, Employee> Employees, IReadOnlyList<FilingDeposit> Deposits, IReadOnlyDictionary<Guid, DateOnly> PayDateByEmployeeLine);
+    private static PayrollW2ReportingInput ParseW2Reporting(string json)
+    {
+        try { return JsonSerializer.Deserialize<PayrollW2ReportingInput>(json) ?? throw new JsonException("The W-2 reporting payload is null."); }
+        catch (JsonException exception) { throw new InvalidOperationException("Stored W-2 reporting data is invalid; filing generation stopped to prevent silent data loss.", exception); }
+    }
+
+    private sealed record FilingSource(Company Company, IReadOnlyList<PayrollRun> Runs, IReadOnlyList<PayrollRunEmployeeLine> EmployeeLines, IReadOnlyList<PayrollEarningLine> EarningLines, IReadOnlyList<PayrollTaxLine> TaxLines, IReadOnlyDictionary<Guid, Employee> Employees, IReadOnlyList<FilingDeposit> Deposits, IReadOnlyDictionary<Guid, DateOnly> PayDateByEmployeeLine);
 }

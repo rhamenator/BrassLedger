@@ -20,12 +20,16 @@ public sealed class PayrollWorkflowTests
         await session.SignInAsync("payroll");
         await session.GotoAsync("/payroll");
         await session.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
+        await Assertions.Expect(session.Page.GetByLabel("Time entry Social Security tips").First).ToBeVisibleAsync();
+        await Assertions.Expect(session.Page.GetByLabel("Time entry cash tips reported").First).ToBeVisibleAsync();
+        await Assertions.Expect(session.Page.GetByLabel("Time entry qualified overtime premium").First).ToBeVisibleAsync();
+        await Assertions.Expect(session.Page.GetByText("TT is only the premium above regular pay", new() { Exact = false })).ToBeVisibleAsync();
 
         var ssaOriginalWorkflow = session.Page.GetByText("SSA original EFW2 specification and AccuWage workflow", new() { Exact = true });
         await ssaOriginalWorkflow.ClickAsync();
         await session.Page.GetByText("SSA published tax-year 2026 EFW2 on July 7, 2026.", new() { Exact = false }).WaitForAsync();
         await Assertions.Expect(session.Page.GetByLabel("SSA original specification tax year")).ToHaveValueAsync("2026");
-        await Assertions.Expect(session.Page.GetByLabel("SSA original layout compatibility code")).ToHaveValueAsync("EFW2-2026-512-RA-RE-RW-RT-RF");
+        await Assertions.Expect(session.Page.GetByLabel("SSA original layout compatibility code")).ToHaveValueAsync("EFW2-2026-512-RA-RE-RW-RO-RT-RU-RF");
         await Assertions.Expect(session.Page.GetByLabel("SSA kind of employer")).ToHaveValueAsync("N");
         await Assertions.Expect(session.Page.GetByLabel("SSA employment code")).ToHaveValueAsync("R");
         await Assertions.Expect(session.Page.GetByRole(AriaRole.Button, new() { Name = "Generate immutable original file for AccuWage", Exact = true })).ToBeDisabledAsync();
@@ -35,7 +39,7 @@ public sealed class PayrollWorkflowTests
         await ssaWorkflow.ClickAsync();
         await session.Page.GetByText("SSA published tax-year 2026 EFW2C on July 10, 2026.", new() { Exact = false }).WaitForAsync();
         await Assertions.Expect(session.Page.GetByLabel("SSA specification tax year")).ToHaveValueAsync("2026");
-        await Assertions.Expect(session.Page.GetByLabel("SSA layout compatibility code")).ToHaveValueAsync("EFW2C-1024-RCA-RCE-RCW-RCT-RCF");
+        await Assertions.Expect(session.Page.GetByLabel("SSA layout compatibility code")).ToHaveValueAsync("EFW2C-2026-1024-RCA-RCE-RCW-RCO-RCT-RCU-RCF");
         await Assertions.Expect(session.Page.GetByRole(AriaRole.Button, new() { Name = "Generate immutable file for AccuWage", Exact = true })).ToBeDisabledAsync();
         await ssaWorkflow.ClickAsync();
 

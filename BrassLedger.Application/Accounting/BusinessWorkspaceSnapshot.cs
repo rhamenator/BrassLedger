@@ -219,7 +219,7 @@ public sealed record PayrollLiabilitySnapshot(Guid Id, Guid PayrollRunId, Guid E
 public sealed record PayrollLiabilityPaymentSnapshot(Guid Id, Guid BankAccountId, DateOnly PaymentDate, string Reference, string Payee, string Method, decimal Amount, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<PayrollLiabilityPaymentApplicationSnapshot> Applications);
 public sealed record PayrollLiabilityPaymentApplicationSnapshot(Guid PayrollLiabilityId, string ObligationCode, decimal Amount);
 public sealed record PayrollTimecardSnapshot(Guid Id, Guid EmployeeId, string EmployeeNumber, string EmployeeName, DateOnly PeriodStart, DateOnly PeriodEnd, string Status, decimal TotalHours, decimal TotalAmount, string Notes, string ConcurrencyToken, Guid? PayrollRunId, DateTimeOffset PreparedAtUtc, DateTimeOffset? SubmittedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? VoidedAtUtc, string VoidReason, IReadOnlyList<PayrollTimeEntrySnapshot> Entries);
-public sealed record PayrollTimeEntrySnapshot(Guid Id, int Sequence, DateOnly WorkDate, string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable, string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict, Guid? ProjectJobId, string Notes);
+public sealed record PayrollTimeEntrySnapshot(Guid Id, int Sequence, DateOnly WorkDate, string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable, string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict, Guid? ProjectJobId, string Notes, PayrollW2ReportingInput W2Reporting);
 
 public sealed record EmployeeSnapshot(
     string EmployeeNumber,

@@ -1240,7 +1240,12 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var protectedDetails = await transactions.SaveEmployeeEmploymentDetailsAsync(new SaveEmployeeEmploymentDetailsRequest(employee.Id, "1 Main St", "", "85001", "Maricopa", "", "Maricopa", "", new DateOnly(2024, 1, 1), null, 25m, 37.5m, false, "", "123-45-6789", "", "", ConcurrencyToken: employee.ConcurrencyToken, AddressCity: "Phoenix", AddressState: "AZ"));
         Assert.True(protectedDetails.Succeeded, protectedDetails.ErrorMessage);
 
-        var firstRun = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 4, 10), "FILING-Q2-1", [new EmployeePayrollInput(employee.Id, 1_000m)], new DateOnly(2026, 3, 29), new DateOnly(2026, 4, 4)));
+        var firstRun = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 4, 10), "FILING-Q2-1", [new EmployeePayrollInput(employee.Id, 1_000m,
+        [
+            new PayrollEarningInput("REG", "Regular", 0, 0, 800m),
+            new PayrollEarningInput("TIPS", "Tips", 0, 0, 100m, W2Reporting: new(100m, 100m, TreasuryTippedOccupationCodes: ["101"])),
+            new PayrollEarningInput("OT", "Overtime", 0, 0, 100m, W2Reporting: new(QualifiedOvertimeCompensation: 33.33m))
+        ])], new DateOnly(2026, 3, 29), new DateOnly(2026, 4, 4)));
         Assert.True(firstRun.Succeeded, firstRun.ErrorMessage);
         var filingDraft = await filings.SaveDraftAsync(new SavePayrollFilingDraftRequest(null, "941", 2026, 2));
         Assert.True(filingDraft.Succeeded, filingDraft.ErrorMessage);
@@ -1318,7 +1323,12 @@ public sealed class WorkspaceInitializationTests : IDisposable
             command.CommandText = "SELECT DataJson FROM PayrollFilingCorrections WHERE Id = $id"; var parameter = command.CreateParameter(); parameter.ParameterName = "$id"; parameter.Value = correction.Id; command.Parameters.Add(parameter);
             Assert.StartsWith("enc::", (await command.ExecuteScalarAsync())?.ToString());
         }
-        var additionalCorrectionRun = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 6, 12), "FILING-Q2-CORRECTION-2", [new EmployeePayrollInput(employee.Id, 2_000m)], new DateOnly(2026, 5, 31), new DateOnly(2026, 6, 6)));
+        var additionalCorrectionRun = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 6, 12), "FILING-Q2-CORRECTION-2", [new EmployeePayrollInput(employee.Id, 2_000m,
+        [
+            new PayrollEarningInput("REG", "Regular", 0, 0, 1_800m),
+            new PayrollEarningInput("TIPS", "Tips", 0, 0, 100m, W2Reporting: new(100m, 100m, TreasuryTippedOccupationCodes: ["101"])),
+            new PayrollEarningInput("OT", "Overtime", 0, 0, 100m, W2Reporting: new(QualifiedOvertimeCompensation: 33.33m))
+        ])], new DateOnly(2026, 5, 31), new DateOnly(2026, 6, 6)));
         Assert.True(additionalCorrectionRun.Succeeded, additionalCorrectionRun.ErrorMessage);
         var mixedClaim = await filings.SaveForm941CorrectionDraftAsync(correctionRequest with { CorrectionId = null, Explanation = "Report the subsequently identified underreported payroll taxes." });
         Assert.False(mixedClaim.Succeeded); Assert.Contains("claim process", mixedClaim.ErrorMessage, StringComparison.OrdinalIgnoreCase);
@@ -1339,6 +1349,12 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.NotEmpty(w2Employees.EnumerateArray());
         Assert.Equal("123456789", w2Employees.EnumerateArray().First().GetProperty("SocialSecurityNumber").GetString());
         Assert.Equal(w2Filing.Data.GetProperty("W3Box1Total").GetDecimal(), w2Employees.EnumerateArray().Sum(item => item.GetProperty("Box1WagesTipsOtherCompensation").GetDecimal()));
+        var tippedEmployee = w2Employees.EnumerateArray().First();
+        Assert.Equal(100m, tippedEmployee.GetProperty("Box7SocialSecurityTips").GetDecimal());
+        Assert.Equal(100m, tippedEmployee.GetProperty("Box12Amounts").EnumerateArray().Single(item => item.GetProperty("Code").GetString() == "TP").GetProperty("Amount").GetDecimal());
+        Assert.Equal(33.33m, tippedEmployee.GetProperty("Box12Amounts").EnumerateArray().Single(item => item.GetProperty("Code").GetString() == "TT").GetProperty("Amount").GetDecimal());
+        Assert.Equal("101", tippedEmployee.GetProperty("TreasuryTippedOccupationCodes")[0].GetString());
+        Assert.Equal(100m, w2Filing.Data.GetProperty("W3Box7Total").GetDecimal());
         Assert.True((await filings.ApproveAsync(new ApprovePayrollFilingRequest(w2Filing.Id, w2Filing.ConcurrencyToken))).Succeeded);
         await using (var db = await factory.CreateDbContextAsync())
         {
@@ -1458,6 +1474,25 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public void SsaEfw2Builder_Emits2026TipAndOvertimeOptionalRecordsAndTotals()
+    {
+        var employee = new W2EmployeeData(Guid.NewGuid(), "E-001", "Jane Employee", "123-45-6789", "10 Home St", "", "48201", 1200m, 110m, 1000m, 62m, 1100m, 15.95m, [], "Jane", "", "Employee", "Detroit", "MI", 100m, [new("TP", 100m), new("TT", 50m)], ["101", "102"]);
+        var package = new W2PackageData(TaxYear: 2026, EmployerLegalName: "Brass Ledger Test Company", EmployerEin: "12-3456789", Employees: [employee], W3Box1Total: 1200m, W3Box2Total: 110m, W3Box3Total: 1000m, W3Box4Total: 62m, W3Box5Total: 1100m, W3Box6Total: 15.95m, W3Box7Total: 100m);
+        var submitter = new SsaEfw2Submitter(2026, "EFW2 TY2026 initial publication (2026-07-07)", "https://www.ssa.gov/employer/efw/26efw2.pdf", "12-3456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com");
+
+        var result = SsaEfw2FileBuilder.Build(package, submitter);
+
+        Assert.True(result.Succeeded, string.Join("; ", result.Errors)); Assert.Equal(7, result.RecordCount);
+        var records = System.Text.Encoding.ASCII.GetString(result.Content).Split("\r\n"); Assert.All(records, record => Assert.Equal(512, record.Length));
+        Assert.Equal("RW", records[2][..2]); Assert.Equal("00000010000", records[2][253..264]); Assert.Equal("101102", records[2][489..495]);
+        Assert.Equal("RO", records[3][..2]); Assert.Equal(new string(' ', 9), records[3][2..11]); Assert.Equal("00000010000", records[3][231..242]); Assert.Equal("00000005000", records[3][242..253]);
+        Assert.Equal("RT", records[4][..2]); Assert.Equal("000000000010000", records[4][99..114]);
+        Assert.Equal("RU", records[5][..2]); Assert.Equal("0000001", records[5][2..9]); Assert.Equal("000000000010000", records[5][309..324]); Assert.Equal("000000000005000", records[5][324..339]);
+        Assert.Equal("RF", records[6][..2]);
+        Assert.False(SsaEfw2FileBuilder.Build(package with { Employees = [employee with { TreasuryTippedOccupationCodes = [] }] }, submitter).Succeeded);
+    }
+
+    [Fact]
     public void SsaEfw2cBuilder_UsesExactRecordPositionsTotalsAndTaxYearGate()
     {
         var previous = new W2EmployeeData(Guid.NewGuid(), "E-001", "Jane Old", "123-45-6789", "1 Main St", "", "48201", 1000m, 100m, 1000m, 62m, 1000m, 14.50m, [], "Jane", "", "Old", "Detroit", "MI");
@@ -1481,6 +1516,28 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(new string(' ', 10), currentRecords[1][324..334]);
         Assert.Equal(new string(' ', 12), currentRecords[2][1008..1020]);
         Assert.False(SsaEfw2cFileBuilder.Build(package with { Employees = [new W2cEmployeeData(previous, corrected, false, "Address only")] }, submitter).Succeeded);
+    }
+
+    [Fact]
+    public void SsaEfw2cBuilder_Emits2026TipAndOvertimeCorrectionRecordsAndTotals()
+    {
+        var previous = new W2EmployeeData(Guid.NewGuid(), "E-001", "Jane Employee", "123-45-6789", "1 Main St", "", "48201", 1200m, 110m, 1000m, 62m, 1100m, 15.95m, [], "Jane", "", "Employee", "Detroit", "MI", 100m, [new("TP", 100m), new("TT", 20m)], ["101"]);
+        var corrected = previous with { Box7SocialSecurityTips = 75m, Box12Amounts = [new("TP", 75m), new("TT", 30m)], TreasuryTippedOccupationCodes = ["102"] };
+        var package = new W2cPackageData(TaxYear: 2026, EmployerLegalName: "Brass Ledger Test Company", EmployerEin: "12-3456789", Employees: [new(previous, corrected, true, "Tip and overtime correction")]);
+        var submitter = new SsaEfw2cSubmitter(2026, "EFW2C TY2026 initial publication (2026-07-10)", "https://www.ssa.gov/employer/efw/26efw2c.pdf", "12-3456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com");
+
+        var result = SsaEfw2cFileBuilder.Build(package, submitter);
+
+        Assert.True(result.Succeeded, string.Join("; ", result.Errors)); Assert.Equal(7, result.RecordCount);
+        var records = System.Text.Encoding.ASCII.GetString(result.Content).Split("\r\n"); Assert.All(records, record => Assert.Equal(1024, record.Length));
+        Assert.Equal(["RCA", "RCE", "RCW", "RCO", "RCT", "RCU", "RCF"], records.Select(record => record[..3]).ToArray());
+        Assert.Equal("00000010000", records[2][375..386]); Assert.Equal("00000007500", records[2][386..397]);
+        Assert.Equal("101102", records[2][1008..1014]);
+        Assert.Equal("00000010000", records[3][452..463]); Assert.Equal("00000007500", records[3][463..474]);
+        Assert.Equal("00000002000", records[3][474..485]); Assert.Equal("00000003000", records[3][485..496]);
+        Assert.Equal("000000000010000", records[4][190..205]); Assert.Equal("000000000007500", records[4][205..220]);
+        Assert.Equal("0000001", records[5][3..10]); Assert.Equal("000000000010000", records[5][610..625]); Assert.Equal("000000000007500", records[5][625..640]);
+        Assert.Equal("000000000002000", records[5][640..655]); Assert.Equal("000000000003000", records[5][655..670]);
     }
 
     [Fact]
@@ -1510,7 +1567,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verify = await factory.CreateDbContextAsync(); await verify.Database.OpenConnectionAsync(); await using var command = verify.Database.GetDbConnection().CreateCommand(); command.CommandText = "SELECT ContentBase64 || '|' || SubmitterEin || '|' || BsoUserId FROM PayrollSsaWageFiles f JOIN PayrollSsaWageFileConfigurations c ON c.Id = f.PayrollSsaWageFileConfigurationId WHERE f.Id = $id"; var parameter = command.CreateParameter(); parameter.ParameterName = "$id"; parameter.Value = file.Id; command.Parameters.Add(parameter); Assert.All(((await command.ExecuteScalarAsync())?.ToString() ?? "").Split('|'), item => Assert.StartsWith("enc::", item));
     }
 
-    private static SaveSsaWageFileConfigurationRequest SsaConfigurationRequest(int year, bool approved) => new(null, year, $"EFW2C TY{year} reviewed", SsaWageFileService.SupportedLayoutCode, $"https://www.ssa.gov/employer/efw/{year % 100:00}efw2c.pdf", new string('c', 64), year >= 2026 ? new DateOnly(2026, 7, 10) : new DateOnly(2026, 1, 20), "Reviewer compared every implemented record and field position with the official SSA publication.", "123456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", approved, approved);
+    private static SaveSsaWageFileConfigurationRequest SsaConfigurationRequest(int year, bool approved) => new(null, year, $"EFW2C TY{year} reviewed", year == 2025 ? SsaWageFileService.Supported2025LayoutCode : SsaWageFileService.SupportedLayoutCode, $"https://www.ssa.gov/employer/efw/{year % 100:00}efw2c.pdf", new string('c', 64), year >= 2026 ? new DateOnly(2026, 7, 10) : new DateOnly(2026, 1, 20), "Reviewer compared every implemented record and field position with the official SSA publication.", "123456789", "AB123456", "Brass Ledger Test Company", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", "L", "", "10 Office Rd", "Detroit", "MI", "48201", "Payroll Contact", "3135551212", "payroll@example.com", approved, approved);
 
     [Fact]
     public async Task SsaOriginalWageFileWorkflow_AllowsSeparateExactSpecEncryptsAndRecordsAccuWageOnce()
@@ -1553,7 +1610,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var request = new SavePayrollTimecardDraftRequest(null, employee.Id, new DateOnly(2026, 8, 10), new DateOnly(2026, 8, 16),
         [
             new PayrollTimeEntryInput(new DateOnly(2026, 8, 10), "REG", "Regular", 8m, 30m, 240m, true, employee.State, "Maricopa", "Phoenix", "", project.Id, "Production shift"),
-            new PayrollTimeEntryInput(new DateOnly(2026, 8, 10), "OT", "Overtime", 2m, 45m, 90m, true, employee.State, "Maricopa", "Phoenix")
+            new PayrollTimeEntryInput(new DateOnly(2026, 8, 10), "OT", "Overtime", 2m, 45m, 90m, true, employee.State, "Maricopa", "Phoenix", W2Reporting: new(QualifiedOvertimeCompensation: 30m))
         ], "Approved source schedule");
 
         var saved = await transactions.SavePayrollTimecardDraftAsync(request);
@@ -1564,12 +1621,17 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var excessiveHours = await transactions.SavePayrollTimecardDraftAsync(new SavePayrollTimecardDraftRequest(null, workspace.Payroll.Employees.Skip(1).First().Id, new DateOnly(2026, 8, 10), new DateOnly(2026, 8, 16), [new PayrollTimeEntryInput(new DateOnly(2026, 8, 10), "REG", "Regular", 25m, 20m, 500m)]));
         Assert.False(excessiveHours.Succeeded);
         Assert.Contains("24 hours", excessiveHours.ErrorMessage);
+        var invalidW2Reporting = await transactions.SavePayrollTimecardDraftAsync(new SavePayrollTimecardDraftRequest(null, workspace.Payroll.Employees.Skip(1).First().Id, new DateOnly(2026, 8, 17), new DateOnly(2026, 8, 23), [new PayrollTimeEntryInput(new DateOnly(2026, 8, 17), "REG", "Regular", 8m, 20m, 160m, W2Reporting: new(QualifiedOvertimeCompensation: 20m))]));
+        Assert.False(invalidW2Reporting.Succeeded); Assert.Contains("overtime earning type", invalidW2Reporting.ErrorMessage);
+        var duplicateOccupation = await transactions.SavePayrollTimecardDraftAsync(new SavePayrollTimecardDraftRequest(null, workspace.Payroll.Employees.Skip(1).First().Id, new DateOnly(2026, 8, 17), new DateOnly(2026, 8, 23), [new PayrollTimeEntryInput(new DateOnly(2026, 8, 17), "TIPS", "Tips", 8m, 20m, 160m, W2Reporting: new(100m, 100m, TreasuryTippedOccupationCodes: ["101", "101"]))]));
+        Assert.False(duplicateOccupation.Succeeded); Assert.Contains("duplicates", duplicateOccupation.ErrorMessage);
 
         var timecard = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(card => card.Id == saved.Id);
         Assert.Equal("Draft", timecard.Status);
         Assert.Equal(10m, timecard.TotalHours);
         Assert.Equal(330m, timecard.TotalAmount);
         Assert.Equal(2, timecard.Entries.Count);
+        Assert.Equal(30m, timecard.Entries.Single(entry => entry.EarningType == "Overtime").W2Reporting.QualifiedOvertimeCompensation);
         Assert.False((await transactions.SubmitPayrollTimecardAsync(new SubmitPayrollTimecardRequest(timecard.Id, "stale"))).Succeeded);
         Assert.True((await transactions.SubmitPayrollTimecardAsync(new SubmitPayrollTimecardRequest(timecard.Id, timecard.ConcurrencyToken))).Succeeded);
         timecard = (await workspaceService.GetWorkspaceAsync()).Payroll.Timecards!.Single(card => card.Id == saved.Id);

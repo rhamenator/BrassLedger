@@ -8,6 +8,8 @@ public static class SsaEfw2FileBuilder
 {
     private static readonly int[] EmployeeMoneyStarts = [188, 199, 210, 221, 232, 243, 254, 276, 287, 298, 309, 320, 331, 353, 364, 375, 386, 408, 419, 430, 441, 452, 463, 474];
     private static readonly int[] TotalMoneyStarts = [10, 25, 40, 55, 70, 85, 100, 130, 145, 160, 175, 190, 205, 235, 250, 265, 280, 295, 310, 325, 340, 355, 370, 385, 400];
+    private static readonly int[] OptionalEmployeeMoneyStarts = [12, 23, 34, 45, 56, 67, 78, 89, 100, 111, 122, 133, 144, 155, 166, 177, 188, 199, 210, 221, 232, 243, 275, 286, 297, 308, 319, 330, 341, 363, 374];
+    private static readonly int[] OptionalTotalMoneyStarts = [10, 25, 40, 55, 70, 85, 100, 115, 145, 160, 175, 190, 205, 220, 235, 250, 265, 280, 295, 310, 325, 355, 370, 385, 400, 415, 430, 445, 460, 475];
 
     public static SsaWageFileBuildResult Build(W2PackageData package, SsaEfw2Submitter submitter)
     {
@@ -17,8 +19,14 @@ public static class SsaEfw2FileBuilder
         try
         {
             var records = new List<string> { BuildRa(submitter), BuildRe(package, submitter) };
-            records.AddRange(employees.Select(BuildRw));
+            foreach (var employee in employees)
+            {
+                records.Add(BuildRw(employee));
+                if (RequiresRo(employee)) records.Add(BuildRo(employee));
+            }
             records.Add(BuildRt(employees));
+            var optionalEmployees = employees.Where(RequiresRo).ToArray();
+            if (optionalEmployees.Length > 0) records.Add(BuildRu(optionalEmployees));
             records.Add(BuildRf(employees.Length));
             if (records.Any(record => Encoding.ASCII.GetByteCount(record) != 512)) return SsaWageFileBuildResult.Failure("Every EFW2 record must contain exactly 512 ASCII bytes.");
             return new(true, Encoding.ASCII.GetBytes(string.Join("\r\n", records)), [], records.Count, employees.Length, submitter.SpecificationVersion);
@@ -52,7 +60,14 @@ public static class SsaEfw2FileBuilder
             if (string.IsNullOrWhiteSpace(employee.FirstName) || string.IsNullOrWhiteSpace(employee.LastName)) errors.Add($"Employee {employee.EmployeeNumber} requires separate first and last names.");
             if (string.IsNullOrWhiteSpace(employee.AddressLine1) || string.IsNullOrWhiteSpace(employee.City) || employee.State.Trim().Length != 2 || Digits(employee.PostalCode).Length is not (5 or 9)) errors.Add($"Employee {employee.EmployeeNumber} requires a complete domestic mailing address.");
             if (MoneyValues(employee).Any(amount => amount < 0 || amount > 999_999_999.99m)) errors.Add($"Employee {employee.EmployeeNumber} contains a negative or overlength EFW2 money amount.");
-            if (employee.Box5MedicareWagesAndTips < employee.Box3SocialSecurityWages) errors.Add($"Employee {employee.EmployeeNumber} has Medicare wages below Social Security wages.");
+            if (employee.Box5MedicareWagesAndTips < employee.Box3SocialSecurityWages + employee.Box7SocialSecurityTips) errors.Add($"Employee {employee.EmployeeNumber} has Medicare wages below Social Security wages plus Social Security tips.");
+            if (employee.Box3SocialSecurityWages + employee.Box7SocialSecurityTips > 184_500m) errors.Add($"Employee {employee.EmployeeNumber} exceeds the 2026 Social Security wage base across boxes 3 and 7.");
+            var box12 = employee.Box12Amounts ?? [];
+            if (box12.GroupBy(item => item.Code, StringComparer.Ordinal).Any(group => group.Count() > 1) || box12.Any(item => item.Code is not ("TP" or "TT"))) errors.Add($"Employee {employee.EmployeeNumber} contains duplicate or unsupported EFW2 box 12 codes; the reviewed optional layout supports TP and TT once each.");
+            var occupations = employee.TreasuryTippedOccupationCodes ?? [];
+            if (occupations.Count > 2 || occupations.Any(code => code.Length != 3 || code.Any(character => !char.IsDigit(character)))) errors.Add($"Employee {employee.EmployeeNumber} has invalid Treasury Tipped Occupation Codes.");
+            if (Box12(employee, "TP") > 0 && occupations.Count == 0) errors.Add($"Employee {employee.EmployeeNumber} requires a Treasury Tipped Occupation Code when code TP cash tips are reported.");
+            if (Box12(employee, "TP") == 0 && occupations.Count > 0) errors.Add($"Employee {employee.EmployeeNumber} cannot report Treasury Tipped Occupation Codes without code TP cash tips.");
         }
         if (employees.Length > 0 && !TotalsMatch(package, employees)) errors.Add("The immutable W-3 totals do not reconcile to the W-2 employee records.");
         return errors.Distinct().ToList();
@@ -79,19 +94,34 @@ public static class SsaEfw2FileBuilder
         Put(record, 66, 22, employee.AddressLine2); Put(record, 88, 22, employee.AddressLine1); Put(record, 110, 22, employee.City); Put(record, 132, 2, employee.State); PutZip(record, 134, employee.PostalCode);
         foreach (var start in EmployeeMoneyStarts) PutMoney(record, start, 11, 0);
         PutMoney(record, 188, 11, employee.Box1WagesTipsOtherCompensation); PutMoney(record, 199, 11, employee.Box2FederalIncomeTaxWithheld); PutMoney(record, 210, 11, employee.Box3SocialSecurityWages); PutMoney(record, 221, 11, employee.Box4SocialSecurityTaxWithheld); PutMoney(record, 232, 11, employee.Box5MedicareWagesAndTips); PutMoney(record, 243, 11, employee.Box6MedicareTaxWithheld);
-        Put(record, 486, 1, "0"); Put(record, 488, 1, "0"); Put(record, 489, 1, "0"); return new(record);
+        PutMoney(record, 254, 11, employee.Box7SocialSecurityTips); Put(record, 486, 1, "0"); Put(record, 488, 1, "0"); Put(record, 489, 1, "0");
+        var occupations = employee.TreasuryTippedOccupationCodes ?? []; if (occupations.Count > 0) Put(record, 490, 3, occupations[0]); if (occupations.Count > 1) Put(record, 493, 3, occupations[1]); return new(record);
+    }
+
+    private static string BuildRo(W2EmployeeData employee)
+    {
+        var record = Blank(); Put(record, 1, 2, "RO"); foreach (var start in OptionalEmployeeMoneyStarts) PutMoney(record, start, 11, 0);
+        PutMoney(record, 232, 11, Box12(employee, "TP")); PutMoney(record, 243, 11, Box12(employee, "TT")); return new(record);
     }
 
     private static string BuildRt(IReadOnlyList<W2EmployeeData> employees)
     {
         var record = Blank(); Put(record, 1, 2, "RT"); PutNumeric(record, 3, 7, employees.Count); foreach (var start in TotalMoneyStarts) PutMoney(record, start, 15, 0);
-        PutMoney(record, 10, 15, employees.Sum(item => item.Box1WagesTipsOtherCompensation)); PutMoney(record, 25, 15, employees.Sum(item => item.Box2FederalIncomeTaxWithheld)); PutMoney(record, 40, 15, employees.Sum(item => item.Box3SocialSecurityWages)); PutMoney(record, 55, 15, employees.Sum(item => item.Box4SocialSecurityTaxWithheld)); PutMoney(record, 70, 15, employees.Sum(item => item.Box5MedicareWagesAndTips)); PutMoney(record, 85, 15, employees.Sum(item => item.Box6MedicareTaxWithheld)); return new(record);
+        PutMoney(record, 10, 15, employees.Sum(item => item.Box1WagesTipsOtherCompensation)); PutMoney(record, 25, 15, employees.Sum(item => item.Box2FederalIncomeTaxWithheld)); PutMoney(record, 40, 15, employees.Sum(item => item.Box3SocialSecurityWages)); PutMoney(record, 55, 15, employees.Sum(item => item.Box4SocialSecurityTaxWithheld)); PutMoney(record, 70, 15, employees.Sum(item => item.Box5MedicareWagesAndTips)); PutMoney(record, 85, 15, employees.Sum(item => item.Box6MedicareTaxWithheld)); PutMoney(record, 100, 15, employees.Sum(item => item.Box7SocialSecurityTips)); return new(record);
+    }
+
+    private static string BuildRu(IReadOnlyList<W2EmployeeData> employees)
+    {
+        var record = Blank(); Put(record, 1, 2, "RU"); PutNumeric(record, 3, 7, employees.Count); foreach (var start in OptionalTotalMoneyStarts) PutMoney(record, start, 15, 0);
+        PutMoney(record, 310, 15, employees.Sum(item => Box12(item, "TP"))); PutMoney(record, 325, 15, employees.Sum(item => Box12(item, "TT"))); return new(record);
     }
 
     private static string BuildRf(int count) { var record = Blank(); Put(record, 1, 2, "RF"); PutNumeric(record, 8, 9, count); return new(record); }
-    private static bool TotalsMatch(W2PackageData p, IReadOnlyList<W2EmployeeData> e) => MoneyEqual(p.W3Box1Total, e.Sum(x => x.Box1WagesTipsOtherCompensation)) && MoneyEqual(p.W3Box2Total, e.Sum(x => x.Box2FederalIncomeTaxWithheld)) && MoneyEqual(p.W3Box3Total, e.Sum(x => x.Box3SocialSecurityWages)) && MoneyEqual(p.W3Box4Total, e.Sum(x => x.Box4SocialSecurityTaxWithheld)) && MoneyEqual(p.W3Box5Total, e.Sum(x => x.Box5MedicareWagesAndTips)) && MoneyEqual(p.W3Box6Total, e.Sum(x => x.Box6MedicareTaxWithheld));
+    private static bool TotalsMatch(W2PackageData p, IReadOnlyList<W2EmployeeData> e) => MoneyEqual(p.W3Box1Total, e.Sum(x => x.Box1WagesTipsOtherCompensation)) && MoneyEqual(p.W3Box2Total, e.Sum(x => x.Box2FederalIncomeTaxWithheld)) && MoneyEqual(p.W3Box3Total, e.Sum(x => x.Box3SocialSecurityWages)) && MoneyEqual(p.W3Box4Total, e.Sum(x => x.Box4SocialSecurityTaxWithheld)) && MoneyEqual(p.W3Box5Total, e.Sum(x => x.Box5MedicareWagesAndTips)) && MoneyEqual(p.W3Box6Total, e.Sum(x => x.Box6MedicareTaxWithheld)) && MoneyEqual(p.W3Box7Total, e.Sum(x => x.Box7SocialSecurityTips));
     private static bool MoneyEqual(decimal left, decimal right) => decimal.Round(left, 2, MidpointRounding.AwayFromZero) == decimal.Round(right, 2, MidpointRounding.AwayFromZero);
-    private static decimal[] MoneyValues(W2EmployeeData x) => [x.Box1WagesTipsOtherCompensation, x.Box2FederalIncomeTaxWithheld, x.Box3SocialSecurityWages, x.Box4SocialSecurityTaxWithheld, x.Box5MedicareWagesAndTips, x.Box6MedicareTaxWithheld];
+    private static decimal[] MoneyValues(W2EmployeeData x) => [x.Box1WagesTipsOtherCompensation, x.Box2FederalIncomeTaxWithheld, x.Box3SocialSecurityWages, x.Box4SocialSecurityTaxWithheld, x.Box5MedicareWagesAndTips, x.Box6MedicareTaxWithheld, x.Box7SocialSecurityTips, .. (x.Box12Amounts ?? []).Select(item => item.Amount)];
+    private static decimal Box12(W2EmployeeData employee, string code) => (employee.Box12Amounts ?? []).Where(item => item.Code.Equals(code, StringComparison.Ordinal)).Sum(item => item.Amount);
+    private static bool RequiresRo(W2EmployeeData employee) => (employee.Box12Amounts ?? []).Any(item => item.Amount != 0);
     private static char[] Blank() => Enumerable.Repeat(' ', 512).ToArray();
     private static void Put(char[] record, int start, int length, string? value, bool upper = true) { value = (value ?? string.Empty).Trim(); if (upper) value = value.ToUpperInvariant(); if (value.Any(character => character > 127)) throw new ArgumentException($"EFW2 field at position {start} contains a non-ASCII character."); if (value.Length > length) throw new ArgumentException($"EFW2 field at position {start} exceeds its {length}-character limit."); value.CopyTo(0, record, start - 1, value.Length); }
     private static void PutZip(char[] record, int start, string value) { var digits = Digits(value); Put(record, start, 5, digits[..Math.Min(5, digits.Length)]); if (digits.Length == 9) Put(record, start + 5, 4, digits[5..]); }

@@ -596,6 +596,7 @@ public sealed class PayrollTimeEntry
     public string WorkSchoolDistrict { get; set; } = string.Empty;
     public Guid? ProjectJobId { get; set; }
     public string Notes { get; set; } = string.Empty;
+    public string W2ReportingJson { get; set; } = "{}";
 }
 
 public sealed class ProjectJob
@@ -811,6 +812,7 @@ public sealed class PayrollEarningLine
     public string WorkCounty { get; set; } = string.Empty;
     public string WorkCity { get; set; } = string.Empty;
     public string WorkSchoolDistrict { get; set; } = string.Empty;
+    public string W2ReportingJson { get; set; } = "{}";
 }
 
 public sealed class PayrollDeductionLine

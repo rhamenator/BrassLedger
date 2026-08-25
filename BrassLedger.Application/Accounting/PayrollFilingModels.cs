@@ -72,6 +72,7 @@ public sealed record Form940Data(
     bool CreditReductionAndStateAdjustmentsRequired = true, bool RequiresProfessionalReview = true);
 
 public sealed record W2JurisdictionAmount(string JurisdictionCode, string JurisdictionName, decimal Wages, decimal IncomeTax);
+public sealed record W2CodeAmount(string Code, decimal Amount);
 public sealed record W2EmployeeData(
     Guid EmployeeId, string EmployeeNumber, string EmployeeName, string SocialSecurityNumber,
     string AddressLine1, string AddressLine2, string PostalCode, decimal Box1WagesTipsOtherCompensation,
@@ -79,12 +80,15 @@ public sealed record W2EmployeeData(
     decimal Box4SocialSecurityTaxWithheld, decimal Box5MedicareWagesAndTips,
     decimal Box6MedicareTaxWithheld, IReadOnlyList<W2JurisdictionAmount> StateAndLocalAmounts,
     string FirstName = "", string MiddleName = "", string LastName = "",
-    string City = "", string State = "");
+    string City = "", string State = "", decimal Box7SocialSecurityTips = 0,
+    IReadOnlyList<W2CodeAmount>? Box12Amounts = null,
+    IReadOnlyList<string>? TreasuryTippedOccupationCodes = null);
 public sealed record W2PackageData(
     string Form = "W-2/W-3", string Revision = "2026", int TaxYear = 0,
     string EmployerLegalName = "", string EmployerEin = "", IReadOnlyList<W2EmployeeData>? Employees = null,
     decimal W3Box1Total = 0, decimal W3Box2Total = 0, decimal W3Box3Total = 0,
     decimal W3Box4Total = 0, decimal W3Box5Total = 0, decimal W3Box6Total = 0,
+    decimal W3Box7Total = 0,
     bool SsaEFileTransmissionImplemented = false, bool RequiresProfessionalReview = true);
 
 public sealed record W2cEmployeeData(
