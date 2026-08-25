@@ -1,0 +1,200 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "capturedAtUtc": "2026-08-25T03:26:33Z",
+  "scope": "US state and District of Columbia employee income-tax withholding jurisdictions not already represented by an individual source-capture package",
+  "jurisdictions": [
+    {
+      "jurisdictionId": "jurisdiction-us-al", "code": "AL", "name": "Alabama", "sourceCompleteness": "Exact2026Publication", "methodFamily": "percentage-and-wage-bracket",
+      "sources": [{ "url": "https://www.revenue.alabama.gov/wp-content/uploads/2026/01/whbooklet_0126.pdf", "title": "2026 Alabama Withholding Tax Tables and Instructions", "sha256": "11aa9a42eb1ba920918bcb7ed9356d6b2aad5b446079ac14c170b46c7313f628", "bytes": 694535 }]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-az", "code": "AZ", "name": "Arizona", "sourceCompleteness": "CurrentOfficialPublication", "methodFamily": "employee-elected-gross-wage-percentage",
+      "sources": [{ "url": "https://azdor.gov/business/withholding-tax", "title": "Arizona Withholding Tax" }, { "url": "https://azdor.gov/sites/default/files/document/FORMS_WITHHOLDING_2025_A-4i.pdf", "title": "Form A-4 Employer Instructions", "sha256": "e912c81815aabea1490f06842de7fc5df68e33c26d837e00d62f9472959147c7", "bytes": 232852 }],
+      "capturedFacts": { "percentageOptions": [0, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035], "missingElectionRate": 0.02, "additionalAmountSupported": true, "zeroElectionMustRenewAnnually": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ar", "code": "AR", "name": "Arkansas", "sourceCompleteness": "Exact2026Publication", "methodFamily": "wage-bracket-and-formula",
+      "sources": [{ "url": "https://www.dfa.arkansas.gov/wp-content/uploads/withholdTaxTablesRegularIncome_2026.pdf", "title": "2026 Arkansas Regular Income Withholding Tables", "sha256": "2724b6214d4e9377f90193a6f6ecee202659eb377d9fe6a5daaa2837eca106bf", "bytes": 2359679 }]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-co", "code": "CO", "name": "Colorado", "sourceCompleteness": "Exact2026OfficialWorksheetLocated", "methodFamily": "annualized-w4-derived-formula",
+      "sources": [{ "url": "https://tax.colorado.gov/DR1098", "title": "DR 1098 Colorado Withholding Worksheet for Employers — 2026" }, { "url": "https://tax.colorado.gov/withholding-tax-guide", "title": "Colorado Withholding Tax Guide" }]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-de", "code": "DE", "name": "Delaware", "sourceCompleteness": "CurrentOfficialGuide", "methodFamily": "annualized-progressive-standard-deduction-exemption-credit",
+      "sources": [{ "url": "https://revenue.delaware.gov/employers-guide-withholding-regulations-employers-duties/", "title": "Delaware Employer's Guide — Withholding Regulations and Duties" }, { "url": "https://revenue.delaware.gov/employers-guide-withholding-tables/", "title": "Delaware Employer Withholding Tables" }],
+      "capturedFacts": { "tableEffectiveOn": "2025-01-01", "highestRate": 0.066, "exemptionCredit": 110, "noReciprocityAgreements": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-dc", "code": "DC", "name": "District of Columbia", "sourceCompleteness": "CurrentFilingPagePlusLegacyCalculationPublication", "methodFamily": "wage-bracket",
+      "sources": [{ "url": "https://otr.cfo.dc.gov/page/withholding-tax-forms", "title": "District of Columbia 2026 Withholding Tax Forms" }, { "url": "https://otr.cfo.dc.gov/sites/default/files/dc/sites/otr/publication/attachments/48494_FR-230_121715%20FINAL.pdf", "title": "FR-230 Withholding Instructions and Tables — legacy publication", "sha256": "6301ce21aa5d923224b0e1972b18966acd82656f803592b9d7d8db9bed4d6f65", "bytes": 886551 }],
+      "captureWarnings": ["The official forms site did not expose a tax-year-2026 FR-230 calculation publication; do not treat the legacy tables as current."]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ga", "code": "GA", "name": "Georgia", "sourceCompleteness": "Exact2026Publication", "methodFamily": "percentage-and-wage-bracket",
+      "sources": [{ "url": "https://dor.georgia.gov/document/document-document/2026-employers-tax-guide-updated-june-2026/download", "title": "2026 Georgia Employer's Tax Guide — updated June 2026" }],
+      "capturedFacts": { "rateFrom": "2026-05-11", "rate": 0.0499 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-hi", "code": "HI", "name": "Hawaii", "sourceCompleteness": "Exact2026Publication", "methodFamily": "annualized-or-alternative-or-wage-bracket",
+      "sources": [{ "url": "https://files.hawaii.gov/tax/news/pubs/25BkltA.pdf", "title": "Hawaii Booklet A Employer's Tax Guide, 2026 withholding appendix", "sha256": "e819a8a48ed9f273014afe0046bc461152228953b545a9aad90e5f7378d3c051", "bytes": 4154063 }, { "url": "https://tax.hawaii.gov/payrollupdate/", "title": "2026 Hawaii Employer Payroll Updates" }],
+      "capturedFacts": { "effectiveOn": "2026-01-01", "scheduledAnnualUpdatesThrough": 2031, "qualifyingNonresidentDayLimit": 60 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-id", "code": "ID", "name": "Idaho", "sourceCompleteness": "Exact2026OfficialTablesLocated", "methodFamily": "percentage-and-wage-bracket",
+      "sources": [{ "url": "https://tax.idaho.gov/pressrelease/withholding-tables-updated-for-2026/", "title": "Idaho withholding tables updated for 2026" }, { "url": "https://tax.idaho.gov/all-tax-guides/", "title": "Idaho 2026 percentage and wage-bracket withholding tables" }],
+      "capturedFacts": { "revisedOn": "2026-07-31", "retroactiveAdjustmentRequired": false, "change": "Idaho Child Tax Credit sunset" }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-il", "code": "IL", "name": "Illinois", "sourceCompleteness": "Exact2026Publication", "methodFamily": "flat-rate-two-allowance-classes",
+      "sources": [{ "url": "https://tax.illinois.gov/content/dam/soi/en/web/tax/forms/withholding/documents/2025/2026_booklet_il_700_t_.pdf", "title": "2026 IL-700-T Illinois Withholding Tax Tables" }, { "url": "https://tax.illinois.gov/forms/withholding/currentyear/il-700-t-withholding-guide-tables.html", "title": "2026 IL-700-T accessible calculation guide" }],
+      "capturedFacts": { "rate": 0.0495, "line1AllowanceAnnualValue": 2925, "line2AllowanceAnnualValue": 1000 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-in", "code": "IN", "name": "Indiana", "sourceCompleteness": "Exact2026Publication", "methodFamily": "flat-state-plus-county-deductions",
+      "sources": [{ "url": "https://secure.in.gov/dor/files/dn01.pdf", "title": "Indiana Departmental Notice 1 — 2026 State and County Withholding", "sha256": "a4c6e71c43295bfe273d5831922565bcd49cb2f0b33208e59d922c4274a0b77d", "bytes": 204818 }],
+      "capturedFacts": { "stateRate": 0.0295, "personalExemption": 1000, "dependentExemption": 1500, "adoptedChildExemption": 3000, "countyRateRequired": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ia", "code": "IA", "name": "Iowa", "sourceCompleteness": "Exact2026Publication", "methodFamily": "four-step-flat-rate-with-w4-version-branches",
+      "sources": [{ "url": "https://revenue.iowa.gov/media/53/download?inline=", "title": "Iowa Individual Income Tax Withholding Formula — 2026", "sha256": "690911fa64266dffe9b21eac207220c18762dd4d02a4ca4807eb8ff02c8ca0e2", "bytes": 211186 }, { "url": "https://revenue.iowa.gov/taxes/tax-guidance/withholding-tax/iowa-withholding-tax-information", "title": "Iowa Withholding Tax Information" }],
+      "capturedFacts": { "rate": 0.038, "legacyW4BranchRequired": true, "separatelyComputedSupplementalRate": 0.038 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ks", "code": "KS", "name": "Kansas", "sourceCompleteness": "CurrentOfficialPublication", "methodFamily": "pay-period-progressive-after-allowances",
+      "sources": [{ "url": "https://www.ksrevenue.gov/pdf/kw100.pdf", "title": "Kansas KW-100 Withholding Tax Guide, revised October 2024", "sha256": "7e521f216548a12e5afc42faff6d3aa170327e9061582ce8e431ed86c67f8fdd", "bytes": 1946195 }],
+      "capturedFacts": { "ratesEffectiveOn": "2024-07-01", "rates": [0.052, 0.0558], "residentOtherStateCreditAtWithholding": true, "nonresidentWorkAllocationRequired": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ky", "code": "KY", "name": "Kentucky", "sourceCompleteness": "Exact2026Publication", "methodFamily": "annualized-flat-standard-deduction",
+      "sources": [{ "url": "https://revenue.ky.gov/Software-Developer/Software%20Development%20Documents/2026%20Withholding%20Tax%20Tables%20-%20Computer%20Formula%2042A003%20%28TCF%29%2810-2025%29%282026%29.pdf", "title": "2026 Kentucky Withholding Tax Computer Formula", "sha256": "901358099eaa0d017be2cec20d2ee0e87b7e8bf1088fb3b8d35b8edcaa492d07", "bytes": 645817 }],
+      "capturedFacts": { "rate": 0.035, "standardDeduction": 3360 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-la", "code": "LA", "name": "Louisiana", "sourceCompleteness": "Exact2026OfficialFormsLocated", "methodFamily": "flat-rate-exemption-and-dependent-credit",
+      "sources": [{ "url": "https://revenue.louisiana.gov/tax-forms/businesses/", "title": "Louisiana 2026 R-1306 tables and R-1210 formula" }, { "url": "https://revenue.louisiana.gov/tax-education-and-faqs/faqs/withholding-tax/on-what-income-are-employers-required-to-withhold-income-tax/", "title": "Louisiana withholding sourcing rules" }],
+      "capturedFacts": { "rate": 0.03, "residentsWorkingInNoTaxStateRequireLouisianaWithholding": true, "employeeCertificate": "L-4" }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-md", "code": "MD", "name": "Maryland", "sourceCompleteness": "Exact2026Publication", "methodFamily": "combined-state-and-local-progressive",
+      "sources": [{ "url": "https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf", "title": "2026 Maryland Employer Withholding Guide", "sha256": "ce61cef90c00bc41ad4f4a4913ea1f9f5be65db9c08b015d43c191d20883e0bf", "bytes": 1430746 }, { "url": "https://services.marylandcomptroller.gov/taxes/en/maryland-income-tax-rates-and-brackets?id=kb_article_view&sysparm_article=KB0010014", "title": "Maryland 2026 state and local withholding rates" }],
+      "capturedFacts": { "employeeResidenceLocalityRequired": true, "localRatesMayBeIncomeTiered": true, "nonresidentSpecialTaxUsesLowestLocalRate": true, "lumpSumStateRate": 0.065 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ma", "code": "MA", "name": "Massachusetts", "sourceCompleteness": "Exact2026PublicationLocated", "methodFamily": "percentage-and-wage-bracket-with-surtax",
+      "sources": [{ "url": "https://www.mass.gov/doc/massachusetts-circular-m-income-tax-withholding-tables-at-50-effective-january-1-2026/download", "title": "Massachusetts Circular M — effective January 1, 2026" }, { "url": "https://www.mass.gov/lists/massachusetts-dor-business-tax-forms", "title": "Massachusetts 2026 withholding forms" }],
+      "capturedFacts": { "baseRate": 0.05, "surtaxRate": 0.04, "surtaxIncludedInPercentageTables": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-mi", "code": "MI", "name": "Michigan", "sourceCompleteness": "Exact2026OfficialValues", "methodFamily": "flat-rate-exemption",
+      "sources": [{ "url": "https://www.michigan.gov/taxes/business-taxes/withholding/calendar-year-tax-information", "title": "Michigan Withholding Tax Information by Calendar Year" }, { "url": "https://www.michigan.gov/treasury/reference/taxpayer-notices/2026/04/15/425-income-tax-rate-for-individuals-and-fiduciaries-in-2026-tax-year", "title": "Michigan 2026 income tax rate determination" }],
+      "capturedFacts": { "rate": 0.0425, "personalExemption": 5900 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-mn", "code": "MN", "name": "Minnesota", "sourceCompleteness": "Exact2026Publication", "methodFamily": "wage-bracket-and-computer-formula",
+      "sources": [{ "url": "https://www.revenue.state.mn.us/sites/default/files/2025-12/wh-inst-26.pdf", "title": "2026 Minnesota Income Tax Withholding Instructions and Tables", "sha256": "47c22acd256bcb85fe6fd49a8012835acc5e97b1ebaec99362e6a154e1795da9", "bytes": 2068607 }]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ms", "code": "MS", "name": "Mississippi", "sourceCompleteness": "Exact2026PublicationLocated", "methodFamily": "filing-status-wage-bracket-with-exemption-ranges",
+      "sources": [{ "url": "https://www.dor.ms.gov/sites/default/files/tax-forms/business/89700251revised1.13.2026.pdf", "title": "2026 Mississippi Withholding Income Tax Tables and Employer Instructions" }],
+      "capturedFacts": { "topExcessRate": 0.04, "marriedSpouseEmploymentStatusRequired": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-mo", "code": "MO", "name": "Missouri", "sourceCompleteness": "Exact2026OfficialFormsLocated", "methodFamily": "annualized-progressive-standard-deduction",
+      "sources": [{ "url": "https://dor.mo.gov/forms/index.php?category=23", "title": "Missouri 2026 Withholding Formula and Tables" }, { "url": "https://dor.mo.gov/taxation/business/tax-types/withholding/", "title": "Missouri Employer Withholding Tax" }]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-mt", "code": "MT", "name": "Montana", "sourceCompleteness": "CurrentOfficialPublication", "methodFamily": "percentage-and-wage-bracket",
+      "sources": [{ "url": "https://mtrevenue.gov/wp-content/uploads/dlm_uploads/2024/12/Montana_Employer_and_Information_Agent_Guide_with_Tax_Tables-1.pdf", "title": "Montana Employer and Information Agent Guide with Tax Tables — November 2024" }]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ne", "code": "NE", "name": "Nebraska", "sourceCompleteness": "Exact2026Publication", "methodFamily": "percentage-and-wage-bracket-with-minimum-test",
+      "sources": [{ "url": "https://revenue.nebraska.gov/sites/revenue.nebraska.gov/files/doc/business/Cir_En_2025/2026cir_en_whole.pdf", "title": "2026 Nebraska Circular EN", "sha256": "b6a3985ee03873aa1d16c1e9267c6de0acd8598a6e59db6b388dce649c1f3991", "bytes": 519436 }],
+      "capturedFacts": { "specialMinimumRate": 0.015, "allTablesChangedFor2026": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-nj", "code": "NJ", "name": "New Jersey", "sourceCompleteness": "CurrentOfficialPublication", "methodFamily": "wage-bracket-with-special-tables",
+      "sources": [{ "url": "https://www.nj.gov/treasury/taxation/pdf/current/njwt.pdf", "title": "Current New Jersey NJ-WT Gross Income Tax Instructions", "sha256": "0fbd45b2c7e9f5d8858ed4008c1436739e7a3ba655a823516ca4be8041cf01e9", "bytes": 2317231 }, { "url": "https://www.nj.gov/treasury/taxation/prntempl.shtml", "title": "New Jersey Employer Payroll Tax Forms" }],
+      "capturedFacts": { "reciprocalState": "PA", "convenienceOfEmployerRule": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-nm", "code": "NM", "name": "New Mexico", "sourceCompleteness": "CurrentOfficialPublication", "methodFamily": "pay-period-progressive-by-filing-status",
+      "sources": [{ "url": "https://www.tax.newmexico.gov/governments/wp-content/uploads/sites/7/2022/11/FYI-104_2025.pdf", "title": "New Mexico FYI-104 Withholding Tables — effective January 1, 2025" }, { "url": "https://www.tax.newmexico.gov/individuals/personal-income-tax-information-overview/", "title": "New Mexico wage withholding overview" }],
+      "captureWarnings": ["No separate 2026 FYI-104 publication was located; confirm that the January 2025 tables remained in force before transcription."]
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ny", "code": "NY", "name": "New York", "sourceCompleteness": "Exact2026Publication", "methodFamily": "exact-calculation-and-wage-bracket-with-local-engines",
+      "sources": [{ "url": "https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nys.pdf", "title": "NYS-50-T-NYS, 2026 New York State Withholding Tables and Methods", "sha256": "e1c2b3440572a10019efe8d8e4d727474c55afb37dd5d18a6a73b94463baf3e8", "bytes": 384460 }, { "url": "https://www.tax.ny.gov/pubs_and_bulls/publications/withholding/wt_pubs_and_bulls_by_number.htm", "title": "New York State, New York City, and Yonkers withholding publications" }],
+      "capturedFacts": { "separateLocalEngines": ["New York City resident", "Yonkers resident", "Yonkers nonresident"], "residentOtherJurisdictionCreditAtWithholding": true, "supplementalRate": 0.117 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-nc", "code": "NC", "name": "North Carolina", "sourceCompleteness": "Exact2026Publication", "methodFamily": "percentage-and-wage-bracket",
+      "sources": [{ "url": "https://www.ncdor.gov/income-tax-withholding-tables-and-instructions-employers/open", "title": "2026 NC-30 Withholding Tables and Instructions", "sha256": "56a00f942c48c51019c3b78d72da1f1cc04969890678c107fe9d0386c5d655be", "bytes": 570759 }],
+      "capturedFacts": { "rate": 0.0399 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-nd", "code": "ND", "name": "North Dakota", "sourceCompleteness": "Exact2026Publication", "methodFamily": "federal-w4-versioned-percentage-and-wage-bracket",
+      "sources": [{ "url": "https://www.tax.nd.gov/sites/www/files/documents/forms/individual/2026-iit/2026-income-tax-withholding-rates-booklet.pdf", "title": "2026 North Dakota Income Tax Withholding Rates and Instructions", "sha256": "b265477a04e5932a79efc5bbc1be6db812febbe018a4f8b7018b7a72553f0415", "bytes": 3837719 }],
+      "capturedFacts": { "pre2020W4BranchRequired": true, "reciprocalStates": ["MN", "MT"] }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-oh", "code": "OH", "name": "Ohio", "sourceCompleteness": "Exact2026OfficialChangeNotice", "methodFamily": "percentage-and-optional-computer-formula",
+      "sources": [{ "url": "https://content.govdelivery.com/accounts/OHTAX/bulletins/420a1ea", "title": "New Ohio Withholding Rates Effective August 1, 2026" }, { "url": "https://content.govdelivery.com/accounts/OHTAX/bulletins/421a404", "title": "Corrected explanatory text for 2026 Percentage Method Table" }, { "url": "https://dam.assets.ohio.gov/image/upload/tax.ohio.gov/employer_withholding/2025-2026%20NYP%20Updates/2026_OH_Employer_School_District_Withholding_Tax_Filing_Guidelines.pdf", "title": "2026 Ohio Employer and School District Withholding Filing Guidelines" }],
+      "capturedFacts": { "effectiveOn": "2026-08-01", "midyearRuleChange": true, "schoolDistrictWithholdingSeparate": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ok", "code": "OK", "name": "Oklahoma", "sourceCompleteness": "Exact2026Publication", "methodFamily": "graduated-wage-withholding-tables",
+      "sources": [{ "url": "https://oklahoma.gov/content/dam/ok/en/tax/documents/resources/publications/businesses/withholding-tables/WHTables-2026.pdf", "title": "2026 Oklahoma Income Tax Withholding Tables", "sha256": "ec4327fe6153611ce6bf60f8e5914eb75c9b6132cf3122bbaaca0ed9dab478a7", "bytes": 429817 }],
+      "capturedFacts": { "topRate": 0.045, "loanOutCompanyHighestRateRule": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-or", "code": "OR", "name": "Oregon", "sourceCompleteness": "Exact2026Publication", "methodFamily": "multi-step-formula-with-high-income-phaseout",
+      "sources": [{ "url": "https://www.oregon.gov/dor/forms/FormsPubs/withholding-tax-formulas_206-436_2026.pdf", "title": "2026 Oregon Withholding Tax Formulas", "sha256": "5beea1190b4072da8fb027d211665a4899ffd43d4488ab9e910bde57261ed37d", "bytes": 261358 }, { "url": "https://www.oregon.gov/DOR/programs/businesses/Pages/payroll-updates.aspx", "title": "Oregon payroll formulas, rates, and deductions" }],
+      "capturedFacts": { "highIncomePhaseout": true, "statewideTransitTaxSeparate": true, "paidLeaveContributionSeparate": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-pa", "code": "PA", "name": "Pennsylvania", "sourceCompleteness": "CurrentOfficialRule", "methodFamily": "flat-gross-compensation-rate",
+      "sources": [{ "url": "https://www.pa.gov/agencies/revenue/resources/tax-types-and-information/employer-withholding", "title": "Pennsylvania Employer Withholding" }],
+      "capturedFacts": { "rate": 0.0307, "residentAndPennsylvaniaSourceNonresidentWages": true, "localEarnedIncomeTaxSeparate": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-ri", "code": "RI", "name": "Rhode Island", "sourceCompleteness": "Exact2026Publication", "methodFamily": "pay-period-progressive-all-filing-statuses",
+      "sources": [{ "url": "https://tax.ri.gov/sites/g/files/xkgbur541/files/2025-12/2026%20Withholding%20Tax%20Booklet.pdf", "title": "2026 Rhode Island Withholding Tax Booklet", "sha256": "1e6883fa1a02cc03eaa0be3a62a8e8bf34b2a02ed5246fc8bcc7c54b0bab37c1", "bytes": 601205 }],
+      "capturedFacts": { "rates": [0.0375, 0.0475, 0.0599], "filingStatusChangesTable": false }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-sc", "code": "SC", "name": "South Carolina", "sourceCompleteness": "Exact2026Publication", "methodFamily": "annualized-progressive-personal-allowance-standard-deduction",
+      "sources": [{ "url": "https://dor.sc.gov/sites/dor/files/SoftwareDeveloperForms/WH1603F_2026.pdf", "title": "South Carolina 2026 Withholding Tax Formula", "sha256": "588edf32e0876bc842d41dea20eebac59c2b12e5457562d052c0c28ac5e9ffff", "bytes": 101841 }, { "url": "https://dor.sc.gov/withholding/withholding-forms", "title": "South Carolina 2026 withholding forms and tables" }],
+      "capturedFacts": { "personalAllowance": 5000, "standardDeductionRate": 0.10, "standardDeductionMaximum": 7500 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-vt", "code": "VT", "name": "Vermont", "sourceCompleteness": "Exact2026Publication", "methodFamily": "pay-period-progressive-after-allowances",
+      "sources": [{ "url": "https://tax.vermont.gov/sites/tax/files/documents/GB-1210-2026.pdf", "title": "2026 Vermont Income Tax Withholding Tables", "sha256": "4656760209691fdd4404f2a10fa4edf57622e24dc7dbaa10ac113f2775f9687d", "bytes": 992046 }, { "url": "https://tax.vermont.gov/individuals/personal-income-tax/withholding", "title": "Vermont income tax withholding guidance" }],
+      "capturedFacts": { "childCarePayrollTaxSeparate": true, "childCareEmployerRate": 0.0044, "maximumEmployeeShareOfChildCareContribution": 0.25 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-va", "code": "VA", "name": "Virginia", "sourceCompleteness": "CurrentOfficialPublicationFor2026", "methodFamily": "annualized-progressive-standard-deduction-exemptions",
+      "sources": [{ "url": "https://www.tax.virginia.gov/sites/default/files/taxforms/withholding/any/employer-withholding-tables-july-2025-and-later-any.pdf", "title": "Virginia Employer Withholding Tables — July 2025 and later", "sha256": "a9756739075a1118a5b41880e1b1f6c3c21bafa34d262a6e62e87fb8b4a411ab", "bytes": 938740 }],
+      "capturedFacts": { "singleStandardDeductionThrough2026": 8750, "personalDependentExemption": 930, "ageBlindExemption": 800, "topRate": 0.0575 }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-wv", "code": "WV", "name": "West Virginia", "sourceCompleteness": "Exact2026Publication", "methodFamily": "pay-period-progressive-one-job-or-multiple-job-tables",
+      "sources": [{ "url": "https://tax.wv.gov/Documents/Withholding/it100.2a.pdf", "title": "West Virginia 2026 Percentage Method of Withholding", "sha256": "c103bacc00f5d3c6c02ce3831c76d328e3ada5ee8af3746a48100b9001ee68b2", "bytes": 96507 }, { "url": "https://tax.wv.gov/Business/Withholding/Pages/WithholdingTaxForms.aspx", "title": "West Virginia 2026 Withholding Tax Forms" }],
+      "capturedFacts": { "rates": [0.0211, 0.0281, 0.0316, 0.0422, 0.0458], "multipleJobTableDefault": true, "roundToWholeDollar": true }
+    },
+    {
+      "jurisdictionId": "jurisdiction-us-wi", "code": "WI", "name": "Wisconsin", "sourceCompleteness": "CurrentJanuary2026Publication", "methodFamily": "wage-bracket-and-alternate-formula",
+      "sources": [{ "url": "https://www.revenue.wi.gov/DOR%20Publications/pb166.pdf", "title": "Wisconsin W-166 Withholding Tax Guide — January 2026", "sha256": "c400ce62d7a945f111d01f42e541415d27c3cae45eb30f3fbf25ac5220949fb7", "bytes": 2128837 }, { "url": "https://www.revenue.wi.gov/Pages/Withholding/home.aspx", "title": "Wisconsin Withholding Tax" }],
+      "capturedFacts": { "reciprocalStates": ["IL", "IN", "KY", "MI"] }
+    }
+  ],
+  "review": {
+    "formulaTranscribed": false,
+    "officialExamplesTranscribed": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Transcribe each jurisdiction into a separately versioned importable package, add official and boundary examples, independently review, and activate only after all tests pass."
+  }
+}

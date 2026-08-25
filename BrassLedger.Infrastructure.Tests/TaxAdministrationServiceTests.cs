@@ -169,6 +169,8 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.Equal(27, jurisdictions.Count(item => item.GetProperty("pit").GetProperty("type").GetString() == "progressive"));
         Assert.Equal(9, jurisdictions.Count(item => item.GetProperty("pit").GetProperty("type").GetString() == "none"));
         Assert.All(jurisdictions, item => Assert.Contains(item.GetProperty("relationships").EnumerateArray(), relationship => relationship.GetProperty("type").GetString() == "ContainedBy" && relationship.GetProperty("targetJurisdictionId").GetString() == "jurisdiction-us"));
+        Assert.Equal(41, jurisdictions.Count(item => item.GetProperty("formulaCoverage").GetString() == "OfficialSourceCaptured"));
+        Assert.Equal(9, jurisdictions.Count(item => item.GetProperty("formulaCoverage").GetString() == "NotApplicableForPIT"));
         Assert.Equal("DraftCaptured", jurisdictions.Single(item => item.GetProperty("code").GetString() == "UT").GetProperty("formulaCoverage").GetString());
         Assert.Equal("OfficialSourceCaptured", jurisdictions.Single(item => item.GetProperty("code").GetString() == "ME").GetProperty("formulaCoverage").GetString());
 
@@ -179,9 +181,44 @@ public sealed class TaxAdministrationServiceTests : IDisposable
             var sourceCapturePath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(catalogPath)!, relativePath!));
             Assert.True(File.Exists(sourceCapturePath), $"Missing source capture for {jurisdiction.GetProperty("code").GetString()}: {sourceCapturePath}");
             using var sourceCapture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(sourceCapturePath));
-            Assert.Equal(jurisdiction.GetProperty("id").GetString(), sourceCapture.RootElement.GetProperty("jurisdictionId").GetString());
+            var expectedJurisdictionId = jurisdiction.GetProperty("id").GetString();
+            var root = sourceCapture.RootElement;
+            var captureContainsJurisdiction = root.TryGetProperty("jurisdictionId", out var capturedJurisdictionId)
+                ? string.Equals(expectedJurisdictionId, capturedJurisdictionId.GetString(), StringComparison.OrdinalIgnoreCase)
+                : root.GetProperty("jurisdictions").EnumerateArray().Any(item =>
+                    string.Equals(expectedJurisdictionId, item.GetProperty("jurisdictionId").GetString(), StringComparison.OrdinalIgnoreCase));
+            Assert.True(captureContainsJurisdiction, $"Source capture does not contain {expectedJurisdictionId}: {sourceCapturePath}");
             Assert.False(sourceCapture.RootElement.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
         }
+    }
+
+    [Fact]
+    public async Task MarylandLocalSourceCapture_CoversEveryCountyAndBaltimoreCityWithoutAssumingFlatRates()
+    {
+        var catalogPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/state-reference-2026.json"));
+        using var catalog = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(catalogPath));
+        var maryland = catalog.RootElement.GetProperty("jurisdictions").EnumerateArray()
+            .Single(item => item.GetProperty("code").GetString() == "MD");
+        var relativePath = maryland.GetProperty("localSourceCapture").GetString();
+        var capturePath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(catalogPath)!, relativePath!));
+
+        using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var root = capture.RootElement;
+        var localJurisdictions = root.GetProperty("localJurisdictions").EnumerateArray().ToArray();
+
+        Assert.Equal("employeeResidence", root.GetProperty("selection").GetProperty("basis").GetString());
+        Assert.True(root.GetProperty("selection").GetProperty("workLocationIsNotSelectionBasis").GetBoolean());
+        Assert.Equal(24, localJurisdictions.Length);
+        Assert.Equal(23, localJurisdictions.Count(item => item.GetProperty("type").GetString() == "County"));
+        Assert.Single(localJurisdictions, item => item.GetProperty("type").GetString() == "City" && item.GetProperty("name").GetString() == "Baltimore City");
+        Assert.Equal(24, localJurisdictions.Select(item => item.GetProperty("jurisdictionId").GetString()).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(2, localJurisdictions.Count(item => item.GetProperty("rateSchedule").GetProperty("type").GetString() == "IncomeTieredRateByFilingStatus"));
+        Assert.Contains(localJurisdictions, item => item.GetProperty("name").GetString() == "Anne Arundel County" && item.GetProperty("rateSchedule").GetProperty("singleGroup").GetArrayLength() == 3);
+        Assert.Contains(localJurisdictions, item => item.GetProperty("name").GetString() == "Frederick County" && item.GetProperty("rateSchedule").GetProperty("singleGroup").GetArrayLength() == 4);
+        Assert.Equal("ContainedBy", root.GetProperty("sharedRelationship").GetProperty("type").GetString());
+        Assert.Equal("jurisdiction-us-md", root.GetProperty("sharedRelationship").GetProperty("targetJurisdictionId").GetString());
+        Assert.Equal(0.0225m, root.GetProperty("specialRules").GetProperty("nonresidentSpecialTaxRate").GetDecimal());
+        Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
     [Fact]
