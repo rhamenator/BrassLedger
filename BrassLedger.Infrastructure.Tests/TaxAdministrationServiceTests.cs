@@ -993,6 +993,59 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.False(root.GetProperty("review").GetProperty("activationAllowed").GetBoolean());
     }
 
+    [Fact]
+    public async Task RemainingThirtyFiveStateCaptures_HaveIndividualInactiveAuditableEnvelopes()
+    {
+        var catalogPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/state-reference-2026.json"));
+        using var catalog = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(catalogPath));
+        var expectedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "AL", "AZ", "AR", "CO", "DE", "DC", "GA", "HI", "ID", "IL", "IA", "KS", "KY", "LA", "MD", "MA", "MN", "MS",
+            "MO", "MT", "NE", "NJ", "NM", "NY", "NC", "ND", "OK", "OR", "PA", "RI", "SC", "VT", "VA", "WV", "WI"
+        };
+        var jurisdictions = catalog.RootElement.GetProperty("jurisdictions").EnumerateArray()
+            .Where(item => expectedCodes.Contains(item.GetProperty("code").GetString()!))
+            .ToArray();
+
+        Assert.Equal(expectedCodes.Count, jurisdictions.Length);
+        foreach (var jurisdiction in jurisdictions)
+        {
+            var code = jurisdiction.GetProperty("code").GetString()!;
+            var relativePath = jurisdiction.GetProperty("sourceCapture").GetString();
+            Assert.NotEqual("state-withholding-sources-2026.json", relativePath);
+            Assert.Equal($"{code.ToLowerInvariant()}/2026-source-capture.json", relativePath);
+
+            var capturePath = Path.Combine(Path.GetDirectoryName(catalogPath)!, relativePath!);
+            using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+            var root = capture.RootElement;
+            Assert.Equal("1.0", root.GetProperty("schemaVersion").GetString());
+            Assert.Equal(2026, root.GetProperty("taxYear").GetInt32());
+            Assert.Equal("OfficialSourceCaptured", root.GetProperty("status").GetString());
+            Assert.Equal(jurisdiction.GetProperty("id").GetString(), root.GetProperty("jurisdictionId").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("capturedAtUtc").GetString()));
+            Assert.NotEmpty(root.GetProperty("sources").EnumerateArray());
+            Assert.All(root.GetProperty("sources").EnumerateArray(), source =>
+            {
+                Assert.True(Uri.TryCreate(source.GetProperty("url").GetString(), UriKind.Absolute, out _));
+                Assert.False(string.IsNullOrWhiteSpace(source.GetProperty("title").GetString()));
+                if (source.TryGetProperty("sha256", out var checksum) && checksum.ValueKind == System.Text.Json.JsonValueKind.String)
+                    Assert.Matches("^[a-f0-9]{64}$", checksum.GetString());
+                else
+                {
+                    var unavailableReason = source.TryGetProperty("retrievalStatus", out var retrievalStatus)
+                        ? retrievalStatus.GetString()
+                        : source.TryGetProperty("rawCaptureStatus", out var rawCaptureStatus)
+                            ? rawCaptureStatus.GetString()
+                            : null;
+                    Assert.False(string.IsNullOrWhiteSpace(unavailableReason));
+                }
+            });
+            var review = root.GetProperty("review");
+            Assert.False(review.GetProperty("activationAllowed").GetBoolean());
+            Assert.False(string.IsNullOrWhiteSpace(review.GetProperty("requiredNextStep").GetString()));
+        }
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var configuration = new ConfigurationBuilder().Build();

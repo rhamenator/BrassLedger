@@ -8,8 +8,8 @@
   "effectiveThrough": "2026-12-31",
   "sources": [
     { "url": "https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nys.pdf", "title": "NYS-50-T-NYS New York State Withholding Tax Tables and Methods", "revision": "1/26", "mediaType": "application/pdf", "sha256": "e1c2b3440572a10019efe8d8e4d727474c55afb37dd5d18a6a73b94463baf3e8", "bytes": 384460 },
-    { "url": "https://www.tax.ny.gov/forms/publications/wt/nys50.htm", "title": "NYS-50 Employer's Guide to Unemployment Insurance, Wage Reporting, and Withholding Tax", "revision": "12/25", "mediaType": "text/html", "sha256": null, "bytes": null },
-    { "url": "https://www.tax.ny.gov/bus/wt/duedates.htm", "title": "New York withholding tax due dates", "mediaType": "text/html", "sha256": null, "bytes": null }
+    { "url": "https://www.tax.ny.gov/forms/publications/wt/nys50.htm", "title": "NYS-50 Employer's Guide to Unemployment Insurance, Wage Reporting, and Withholding Tax", "revision": "12/25", "mediaType": "text/html", "sha256": null, "bytes": null, "rawCaptureStatus": "Official HTML was reviewed during intake; a stable raw-byte capture and checksum remain pending" },
+    { "url": "https://www.tax.ny.gov/bus/wt/duedates.htm", "title": "New York withholding tax due dates", "mediaType": "text/html", "sha256": null, "bytes": null, "rawCaptureStatus": "Official HTML was reviewed during intake; a stable raw-byte capture and checksum remain pending" }
   ],
   "employeeInputs": [
     { "code": "filingStatus", "source": "Form IT-2104", "dataType": "enum", "values": ["Single", "Married"] },

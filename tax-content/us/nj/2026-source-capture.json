@@ -10,7 +10,7 @@
     { "url": "https://www.nj.gov/treasury/taxation/pdf/current/njwt.pdf", "title": "NJ-WT New Jersey Gross Income Tax Instructions", "revision": "September 2025", "mediaType": "application/pdf", "sha256": "0fbd45b2c7e9f5d8858ed4008c1436739e7a3ba655a823516ca4be8041cf01e9", "bytes": 2317231 },
     { "url": "https://www.nj.gov/treasury/taxation/pdf/withholdingtables.pdf", "title": "New Jersey Tables for Percentage Method of Withholding", "revision": "Applicable on and after October 1, 2020; linked as current for 2026", "mediaType": "application/pdf", "sha256": "e7480d096b6126f49181c9f5e9b04a15b1542ca79e7480d01e4a3d6bb359f3f8", "bytes": 480199 },
     { "url": "https://www.nj.gov/treasury/taxation/pdf/current/njwtsp.pdf", "title": "Supplemental NJ-WT Gross Income Tax Supplemental Withholding Tables", "revision": "Effective on and after January 1, 2005; linked as current for 2026", "mediaType": "application/pdf", "sha256": "194cb84f0f9fced771d14dfe61692c2e917de6b2e013155526fb2da685e2438e", "bytes": 740495 },
-    { "url": "https://www.nj.gov/treasury/taxation/conveniencerulefaq.shtml", "title": "Convenience of the Employer Sourcing Rule FAQ", "updated": "2025-10-30", "mediaType": "text/html", "sha256": null, "bytes": null }
+    { "url": "https://www.nj.gov/treasury/taxation/conveniencerulefaq.shtml", "title": "Convenience of the Employer Sourcing Rule FAQ", "updated": "2025-10-30", "mediaType": "text/html", "sha256": null, "bytes": null, "rawCaptureStatus": "Official HTML was reviewed during intake; a stable raw-byte capture and checksum remain pending" }
   ],
   "employeeInputs": [
     { "code": "rateTable", "source": "Form NJ-W4 lines 2 and 3", "dataType": "enum", "values": ["A", "B", "C", "D", "E"] },
