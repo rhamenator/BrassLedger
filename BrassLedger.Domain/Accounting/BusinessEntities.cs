@@ -177,9 +177,17 @@ public sealed class JournalEntry
     public string Reference { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
+    public string Status { get; set; } = "Posted";
     public bool IsPosted { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
     public Guid? PostedByUserId { get; set; }
     public DateTimeOffset PostedAtUtc { get; set; }
+    public Guid? ReversalOfJournalEntryId { get; set; }
+    public Guid? ReversedByJournalEntryId { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class JournalEntryLine

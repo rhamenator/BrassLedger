@@ -63,7 +63,12 @@ public sealed record JournalEntrySnapshot(
     DateOnly PostedOn,
     string SourceModule,
     string Description,
-    decimal TotalAmount);
+    decimal TotalAmount,
+    Guid Id = default,
+    string Reference = "",
+    string Status = "Posted",
+    Guid? ReversalOfJournalEntryId = null,
+    Guid? ReversedByJournalEntryId = null);
 
 public sealed record ReceivablesWorkspace(
     decimal OpenBalance,

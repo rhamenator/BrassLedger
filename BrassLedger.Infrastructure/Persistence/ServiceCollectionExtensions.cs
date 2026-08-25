@@ -233,6 +233,15 @@ public static class ServiceCollectionExtensions
             await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "BankAccountId", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""BankAccountId"" TEXT NULL;", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "SourceDocumentId", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""SourceDocumentId"" TEXT NULL;", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "SourceDocumentType", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""SourceDocumentType"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "Status", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""Status"" TEXT NOT NULL DEFAULT 'Posted';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "CreatedByUserId", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""CreatedByUserId"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "CreatedAtUtc", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""CreatedAtUtc"" TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "ApprovedByUserId", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""ApprovedByUserId"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "ApprovedAtUtc", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""ApprovedAtUtc"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "ReversalOfJournalEntryId", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""ReversalOfJournalEntryId"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "ReversedByJournalEntryId", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""ReversedByJournalEntryId"" TEXT NULL;", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "JournalEntries", "ConcurrencyToken", @"ALTER TABLE ""JournalEntries"" ADD COLUMN ""ConcurrencyToken"" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_JournalEntries_CompanyId_Status_PostedOn"" ON ""JournalEntries"" (""CompanyId"", ""Status"", ""PostedOn"");", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "SalesInvoices", "ConcurrencyToken", @"ALTER TABLE ""SalesInvoices"" ADD COLUMN ""ConcurrencyToken"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "VendorBills", "ConcurrencyToken", @"ALTER TABLE ""VendorBills"" ADD COLUMN ""ConcurrencyToken"" TEXT NOT NULL DEFAULT '';", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "BankAccounts", "ConcurrencyToken", @"ALTER TABLE ""BankAccounts"" ADD COLUMN ""ConcurrencyToken"" TEXT NOT NULL DEFAULT '';", cancellationToken);
@@ -409,6 +418,15 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "SourceDocumentType" text NOT NULL DEFAULT '';""",
                 cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "Status" text NOT NULL DEFAULT 'Posted';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "CreatedByUserId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "CreatedAtUtc" timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00+00:00';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "ApprovedByUserId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "ApprovedAtUtc" timestamptz NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "ReversalOfJournalEntryId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "ReversedByJournalEntryId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "JournalEntries" ADD COLUMN IF NOT EXISTS "ConcurrencyToken" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_JournalEntries_CompanyId_Status_PostedOn" ON "JournalEntries" ("CompanyId", "Status", "PostedOn");""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """UPDATE "BankAccounts" SET "LastReconciledBalance" = "CurrentBalance" WHERE "LastReconciledBalance" = 0 AND "CurrentBalance" <> 0 AND NOT EXISTS (SELECT 1 FROM "BankReconciliations" WHERE "BankReconciliations"."BankAccountId" = "BankAccounts"."Id");""",
                 cancellationToken);

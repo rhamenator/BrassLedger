@@ -13,6 +13,146 @@ public sealed class AccountingTransactionService(
     IDbContextFactory<BrassLedgerDbContext> dbContextFactory,
     IHttpContextAccessor httpContextAccessor) : IAccountingTransactionService
 {
+    public async Task<TransactionResult> SaveJournalEntryDraftAsync(SaveJournalEntryDraftRequest request, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Description))
+            return TransactionResult.Failure("A journal reference and description are required.");
+        if (request.Lines.Count < 2 || request.Lines.Any(line => line.Debit < 0 || line.Credit < 0 || (line.Debit == 0 && line.Credit == 0) || (line.Debit > 0 && line.Credit > 0)))
+            return TransactionResult.Failure("Journal drafts require at least two valid debit or credit lines.");
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var accountNumbers = request.Lines.Select(line => line.AccountNumber.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && accountNumbers.Contains(account.Number)).ToListAsync(cancellationToken);
+        if (accounts.Count != accountNumbers.Length) return TransactionResult.Failure("One or more active posting accounts could not be found.");
+        if (accounts.Any(account => account.IsControlAccount)) return TransactionResult.Failure("General journal drafts cannot use control accounts; use the related subledger workflow.");
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var userId = ResolveUserId();
+        JournalEntry entry;
+        if (request.Id.HasValue)
+        {
+            var existing = await db.JournalEntries.SingleOrDefaultAsync(candidate => candidate.Id == request.Id && candidate.CompanyId == companyId, cancellationToken);
+            if (existing is null) return TransactionResult.Failure("Journal draft not found.");
+            entry = existing;
+            if (!entry.Status.Equals("Draft", StringComparison.OrdinalIgnoreCase)) return TransactionResult.Failure("Only journal drafts can be edited.");
+            db.JournalEntryLines.RemoveRange(await db.JournalEntryLines.Where(line => line.JournalEntryId == entry.Id).ToListAsync(cancellationToken));
+        }
+        else
+        {
+            entry = new JournalEntry
+            {
+                Id = Guid.NewGuid(), CompanyId = companyId, EntryNumber = $"DRAFT-{Guid.NewGuid():N}"[..20],
+                SourceModule = "General Ledger", Status = "Draft", CreatedByUserId = userId, CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+            db.JournalEntries.Add(entry);
+        }
+
+        entry.PostedOn = request.EntryDate;
+        entry.Reference = request.Reference.Trim();
+        entry.Description = request.Description.Trim();
+        entry.TotalAmount = request.Lines.Sum(line => line.Debit);
+        entry.IsPosted = false;
+        entry.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        foreach (var line in request.Lines)
+        {
+            var account = accounts.Single(candidate => candidate.Number.Equals(line.AccountNumber.Trim(), StringComparison.OrdinalIgnoreCase));
+            db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit });
+        }
+        AddJournalAudit(db, companyId, userId, "journal.draft.saved", entry, new { lineCount = request.Lines.Count });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The journal draft changed while it was being saved. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(entry.Id);
+    }
+
+    public async Task<TransactionResult> ApproveJournalEntryAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var entry = await db.JournalEntries.SingleOrDefaultAsync(candidate => candidate.Id == journalEntryId && candidate.CompanyId == companyId, cancellationToken);
+        if (entry is null) return TransactionResult.Failure("Journal draft not found.");
+        if (!entry.Status.Equals("Draft", StringComparison.OrdinalIgnoreCase)) return TransactionResult.Failure("Only a journal draft can be approved.");
+        if (await IsClosedPeriodAsync(db, companyId, entry.PostedOn, cancellationToken)) return TransactionResult.Failure("This journal date is in a closed accounting period.");
+        var lines = await db.JournalEntryLines.Where(line => line.JournalEntryId == entry.Id).ToListAsync(cancellationToken);
+        if (lines.Count < 2 || lines.Sum(line => line.Debit) != lines.Sum(line => line.Credit)) return TransactionResult.Failure("The journal draft must balance before approval.");
+
+        var userId = ResolveUserId();
+        entry.Status = "Approved";
+        entry.ApprovedByUserId = userId;
+        entry.ApprovedAtUtc = DateTimeOffset.UtcNow;
+        entry.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddJournalAudit(db, companyId, userId, "journal.approved", entry, new { entry.ApprovedAtUtc });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The journal draft changed during approval. Refresh and try again."); }
+        return TransactionResult.Success(entry.Id);
+    }
+
+    public async Task<TransactionResult> PostApprovedJournalEntryAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var entry = await db.JournalEntries.SingleOrDefaultAsync(candidate => candidate.Id == journalEntryId && candidate.CompanyId == companyId, cancellationToken);
+        if (entry is null) return TransactionResult.Failure("Approved journal entry not found.");
+        if (!entry.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase) || entry.IsPosted) return TransactionResult.Failure("Only an approved, unposted journal entry can be posted.");
+        if (await IsClosedPeriodAsync(db, companyId, entry.PostedOn, cancellationToken)) return TransactionResult.Failure("This posting date is in a closed accounting period.");
+        var lines = await db.JournalEntryLines.Where(line => line.JournalEntryId == entry.Id).ToListAsync(cancellationToken);
+        if (lines.Count < 2 || lines.Sum(line => line.Debit) != lines.Sum(line => line.Credit)) return TransactionResult.Failure("The approved journal entry is no longer balanced.");
+        var accountIds = lines.Select(line => line.AccountId).Distinct().ToArray();
+        var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && accountIds.Contains(account.Id)).ToListAsync(cancellationToken);
+        if (accounts.Count != accountIds.Length || accounts.Any(account => account.IsControlAccount)) return TransactionResult.Failure("The approved journal contains an unavailable or control account.");
+
+        foreach (var line in lines)
+        {
+            var account = accounts.Single(candidate => candidate.Id == line.AccountId);
+            account.CurrentBalance += account.Type is AccountType.Asset or AccountType.Expense ? line.Debit - line.Credit : line.Credit - line.Debit;
+        }
+        var userId = ResolveUserId();
+        entry.EntryNumber = $"JE-{entry.PostedOn:yyyyMMdd}-{Guid.NewGuid():N}"[..20];
+        entry.Status = "Posted";
+        entry.IsPosted = true;
+        entry.PostedByUserId = userId;
+        entry.PostedAtUtc = DateTimeOffset.UtcNow;
+        entry.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddJournalAudit(db, companyId, userId, "journal.posted", entry, new { entry.ApprovedByUserId, entry.ApprovedAtUtc });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The approved journal changed while it was posting. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(entry.Id);
+    }
+
+    public async Task<TransactionResult> ReverseJournalEntryAsync(ReverseJournalEntryRequest request, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A reversal reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var original = await db.JournalEntries.SingleOrDefaultAsync(entry => entry.Id == request.JournalEntryId && entry.CompanyId == companyId, cancellationToken);
+        if (original is null) return TransactionResult.Failure("Journal entry not found.");
+        if (!original.IsPosted || !original.Status.Equals("Posted", StringComparison.OrdinalIgnoreCase) || original.ReversedByJournalEntryId.HasValue) return TransactionResult.Failure("Only an unreversed posted journal entry can be reversed.");
+        if (!original.SourceModule.Equals("General Ledger", StringComparison.OrdinalIgnoreCase) || original.SourceDocumentId.HasValue) return TransactionResult.Failure("Reverse subledger transactions through their originating workflow.");
+        if (request.ReversalDate < original.PostedOn) return TransactionResult.Failure("A reversal cannot precede the original posting date.");
+        if (await db.BankReconciliationItems.AnyAsync(item => item.JournalEntryId == original.Id, cancellationToken)) return TransactionResult.Failure("A reconciled journal entry cannot be reversed until the reconciliation is reopened.");
+        var originalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == original.Id).ToListAsync(cancellationToken);
+        var accountIds = originalLines.Select(line => line.AccountId).Distinct().ToArray();
+        var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
+        var reversingLines = originalLines.Select(line => new JournalLineRequest(accounts[line.AccountId].Number, line.Credit, line.Debit, $"Reversal: {line.Description}")).ToArray();
+        var posting = await PostAsync(db, companyId, request.ReversalDate, "General Ledger", $"REV-{original.Reference}", request.Reason, reversingLines, cancellationToken, sourceDocumentId: original.Id, sourceDocumentType: "JournalEntryReversal");
+        if (!posting.Succeeded) return posting;
+        var reversal = await db.JournalEntries.SingleAsync(entry => entry.Id == posting.Id, cancellationToken);
+        reversal.ReversalOfJournalEntryId = original.Id;
+        reversal.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        original.Status = "Reversed";
+        original.ReversedByJournalEntryId = reversal.Id;
+        original.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddJournalAudit(db, companyId, ResolveUserId(), "journal.reversed", original, new { reversalEntryId = reversal.Id, request.ReversalDate, reason = request.Reason.Trim() });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The journal entry changed while it was being reversed. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return posting;
+    }
+
     public async Task<TransactionResult> PostJournalEntryAsync(PostJournalEntryRequest request, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -398,7 +538,7 @@ public sealed class AccountingTransactionService(
 
     private async Task<TransactionResult> PostAsync(BrassLedgerDbContext db, Guid companyId, DateOnly date, string module, string reference, string description, IReadOnlyList<JournalLineRequest> lines, CancellationToken ct, Guid? bankAccountId = null, bool allowControlAccounts = false, Guid? sourceDocumentId = null, string? sourceDocumentType = null)
     {
-        if (await db.AccountingPeriods.AnyAsync(period => period.CompanyId == companyId && period.Status == "Closed" && period.StartsOn <= date && period.EndsOn >= date, ct)) return TransactionResult.Failure("This posting date is in a closed accounting period.");
+        if (await IsClosedPeriodAsync(db, companyId, date, ct)) return TransactionResult.Failure("This posting date is in a closed accounting period.");
         if (lines.Count < 2 || lines.Any(x => x.Debit < 0 || x.Credit < 0 || (x.Debit == 0 && x.Credit == 0) || (x.Debit > 0 && x.Credit > 0))) return TransactionResult.Failure("Journal entries require at least two valid debit or credit lines.");
         var debits = lines.Sum(x => x.Debit); var credits = lines.Sum(x => x.Credit);
         if (debits != credits) return TransactionResult.Failure("Journal entry debits and credits must balance.");
@@ -406,8 +546,9 @@ public sealed class AccountingTransactionService(
         var accounts = await db.Accounts.Where(x => x.CompanyId == companyId && x.IsActive && numbers.Contains(x.Number)).ToListAsync(ct);
         if (accounts.Count != numbers.Length) return TransactionResult.Failure("One or more active posting accounts could not be found.");
         if (!allowControlAccounts && accounts.Any(account => account.IsControlAccount)) return TransactionResult.Failure("General journal entries cannot post directly to control accounts; use the related receivables, payables, inventory, or payroll workflow.");
-        var postedByUserId = httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        var entry = new JournalEntry { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bankAccountId, SourceDocumentId = sourceDocumentId, SourceDocumentType = sourceDocumentType ?? string.Empty, EntryNumber = $"JE-{date:yyyyMMdd}-{Guid.NewGuid():N}"[..20], PostedOn = date, SourceModule = module, Reference = reference.Trim(), Description = description.Trim(), TotalAmount = debits, IsPosted = true, PostedByUserId = Guid.TryParse(postedByUserId, out var userId) ? userId : null, PostedAtUtc = DateTimeOffset.UtcNow };
+        var userId = ResolveUserId();
+        var now = DateTimeOffset.UtcNow;
+        var entry = new JournalEntry { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bankAccountId, SourceDocumentId = sourceDocumentId, SourceDocumentType = sourceDocumentType ?? string.Empty, EntryNumber = $"JE-{date:yyyyMMdd}-{Guid.NewGuid():N}"[..20], PostedOn = date, SourceModule = module, Reference = reference.Trim(), Description = description.Trim(), TotalAmount = debits, Status = "Posted", IsPosted = true, CreatedByUserId = userId, CreatedAtUtc = now, ApprovedByUserId = userId, ApprovedAtUtc = now, PostedByUserId = userId, PostedAtUtc = now, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.JournalEntries.Add(entry);
         foreach (var line in lines)
         {
@@ -415,9 +556,28 @@ public sealed class AccountingTransactionService(
             account.CurrentBalance += account.Type is AccountType.Asset or AccountType.Expense ? line.Debit - line.Credit : line.Credit - line.Debit;
             db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit });
         }
-        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = entry.PostedByUserId, Action = "journal.posted", EntityType = "JournalEntry", EntityId = entry.Id, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { entry.EntryNumber, entry.PostedOn, entry.SourceModule, entry.Reference, entry.TotalAmount, entry.SourceDocumentType, entry.SourceDocumentId }), OccurredAtUtc = entry.PostedAtUtc });
+        AddJournalAudit(db, companyId, userId, "journal.posted", entry, new { entry.SourceDocumentType, entry.SourceDocumentId });
         await db.SaveChangesAsync(ct);
         return TransactionResult.Success(entry.Id);
+    }
+
+    private static Task<bool> IsClosedPeriodAsync(BrassLedgerDbContext db, Guid companyId, DateOnly date, CancellationToken cancellationToken) =>
+        db.AccountingPeriods.AnyAsync(period => period.CompanyId == companyId && period.Status == "Closed" && period.StartsOn <= date && period.EndsOn >= date, cancellationToken);
+
+    private Guid? ResolveUserId()
+    {
+        var userIdValue = httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(userIdValue, out var userId) ? userId : null;
+    }
+
+    private static void AddJournalAudit(BrassLedgerDbContext db, Guid companyId, Guid? userId, string action, JournalEntry entry, object details)
+    {
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry
+        {
+            Id = Guid.NewGuid(), CompanyId = companyId, UserId = userId, Action = action, EntityType = "JournalEntry", EntityId = entry.Id,
+            DetailJson = System.Text.Json.JsonSerializer.Serialize(new { entry.EntryNumber, entry.PostedOn, entry.SourceModule, entry.Reference, entry.Description, entry.TotalAmount, entry.Status, details }),
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        });
     }
 
     private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken ct)

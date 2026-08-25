@@ -145,6 +145,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SalesInvoice>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<VendorBill>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<BankAccount>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<JournalEntry>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         ConfigureMoney(modelBuilder.Entity<BankAccount>().Property(x => x.LastReconciledBalance));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.MonthlyBasePay));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.AdditionalWithholding));
@@ -187,6 +188,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<GeneralLedgerAccount>().HasIndex(x => new { x.CompanyId, x.Number }).IsUnique();
         modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.CompanyId, x.BankAccountId, x.PostedOn });
         modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.CompanyId, x.SourceDocumentType, x.SourceDocumentId });
+        modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.CompanyId, x.Status, x.PostedOn });
         modelBuilder.Entity<Customer>().HasIndex(x => new { x.CompanyId, x.CustomerNumber }).IsUnique();
         modelBuilder.Entity<Vendor>().HasIndex(x => new { x.CompanyId, x.VendorNumber }).IsUnique();
         modelBuilder.Entity<SalesInvoice>().HasIndex(x => new { x.CompanyId, x.InvoiceNumber }).IsUnique();

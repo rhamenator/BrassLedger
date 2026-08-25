@@ -106,6 +106,21 @@ h1:focus {
     border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
+.panel .action-secondary,
+.auth-card .action-secondary {
+    background: rgba(24, 82, 78, 0.08);
+    color: var(--ink-strong);
+    border: 1px solid rgba(24, 82, 78, 0.24);
+}
+
+.panel .action-secondary:hover,
+.panel .action-secondary:focus-visible,
+.auth-card .action-secondary:hover,
+.auth-card .action-secondary:focus-visible {
+    background: rgba(24, 82, 78, 0.16);
+    color: var(--ink-strong);
+}
+
 .hero-badges {
     display: flex;
     flex-wrap: wrap;

@@ -454,6 +454,63 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task JournalLifecycle_DraftsApprovesPostsAndReversesWithoutMutatingAuditHistory()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var date = new DateOnly(2026, 5, 2);
+
+        var draft = await transactions.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(null, date, "JE-LIFECYCLE-1", "Lifecycle test",
+            [new JournalLineRequest("1000", 75m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 70m, "Unbalanced credit")]));
+        Assert.True(draft.Succeeded, draft.ErrorMessage);
+        Assert.NotNull(draft.Id);
+        Assert.False((await transactions.ApproveJournalEntryAsync(draft.Id!.Value)).Succeeded);
+
+        var balancedDraft = await transactions.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(draft.Id, date, "JE-LIFECYCLE-1", "Lifecycle test",
+            [new JournalLineRequest("1000", 75m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 75m, "Balanced credit")]));
+        Assert.True(balancedDraft.Succeeded, balancedDraft.ErrorMessage);
+        var afterDraft = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance, afterDraft.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance);
+        Assert.Contains(afterDraft.GeneralLedger.RecentEntries, entry => entry.Id == draft.Id && entry.Status == "Draft");
+
+        var approved = await transactions.ApproveJournalEntryAsync(draft.Id.Value);
+        Assert.True(approved.Succeeded, approved.ErrorMessage);
+        Assert.False((await transactions.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(draft.Id, date, "JE-LIFECYCLE-1", "Changed after approval",
+            [new JournalLineRequest("1000", 75m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 75m, "Credit")]))).Succeeded);
+        var posted = await transactions.PostApprovedJournalEntryAsync(draft.Id.Value);
+        Assert.True(posted.Succeeded, posted.ErrorMessage);
+        Assert.False((await transactions.PostApprovedJournalEntryAsync(draft.Id.Value)).Succeeded);
+
+        var afterPosting = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance + 75m, afterPosting.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance);
+        Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "4000").Balance + 75m, afterPosting.GeneralLedger.Accounts.Single(account => account.Number == "4000").Balance);
+
+        var reversal = await transactions.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(draft.Id.Value, new DateOnly(2026, 5, 3), "Correcting lifecycle test"));
+        Assert.True(reversal.Succeeded, reversal.ErrorMessage);
+        Assert.False((await transactions.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(draft.Id.Value, new DateOnly(2026, 5, 3), "Duplicate reversal"))).Succeeded);
+        var afterReversal = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance, afterReversal.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance);
+        Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "4000").Balance, afterReversal.GeneralLedger.Accounts.Single(account => account.Number == "4000").Balance);
+
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        var original = await db.JournalEntries.SingleAsync(entry => entry.Id == draft.Id.Value);
+        var reversingEntry = await db.JournalEntries.SingleAsync(entry => entry.Id == reversal.Id);
+        Assert.Equal("Reversed", original.Status);
+        Assert.Equal(reversingEntry.Id, original.ReversedByJournalEntryId);
+        Assert.Equal(original.Id, reversingEntry.ReversalOfJournalEntryId);
+        var auditActions = await db.BusinessAuditEntries.Where(entry => entry.EntityId == original.Id).Select(entry => entry.Action).ToListAsync();
+        Assert.Contains("journal.draft.saved", auditActions);
+        Assert.Contains("journal.approved", auditActions);
+        Assert.Contains("journal.posted", auditActions);
+        Assert.Contains("journal.reversed", auditActions);
+    }
+
+    [Fact]
     public async Task TransactionService_PostsCashToTheSelectedBankLedgerAccount()
     {
         using var services = CreateServiceProvider();

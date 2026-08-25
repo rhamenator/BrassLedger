@@ -46,10 +46,10 @@ else
         </section>
 
         <section class="panel">
-            <h2>Post balanced journal entry</h2>
-            <p class="page-intro">Every entry must balance before it can change account balances. Receivables, payables, inventory, and payroll control accounts are posted through their dedicated workflows.</p>
+            <h2>Prepare journal entry</h2>
+            <p class="page-intro">Save the entry as a draft, approve it after review, and then post it. Account balances do not change until the approved entry is posted. Receivables, payables, inventory, and payroll control accounts remain restricted to their dedicated workflows.</p>
             @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
-            <EditForm Model="JournalForm" OnValidSubmit="PostJournalAsync">
+            <EditForm Model="JournalForm" OnValidSubmit="SaveJournalDraftAsync">
                 <div class="content-grid">
                     <div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Journal entry date" class="field-input" @bind-Value="JournalForm.Date" /></div>
                     <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Journal entry reference" class="field-input" @bind-Value="JournalForm.Reference" /></div>
@@ -71,7 +71,7 @@ else
                     </tbody>
                     <tfoot><tr><th colspan="2">Totals</th><th>@JournalForm.Lines.Sum(line => line.Debit).ToString("C")</th><th>@JournalForm.Lines.Sum(line => line.Credit).ToString("C")</th><th></th></tr></tfoot>
                 </table>
-                <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddJournalLine">Add line</button><button class="action-primary" type="submit">Post entry</button></div>
+                <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddJournalLine">Add line</button><button class="action-primary" type="submit">Save draft</button></div>
             </EditForm>
         </section>
 
@@ -126,8 +126,10 @@ else
                             <th>Entry</th>
                             <th>Date</th>
                             <th>Module</th>
+                            <th>Status</th>
                             <th>Description</th>
                             <th>Total</th>
+                            <th><span class="sr-only">Actions</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -137,13 +139,37 @@ else
                                 <td>@entry.EntryNumber</td>
                                 <td>@entry.PostedOn.ToString("MMM d, yyyy")</td>
                                 <td>@entry.SourceModule</td>
+                                <td>@entry.Status</td>
                                 <td>@entry.Description</td>
                                 <td>@entry.TotalAmount.ToString("C")</td>
+                                <td>
+                                    @if (entry.Status == "Draft")
+                                    {
+                                        <button class="action-secondary" type="button" @onclick="() => ApproveJournalAsync(entry.Id)">Approve</button>
+                                    }
+                                    else if (entry.Status == "Approved")
+                                    {
+                                        <button class="action-primary" type="button" @onclick="() => PostApprovedJournalAsync(entry.Id)">Post</button>
+                                    }
+                                </td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </article>
+        </section>
+
+        <section class="panel">
+            <h2>Reverse posted general journal</h2>
+            <p class="page-intro">A reversal creates a new equal-and-opposite entry and preserves the original audit history. Transactions originating in receivables, payables, inventory, or payroll must be corrected in their originating workflow.</p>
+            <EditForm Model="ReversalForm" OnValidSubmit="ReverseJournalAsync">
+                <div class="content-grid">
+                    <div class="field-group"><label class="field-label">Posted journal</label><InputSelect aria-label="Journal entry to reverse" class="field-input" @bind-Value="ReversalForm.JournalEntryId"><option value="@Guid.Empty">Select entry</option>@foreach (var entry in ReversibleJournalEntries) { <option value="@entry.Id">@entry.EntryNumber — @entry.Reference — @entry.TotalAmount.ToString("C")</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Journal reversal date" class="field-input" @bind-Value="ReversalForm.ReversalDate" /></div>
+                    <div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Journal reversal reason" class="field-input" @bind-Value="ReversalForm.Reason" /></div>
+                </div>
+                <button class="action-primary" type="submit">Create reversal</button>
+            </EditForm>
         </section>
 
         <section class="panel">
@@ -220,6 +246,7 @@ else
     private BusinessWorkspaceSnapshot? Workspace;
     private string? StatusMessage;
     private JournalEditor JournalForm { get; } = new();
+    private JournalReversalEditor ReversalForm { get; } = new();
     private ReconciliationEditor ReconciliationForm { get; } = new();
     private BankMappingEditor BankMappingForm { get; } = new();
     private QuickBooksImportEditor QuickBooksImport { get; } = new();
@@ -229,12 +256,33 @@ else
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
 
-    private async Task PostJournalAsync()
+    private async Task SaveJournalDraftAsync()
     {
-        var result = await TransactionService.PostJournalEntryAsync(new PostJournalEntryRequest(JournalForm.Date, JournalForm.Reference, JournalForm.Description,
+        var result = await TransactionService.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(null, JournalForm.Date, JournalForm.Reference, JournalForm.Description,
             JournalForm.Lines.Select(line => new JournalLineRequest(line.AccountNumber, line.Debit, line.Credit, line.Description)).ToArray()));
-        StatusMessage = result.Succeeded ? "Journal entry posted." : result.ErrorMessage;
+        StatusMessage = result.Succeeded ? "Journal draft saved for review." : result.ErrorMessage;
+        if (result.Succeeded) { JournalForm.Reset(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    }
+
+    private async Task ApproveJournalAsync(Guid journalEntryId)
+    {
+        var result = await TransactionService.ApproveJournalEntryAsync(journalEntryId);
+        StatusMessage = result.Succeeded ? "Journal entry approved and ready to post." : result.ErrorMessage;
         if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private async Task PostApprovedJournalAsync(Guid journalEntryId)
+    {
+        var result = await TransactionService.PostApprovedJournalEntryAsync(journalEntryId);
+        StatusMessage = result.Succeeded ? "Approved journal entry posted." : result.ErrorMessage;
+        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+
+    private async Task ReverseJournalAsync()
+    {
+        var result = await TransactionService.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(ReversalForm.JournalEntryId, ReversalForm.ReversalDate, ReversalForm.Reason));
+        StatusMessage = result.Succeeded ? "Reversal posted with the original entry retained in the audit trail." : result.ErrorMessage;
+        if (result.Succeeded) { ReversalForm.Reset(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     }
 
     private async Task ReconcileAsync()
@@ -278,6 +326,7 @@ else
     private void AddJournalLine() => JournalForm.Lines.Add(new JournalLineEditor());
     private void RemoveJournalLine(JournalLineEditor line) { if (JournalForm.Lines.Count > 2) JournalForm.Lines.Remove(line); }
     private IEnumerable<BankReconciliationCandidateSnapshot> VisibleReconciliationCandidates => Workspace?.Treasury.ReconciliationCandidates?.Where(candidate => candidate.BankAccountId == ReconciliationForm.BankAccountId && candidate.PostedOn <= ReconciliationForm.StatementDate) ?? [];
+    private IEnumerable<JournalEntrySnapshot> ReversibleJournalEntries => Workspace?.GeneralLedger.RecentEntries.Where(entry => entry.Status == "Posted" && entry.SourceModule == "General Ledger" && entry.ReversalOfJournalEntryId is null) ?? [];
     private void ResetReconciliationSelections() => ReconciliationForm.SelectedEntryIds = VisibleReconciliationCandidates.Select(candidate => candidate.JournalEntryId).ToHashSet();
     private void SetReconciliationSelection(Guid entryId, bool selected)
     {
@@ -285,8 +334,9 @@ else
         else ReconciliationForm.SelectedEntryIds.Remove(entryId);
     }
 
-    private sealed class JournalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public List<JournalLineEditor> Lines { get; } = [new(), new()]; }
+    private sealed class JournalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public List<JournalLineEditor> Lines { get; } = [new(), new()]; public void Reset() { Date = DateOnly.FromDateTime(DateTime.Today); Reference = string.Empty; Description = string.Empty; Lines.Clear(); Lines.Add(new()); Lines.Add(new()); } }
     private sealed class JournalLineEditor { public Guid Key { get; } = Guid.NewGuid(); public string AccountNumber { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public decimal Debit { get; set; } public decimal Credit { get; set; } }
+    private sealed class JournalReversalEditor { public Guid JournalEntryId { get; set; } public DateOnly ReversalDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; public void Reset() { JournalEntryId = Guid.Empty; ReversalDate = DateOnly.FromDateTime(DateTime.Today); Reason = string.Empty; } }
     private sealed class ReconciliationEditor { public Guid BankAccountId { get; set; } public DateOnly StatementDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal StatementBalance { get; set; } public HashSet<Guid> SelectedEntryIds { get; set; } = []; }
     private sealed class BankMappingEditor { public Guid BankAccountId { get; set; } public string LedgerAccountNumber { get; set; } = string.Empty; }
     private sealed class QuickBooksImportEditor { public string Entity { get; set; } = "chart-of-accounts"; public IBrowserFile? File { get; set; } public string FileName { get; set; } = string.Empty; }
