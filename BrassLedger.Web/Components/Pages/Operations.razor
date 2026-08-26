@@ -205,7 +205,7 @@ else
 
             <article class="panel">
                 <h2>Sales orders</h2>
-                <table class="data-table">
+                <table class="data-table" aria-label="Sales orders">
                     <thead>
                         <tr>
                             <th>Order</th>
@@ -226,9 +226,11 @@ else
                                 <td>@order.Status</td>
                                 <td>@order.OrderedOn.ToString("MMM d, yyyy")</td>
                                 <td>@order.TotalAmount.ToString("C")</td>
-                                <td>@((order.Lines ?? []).Sum(line => line.AllocatedQuantity)) allocated / @((order.Lines ?? []).Sum(line => line.OrderedQuantity)) ordered<br />@((order.Lines ?? []).Sum(line => line.ShippedQuantity)) shipped; @((order.Lines ?? []).Sum(line => line.InvoicedQuantity)) invoiced</td>
+                                <td>@((order.Lines ?? []).Sum(line => line.AllocatedQuantity)) allocated / @((order.Lines ?? []).Sum(line => line.OrderedQuantity)) ordered<br />@((order.Lines ?? []).Sum(line => line.ShippedQuantity)) shipped; @((order.Lines ?? []).Sum(line => line.CancelledQuantity)) cancelled; @((order.Lines ?? []).Sum(line => line.InvoicedQuantity)) invoiced</td>
                                 <td>
                                     @if (CanManageSales && order.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => ApproveSalesOrderAsync(order)">Approve</button> }
+                                    @if (CanManageSales && order.SalesQuoteId is null && order.Status is ("Approved" or "Allocated") && (order.Lines ?? []).All(line => line.ShippedQuantity == 0m && line.InvoicedQuantity == 0m && line.ReturnedQuantity == 0m && line.CancelledQuantity == 0m)) { <button class="action-secondary" type="button" @onclick="() => BeginSalesOrderAmendment(order)">Amend</button> }
+                                    @if (CanManageSales && order.Status is ("Draft" or "Approved" or "Allocated" or "PartiallyShipped") && (order.Lines ?? []).Any(line => line.OrderedQuantity > line.ShippedQuantity + line.CancelledQuantity)) { <button class="action-secondary" type="button" @onclick="() => BeginSalesOrderCancellation(order)">Cancel open quantity</button> }
                                     @if (CanFulfillSales && order.Status is "Approved" or "Allocated" or "PartiallyShipped") { <button class="action-secondary" type="button" @onclick="() => BeginAllocation(order)">Allocate</button> }
                                     @if (CanFulfillSales && (order.Lines ?? []).Any(line => line.AllocatedQuantity > 0m)) { <button class="action-secondary" type="button" @onclick="() => BeginShipment(order)">Ship</button> }
                                 </td>
@@ -238,6 +240,19 @@ else
                 </table>
             </article>
         </section>
+
+        @if (CanManageSales && SalesOrderAmendmentForm is not null)
+        {
+            <section class="panel"><h2>Amend @SalesOrderAmendmentForm.OrderNumber</h2><p class="page-intro">A commercial amendment releases every reservation, retains before-and-after evidence, and returns the order to draft for fresh approval.</p><EditForm Model="SalesOrderAmendmentForm" OnValidSubmit="AmendSalesOrderAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Order date</label><InputDate aria-label="Amended sales order date" class="field-input" @bind-Value="SalesOrderAmendmentForm.OrderedOn" /></div><div class="field-group"><label class="field-label">Requested ship date</label><InputDate aria-label="Amended requested ship date" class="field-input" @bind-Value="SalesOrderAmendmentForm.RequestedShipOn" /></div><div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Amended sales order notes" class="field-input" @bind-Value="SalesOrderAmendmentForm.Notes" /></div><div class="field-group"><label class="field-label">Amendment reason</label><InputText aria-label="Sales order amendment reason" class="field-input" @bind-Value="SalesOrderAmendmentForm.Reason" /></div>
+                @for (var index = 0; index < SalesOrderAmendmentForm.Lines.Count; index++) { var lineIndex = index; var line = SalesOrderAmendmentForm.Lines[lineIndex]; <fieldset class="panel-subsection"><legend>Amended line @(lineIndex + 1)</legend><div class="field-group"><label class="field-label">Inventory item</label><InputSelect aria-label="@($"Amended sales order line {lineIndex + 1} item")" class="field-input" @bind-Value="line.InventoryItemId"><option value="@Guid.Empty">Select item</option>@foreach (var item in Workspace.Operations.InventoryItems) { <option value="@item.Id">@item.Sku — @item.Description</option> }</InputSelect></div><div class="field-group"><label class="field-label">Description</label><InputText aria-label="@($"Amended sales order line {lineIndex + 1} description")" class="field-input" @bind-Value="line.Description" /></div><div class="field-group"><label class="field-label">Quantity</label><InputNumber aria-label="@($"Amended sales order line {lineIndex + 1} quantity")" class="field-input" @bind-Value="line.Quantity" /></div><div class="field-group"><label class="field-label">Unit price</label><InputNumber aria-label="@($"Amended sales order line {lineIndex + 1} unit price")" class="field-input" @bind-Value="line.UnitPrice" /></div><div class="field-group"><label class="field-label">Discount</label><InputNumber aria-label="@($"Amended sales order line {lineIndex + 1} discount")" class="field-input" @bind-Value="line.DiscountAmount" /></div><div class="field-group"><label class="field-label">Tax</label><InputNumber aria-label="@($"Amended sales order line {lineIndex + 1} tax")" class="field-input" @bind-Value="line.TaxAmount" /></div><div class="field-group"><label class="field-label">Revenue account</label><InputSelect aria-label="@($"Amended sales order line {lineIndex + 1} revenue account")" class="field-input" @bind-Value="line.RevenueAccountNumber"><option value="">Select revenue account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => account.Type == "Revenue" && !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>@if (SalesOrderAmendmentForm.Lines.Count > 1) { <button class="action-secondary" type="button" @onclick="() => RemoveAmendmentLine(lineIndex)">Remove line</button> }</fieldset> }
+                <button class="action-secondary" type="button" @onclick="AddAmendmentLine">Add line</button><button class="action-primary" type="submit">Save amendment for reapproval</button><button class="action-secondary" type="button" @onclick="CancelSalesOrderAmendment">Discard</button>
+            </div></EditForm></section>
+        }
+        @if (CanManageSales && SalesOrderCancellationForm is not null)
+        {
+            <section class="panel"><h2>Cancel open quantity on @SalesOrderCancellationForm.OrderNumber</h2><p class="page-intro">This releases reservations and closes every unshipped quantity. Posted shipments and invoices remain unchanged.</p><EditForm Model="SalesOrderCancellationForm" OnValidSubmit="CancelSalesOrderAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Sales order cancellation reason" class="field-input" @bind-Value="SalesOrderCancellationForm.Reason" /></div><button class="action-primary" type="submit">Confirm cancellation</button><button class="action-secondary" type="button" @onclick="DismissSalesOrderCancellation">Keep order open</button></div></EditForm></section>
+        }
 
         @if (CanFulfillSales && AllocationForm is not null)
         {
@@ -380,6 +395,8 @@ else
     private SalesOrderEditor SalesOrderForm { get; } = new();
     private SalesQuoteConversionEditor? QuoteConversionForm;
     private SalesQuoteWithdrawalEditor? QuoteWithdrawalForm;
+    private SalesOrderAmendmentEditor? SalesOrderAmendmentForm;
+    private SalesOrderCancellationEditor? SalesOrderCancellationForm;
     private PurchaseOrderEditor PurchaseOrderForm { get; } = new();
     private SalesAllocationEditor? AllocationForm;
     private SalesShipmentEditor? ShipmentForm;
@@ -447,7 +464,21 @@ else
     {
         var result = await TransactionService.ApproveSalesOrderAsync(new ApproveSalesOrderRequest(order.Id, order.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Sales order {order.OrderNumber} approved." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync();
     }
-    private void BeginAllocation(SalesOrderSnapshot order) => AllocationForm = new SalesAllocationEditor(order.Id, order.OrderNumber, order.ConcurrencyToken, (order.Lines ?? []).Where(line => line.ShippedQuantity < line.OrderedQuantity).Select(line => new SalesAllocationLineEditor(line.Id, line.Sku, line.OrderedQuantity - line.ShippedQuantity, line.AllocatedQuantity)).ToList());
+    private void BeginSalesOrderAmendment(SalesOrderSnapshot order) => SalesOrderAmendmentForm = new SalesOrderAmendmentEditor(order.Id, order.OrderNumber, order.OrderedOn, order.RequestedShipOn, order.Notes, order.ConcurrencyToken, (order.Lines ?? []).Select(line => new SalesOrderLineEditor { InventoryItemId = line.InventoryItemId, Description = line.Description, Quantity = line.OrderedQuantity, UnitPrice = line.UnitPrice, DiscountAmount = line.DiscountAmount, TaxAmount = line.TaxAmount, RevenueAccountNumber = line.RevenueAccountNumber }).ToList());
+    private void AddAmendmentLine() => SalesOrderAmendmentForm!.Lines.Add(new());
+    private void RemoveAmendmentLine(int index) => SalesOrderAmendmentForm!.Lines.RemoveAt(index);
+    private void CancelSalesOrderAmendment() => SalesOrderAmendmentForm = null;
+    private async Task AmendSalesOrderAsync()
+    {
+        var form = SalesOrderAmendmentForm!; var result = await TransactionService.AmendSalesOrderAsync(new AmendSalesOrderRequest(form.SalesOrderId, form.OrderedOn, form.RequestedShipOn, form.Notes, form.Reason, form.Lines.Select(line => new SalesOrderLineRequest(line.InventoryItemId, line.Description, line.Quantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.RevenueAccountNumber)).ToArray(), form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Sales order {form.OrderNumber} amended and returned to draft for approval." : result.ErrorMessage; if (result.Succeeded) { SalesOrderAmendmentForm = null; await ReloadAsync(); }
+    }
+    private void BeginSalesOrderCancellation(SalesOrderSnapshot order) => SalesOrderCancellationForm = new SalesOrderCancellationEditor(order.Id, order.OrderNumber, order.ConcurrencyToken);
+    private void DismissSalesOrderCancellation() => SalesOrderCancellationForm = null;
+    private async Task CancelSalesOrderAsync()
+    {
+        var form = SalesOrderCancellationForm!; var result = await TransactionService.CancelSalesOrderAsync(new CancelSalesOrderRequest(form.SalesOrderId, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Open quantity on sales order {form.OrderNumber} cancelled." : result.ErrorMessage; if (result.Succeeded) { SalesOrderCancellationForm = null; await ReloadAsync(); }
+    }
+    private void BeginAllocation(SalesOrderSnapshot order) => AllocationForm = new SalesAllocationEditor(order.Id, order.OrderNumber, order.ConcurrencyToken, (order.Lines ?? []).Where(line => line.ShippedQuantity + line.CancelledQuantity < line.OrderedQuantity).Select(line => new SalesAllocationLineEditor(line.Id, line.Sku, line.OrderedQuantity - line.ShippedQuantity - line.CancelledQuantity, line.AllocatedQuantity)).ToList());
     private void CancelAllocation() => AllocationForm = null;
     private async Task AllocateSalesOrderAsync()
     {
@@ -513,6 +544,8 @@ else
     private sealed class SalesQuoteWithdrawalEditor(Guid salesQuoteId, string quoteNumber, string concurrencyToken) { public Guid SalesQuoteId { get; } = salesQuoteId; public string QuoteNumber { get; } = quoteNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = ""; }
     private sealed class SalesOrderEditor { public Guid CustomerId { get; set; } public string OrderNumber { get; set; } = $"SO-{DateTime.Today:yyyyMMdd}"; public DateOnly OrderedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? RequestedShipOn { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(3)); public string Notes { get; set; } = ""; public List<SalesOrderLineEditor> Lines { get; } = [new()]; public void Reset() { CustomerId = Guid.Empty; OrderNumber = $"SO-{DateTime.Now:yyyyMMddHHmm}"; OrderedOn = DateOnly.FromDateTime(DateTime.Today); RequestedShipOn = OrderedOn.AddDays(3); Notes = ""; Lines.Clear(); Lines.Add(new()); } }
     private sealed class SalesOrderLineEditor { public Guid InventoryItemId { get; set; } public string Description { get; set; } = "Inventory sale"; public decimal Quantity { get; set; } = 1m; public decimal UnitPrice { get; set; } public decimal DiscountAmount { get; set; } public decimal TaxAmount { get; set; } public string RevenueAccountNumber { get; set; } = ""; }
+    private sealed class SalesOrderAmendmentEditor(Guid salesOrderId, string orderNumber, DateOnly orderedOn, DateOnly? requestedShipOn, string notes, string concurrencyToken, List<SalesOrderLineEditor> lines) { public Guid SalesOrderId { get; } = salesOrderId; public string OrderNumber { get; } = orderNumber; public DateOnly OrderedOn { get; set; } = orderedOn; public DateOnly? RequestedShipOn { get; set; } = requestedShipOn; public string Notes { get; set; } = notes; public string Reason { get; set; } = ""; public string ConcurrencyToken { get; } = concurrencyToken; public List<SalesOrderLineEditor> Lines { get; } = lines; }
+    private sealed class SalesOrderCancellationEditor(Guid salesOrderId, string orderNumber, string concurrencyToken) { public Guid SalesOrderId { get; } = salesOrderId; public string OrderNumber { get; } = orderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = ""; }
     private sealed class SalesAllocationEditor(Guid salesOrderId, string salesOrderNumber, string concurrencyToken, List<SalesAllocationLineEditor> lines) { public Guid SalesOrderId { get; } = salesOrderId; public string SalesOrderNumber { get; } = salesOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public List<SalesAllocationLineEditor> Lines { get; } = lines; }
     private sealed class SalesAllocationLineEditor(Guid salesOrderLineId, string sku, decimal unshippedQuantity, decimal quantity) { public Guid SalesOrderLineId { get; } = salesOrderLineId; public string Sku { get; } = sku; public decimal UnshippedQuantity { get; } = unshippedQuantity; public decimal Quantity { get; set; } = quantity; }
     private sealed class SalesShipmentEditor(Guid salesOrderId, string salesOrderNumber, string concurrencyToken, List<SalesShipmentLineEditor> lines) { public Guid SalesOrderId { get; } = salesOrderId; public string SalesOrderNumber { get; } = salesOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string ShipmentNumber { get; set; } = $"SHIP-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly ShippedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public List<SalesShipmentLineEditor> Lines { get; } = lines; }

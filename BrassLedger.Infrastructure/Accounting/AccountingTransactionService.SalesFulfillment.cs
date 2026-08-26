@@ -120,7 +120,7 @@ public sealed partial class AccountingTransactionService
         var requestedById = requestedLines.ToDictionary(line => line.SalesOrderLineId, line => RoundQuantity(line.Quantity));
         foreach (var line in orderLines.Where(line => requestedById.ContainsKey(line.Id)))
         {
-            if (requestedById[line.Id] > line.OrderedQuantity - line.ShippedQuantity) return TransactionResult.Failure($"Allocation exceeds the unshipped quantity for line {line.Sequence}.");
+            if (requestedById[line.Id] > line.OrderedQuantity - line.ShippedQuantity - line.CancelledQuantity) return TransactionResult.Failure($"Allocation exceeds the open, uncancelled quantity for line {line.Sequence}.");
         }
         var itemIds = orderLines.Where(line => requestedById.ContainsKey(line.Id)).Select(line => line.InventoryItemId).Distinct().ToArray();
         var items = await db.InventoryItems.Where(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
@@ -232,10 +232,13 @@ public sealed partial class AccountingTransactionService
         var invoiceAmounts = shipmentLines.Select(line =>
         {
             var source = orderLines[line.SalesOrderLineId];
-            var isFinal = source.InvoicedQuantity + line.Quantity == source.OrderedQuantity;
+            var fulfilledQuantity = source.OrderedQuantity - source.CancelledQuantity;
+            var isFinal = source.InvoicedQuantity + line.Quantity == fulfilledQuantity;
             var prior = priorInvoiceLines.Where(invoiceLine => invoiceLine.SalesOrderLineId == source.Id).ToArray();
-            var discount = isFinal ? source.DiscountAmount - prior.Sum(invoiceLine => invoiceLine.DiscountAmount) : RoundCurrency(source.DiscountAmount * line.Quantity / source.OrderedQuantity);
-            var tax = isFinal ? source.TaxAmount - prior.Sum(invoiceLine => invoiceLine.TaxAmount) : RoundCurrency(source.TaxAmount * line.Quantity / source.OrderedQuantity);
+            var fulfilledDiscount = RoundCurrency(source.DiscountAmount * fulfilledQuantity / source.OrderedQuantity);
+            var fulfilledTax = RoundCurrency(source.TaxAmount * fulfilledQuantity / source.OrderedQuantity);
+            var discount = isFinal ? fulfilledDiscount - prior.Sum(invoiceLine => invoiceLine.DiscountAmount) : RoundCurrency(source.DiscountAmount * line.Quantity / source.OrderedQuantity);
+            var tax = isFinal ? fulfilledTax - prior.Sum(invoiceLine => invoiceLine.TaxAmount) : RoundCurrency(source.TaxAmount * line.Quantity / source.OrderedQuantity);
             var net = RoundCurrency(line.Quantity * source.UnitPrice - discount);
             return new { ShipmentLine = line, Source = source, Discount = discount, Tax = tax, Net = net, Total = net + tax };
         }).ToArray();
@@ -298,6 +301,9 @@ public sealed partial class AccountingTransactionService
         }
         var order = await db.SalesOrders.SingleAsync(candidate => candidate.Id == shipment.SalesOrderId && candidate.CompanyId == companyId, cancellationToken);
         var orderLines = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).ToDictionaryAsync(line => line.Id, cancellationToken);
+        var activeInvoiceTotals = order.CancelledAtUtc.HasValue
+            ? await LoadActiveSalesOrderInvoiceTotalsAsync(db, companyId, orderLines.Keys, cancellationToken)
+            : null;
         var items = await db.InventoryItems.Where(item => item.CompanyId == companyId && shipmentLines.Select(line => line.InventoryItemId).Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
         if (orderLines.Count(line => shipmentLines.Any(shipmentLine => shipmentLine.SalesOrderLineId == line.Key)) != shipmentLines.Count || items.Count != shipmentLines.Select(line => line.InventoryItemId).Distinct().Count()) return TransactionResult.Failure("Shipment source data is incomplete.");
 
@@ -310,9 +316,11 @@ public sealed partial class AccountingTransactionService
             var orderLine = orderLines[line.SalesOrderLineId];
             item.QuantityOnHand += line.Quantity;
             orderLine.ShippedQuantity -= line.Quantity;
-            orderLine.AllocatedQuantity += line.Quantity;
+            if (order.CancelledAtUtc.HasValue) orderLine.CancelledQuantity += line.Quantity;
+            else orderLine.AllocatedQuantity += line.Quantity;
             db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, OccurredOn = request.ReversalDate, TransactionType = "Customer shipment reversal", QuantityChange = line.Quantity, UnitCost = line.UnitCost, TotalCost = line.TotalCost, Reference = $"REV-{shipment.ShipmentNumber}", JournalEntryId = reversal.Id!.Value });
         }
+        if (order.CancelledAtUtc.HasValue) order.TotalAmount = CalculateRetainedSalesOrderTotal(orderLines.Values, activeInvoiceTotals);
         shipment.Status = "Reversed";
         shipment.ReversalJournalEntryId = reversal.Id;
         shipment.ReversedByUserId = ResolveUserId();
@@ -330,16 +338,56 @@ public sealed partial class AccountingTransactionService
 
     private static void UpdateSalesOrderFulfillmentStatus(SalesOrder order, IReadOnlyCollection<SalesOrderLine> lines)
     {
-        order.Status = lines.All(line => line.ShippedQuantity == line.OrderedQuantity && line.InvoicedQuantity == line.OrderedQuantity)
-            ? "Completed"
-            : lines.All(line => line.ShippedQuantity == line.OrderedQuantity)
-                ? "Shipped"
-                : lines.Any(line => line.ShippedQuantity > 0m)
-                    ? "PartiallyShipped"
-                    : lines.Any(line => line.AllocatedQuantity > 0m)
-                        ? "Allocated"
-                        : "Approved";
+        var hasCancellation = lines.Any(line => line.CancelledQuantity > 0m);
+        var fullyClosed = lines.All(line => line.ShippedQuantity + line.CancelledQuantity == line.OrderedQuantity);
+        if (hasCancellation && lines.All(line => line.CancelledQuantity == line.OrderedQuantity))
+            order.Status = "Cancelled";
+        else if (hasCancellation && fullyClosed && lines.All(line => line.InvoicedQuantity == line.ShippedQuantity))
+            order.Status = "Closed";
+        else if (hasCancellation && fullyClosed)
+            order.Status = "ClosedPendingInvoice";
+        else if (lines.All(line => line.ShippedQuantity == line.OrderedQuantity && line.InvoicedQuantity == line.OrderedQuantity))
+            order.Status = "Completed";
+        else if (lines.All(line => line.ShippedQuantity == line.OrderedQuantity))
+            order.Status = "Shipped";
+        else if (lines.Any(line => line.ShippedQuantity > 0m))
+            order.Status = "PartiallyShipped";
+        else if (lines.Any(line => line.AllocatedQuantity > 0m))
+            order.Status = "Allocated";
+        else
+            order.Status = "Approved";
         order.ConcurrencyToken = Guid.NewGuid().ToString("N");
+    }
+
+    private static decimal CalculateRetainedSalesOrderTotal(IEnumerable<SalesOrderLine> lines, IReadOnlyDictionary<Guid, decimal>? activeInvoiceTotals = null) => lines.Sum(line =>
+    {
+        if (activeInvoiceTotals is not null && line.InvoicedQuantity == line.ShippedQuantity)
+            return activeInvoiceTotals.GetValueOrDefault(line.Id);
+        var retainedQuantity = line.OrderedQuantity - line.CancelledQuantity;
+        var retainedDiscount = RoundCurrency(line.DiscountAmount * retainedQuantity / line.OrderedQuantity);
+        var retainedTax = RoundCurrency(line.TaxAmount * retainedQuantity / line.OrderedQuantity);
+        return RoundCurrency(retainedQuantity * line.UnitPrice - retainedDiscount + retainedTax);
+    });
+
+    private static async Task<IReadOnlyDictionary<Guid, decimal>> LoadActiveSalesOrderInvoiceTotalsAsync(
+        BrassLedgerDbContext db,
+        Guid companyId,
+        IEnumerable<Guid> salesOrderLineIds,
+        CancellationToken cancellationToken)
+    {
+        var lineIds = salesOrderLineIds.Distinct().ToArray();
+        var amounts = await (
+            from line in db.SalesInvoiceLines
+            join invoice in db.SalesInvoices on line.SalesInvoiceId equals invoice.Id
+            where invoice.CompanyId == companyId
+                && invoice.Status != "Voided"
+                && line.SalesOrderLineId.HasValue
+                && lineIds.Contains(line.SalesOrderLineId.Value)
+            select new { SalesOrderLineId = line.SalesOrderLineId ?? Guid.Empty, line.LineTotal })
+            .ToListAsync(cancellationToken);
+        return amounts
+            .GroupBy(amount => amount.SalesOrderLineId)
+            .ToDictionary(group => group.Key, group => group.Sum(amount => amount.LineTotal));
     }
 
     private void AddSalesFulfillmentAudit(BrassLedgerDbContext db, Guid companyId, string action, string entityType, Guid entityId, object details) =>

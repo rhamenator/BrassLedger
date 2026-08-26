@@ -690,6 +690,9 @@ public sealed class SalesOrder
     public DateTimeOffset PreparedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
     public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
@@ -704,12 +707,26 @@ public sealed class SalesOrderLine
     public decimal OrderedQuantity { get; set; }
     public decimal AllocatedQuantity { get; set; }
     public decimal ShippedQuantity { get; set; }
+    public decimal CancelledQuantity { get; set; }
     public decimal ReturnedQuantity { get; set; }
     public decimal InvoicedQuantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal LineTotal { get; set; }
+}
+
+public sealed class SalesOrderAmendment
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid SalesOrderId { get; set; }
+    public int RevisionNumber { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string BeforeJson { get; set; } = "{}";
+    public string AfterJson { get; set; } = "{}";
+    public Guid? AmendedByUserId { get; set; }
+    public DateTimeOffset AmendedAtUtc { get; set; }
 }
 
 public sealed class InventoryShipment

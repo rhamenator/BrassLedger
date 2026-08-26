@@ -873,6 +873,18 @@ api.MapPost("/sales-orders/{salesOrderId:guid}/approval", async (Guid salesOrder
     var result = await service.ApproveSalesOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesOrder"] = [result.ErrorMessage] });
 }).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
 
+api.MapPost("/sales-orders/{salesOrderId:guid}/amendment", async (Guid salesOrderId, AmendSalesOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesOrderId != salesOrderId) return Results.BadRequest(new { error = "sales_order_id_mismatch" });
+    var result = await service.AmendSalesOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
+api.MapPost("/sales-orders/{salesOrderId:guid}/cancellation", async (Guid salesOrderId, CancelSalesOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesOrderId != salesOrderId) return Results.BadRequest(new { error = "sales_order_id_mismatch" });
+    var result = await service.CancelSalesOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
 api.MapPost("/sales-orders/{salesOrderId:guid}/allocation", async (Guid salesOrderId, AllocateSalesOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     if (request.SalesOrderId != salesOrderId) return Results.BadRequest(new { error = "sales_order_id_mismatch" });

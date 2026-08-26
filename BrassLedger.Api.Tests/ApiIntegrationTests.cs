@@ -153,6 +153,12 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.OK, (await sales.PostAsJsonAsync($"/api/sales-orders/{draft.Id}/approval", new ApproveSalesOrderRequest(draft.Id, draft.ConcurrencyToken))).StatusCode);
         var approved = Assert.Single((await warehouse.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == draft.Id);
         var line = Assert.Single(approved.Lines!);
+        var amendment = new AmendSalesOrderRequest(approved.Id, approved.OrderedOn, approved.RequestedShipOn, "API sales fulfillment amended", "Customer confirmed delivery notes", [new SalesOrderLineRequest(line.InventoryItemId, line.Description, line.OrderedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.RevenueAccountNumber)], approved.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync($"/api/sales-orders/{approved.Id}/amendment", amendment)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await sales.PostAsJsonAsync($"/api/sales-orders/{approved.Id}/amendment", amendment)).StatusCode);
+        var amended = Assert.Single((await sales.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == approved.Id); Assert.Equal("Draft", amended.Status);
+        Assert.Equal(HttpStatusCode.OK, (await sales.PostAsJsonAsync($"/api/sales-orders/{amended.Id}/approval", new ApproveSalesOrderRequest(amended.Id, amended.ConcurrencyToken))).StatusCode);
+        approved = Assert.Single((await warehouse.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == draft.Id); line = Assert.Single(approved.Lines!);
         Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync($"/api/sales-orders/{approved.Id}/allocation", new AllocateSalesOrderRequest(approved.Id, [new(line.Id, 3m)], approved.ConcurrencyToken))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await warehouse.PostAsJsonAsync($"/api/sales-orders/{approved.Id}/allocation", new AllocateSalesOrderRequest(approved.Id, [new(line.Id, 3m)], approved.ConcurrencyToken))).StatusCode);
         var allocated = Assert.Single((await warehouse.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == approved.Id);
@@ -164,6 +170,11 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var invoicedShipment = Assert.Single((await receivables.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.InventoryShipments!, candidate => candidate.Id == shipment.Id);
         Assert.NotNull(invoicedShipment.SalesInvoiceId);
         Assert.Contains((await receivables.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.Receivables.Invoices, invoice => invoice.Id == invoicedShipment.SalesInvoiceId && invoice.TotalAmount == 42m);
+        var partiallyFulfilled = Assert.Single((await sales.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == approved.Id);
+        var cancellation = new CancelSalesOrderRequest(partiallyFulfilled.Id, "Customer cancelled final unit", partiallyFulfilled.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync($"/api/sales-orders/{partiallyFulfilled.Id}/cancellation", cancellation)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await sales.PostAsJsonAsync($"/api/sales-orders/{partiallyFulfilled.Id}/cancellation", cancellation)).StatusCode);
+        var closed = Assert.Single((await sales.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == approved.Id); Assert.Equal("Closed", closed.Status); Assert.Equal(1m, closed.Lines!.Single().CancelledQuantity); Assert.Equal(42m, closed.TotalAmount);
     }
 
     [Fact]

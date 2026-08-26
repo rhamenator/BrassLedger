@@ -153,7 +153,7 @@ public sealed class BusinessWorkspaceService(
                 PayablesOpen: vendorBills.Sum(x => x.BalanceDue),
                 MonthlyPayroll: employeeSummary.Where(x => x.IsActive).Sum(x => x.MonthlyBasePay),
                 InventoryItems: inventoryItems.Count,
-                OpenSalesOrders: salesOrders.Count(x => x.Status is "Draft" or "Approved" or "Allocated" or "PartiallyShipped" or "Shipped"),
+                OpenSalesOrders: salesOrders.Count(x => x.Status is "Draft" or "Approved" or "Allocated" or "PartiallyShipped" or "Shipped" or "ClosedPendingInvoice"),
                 OpenProjects: projectJobs.Count(x => x.Status is "Open" or "Billing"),
                 EnabledModules: assessment.Modules.Count,
                 ReportsReady: reports.Count + labels.Count),
@@ -217,7 +217,7 @@ public sealed class BusinessWorkspaceService(
             Operations: new OperationsWorkspace(
                 InventoryItemCount: inventoryItems.Count,
                 ReorderAlerts: inventoryItems.Count(x => x.QuantityOnHand <= x.ReorderPoint),
-                OpenSalesOrderCount: salesOrders.Count(x => x.Status is "Draft" or "Approved" or "Allocated" or "PartiallyShipped" or "Shipped"),
+                OpenSalesOrderCount: salesOrders.Count(x => x.Status is "Draft" or "Approved" or "Allocated" or "PartiallyShipped" or "Shipped" or "ClosedPendingInvoice"),
                 OpenPurchaseOrderCount: purchaseOrders.Count(x => x.Status is "Draft" or "Issued" or "Approved" or "PartiallyReceived" or "Received"),
                 InventoryItems: inventoryItems.Select(x => new InventoryItemSnapshot(x.Sku, x.Description, x.UnitPrice, x.QuantityOnHand, x.ReorderPoint, x.Id, x.UnitCost)).ToArray(),
                 SalesOrders: salesOrders.Select(x => new SalesOrderSnapshot(
@@ -231,7 +231,7 @@ public sealed class BusinessWorkspaceService(
                     x.RequestedShipOn,
                     x.Notes,
                     x.ConcurrencyToken,
-                    salesOrderLineLookup[x.Id].Select(line => new SalesOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.AllocatedQuantity, line.ShippedQuantity, line.ReturnedQuantity, line.InvoicedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"))).ToArray(),
+                    salesOrderLineLookup[x.Id].Select(line => new SalesOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.AllocatedQuantity, line.ShippedQuantity, line.CancelledQuantity, line.ReturnedQuantity, line.InvoicedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"))).ToArray(),
                     x.SalesQuoteId)).ToArray(),
                 PurchaseOrders: purchaseOrders.Select(x => new PurchaseOrderSnapshot(
                     x.OrderNumber,

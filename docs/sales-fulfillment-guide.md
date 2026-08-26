@@ -18,6 +18,12 @@ An approved quote can be converted exactly once and only on or before its expira
 
 Sales, fulfillment, and receivables permissions are intentionally separate. Administrators can combine them when staffing requires it, but a warehouse operator cannot approve prices or post accounts receivable merely because that person can move stock.
 
+## Amendments and cancellation
+
+An approved or allocated order can be amended only before any shipment, invoice, return, or cancellation history exists. Quote-derived commercial terms cannot be amended. An amendment requires a reason, stores immutable before-and-after JSON with a sequential revision number, releases all reservations, replaces the reviewed lines atomically, and returns the order to `Draft`. Sales must approve it again before the warehouse can reserve or ship anything.
+
+Sales may cancel every still-open quantity on a draft, approved, allocated, or partially shipped order. Cancellation requires a reason, releases reservations, records cancelled quantity per line, and never changes posted shipments or invoices. A completely unshipped order becomes `Cancelled`. A partially fulfilled order becomes `ClosedPendingInvoice` until every retained shipment is invoiced, then `Closed`. The retained order total, discounts, and tax are prorated from the approved line terms; final shipment invoicing receives the rounding remainder. If all retained shipments were already invoiced separately, the retained total uses their actual active invoice amounts so independently rounded documents still reconcile. Reversing an uninvoiced shipment after cancellation converts its formerly shipped quantity to cancelled demand rather than reopening it for allocation.
+
 ## Accounting
 
 Shipment posting credits the configured **Inventory asset** control account and debits **Cost of goods sold** using the item's current moving-average cost. On-hand quantity, reserved quantity, shipped quantity, the inventory movement, COGS journal, shipment, and audit event are saved atomically.
@@ -40,4 +46,4 @@ Older prerelease databases may contain sales-order headers with no authoritative
 
 ## Current boundary
 
-This workflow covers line-based quotes, approval, withdrawal, expiration-aware one-time conversion, line-based sales orders, approval, reservations, partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Order amendments and cancellation, pick/pack documents, backorders, customer return authorization and credit/refund coordination, warehouses/bins/lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.
+This workflow covers line-based quotes, approval, withdrawal, expiration-aware one-time conversion, line-based sales orders, approval, auditable amendment/reapproval, open-quantity cancellation, reservations, partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Pick/pack documents, explicit backorder scheduling, customer return authorization and credit/refund coordination, warehouses/bins/lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.

@@ -77,6 +77,8 @@ public sealed record WithdrawSalesQuoteRequest(Guid SalesQuoteId, string Reason,
 public sealed record ConvertSalesQuoteRequest(Guid SalesQuoteId, string OrderNumber, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, string ConcurrencyToken);
 public sealed record SaveSalesOrderRequest(Guid? Id, Guid CustomerId, string OrderNumber, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record ApproveSalesOrderRequest(Guid SalesOrderId, string ConcurrencyToken);
+public sealed record AmendSalesOrderRequest(Guid SalesOrderId, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, string Reason, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken);
+public sealed record CancelSalesOrderRequest(Guid SalesOrderId, string Reason, string ConcurrencyToken);
 public sealed record AllocateSalesOrderLineRequest(Guid SalesOrderLineId, decimal Quantity);
 public sealed record AllocateSalesOrderRequest(Guid SalesOrderId, IReadOnlyList<AllocateSalesOrderLineRequest> Lines, string ConcurrencyToken);
 public sealed record ShipSalesOrderLineRequest(Guid SalesOrderLineId, decimal Quantity);
@@ -176,6 +178,8 @@ public interface IAccountingTransactionService
     Task<TransactionResult> ConvertSalesQuoteAsync(ConvertSalesQuoteRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveSalesOrderAsync(SaveSalesOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApproveSalesOrderAsync(ApproveSalesOrderRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> AmendSalesOrderAsync(AmendSalesOrderRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CancelSalesOrderAsync(CancelSalesOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> AllocateSalesOrderAsync(AllocateSalesOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ShipSalesOrderAsync(ShipSalesOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> InvoiceInventoryShipmentAsync(InvoiceInventoryShipmentRequest request, CancellationToken cancellationToken = default);

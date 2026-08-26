@@ -114,14 +114,17 @@ public sealed class WorkflowDataTests
         var suffix = Guid.NewGuid().ToString("N")[..8]; var orderNumber = $"SO-E2E-{suffix}"; var shipmentNumber = $"SHIP-E2E-{suffix}"; var invoiceNumber = $"INV-E2E-{suffix}";
         await using (var salesSession = await _fixture.CreateSessionAsync(browserKind))
         {
-            await salesSession.SignInAsync("sales"); var sales = new OperationsPage(salesSession); await sales.OpenAsync(); await sales.PrepareAndApproveSalesOrderAsync(orderNumber); await salesSession.AssertNoUiFailuresAsync("sales-order preparation and approval");
+            await salesSession.SignInAsync("sales"); var sales = new OperationsPage(salesSession); await sales.OpenAsync(); await sales.PrepareAndApproveSalesOrderAsync(orderNumber); await sales.AmendAndReapproveSalesOrderAsync(orderNumber); await salesSession.AssertNoUiFailuresAsync("sales-order preparation, amendment, and reapproval");
         }
         await using (var warehouseSession = await _fixture.CreateSessionAsync(browserKind))
         {
-            await warehouseSession.SignInAsync("warehouse"); var warehouse = new OperationsPage(warehouseSession); await warehouse.OpenAsync(); await warehouse.AllocateAndShipSalesOrderAsync(orderNumber, shipmentNumber); await warehouseSession.AssertNoUiFailuresAsync("sales-order allocation and shipment");
+            await warehouseSession.SignInAsync("warehouse"); var warehouse = new OperationsPage(warehouseSession); await warehouse.OpenAsync(); await warehouse.AllocateAndShipSalesOrderAsync(orderNumber, shipmentNumber, 1m); await warehouseSession.AssertNoUiFailuresAsync("sales-order allocation and partial shipment");
         }
-        await using var receivablesSession = await _fixture.CreateSessionAsync(browserKind);
-        await receivablesSession.SignInAsync("controller"); var receivables = new OperationsPage(receivablesSession); await receivables.OpenAsync(); await receivables.InvoiceShipmentAsync(shipmentNumber, invoiceNumber); await receivablesSession.AssertNoUiFailuresAsync("shipment invoicing");
+        await using (var receivablesSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await receivablesSession.SignInAsync("controller"); var receivables = new OperationsPage(receivablesSession); await receivables.OpenAsync(); await receivables.InvoiceShipmentAsync(shipmentNumber, invoiceNumber); await receivablesSession.AssertNoUiFailuresAsync("shipment invoicing");
+        }
+        await using var cancellationSession = await _fixture.CreateSessionAsync(browserKind); await cancellationSession.SignInAsync("sales"); var cancellation = new OperationsPage(cancellationSession); await cancellation.OpenAsync(); await cancellation.CancelOpenSalesOrderQuantityAsync(orderNumber); await cancellationSession.AssertNoUiFailuresAsync("sales-order remaining-quantity cancellation");
     }
 
     [Theory]

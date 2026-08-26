@@ -4475,6 +4475,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("ApprovedByUserId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CancellationReason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CancelledByUserId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("TEXT");
 
@@ -4530,6 +4540,47 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("SalesOrders");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesOrderAmendment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AfterJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("AmendedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AmendedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BeforeJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RevisionNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SalesOrderId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SalesOrderId", "RevisionNumber")
+                        .IsUnique();
+
+                    b.ToTable("SalesOrderAmendments");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesOrderLine", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4537,6 +4588,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("AllocatedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("CancelledQuantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("TEXT");
 
@@ -6263,6 +6318,15 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .WithMany()
                         .HasForeignKey("SalesQuoteId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesOrderAmendment", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.SalesOrder", null)
+                        .WithMany()
+                        .HasForeignKey("SalesOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesOrderLine", b =>

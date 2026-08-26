@@ -50,9 +50,32 @@ public sealed class OperationsPage
         await _session.Page.GetByLabel("Sales order line 1 revenue account").SelectOptionAsync(new SelectOptionValue { Label = "4000 — Product Revenue" });
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save sales-order draft" }).ClickAsync();
         await _session.Page.GetByText("Sales-order draft saved.", new() { Exact = true }).WaitForAsync();
-        var row = _session.Page.Locator("tr").Filter(new() { HasTextString = orderNumber });
+        var row = SalesOrderRow(orderNumber);
         await row.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
         await _session.Page.GetByText($"Sales order {orderNumber} approved.", new() { Exact = true }).WaitForAsync();
+    }
+
+    public async Task AmendAndReapproveSalesOrderAsync(string orderNumber)
+    {
+        var row = SalesOrderRow(orderNumber);
+        await row.GetByRole(AriaRole.Button, new() { Name = "Amend" }).ClickAsync();
+        await _session.Page.GetByLabel("Sales order amendment reason").FillAsync("Browser-tested customer change");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save amendment for reapproval" }).ClickAsync();
+        await _session.Page.GetByText($"Sales order {orderNumber} amended and returned to draft for approval.", new() { Exact = true }).WaitForAsync();
+        row = SalesOrderRow(orderNumber); await row.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
+        await _session.Page.GetByText($"Sales order {orderNumber} approved.", new() { Exact = true }).WaitForAsync();
+    }
+
+    public async Task CancelOpenSalesOrderQuantityAsync(string orderNumber)
+    {
+        var row = SalesOrderRow(orderNumber); await row.GetByRole(AriaRole.Button, new() { Name = "Cancel open quantity" }).ClickAsync();
+        await _session.Page.GetByLabel("Sales order cancellation reason").FillAsync("Browser-tested customer cancellation");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Confirm cancellation" }).ClickAsync();
+        await _session.Page.GetByText($"Open quantity on sales order {orderNumber} cancelled.", new() { Exact = true }).WaitForAsync();
+        row = SalesOrderRow(orderNumber);
+        var rowText = await row.InnerTextAsync();
+        Assert.Contains("Closed", rowText);
+        Assert.Matches(@"1(?:\.0+)? cancelled", rowText);
     }
 
     public async Task PrepareApproveAndConvertSalesQuoteAsync(string quoteNumber, string orderNumber)
@@ -81,16 +104,17 @@ public sealed class OperationsPage
         var orderRow = _session.Page.Locator("tr").Filter(new() { HasTextString = orderNumber }); Assert.Contains("Draft", await orderRow.InnerTextAsync()); Assert.Contains("$41.00", await orderRow.InnerTextAsync());
     }
 
-    public async Task AllocateAndShipSalesOrderAsync(string orderNumber, string shipmentNumber)
+    public async Task AllocateAndShipSalesOrderAsync(string orderNumber, string shipmentNumber, decimal shipmentQuantity = 2m)
     {
-        var row = _session.Page.Locator("tr").Filter(new() { HasTextString = orderNumber });
+        var row = SalesOrderRow(orderNumber);
         await row.GetByRole(AriaRole.Button, new() { Name = "Allocate" }).ClickAsync();
         await _session.Page.GetByLabel("Allocate RM-220 quantity").FillAsync("2");
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save allocation" }).ClickAsync();
         await _session.Page.GetByText("Inventory allocation saved.", new() { Exact = true }).WaitForAsync();
-        row = _session.Page.Locator("tr").Filter(new() { HasTextString = orderNumber });
+        row = SalesOrderRow(orderNumber);
         await row.GetByRole(AriaRole.Button, new() { Name = "Ship" }).ClickAsync();
         await _session.Page.GetByLabel("Inventory shipment number").FillAsync(shipmentNumber);
+        await _session.Page.GetByLabel("Ship RM-220 quantity").FillAsync(shipmentQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture));
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post shipment" }).ClickAsync();
         await _session.Page.GetByText("Customer shipment posted; inventory and COGS were updated.", new() { Exact = true }).WaitForAsync();
     }
@@ -124,4 +148,10 @@ public sealed class OperationsPage
         receiptRow = _session.Page.Locator("tr").Filter(new() { HasTextString = receiptNumber });
         Assert.Contains("Matched", await receiptRow.InnerTextAsync());
     }
+
+    private ILocator SalesOrderRow(string orderNumber) =>
+        _session.Page.GetByRole(AriaRole.Table, new() { Name = "Sales orders" }).Locator("tr").Filter(new()
+        {
+            Has = _session.Page.GetByText(orderNumber, new() { Exact = true })
+        });
 }

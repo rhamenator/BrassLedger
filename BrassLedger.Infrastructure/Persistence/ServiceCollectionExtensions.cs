@@ -287,6 +287,10 @@ public static class ServiceCollectionExtensions
             return await HasTableAsync(dbContext, "SalesQuotes", cancellationToken)
                 && await HasTableAsync(dbContext, "SalesQuoteLines", cancellationToken)
                 && await HasColumnAsync(dbContext, "SalesOrders", "SalesQuoteId", cancellationToken);
+        if (migrationId.EndsWith("_AddSalesOrderChangeControls", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "SalesOrderAmendments", cancellationToken)
+                && await HasColumnAsync(dbContext, "SalesOrderLines", "CancelledQuantity", cancellationToken)
+                && await HasColumnAsync(dbContext, "SalesOrders", "CancellationReason", cancellationToken);
         return false;
     }
 

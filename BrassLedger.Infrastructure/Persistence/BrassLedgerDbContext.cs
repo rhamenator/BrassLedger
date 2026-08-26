@@ -88,6 +88,7 @@ public sealed class BrassLedgerDbContext(
     public DbSet<SalesQuoteLine> SalesQuoteLines => Set<SalesQuoteLine>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<SalesOrderLine> SalesOrderLines => Set<SalesOrderLine>();
+    public DbSet<SalesOrderAmendment> SalesOrderAmendments => Set<SalesOrderAmendment>();
     public DbSet<TaxProfile> TaxProfiles => Set<TaxProfile>();
     public DbSet<TaxRuleSet> TaxRuleSets => Set<TaxRuleSet>();
     public DbSet<TaxContentPackage> TaxContentPackages => Set<TaxContentPackage>();
@@ -151,6 +152,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SalesQuoteLine>().HasKey(x => x.Id);
         modelBuilder.Entity<SalesOrder>().HasKey(x => x.Id);
         modelBuilder.Entity<SalesOrderLine>().HasKey(x => x.Id);
+        modelBuilder.Entity<SalesOrderAmendment>().HasKey(x => x.Id);
         modelBuilder.Entity<PurchaseOrder>().HasKey(x => x.Id);
         modelBuilder.Entity<PurchaseOrderLine>().HasKey(x => x.Id);
         modelBuilder.Entity<BankAccount>().HasKey(x => x.Id);
@@ -214,6 +216,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SalesOrderLine>().HasOne<SalesOrder>().WithMany().HasForeignKey(line => line.SalesOrderId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<SalesOrderLine>().HasOne<InventoryItem>().WithMany().HasForeignKey(line => line.InventoryItemId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SalesOrderLine>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(line => line.RevenueAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SalesOrderAmendment>().HasOne<SalesOrder>().WithMany().HasForeignKey(amendment => amendment.SalesOrderId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<InventoryShipment>().HasOne<SalesOrder>().WithMany().HasForeignKey(shipment => shipment.SalesOrderId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<InventoryShipment>().HasOne<JournalEntry>().WithMany().HasForeignKey(shipment => shipment.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<InventoryShipment>().HasOne<JournalEntry>().WithMany().HasForeignKey(shipment => shipment.ReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
@@ -421,6 +424,7 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<SalesOrderLine>().Property(x => x.OrderedQuantity), 18, 4);
         ConfigureMoney(modelBuilder.Entity<SalesOrderLine>().Property(x => x.AllocatedQuantity), 18, 4);
         ConfigureMoney(modelBuilder.Entity<SalesOrderLine>().Property(x => x.ShippedQuantity), 18, 4);
+        ConfigureMoney(modelBuilder.Entity<SalesOrderLine>().Property(x => x.CancelledQuantity), 18, 4);
         ConfigureMoney(modelBuilder.Entity<SalesOrderLine>().Property(x => x.ReturnedQuantity), 18, 4);
         ConfigureMoney(modelBuilder.Entity<SalesOrderLine>().Property(x => x.InvoicedQuantity), 18, 4);
         ConfigureMoney(modelBuilder.Entity<SalesOrderLine>().Property(x => x.UnitPrice));
@@ -587,6 +591,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SalesOrder>().HasIndex(x => new { x.CompanyId, x.OrderNumber }).IsUnique();
         modelBuilder.Entity<SalesOrder>().HasIndex(x => x.SalesQuoteId).IsUnique();
         modelBuilder.Entity<SalesOrderLine>().HasIndex(x => new { x.SalesOrderId, x.Sequence }).IsUnique();
+        modelBuilder.Entity<SalesOrderAmendment>().HasIndex(x => new { x.SalesOrderId, x.RevisionNumber }).IsUnique();
         modelBuilder.Entity<InventoryShipment>().HasIndex(x => new { x.CompanyId, x.ShipmentNumber }).IsUnique();
         modelBuilder.Entity<InventoryShipment>().HasIndex(x => new { x.CompanyId, x.SalesOrderId, x.Status });
         modelBuilder.Entity<InventoryShipment>().HasIndex(x => x.SalesInvoiceId).IsUnique();

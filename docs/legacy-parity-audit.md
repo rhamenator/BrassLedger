@@ -7,7 +7,7 @@ and a property-management cluster.
 
 BrassLedger already has modern, organization-neutral foundations for the core
 ledger, customers/invoices, vendors/bills, inventory, purchase-order lines,
-partial receiving, exact receipt-to-bill matching, line-based sales quotes with controlled conversion, line-based sales orders,
+partial receiving, exact receipt-to-bill matching, line-based sales quotes with controlled conversion, line-based sales orders with controlled amendment and cancellation,
 reservations, partial shipment, moving-average COGS, shipment invoicing, banking,
 payroll/tax administration, jobs, and printable output. The
 registration/module-purchase switches, global-state startup architecture,
