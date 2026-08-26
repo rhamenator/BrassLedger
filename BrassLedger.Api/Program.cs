@@ -220,18 +220,6 @@ api.MapPost("/accounting-schedules/reverse-disposal", async (ReverseFixedAssetDi
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["fixedAssetDisposal"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger, BrassLedgerAuthorizationPolicies.ReverseJournals);
 
-api.MapPost("/invoices", async (CreateInvoiceRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
-{
-    var result = await service.CreateInvoiceAsync(request, cancellationToken);
-    return result.Succeeded ? Results.Created($"/api/invoices/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["invoice"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReceivables);
-
-api.MapPost("/vendor-bills", async (CreateVendorBillRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
-{
-    var result = await service.CreateVendorBillAsync(request, cancellationToken);
-    return result.Succeeded ? Results.Created($"/api/vendor-bills/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["bill"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
-
 api.MapPost("/invoice-drafts", async (CreateInvoiceRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveInvoiceDraftAsync(request, cancellationToken);

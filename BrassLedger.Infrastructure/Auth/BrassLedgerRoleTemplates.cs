@@ -25,6 +25,48 @@ public static class BrassLedgerRoleTemplates
             BrassLedgerPermissions.PublishManage,
             BrassLedgerPermissions.ProjectsManage
         ]),
+        new("receivables-preparer", "Receivables Preparer", "Creates customer invoice and recurring invoice drafts without approval or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ReceivablesManage,
+            BrassLedgerPermissions.SubledgerPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("receivables-approver", "Receivables Approver", "Reviews customer invoice drafts without preparation or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ReceivablesManage,
+            BrassLedgerPermissions.SubledgerApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("receivables-poster", "Receivables Poster", "Posts approved customer invoices without preparing or approving them.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ReceivablesManage,
+            BrassLedgerPermissions.SubledgerPost,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payables-preparer", "Payables Preparer", "Creates vendor bill and recurring bill drafts without approval, posting, or payment authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayablesManage,
+            BrassLedgerPermissions.SubledgerPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payables-approver", "Payables Approver", "Reviews vendor bill drafts without preparation, posting, or payment authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayablesManage,
+            BrassLedgerPermissions.SubledgerApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payables-poster", "Payables Poster", "Posts approved vendor bills without preparing, approving, or paying them.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayablesManage,
+            BrassLedgerPermissions.SubledgerPost,
+            BrassLedgerPermissions.ReportingManage
+        ]),
         new("journal-preparer", "Journal Preparer", "Creates journal drafts without authority to approve, post, or reverse them.", false, false,
         [
             BrassLedgerPermissions.WorkspaceView,

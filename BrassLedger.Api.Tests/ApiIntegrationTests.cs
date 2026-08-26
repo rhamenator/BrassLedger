@@ -170,7 +170,14 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.OK, (await controller.PostAsJsonAsync($"/api/purchase-invoice-matches/{sourceMatch.Id}/submission", new SubmitPurchaseInvoiceMatchRequest(sourceMatch.Id, sourceMatch.ConcurrencyToken))).StatusCode); sourceMatch = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseInvoiceMatches!, match => match.Id == sourceMatch.Id); Assert.Equal(HttpStatusCode.OK, (await purchasing.PostAsJsonAsync($"/api/purchase-invoice-matches/{sourceMatch.Id}/decision", new DecidePurchaseInvoiceMatchRequest(sourceMatch.Id, true, "Source receipt reviewed", sourceMatch.ConcurrencyToken))).StatusCode); sourceMatch = Assert.Single((await controller.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseInvoiceMatches!, match => match.Id == sourceMatch.Id); Assert.Equal(HttpStatusCode.OK, (await controller.PostAsJsonAsync($"/api/purchase-invoice-matches/{sourceMatch.Id}/posting", new PostPurchaseInvoiceMatchRequest(sourceMatch.Id, sourceMatch.ConcurrencyToken))).StatusCode);
         workspace = await purchasing.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"); var sourceBill = Assert.Single(workspace!.Payables.Bills, candidate => candidate.BillNumber == $"BILL-SR-{suffix}");
         Assert.Equal(HttpStatusCode.Created, (await controller.PostAsJsonAsync("/api/vendor-payments", new RecordVendorPaymentRequest(vendor.Id, bank.Id, date.AddDays(3), 34m, $"PAY-SR-{suffix}", "ACH", [new PaymentDocumentApplicationRequest(sourceBill.Id, 34m)]))).StatusCode);
-        var targetBillResponse = await controller.PostAsJsonAsync("/api/vendor-bills", new CreateVendorBillRequest(vendor.Id, $"TARGET-SR-{suffix}", date.AddDays(3), date.AddDays(33), 25m, "5100", "Credit application target")); Assert.Equal(HttpStatusCode.Created, targetBillResponse.StatusCode); var targetBillResult = await targetBillResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        Guid targetBillId;
+        await using (var setupScope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var setupTransactions = setupScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+            var targetBill = await setupTransactions.CreateVendorBillAsync(new(vendor.Id, $"TARGET-SR-{suffix}", date.AddDays(3), date.AddDays(33), 25m, "5100", "Credit application target"));
+            Assert.True(targetBill.Succeeded, targetBill.ErrorMessage);
+            targetBillId = targetBill.Id!.Value;
+        }
 
         receipt = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.InventoryReceipts!, candidate => candidate.Id == receipt.Id); var authorizationRequest = new AuthorizeSupplierReturnRequest(receipt.Id, $"SRA-{suffix}", date.AddDays(4), "Damaged inventory", [new(receiptLine.Id, 1m)], receipt.ConcurrencyToken);
         Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync($"/api/inventory-receipts/{receipt.Id}/supplier-returns", authorizationRequest)).StatusCode);
@@ -181,7 +188,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var shipmentResponse = await purchasing.PostAsJsonAsync($"/api/supplier-returns/{authorization.Id}/shipments", staleShipment with { ShipmentNumber = $"SRS-{suffix}", ConcurrencyToken = authorization.ConcurrencyToken }); Assert.Equal(HttpStatusCode.Created, shipmentResponse.StatusCode);
         var shipment = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SupplierReturnShipments!, candidate => candidate.ShipmentNumber == $"SRS-{suffix}"); Assert.True(shipment.CreatesVendorCredit); Assert.Equal(sourceBill.Id, shipment.SourceVendorBillId); Assert.Equal(17m, shipment.AvailableAmount);
 
-        var applyRequest = new ApplySupplierReturnCreditRequest(shipment.Id, targetBillResult!.Id!.Value, date.AddDays(6), 10m, shipment.ConcurrencyToken); Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync($"/api/supplier-return-shipments/{shipment.Id}/applications", applyRequest)).StatusCode); var applyResponse = await controller.PostAsJsonAsync($"/api/supplier-return-shipments/{shipment.Id}/applications", applyRequest); Assert.Equal(HttpStatusCode.Created, applyResponse.StatusCode); var applyResult = await applyResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var applyRequest = new ApplySupplierReturnCreditRequest(shipment.Id, targetBillId, date.AddDays(6), 10m, shipment.ConcurrencyToken); Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync($"/api/supplier-return-shipments/{shipment.Id}/applications", applyRequest)).StatusCode); var applyResponse = await controller.PostAsJsonAsync($"/api/supplier-return-shipments/{shipment.Id}/applications", applyRequest); Assert.Equal(HttpStatusCode.Created, applyResponse.StatusCode); var applyResult = await applyResponse.Content.ReadFromJsonAsync<TransactionResult>();
         shipment = Assert.Single((await controller.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SupplierReturnShipments!, candidate => candidate.Id == shipment.Id); var refundRequest = new RefundSupplierReturnCreditRequest(shipment.Id, bank.Id, $"REF-SR-{suffix}", date.AddDays(7), 7m, shipment.ConcurrencyToken); var refundResponse = await controller.PostAsJsonAsync($"/api/supplier-return-shipments/{shipment.Id}/refunds", refundRequest); Assert.Equal(HttpStatusCode.Created, refundResponse.StatusCode); var refundResult = await refundResponse.Content.ReadFromJsonAsync<TransactionResult>();
         shipment = Assert.Single((await controller.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SupplierReturnShipments!, candidate => candidate.Id == shipment.Id); Assert.Equal(0m, shipment.AvailableAmount); var application = Assert.Single(shipment.Applications, candidate => candidate.Id == applyResult!.Id); var refund = Assert.Single(shipment.Refunds, candidate => candidate.Id == refundResult!.Id);
         Assert.Equal(HttpStatusCode.OK, (await controller.PostAsJsonAsync($"/api/supplier-return-credit-refunds/{refund.Id}/reversal", new ReverseSupplierReturnCreditRefundRequest(refund.Id, date.AddDays(8), "Refund correction", refund.ConcurrencyToken))).StatusCode);
@@ -778,15 +785,19 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
-    public async Task CreateInvoice_PostsAndUpdatesReceivablesWorkspace()
+    public async Task InvoiceApi_RequiresDraftApprovalAndSeparatedPosting()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
-        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
-        var before = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        await EnsureControllerCloneAsync(isolatedFactory, "subledger-approver-api");
+        await EnsureControllerCloneAsync(isolatedFactory, "subledger-poster-api");
+        using var preparer = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var approver = await CreateAuthenticatedClientAsync(isolatedFactory, "subledger-approver-api");
+        using var poster = await CreateAuthenticatedClientAsync(isolatedFactory, "subledger-poster-api");
+        var before = await preparer.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         Assert.NotNull(before);
         var customer = before!.Receivables.Customers.First();
-
-        var response = await client.PostAsJsonAsync("/api/invoices", new CreateInvoiceRequest(
+        var vendor = before.Payables.Vendors.First();
+        var request = new CreateInvoiceRequest(
             customer.Id,
             "INV-API-TEST-1",
             new DateOnly(2026, 5, 1),
@@ -794,10 +805,19 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             125m,
             0m,
             "4000",
-            "API workflow test"));
+            "API workflow test");
 
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var after = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.Equal(HttpStatusCode.NotFound, (await preparer.PostAsJsonAsync("/api/invoices", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await preparer.PostAsJsonAsync("/api/vendor-bills", new CreateVendorBillRequest(
+            vendor.Id, "BILL-API-BYPASS-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 25m, "5100", "Bypass must not exist"))).StatusCode);
+        var draftResponse = await preparer.PostAsJsonAsync("/api/invoice-drafts", request);
+        Assert.Equal(HttpStatusCode.Created, draftResponse.StatusCode);
+        var draftResult = await draftResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        Assert.Equal(HttpStatusCode.BadRequest, (await preparer.PostAsync($"/api/subledger-document-workflows/{draftResult!.Id}/approve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await approver.PostAsync($"/api/subledger-document-workflows/{draftResult.Id}/approve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await approver.PostAsync($"/api/subledger-document-workflows/{draftResult.Id}/post", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await poster.PostAsync($"/api/subledger-document-workflows/{draftResult.Id}/post", null)).StatusCode);
+        var after = await preparer.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         Assert.NotNull(after);
         Assert.Equal(before.Receivables.OpenBalance + 125m, after!.Receivables.OpenBalance);
         Assert.Contains(after.Receivables.Invoices, invoice => invoice.InvoiceNumber == "INV-API-TEST-1" && invoice.BalanceDue == 125m);
@@ -822,12 +842,11 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
 
         async Task<Guid> CreateInvoiceAsync(string number, decimal amount)
         {
-            var response = await client.PostAsJsonAsync("/api/invoices", new CreateInvoiceRequest(
+            await using var setupScope = isolatedFactory.Services.CreateAsyncScope();
+            var result = await setupScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().CreateInvoiceAsync(new(
                 customer.Id, number, new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), amount, 0m, "4000", "Payment API workflow"));
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var result = await response.Content.ReadFromJsonAsync<TransactionResult>();
-            Assert.NotNull(result?.Id);
-            return result!.Id!.Value;
+            Assert.True(result.Succeeded, result.ErrorMessage);
+            return result.Id!.Value;
         }
 
         var firstInvoiceId = await CreateInvoiceAsync("INV-API-PAY-1", 40m);
@@ -1070,7 +1089,11 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     public async Task QuickBooksOnlineInterchange_ExportsAndImportsCoreLists()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
+        await EnsureControllerCloneAsync(isolatedFactory, "qbo-approver-api");
+        await EnsureControllerCloneAsync(isolatedFactory, "qbo-poster-api");
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var invoiceApprover = await CreateAuthenticatedClientAsync(isolatedFactory, "qbo-approver-api");
+        using var invoicePoster = await CreateAuthenticatedClientAsync(isolatedFactory, "qbo-poster-api");
 
         var export = await client.GetAsync("/api/interchange/quickbooks-online/chart-of-accounts.csv");
         Assert.Equal(HttpStatusCode.OK, export.StatusCode);
@@ -1083,8 +1106,6 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains("INV-24021", invoiceExport);
         Assert.DoesNotContain("INV-24015", invoiceExport);
 
-        var token = await client.GetFromJsonAsync<Dictionary<string, string>>("/api/antiforgery/token");
-        Assert.NotNull(token);
         using var form = new MultipartFormDataContent();
         form.Add(new StringContent("Display Name,Company Name,Email,Customer Number\r\n\"QuickBooks\nImport Co\",QuickBooks Import Co,import@example.test,QBO-IMPORT-1"), "file", "quickbooks-customers.csv");
         var preview = await client.PostAsync("/api/interchange/quickbooks-online/customers?dryRun=true", form);
@@ -1160,12 +1181,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal("Draft", importedDraft.Status);
         Assert.Equal(receivablesBefore, afterInvoiceImport.Receivables.OpenBalance);
 
-        using var approveRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/subledger-document-workflows/{importedDraft.Id}/approve");
-        approveRequest.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(approveRequest)).StatusCode);
-        using var postRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/subledger-document-workflows/{importedDraft.Id}/post");
-        postRequest.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(postRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await invoiceApprover.PostAsync($"/api/subledger-document-workflows/{importedDraft.Id}/approve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await invoicePoster.PostAsync($"/api/subledger-document-workflows/{importedDraft.Id}/post", null)).StatusCode);
         var afterInvoicePost = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         Assert.Equal(receivablesBefore + 75m, afterInvoicePost!.Receivables.OpenBalance);
         Assert.Contains(afterInvoicePost.Receivables.Invoices, invoice => invoice.InvoiceNumber == "QBO-INV-1" && invoice.TotalAmount == 75m);
@@ -1458,6 +1475,40 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         if (includeAntiforgery) client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", await GetAntiforgeryTokenAsync(client));
         return client;
+    }
+
+    private static async Task EnsureControllerCloneAsync(BrassLedgerApiFactory factory, string userName)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        if (await db.Users.AnyAsync(user => user.UserName == userName)) return;
+        var source = await db.Users.SingleAsync(user => user.UserName == "controller");
+        var clone = new AppUser
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = source.CompanyId,
+            UserName = userName,
+            DisplayName = userName,
+            Email = $"{userName}@example.test",
+            EmailConfirmedAtUtc = DateTimeOffset.UtcNow,
+            PasswordHash = source.PasswordHash,
+            SecurityStamp = Guid.NewGuid().ToString("N"),
+            Role = source.Role,
+            IsActive = true,
+            LastPasswordChangedUtc = DateTimeOffset.UtcNow
+        };
+        db.Users.Add(clone);
+        db.CompanyMemberships.Add(new CompanyMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = clone.Id,
+            CompanyId = clone.CompanyId,
+            Role = clone.Role,
+            IsActive = true,
+            GrantedAtUtc = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
     }
 
     private static async Task<string> GetAntiforgeryTokenAsync(HttpClient client)

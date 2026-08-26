@@ -16,6 +16,7 @@ public sealed class ItemizedDocumentWorkflowTests
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task ReceivablesAndPayables_PostItemizedDocuments(BrowserKind browserKind)
     {
+        await _fixture.CreateSubledgerWorkflowUsersAsync();
         await using var session = await _fixture.CreateSessionAsync(browserKind);
         await session.SignInAsync();
         var receivables = new ReceivablesPage(session);
@@ -23,14 +24,32 @@ public sealed class ItemizedDocumentWorkflowTests
 
         await receivables.OpenAsync();
         var invoiceNumber = $"INV-E2E-{browserKind}";
-        await receivables.CreateItemizedInvoiceAsync(invoiceNumber);
+        await receivables.CreateItemizedInvoiceDraftAsync(invoiceNumber);
+        await using (var approverSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await approverSession.SignInAsync("e2e-ar-approver"); var approver = new ReceivablesPage(approverSession); await approver.OpenAsync(); await approver.ApproveInvoiceAsync(invoiceNumber);
+        }
+        await using (var posterSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await posterSession.SignInAsync("e2e-ar-poster"); var poster = new ReceivablesPage(posterSession); await poster.OpenAsync(); await poster.PostInvoiceAsync(invoiceNumber, "$165.00");
+        }
+        await receivables.OpenAsync();
         await receivables.RecordAndReturnCustomerPaymentAsync(invoiceNumber, $"DEP-E2E-{browserKind}");
         await receivables.RecordAndReverseCreditMemoAsync($"CM-E2E-{browserKind}");
         await session.AssertNoUiFailuresAsync("itemized invoice workflow");
 
         await payables.OpenAsync();
         var billNumber = $"B-E2E-{browserKind}";
-        await payables.CreateItemizedBillAsync(billNumber);
+        await payables.CreateItemizedBillDraftAsync(billNumber);
+        await using (var approverSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await approverSession.SignInAsync("e2e-ap-approver"); var approver = new PayablesPage(approverSession); await approver.OpenAsync(); await approver.ApproveBillAsync(billNumber);
+        }
+        await using (var posterSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await posterSession.SignInAsync("e2e-ap-poster"); var poster = new PayablesPage(posterSession); await poster.OpenAsync(); await poster.PostBillAsync(billNumber, "$90.00");
+        }
+        await payables.OpenAsync();
         await payables.RecordAndVoidVendorPaymentAsync(billNumber, $"CHK-E2E-{browserKind}");
         await payables.RecordAndReverseVendorCreditAsync($"VC-E2E-{browserKind}");
         await session.AssertNoUiFailuresAsync("itemized bill workflow");

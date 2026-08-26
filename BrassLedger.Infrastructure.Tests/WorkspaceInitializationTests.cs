@@ -1176,6 +1176,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(before.Receivables.OpenBalance + 50m, afterPost.Receivables.OpenBalance);
         Assert.Contains(afterPost.Receivables.Invoices, item => item.Id == posted.Id && item.InvoiceNumber == "INV-WF-1");
         Assert.Contains(afterPost.Receivables.Workflows!, item => item.Id == draft.Id && item.Status == "Posted" && item.PostedDocumentId == posted.Id);
+        var retry = await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value);
+        Assert.True(retry.Succeeded, retry.ErrorMessage);
+        Assert.Equal(posted.Id, retry.Id);
+        await using (var verification = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
+        {
+            Assert.Equal(1, await verification.SalesInvoices.CountAsync(item => item.Id == posted.Id));
+            Assert.Equal(1, await verification.JournalEntries.CountAsync(item => item.SourceDocumentType == "SalesInvoice" && item.SourceDocumentId == posted.Id));
+        }
+        Assert.Equal(afterPost.Receivables.OpenBalance, (await workspaceService.GetWorkspaceAsync()).Receivables.OpenBalance);
 
         var template = await transactions.SaveRecurringVendorBillTemplateAsync(new SaveRecurringVendorBillTemplateRequest(
             new CreateVendorBillRequest(vendor.Id, "RB-WF", new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 16), 25m, "5100", "Monthly service"),
@@ -1193,19 +1202,105 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SubledgerWorkflow_RollsBackJournalBalancesAndWorkflowWhenSourceDocumentInsertFails()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var request = new CreateInvoiceRequest(before.Receivables.Customers.First().Id, "INV-WF-ROLLBACK-1", new DateOnly(2026, 8, 3), new DateOnly(2026, 9, 2), 73m, 0m, "4000", "Atomic workflow rollback");
+        var draft = await transactions.SaveInvoiceDraftAsync(request);
+        Assert.True(draft.Succeeded, draft.ErrorMessage);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value)).Succeeded);
+
+        await using (var triggerDb = await factory.CreateDbContextAsync())
+        {
+            await triggerDb.Database.ExecuteSqlRawAsync("""
+                CREATE TRIGGER SimulateSalesInvoiceInsertFailure
+                BEFORE INSERT ON SalesInvoices
+                BEGIN
+                    SELECT RAISE(ABORT, 'simulated source insert failure');
+                END;
+                """);
+        }
+        var failed = await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value);
+        Assert.False(failed.Succeeded);
+        await using (var triggerDb = await factory.CreateDbContextAsync())
+        {
+            await triggerDb.Database.ExecuteSqlRawAsync("DROP TRIGGER SimulateSalesInvoiceInsertFailure;");
+        }
+
+        var afterFailure = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(before.Receivables.OpenBalance, afterFailure.Receivables.OpenBalance);
+        Assert.DoesNotContain(afterFailure.Receivables.Invoices, item => item.InvoiceNumber == request.InvoiceNumber);
+        await using (var verification = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal("Approved", await verification.SubledgerDocumentWorkflows.Where(item => item.Id == draft.Id).Select(item => item.Status).SingleAsync());
+            Assert.False(await verification.JournalEntries.AnyAsync(item => item.Reference == request.InvoiceNumber));
+            Assert.False(await verification.BusinessAuditEntries.AnyAsync(item => item.Action == "journal.posted" && item.DetailJson.Contains(request.InvoiceNumber)));
+        }
+
+        var retry = await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value);
+        Assert.True(retry.Succeeded, retry.ErrorMessage);
+        Assert.Equal(before.Receivables.OpenBalance + 73m, (await workspaceService.GetWorkspaceAsync()).Receivables.OpenBalance);
+    }
+
+    [Fact]
+    public async Task SubledgerWorkflow_ConcurrentPostingCreatesExactlyOneDocumentAndIsRetryable()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var setupScope = services.CreateScope();
+        var setupWorkspace = await setupScope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var setupTransactions = setupScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var request = new CreateInvoiceRequest(setupWorkspace.Receivables.Customers.First().Id, "INV-WF-CONCURRENT-1", new DateOnly(2026, 8, 4), new DateOnly(2026, 9, 3), 41m, 0m, "4000", "Concurrent workflow posting");
+        var draft = await setupTransactions.SaveInvoiceDraftAsync(request);
+        Assert.True(draft.Succeeded, draft.ErrorMessage);
+        Assert.True((await setupTransactions.ApproveSubledgerDocumentAsync(draft.Id!.Value)).Succeeded);
+
+        using var firstScope = services.CreateScope();
+        using var secondScope = services.CreateScope();
+        var firstTransactions = firstScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var secondTransactions = secondScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var attempts = await Task.WhenAll(
+            firstTransactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value),
+            secondTransactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value));
+        Assert.Contains(attempts, attempt => attempt.Succeeded);
+
+        var firstRetry = await firstTransactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value);
+        var secondRetry = await secondTransactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value);
+        Assert.True(firstRetry.Succeeded, firstRetry.ErrorMessage);
+        Assert.True(secondRetry.Succeeded, secondRetry.ErrorMessage);
+        Assert.Equal(firstRetry.Id, secondRetry.Id);
+        await using var verification = await setupScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync();
+        var invoice = await verification.SalesInvoices.SingleAsync(item => item.InvoiceNumber == request.InvoiceNumber);
+        Assert.Equal(invoice.Id, firstRetry.Id);
+        Assert.Equal(1, await verification.JournalEntries.CountAsync(item => item.SourceDocumentType == "SalesInvoice" && item.SourceDocumentId == invoice.Id));
+        Assert.Equal("Posted", await verification.SubledgerDocumentWorkflows.Where(item => item.Id == draft.Id).Select(item => item.Status).SingleAsync());
+    }
+
+    [Fact]
     public async Task SubledgerWorkflow_EnforcesPreparationApprovalAndPostingPermissionsSeparately()
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
         var companyId = await db.Companies.Select(item => item.Id).FirstAsync(); var customerId = await db.Customers.Where(item => item.CompanyId == companyId).Select(item => item.Id).FirstAsync();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>(); var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
-        void ActAs(params string[] permissions) { var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()) }; claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
+        void ActAs(Guid userId, params string[] permissions) { var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()), new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()) }; claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
+        var preparerId = Guid.NewGuid(); var approverId = Guid.NewGuid(); var posterId = Guid.NewGuid();
         var request = new CreateInvoiceRequest(customerId, "INV-WF-SOD-1", new DateOnly(2026, 8, 2), new DateOnly(2026, 9, 1), 10m, 0m, "4000", "Workflow permissions");
-        ActAs(BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        ActAs(preparerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
         var draft = await transactions.SaveInvoiceDraftAsync(request); Assert.True(draft.Succeeded, draft.ErrorMessage); Assert.False((await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value)).Succeeded);
-        ActAs(BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        ActAs(preparerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        var selfApproval = await transactions.ApproveSubledgerDocumentAsync(draft.Id.Value); Assert.False(selfApproval.Succeeded); Assert.Contains("prepared", selfApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(approverId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
         Assert.True((await transactions.ApproveSubledgerDocumentAsync(draft.Id.Value)).Succeeded); Assert.False((await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value)).Succeeded);
-        ActAs(BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        ActAs(approverId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        var selfPosting = await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value); Assert.False(selfPosting.Succeeded); Assert.Contains("approved", selfPosting.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
         Assert.True((await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value)).Succeeded);
     }
 

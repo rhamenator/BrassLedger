@@ -522,14 +522,25 @@ public sealed partial class AccountingTransactionService(
     public async Task<TransactionResult> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.ReceivablesManage)) return TransactionResult.Failure("You are not authorized to post invoices.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        TransactionResult result;
+        try { result = await CreateInvoiceCoreAsync(db, companyId, request, cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The invoice or an affected balance changed while it was posting. The entire posting was rolled back; refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The invoice could not be posted atomically. The entire posting was rolled back; refresh and try again."); }
+        if (result.Succeeded) await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    private async Task<TransactionResult> CreateInvoiceCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateInvoiceRequest request, CancellationToken cancellationToken)
+    {
         var requestedLines = request.Lines?.ToArray() ?? [];
         if (string.IsNullOrWhiteSpace(request.InvoiceNumber) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("An invoice number and description are required.");
         if (request.DueDate < request.InvoiceDate) return TransactionResult.Failure("The invoice due date cannot precede the invoice date.");
         if (requestedLines.Length > 0 && requestedLines.Any(line => string.IsNullOrWhiteSpace(line.Description) || line.Quantity <= 0 || line.UnitPrice < 0 || line.DiscountAmount < 0 || line.DiscountAmount > line.Quantity * line.UnitPrice || line.TaxAmount < 0 || string.IsNullOrWhiteSpace(line.RevenueAccountNumber)))
             return TransactionResult.Failure("Each invoice line requires a description, positive quantity, valid price and discount, non-negative tax, and revenue account.");
         if (requestedLines.Length == 0 && (request.Subtotal < 0 || request.TaxAmount < 0)) return TransactionResult.Failure("Invoice amounts must be non-negative.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var customer = await db.Customers.SingleOrDefaultAsync(x => x.Id == request.CustomerId && x.CompanyId == companyId, cancellationToken);
         if (customer is null) return TransactionResult.Failure("Customer not found.");
         if (await db.SalesInvoices.AnyAsync(x => x.CompanyId == companyId && x.InvoiceNumber == request.InvoiceNumber.Trim(), cancellationToken)) return TransactionResult.Failure("Invoice number already exists.");
@@ -550,7 +561,6 @@ public sealed partial class AccountingTransactionService(
         if (total <= 0) return TransactionResult.Failure("Invoice total must be greater than zero.");
         if (customer.CreditLimit > 0 && customer.OpenBalance + total > customer.CreditLimit)
             return TransactionResult.Failure("Posting this invoice would exceed the customer's credit limit.");
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var lines = new List<JournalLineRequest>
         {
             new(OperationalRoleReference(AccountingAccountRoles.AccountsReceivable), total, 0, "Invoice receivable")
@@ -571,21 +581,31 @@ public sealed partial class AccountingTransactionService(
         customer.OpenBalance += total;
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException) { return TransactionResult.Failure("Invoice number already exists or was posted concurrently. Refresh and try again."); }
-        await transaction.CommitAsync(cancellationToken);
         return TransactionResult.Success(invoice.Id);
     }
 
     public async Task<TransactionResult> CreateVendorBillAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.PayablesManage)) return TransactionResult.Failure("You are not authorized to post vendor bills.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        TransactionResult result;
+        try { result = await CreateVendorBillCoreAsync(db, companyId, request, cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The bill or an affected balance changed while it was posting. The entire posting was rolled back; refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The bill could not be posted atomically. The entire posting was rolled back; refresh and try again."); }
+        if (result.Succeeded) await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    private async Task<TransactionResult> CreateVendorBillCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateVendorBillRequest request, CancellationToken cancellationToken)
+    {
         var requestedLines = request.Lines?.ToArray() ?? [];
         if (string.IsNullOrWhiteSpace(request.BillNumber) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("A bill number and description are required.");
         if (request.DueDate < request.BillDate) return TransactionResult.Failure("The bill due date cannot precede the bill date.");
         if (requestedLines.Length > 0 && requestedLines.Any(line => string.IsNullOrWhiteSpace(line.Description) || line.Quantity <= 0 || line.UnitCost < 0 || line.DiscountAmount < 0 || line.DiscountAmount > line.Quantity * line.UnitCost || line.TaxAmount < 0 || string.IsNullOrWhiteSpace(line.ExpenseAccountNumber)))
             return TransactionResult.Failure("Each bill line requires a description, positive quantity, valid cost and discount, non-negative tax, and expense account.");
         if (requestedLines.Length == 0 && request.TotalAmount <= 0) return TransactionResult.Failure("Bill amount must be positive.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         if (!await db.Vendors.AnyAsync(x => x.Id == request.VendorId && x.CompanyId == companyId, cancellationToken)) return TransactionResult.Failure("Vendor not found.");
         var billNumber = request.BillNumber.Trim();
         if (await db.VendorBills.AnyAsync(x => x.CompanyId == companyId && x.VendorId == request.VendorId && x.BillNumber == billNumber, cancellationToken)
@@ -605,7 +625,6 @@ public sealed partial class AccountingTransactionService(
         }).ToArray();
         var total = requestedLines.Length == 0 ? RoundCurrency(request.TotalAmount) : lineAmounts.Sum(line => line.NetAmount + line.TaxAmount);
         if (total <= 0) return TransactionResult.Failure("Bill total must be positive.");
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var billId = Guid.NewGuid();
         IReadOnlyList<JournalLineRequest> postingLines = requestedLines.Length == 0
             ? [new(request.ExpenseAccountNumber, total, 0, "Bill expense"), new(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), 0, total, "Accounts payable")]
@@ -626,7 +645,6 @@ public sealed partial class AccountingTransactionService(
         vendor.OpenBalance += total;
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException) { return TransactionResult.Failure("Bill number already exists or was posted concurrently. Refresh and try again."); }
-        await transaction.CommitAsync(cancellationToken);
         return TransactionResult.Success(bill.Id);
     }
 
@@ -645,7 +663,10 @@ public sealed partial class AccountingTransactionService(
         if (workflow is null || workflow.IsRecurringTemplate || workflow.Status != "Draft") return TransactionResult.Failure("Only an invoice or bill draft can be approved.");
         var modulePermission = workflow.DocumentType == "Invoice" ? BrassLedgerPermissions.ReceivablesManage : BrassLedgerPermissions.PayablesManage;
         if (!HasPermission(modulePermission)) return TransactionResult.Failure("You are not authorized for this subledger.");
-        workflow.Status = "Approved"; workflow.ApprovedByUserId = ResolveUserId(); workflow.ApprovedAtUtc = DateTimeOffset.UtcNow; workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var approvingUserId = ResolveUserId();
+        if (approvingUserId.HasValue && workflow.CreatedByUserId == approvingUserId)
+            return TransactionResult.Failure("The person who prepared an invoice or bill draft cannot approve it.");
+        workflow.Status = "Approved"; workflow.ApprovedByUserId = approvingUserId; workflow.ApprovedAtUtc = DateTimeOffset.UtcNow; workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddWorkflowAudit(db, workflow, "subledger-document.approved");
         try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The draft changed during approval. Refresh and try again."); }
         return TransactionResult.Success(workflow.Id);
@@ -654,32 +675,46 @@ public sealed partial class AccountingTransactionService(
     public async Task<TransactionResult> PostApprovedSubledgerDocumentAsync(Guid workflowId, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.SubledgerPost)) return TransactionResult.Failure("You are not authorized to post approved invoice or bill drafts.");
-        string documentType; string payload;
-        await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
-        {
-            var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-            var workflow = await db.SubledgerDocumentWorkflows.AsNoTracking().SingleOrDefaultAsync(item => item.Id == workflowId && item.CompanyId == companyId, cancellationToken);
-            if (workflow is null || workflow.IsRecurringTemplate || workflow.Status != "Approved") return TransactionResult.Failure("Only an approved invoice or bill draft can be posted.");
-            documentType = workflow.DocumentType; payload = workflow.PayloadJson;
-        }
-        var modulePermission = documentType == "Invoice" ? BrassLedgerPermissions.ReceivablesManage : BrassLedgerPermissions.PayablesManage;
+        var postingUserId = ResolveUserId();
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var workflow = await db.SubledgerDocumentWorkflows.SingleOrDefaultAsync(item => item.Id == workflowId && item.CompanyId == companyId, cancellationToken);
+        if (workflow is null || workflow.IsRecurringTemplate || workflow.DocumentType is not ("Invoice" or "VendorBill"))
+            return TransactionResult.Failure("Only an approved invoice or bill draft can be posted.");
+        var modulePermission = workflow.DocumentType == "Invoice" ? BrassLedgerPermissions.ReceivablesManage : BrassLedgerPermissions.PayablesManage;
         if (!HasPermission(modulePermission)) return TransactionResult.Failure("You are not authorized for this subledger.");
+        if (workflow.Status == "Posted" && workflow.PostedDocumentId.HasValue)
+            return TransactionResult.Success(workflow.PostedDocumentId.Value);
+        if (workflow.Status != "Approved") return TransactionResult.Failure("Only an approved invoice or bill draft can be posted.");
+        if (postingUserId.HasValue && workflow.ApprovedByUserId == postingUserId)
+            return TransactionResult.Failure("The person who approved an invoice or bill draft cannot post it.");
         TransactionResult posting;
         try
         {
-            posting = documentType == "Invoice"
-                ? await CreateInvoiceAsync(System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(payload)!, cancellationToken)
-                : await CreateVendorBillAsync(System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(payload)!, cancellationToken);
+            if (workflow.DocumentType == "Invoice")
+            {
+                var request = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(workflow.PayloadJson);
+                if (request is null) return TransactionResult.Failure("The approved invoice draft payload is empty.");
+                posting = await CreateInvoiceCoreAsync(db, companyId, request, cancellationToken);
+            }
+            else
+            {
+                var request = System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(workflow.PayloadJson);
+                if (request is null) return TransactionResult.Failure("The approved vendor bill draft payload is empty.");
+                posting = await CreateVendorBillCoreAsync(db, companyId, request, cancellationToken);
+            }
         }
         catch (System.Text.Json.JsonException) { return TransactionResult.Failure("The approved draft payload is invalid."); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The approved draft or an affected balance changed while it was posting. The entire posting was rolled back; refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The approved draft could not be posted atomically. The entire posting was rolled back; refresh and try again."); }
         if (!posting.Succeeded) return posting;
-        await using var updateDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var updateCompanyId = await ResolveCompanyIdAsync(updateDb, cancellationToken);
-        var tracked = await updateDb.SubledgerDocumentWorkflows.SingleAsync(item => item.Id == workflowId && item.CompanyId == updateCompanyId, cancellationToken);
-        if (tracked.Status != "Approved") return TransactionResult.Failure("The draft changed while it was posting; the source document was posted and requires administrative review.");
-        tracked.Status = "Posted"; tracked.PostedDocumentId = posting.Id; tracked.PostedByUserId = ResolveUserId(); tracked.PostedAtUtc = DateTimeOffset.UtcNow; tracked.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        AddWorkflowAudit(updateDb, tracked, "subledger-document.posted");
-        await updateDb.SaveChangesAsync(cancellationToken);
+        workflow.Status = "Posted"; workflow.PostedDocumentId = posting.Id; workflow.PostedByUserId = postingUserId; workflow.PostedAtUtc = DateTimeOffset.UtcNow; workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddWorkflowAudit(db, workflow, "subledger-document.posted");
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The approved draft changed while it was posting. The entire posting was rolled back; refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The approved draft could not be posted atomically. The entire posting was rolled back; refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken);
         return TransactionResult.Success(posting.Id!.Value);
     }
 

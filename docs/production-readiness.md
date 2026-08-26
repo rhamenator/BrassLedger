@@ -15,11 +15,11 @@ SQLite and PostgreSQL have separate versioned migrations for this schema. Existi
 Verification completed on 2026-08-26:
 
 - Release solution build: succeeded with zero warnings and zero errors.
-- SQLite/default infrastructure suite: 178 tests passed; five PostgreSQL-only tests were skipped in that run.
-- Disposable PostgreSQL 16 infrastructure suite: 182 of 182 tests passed with zero skips.
+- SQLite/default infrastructure suite: 180 tests passed; six PostgreSQL-only tests were skipped in that run after the PostgreSQL workflow race test was added.
+- Disposable PostgreSQL 16 infrastructure suite: 186 of 186 tests passed with zero skips.
 - API integration suite: 32 of 32 tests passed.
 - Web component suite: 7 of 7 tests passed.
-- Chromium end-to-end suite: 27 of 27 tests passed, including separated purchasing roles and the visually approved snapshots.
+- Chromium end-to-end suite: 27 of 27 tests passed, including separated purchasing and AR/AP roles and the visually approved snapshots.
 - SQLite and PostgreSQL EF model-drift checks: no pending model changes.
 - NuGet direct and transitive vulnerability scan: no known vulnerable packages from the configured source.
 - Cross-invoice supplier-return regression: passed for a return spanning two supplier invoices with different prices, followed by exact reversal.
@@ -27,12 +27,18 @@ Verification completed on 2026-08-26:
 
 The browser test host launches the already-built web assembly directly. This avoids nested MSBuild worker failures and ensures browser tests exercise the same Debug or Release output produced by their build.
 
+### Controlled receivables and payables posting
+
+Customer invoices and ordinary vendor bills enter through draft, approval, and posting workflows; the API no longer exposes direct posting routes that bypass review. Built-in Receivables and Payables Preparer, Approver, and Poster roles permit least-privilege assignments. A preparer cannot approve the same document, and its approver cannot post it.
+
+Posting the journal, account and subledger balances, source invoice or bill, workflow state, and audit evidence is one database transaction. A forced source-document insertion failure proves that the earlier journal and balance changes roll back and the workflow remains approved for correction or retry. Repeating a completed request returns the original source-document ID without posting again; concurrent attempts produce exactly one source document and one journal entry. These controls are covered by infrastructure and API authorization regressions on 2026-08-26.
+
 ## Known limitations and unverified areas
 
 The following areas are not yet proven complete against the project definition of done:
 
 - The representative-business acceptance scenario has not passed as one uninterrupted install-to-restore workflow.
-- Complete AR, AP, banking, payroll, inventory, projects, fixed assets, period-end, multi-currency, consolidation, and reporting acceptance matrices remain to be audited against the required positive, negative, authorization, isolation, rounding, concurrency, and reversal cases.
+- The ordinary AR/AP draft-to-post path is controlled and retry-safe, but complete AR, AP, banking, payroll, inventory, projects, fixed assets, period-end, multi-currency, consolidation, and reporting acceptance matrices remain to be audited against the required positive, negative, authorization, isolation, rounding, concurrency, and reversal cases.
 - Tax runtime packages for every state and the District of Columbia require a source-by-source completion audit, executable boundary tests, review, and explicit activation. Captured or LLM-assisted interpretations are not regulatory approval.
 - Local payroll-tax coverage, reciprocity, convenience-of-employer rules, filing outputs, and multi-work-location allocation require jurisdiction-specific verification by qualified payroll/tax reviewers.
 - QuickBooks and other interchange paths require a capability-by-capability audit of mapping, dry runs, idempotency, duplicate handling, rejection correction, reconciliation totals, and round trips. QuickBooks Online production synchronization additionally depends on provider credentials and approval.

@@ -26,7 +26,7 @@ public sealed class PayablesPage
         Assert.Contains("$13,210.50", content);
     }
 
-    public async Task CreateItemizedBillAsync(string billNumber)
+    public async Task CreateItemizedBillDraftAsync(string billNumber)
     {
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Add line" }).ClickAsync();
         await _session.AssertNoUiFailuresAsync("adding a bill line");
@@ -43,14 +43,24 @@ public sealed class PayablesPage
         await _session.Page.GetByLabel("Bill line tax").Nth(1).FillAsync("2");
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save bill draft" }).ClickAsync();
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor bill draft saved.");
+    }
+
+    public async Task ApproveBillAsync(string billNumber)
+    {
         var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber });
+        await Assertions.Expect(workflowRow).ToContainTextAsync("Draft");
         await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor bill draft approved.");
-        workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber });
+    }
+
+    public async Task PostBillAsync(string billNumber, string expectedTotal)
+    {
+        var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber });
+        await Assertions.Expect(workflowRow).ToContainTextAsync("Approved");
         await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Approved vendor bill posted.");
-        var row = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber }).Filter(new() { HasText = "$90.00" });
-        await Assertions.Expect(row).ToContainTextAsync("$90.00");
+        var row = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber }).Filter(new() { HasText = expectedTotal });
+        await Assertions.Expect(row).ToContainTextAsync(expectedTotal);
         await Assertions.Expect(row).ToContainTextAsync("2");
     }
 

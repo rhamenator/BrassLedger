@@ -50,6 +50,7 @@ public sealed class WorkflowDataTests
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task QuickBooksInvoiceImport_ValidatesCreatesDraftAndUsesNormalPostingWorkflow(BrowserKind browserKind)
     {
+        await _fixture.CreateSubledgerWorkflowUsersAsync();
         await using var session = await _fixture.CreateSessionAsync(browserKind);
         await session.SignInAsync();
         var invoiceNumber = $"QBO-E2E-{Guid.NewGuid():N}"[..20];
@@ -58,8 +59,21 @@ public sealed class WorkflowDataTests
         await ledger.ImportQuickBooksInvoiceDraftAsync(invoiceNumber);
         var receivables = new ReceivablesPage(session);
         await receivables.OpenAsync();
-        await receivables.ApproveAndPostImportedInvoiceAsync(invoiceNumber);
         await session.AssertNoUiFailuresAsync("QuickBooks invoice import workflow");
+
+        await using var approverSession = await _fixture.CreateSessionAsync(browserKind);
+        await approverSession.SignInAsync("e2e-ar-approver");
+        var approvingReceivables = new ReceivablesPage(approverSession);
+        await approvingReceivables.OpenAsync();
+        await approvingReceivables.ApproveInvoiceAsync(invoiceNumber);
+        await approverSession.AssertNoUiFailuresAsync("QuickBooks invoice approval workflow");
+
+        await using var posterSession = await _fixture.CreateSessionAsync(browserKind);
+        await posterSession.SignInAsync("e2e-ar-poster");
+        var postingReceivables = new ReceivablesPage(posterSession);
+        await postingReceivables.OpenAsync();
+        await postingReceivables.PostInvoiceAsync(invoiceNumber, "$75.00");
+        await posterSession.AssertNoUiFailuresAsync("QuickBooks invoice posting workflow");
     }
 
     [Theory]
