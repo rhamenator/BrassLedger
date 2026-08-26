@@ -1208,6 +1208,7 @@ public sealed class SupplierReturnAuthorizationLine
     public int Sequence { get; set; }
     public decimal AuthorizedQuantity { get; set; }
     public decimal ShippedQuantity { get; set; }
+    public decimal ReceiptUnitCost { get; set; }
     public decimal UnitCost { get; set; }
 }
 
@@ -1223,6 +1224,7 @@ public sealed class SupplierReturnShipment
     public DateOnly ShippedOn { get; set; }
     public string Status { get; set; } = "Posted";
     public decimal TotalAmount { get; set; }
+    public decimal VendorCreditAmount { get; set; }
     public bool CreatesVendorCredit { get; set; }
     public decimal SourceAppliedAmount { get; set; }
     public decimal AppliedAmount { get; set; }
@@ -1250,6 +1252,8 @@ public sealed class SupplierReturnShipmentLine
     public decimal Quantity { get; set; }
     public decimal UnitCost { get; set; }
     public decimal TotalAmount { get; set; }
+    public decimal VendorCreditUnitCost { get; set; }
+    public decimal VendorCreditAmount { get; set; }
     public decimal PriorQuantityOnHand { get; set; }
     public decimal PriorUnitCost { get; set; }
     public decimal ResultingUnitCost { get; set; }

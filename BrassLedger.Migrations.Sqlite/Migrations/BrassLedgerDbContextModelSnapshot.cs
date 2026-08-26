@@ -6730,6 +6730,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid>("PurchaseOrderLineId")
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("ReceiptUnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Sequence")
                         .HasColumnType("INTEGER");
 
@@ -6976,6 +6980,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("VendorCreditAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("WarehouseId")
                         .HasColumnType("TEXT");
 
@@ -7044,6 +7052,14 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("UnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("VendorCreditAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("VendorCreditUnitCost")
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 

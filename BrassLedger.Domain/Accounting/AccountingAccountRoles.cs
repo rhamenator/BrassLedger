@@ -17,6 +17,7 @@ public static class AccountingAccountRoles
     public const string DefaultRevenue = "DefaultRevenue";
     public const string ForeignExchangeGain = "ForeignExchangeGain";
     public const string CostOfGoodsSold = "CostOfGoodsSold";
+    public const string PurchasePriceVariance = "PurchasePriceVariance";
     public const string PayrollExpense = "PayrollExpense";
     public const string ForeignExchangeLoss = "ForeignExchangeLoss";
 
@@ -37,6 +38,7 @@ public static class AccountingAccountRoles
         new(DefaultRevenue, "Default revenue", "Default revenue account used by reviewed invoice imports when a line has no explicit account.", AccountType.Revenue, false),
         new(ForeignExchangeGain, "Foreign-exchange gain", "Revenue account used for realized and unrealized currency gains.", AccountType.Revenue, false),
         new(CostOfGoodsSold, "Cost of goods sold", "Expense account used for inventory cost and adjustment offsets.", AccountType.Expense, false),
+        new(PurchasePriceVariance, "Purchase-price variance", "Expense account used for reviewed invoice-price differences and nonrecoverable capitalized costs on supplier returns.", AccountType.Expense, false),
         new(PayrollExpense, "Payroll expense", "Expense account used for gross payroll, employer taxes, and employer contributions.", AccountType.Expense, false),
         new(ForeignExchangeLoss, "Foreign-exchange loss", "Expense account used for realized and unrealized currency losses.", AccountType.Expense, false)
     ];

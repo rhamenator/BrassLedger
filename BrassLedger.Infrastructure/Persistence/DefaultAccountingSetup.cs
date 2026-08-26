@@ -27,6 +27,7 @@ internal static class DefaultAccountingSetup
         Account(companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue, role: AccountingAccountRoles.ForeignExchangeGain),
         Account(companyId, "4400", "Gain on Asset Disposal", AccountType.Revenue),
         Account(companyId, "5100", "Cost of Goods Sold", AccountType.Expense, role: AccountingAccountRoles.CostOfGoodsSold),
+        Account(companyId, "5200", "Purchase Price Variance", AccountType.Expense, role: AccountingAccountRoles.PurchasePriceVariance),
         Account(companyId, "6100", "Payroll Expense", AccountType.Expense, role: AccountingAccountRoles.PayrollExpense),
         Account(companyId, "6200", "Depreciation Expense", AccountType.Expense),
         Account(companyId, "6250", "Interest Expense", AccountType.Expense),
@@ -68,6 +69,7 @@ internal static class DefaultAccountingSetup
                 await EnsureRoleAccountAsync(dbContext, companyId, "1050", "Bank Transfer Clearing", AccountType.Asset, false, AccountingAccountRoles.BankTransferClearing, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "2150", "Customer Deposits", AccountType.Liability, true, AccountingAccountRoles.CustomerDeposits, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue, false, AccountingAccountRoles.ForeignExchangeGain, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "5200", "Purchase Price Variance", AccountType.Expense, false, AccountingAccountRoles.PurchasePriceVariance, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "6300", "Foreign Exchange Loss", AccountType.Expense, false, AccountingAccountRoles.ForeignExchangeLoss, cancellationToken);
                 await EnsureAccountAsync(dbContext, companyId, "1400", "Prepaid Expenses", AccountType.Asset, cancellationToken);
                 await EnsureAccountAsync(dbContext, companyId, "1500", "Fixed Assets", AccountType.Asset, cancellationToken);

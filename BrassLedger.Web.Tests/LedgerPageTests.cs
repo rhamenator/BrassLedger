@@ -72,6 +72,9 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("table[aria-label='Supplier return authorizations']"));
         Assert.NotNull(cut.Find("table[aria-label='Supplier return shipments']"));
         Assert.Contains("Returns remain linked to the exact receipt and purchase-order lines", cut.Markup);
+        Assert.Contains("Inventory removed", cut.Markup);
+        Assert.Contains("Vendor credit", cut.Markup);
+        Assert.Contains("purchase-price variance", cut.Markup);
         Assert.NotNull(cut.Find("table[aria-label='Landed cost allocations']"));
         Assert.Contains("Freight and import charges remain tied to their source receipt", cut.Markup);
     }

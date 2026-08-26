@@ -332,6 +332,12 @@ public static class ServiceCollectionExtensions
             return await HasTableAsync(dbContext, "LandedCostAllocations", cancellationToken)
                 && await HasTableAsync(dbContext, "LandedCostCharges", cancellationToken)
                 && await HasTableAsync(dbContext, "LandedCostAllocationLines", cancellationToken);
+        if (migrationId.EndsWith("_SeparateSupplierReturnCreditValue", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "SupplierReturnAuthorizations", "Id", cancellationToken)
+                && await HasColumnAsync(dbContext, "SupplierReturnAuthorizationLines", "ReceiptUnitCost", cancellationToken)
+                && await HasColumnAsync(dbContext, "SupplierReturnShipments", "VendorCreditAmount", cancellationToken)
+                && await HasColumnAsync(dbContext, "SupplierReturnShipmentLines", "VendorCreditUnitCost", cancellationToken)
+                && await HasColumnAsync(dbContext, "SupplierReturnShipmentLines", "VendorCreditAmount", cancellationToken);
         return false;
     }
 
