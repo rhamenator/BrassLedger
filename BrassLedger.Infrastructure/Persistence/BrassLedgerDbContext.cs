@@ -291,6 +291,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<IntegrationConnection>().Property(x => x.CredentialsJson).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<IntegrationConnection>().Property(x => x.CredentialVersion).IsConcurrencyToken();
         modelBuilder.Entity<ExternalEntityLink>().Property(x => x.LastSynchronizedAtUtc).IsConcurrencyToken();
+        modelBuilder.Entity<GeneralLedgerAccount>().Property(x => x.OperationalRole).IsConcurrencyToken();
         modelBuilder.Entity<AccessRole>().Property(x => x.Description).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Customer>().Property(x => x.Name).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Customer>().Property(x => x.Email).HasConversion(encryptedStringConverter);
@@ -460,6 +461,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<AccessRole>().HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();
         modelBuilder.Entity<AuthenticationAuditEntry>().HasIndex(x => new { x.UserName, x.OccurredUtc });
         modelBuilder.Entity<GeneralLedgerAccount>().HasIndex(x => new { x.CompanyId, x.Number }).IsUnique();
+        modelBuilder.Entity<GeneralLedgerAccount>().HasIndex(x => new { x.CompanyId, x.OperationalRole }).IsUnique();
         modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.CompanyId, x.BankAccountId, x.PostedOn });
         modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.CompanyId, x.SourceDocumentType, x.SourceDocumentId });
         modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.CompanyId, x.Status, x.PostedOn });

@@ -837,10 +837,10 @@ public sealed class QuickBooksOnlineSyncService(
     private static string GetLocalControlAccountPurpose(GeneralLedgerAccount account)
     {
         if (!account.IsControlAccount) return string.Empty;
-        return account.Number.Trim() switch
+        return account.OperationalRole switch
         {
-            "1100" => "AccountsReceivable",
-            "2000" => "AccountsPayable",
+            AccountingAccountRoles.AccountsReceivable => AccountingAccountRoles.AccountsReceivable,
+            AccountingAccountRoles.AccountsPayable => AccountingAccountRoles.AccountsPayable,
             _ => string.Empty
         };
     }

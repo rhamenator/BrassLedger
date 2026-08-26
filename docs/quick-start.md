@@ -66,7 +66,7 @@ Optional advanced deployments can still preconfigure these values through config
 ## First-day walkthrough
 
 1. Review `Overview`.
-2. Confirm the chart of accounts in `Ledger`.
+2. Confirm the chart of accounts in `Ledger`, then review **Operational account routing** in `Administration` before posting live subledger, payroll, banking, or inventory activity.
 3. Review open customer and invoice activity in `Receivables`.
 4. Review vendor balances and due items in `Payables`.
 5. Review inventory and order flow in `Operations`.

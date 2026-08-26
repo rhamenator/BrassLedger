@@ -7,28 +7,35 @@ internal static class DefaultAccountingSetup
 {
     public static IReadOnlyList<GeneralLedgerAccount> CreateAccounts(Guid companyId) =>
     [
-        Account(companyId, "1000", "Operating Cash", AccountType.Asset),
-        Account(companyId, "1010", "Payroll Clearing", AccountType.Asset),
-        Account(companyId, "1050", "Bank Transfer Clearing", AccountType.Asset),
-        Account(companyId, "1100", "Accounts Receivable", AccountType.Asset, true),
-        Account(companyId, "1200", "Inventory Asset", AccountType.Asset, true),
-        Account(companyId, "1300", "Vendor Advances", AccountType.Asset, true),
-        Account(companyId, "2000", "Accounts Payable", AccountType.Liability, true),
-        Account(companyId, "2100", "Sales Tax Payable", AccountType.Liability, true),
-        Account(companyId, "2150", "Customer Deposits", AccountType.Liability, true),
-        Account(companyId, "2200", "Payroll Liabilities", AccountType.Liability, true),
-        Account(companyId, "3000", "Owner Equity", AccountType.Equity),
-        Account(companyId, "4000", "Product Revenue", AccountType.Revenue),
-        Account(companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue),
-        Account(companyId, "5100", "Cost of Goods Sold", AccountType.Expense),
-        Account(companyId, "6100", "Payroll Expense", AccountType.Expense),
-        Account(companyId, "6300", "Foreign Exchange Loss", AccountType.Expense)
+        Account(companyId, "1000", "Operating Cash", AccountType.Asset, role: AccountingAccountRoles.OperatingCash),
+        Account(companyId, "1010", "Payroll Clearing", AccountType.Asset, role: AccountingAccountRoles.PayrollClearing),
+        Account(companyId, "1050", "Bank Transfer Clearing", AccountType.Asset, role: AccountingAccountRoles.BankTransferClearing),
+        Account(companyId, "1100", "Accounts Receivable", AccountType.Asset, true, AccountingAccountRoles.AccountsReceivable),
+        Account(companyId, "1200", "Inventory Asset", AccountType.Asset, true, AccountingAccountRoles.InventoryAsset),
+        Account(companyId, "1300", "Vendor Advances", AccountType.Asset, true, AccountingAccountRoles.VendorAdvances),
+        Account(companyId, "2000", "Accounts Payable", AccountType.Liability, true, AccountingAccountRoles.AccountsPayable),
+        Account(companyId, "2100", "Sales Tax Payable", AccountType.Liability, true, AccountingAccountRoles.SalesTaxPayable),
+        Account(companyId, "2150", "Customer Deposits", AccountType.Liability, true, AccountingAccountRoles.CustomerDeposits),
+        Account(companyId, "2200", "Payroll Liabilities", AccountType.Liability, true, AccountingAccountRoles.PayrollLiabilities),
+        Account(companyId, "3000", "Owner Equity", AccountType.Equity, role: AccountingAccountRoles.OwnerEquity),
+        Account(companyId, "4000", "Product Revenue", AccountType.Revenue, role: AccountingAccountRoles.DefaultRevenue),
+        Account(companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue, role: AccountingAccountRoles.ForeignExchangeGain),
+        Account(companyId, "5100", "Cost of Goods Sold", AccountType.Expense, role: AccountingAccountRoles.CostOfGoodsSold),
+        Account(companyId, "6100", "Payroll Expense", AccountType.Expense, role: AccountingAccountRoles.PayrollExpense),
+        Account(companyId, "6300", "Foreign Exchange Loss", AccountType.Expense, role: AccountingAccountRoles.ForeignExchangeLoss)
     ];
 
     public static BankAccount CreateOperatingBankAccount(Guid companyId, Guid ledgerAccountId) => new()
     {
-        Id = Guid.NewGuid(), CompanyId = companyId, Name = "Operating Account", AccountNumberMasked = "Not connected",
-        LedgerAccountId = ledgerAccountId, CurrentBalance = 0m, UnreconciledAmount = 0m, LastReconciledOn = DateOnly.FromDateTime(DateTime.UtcNow), LastReconciledBalance = 0m
+        Id = Guid.NewGuid(),
+        CompanyId = companyId,
+        Name = "Operating Account",
+        AccountNumberMasked = "Not connected",
+        LedgerAccountId = ledgerAccountId,
+        CurrentBalance = 0m,
+        UnreconciledAmount = 0m,
+        LastReconciledOn = DateOnly.FromDateTime(DateTime.UtcNow),
+        LastReconciledBalance = 0m
     };
 
     public static async Task EnsureMinimumSetupAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
@@ -39,40 +46,63 @@ internal static class DefaultAccountingSetup
             {
                 var accounts = CreateAccounts(companyId);
                 await dbContext.Accounts.AddRangeAsync(accounts, cancellationToken);
-                await dbContext.BankAccounts.AddAsync(CreateOperatingBankAccount(companyId, accounts.Single(account => account.Number == "1000").Id), cancellationToken);
+                await dbContext.BankAccounts.AddAsync(CreateOperatingBankAccount(companyId, accounts.Single(account => account.OperationalRole == AccountingAccountRoles.OperatingCash).Id), cancellationToken);
                 continue;
             }
             else
             {
-                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "2100", cancellationToken))
-                    await dbContext.Accounts.AddAsync(Account(companyId, "2100", "Sales Tax Payable", AccountType.Liability, true), cancellationToken);
-                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "2200", cancellationToken))
-                    await dbContext.Accounts.AddAsync(Account(companyId, "2200", "Payroll Liabilities", AccountType.Liability, true), cancellationToken);
-                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "1300", cancellationToken))
-                    await dbContext.Accounts.AddAsync(Account(companyId, "1300", "Vendor Advances", AccountType.Asset, true), cancellationToken);
-                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "1050", cancellationToken))
-                    await dbContext.Accounts.AddAsync(Account(companyId, "1050", "Bank Transfer Clearing", AccountType.Asset), cancellationToken);
-                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "2150", cancellationToken))
-                    await dbContext.Accounts.AddAsync(Account(companyId, "2150", "Customer Deposits", AccountType.Liability, true), cancellationToken);
-                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "4300", cancellationToken))
-                    await dbContext.Accounts.AddAsync(Account(companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue), cancellationToken);
-                if (!await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == "6300", cancellationToken))
-                    await dbContext.Accounts.AddAsync(Account(companyId, "6300", "Foreign Exchange Loss", AccountType.Expense), cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "2100", "Sales Tax Payable", AccountType.Liability, true, AccountingAccountRoles.SalesTaxPayable, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "2200", "Payroll Liabilities", AccountType.Liability, true, AccountingAccountRoles.PayrollLiabilities, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "1300", "Vendor Advances", AccountType.Asset, true, AccountingAccountRoles.VendorAdvances, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "1050", "Bank Transfer Clearing", AccountType.Asset, false, AccountingAccountRoles.BankTransferClearing, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "2150", "Customer Deposits", AccountType.Liability, true, AccountingAccountRoles.CustomerDeposits, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue, false, AccountingAccountRoles.ForeignExchangeGain, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "6300", "Foreign Exchange Loss", AccountType.Expense, false, AccountingAccountRoles.ForeignExchangeLoss, cancellationToken);
             }
 
-            var operatingCash = await dbContext.Accounts.SingleAsync(account => account.CompanyId == companyId && account.Number == "1000", cancellationToken);
+            var operatingCash = await EnsureOperationalRolesAsync(dbContext, companyId, cancellationToken);
             var bankAccounts = await dbContext.BankAccounts.Where(account => account.CompanyId == companyId).ToListAsync(cancellationToken);
-            if (bankAccounts.Count == 0)
+            if (bankAccounts.Count == 0 && operatingCash is not null)
                 await dbContext.BankAccounts.AddAsync(CreateOperatingBankAccount(companyId, operatingCash.Id), cancellationToken);
-            else
+            else if (operatingCash is not null)
                 foreach (var bankAccount in bankAccounts.Where(account => account.LedgerAccountId == Guid.Empty))
                     bankAccount.LedgerAccountId = operatingCash.Id;
         }
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static GeneralLedgerAccount Account(Guid companyId, string number, string name, AccountType type, bool isControlAccount = false) => new()
+    private static async Task<GeneralLedgerAccount?> EnsureOperationalRolesAsync(BrassLedgerDbContext dbContext, Guid companyId, CancellationToken cancellationToken)
     {
-        Id = Guid.NewGuid(), CompanyId = companyId, Number = number, Name = name, Type = type, IsControlAccount = isControlAccount, IsActive = true
+        var defaults = CreateAccounts(companyId).ToDictionary(account => account.Number, account => account.OperationalRole, StringComparer.OrdinalIgnoreCase);
+        var accounts = await dbContext.Accounts.Where(account => account.CompanyId == companyId).ToListAsync(cancellationToken);
+        foreach (var account in accounts.Where(account => string.IsNullOrWhiteSpace(account.OperationalRole) && defaults.ContainsKey(account.Number)))
+        {
+            var role = defaults[account.Number];
+            var definition = AccountingAccountRoles.Find(role);
+            if (definition is not null
+                && account.Type == definition.RequiredAccountType
+                && account.IsControlAccount == definition.RequiresControlAccount
+                && !accounts.Any(candidate => string.Equals(candidate.OperationalRole, role, StringComparison.Ordinal))) account.OperationalRole = role;
+        }
+
+        return accounts.SingleOrDefault(account => account.IsActive && account.OperationalRole == AccountingAccountRoles.OperatingCash);
+    }
+
+    private static async Task EnsureRoleAccountAsync(BrassLedgerDbContext dbContext, Guid companyId, string number, string name, AccountType type, bool isControlAccount, string role, CancellationToken cancellationToken)
+    {
+        if (await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && (account.OperationalRole == role || account.Number == number), cancellationToken)) return;
+        await dbContext.Accounts.AddAsync(Account(companyId, number, name, type, isControlAccount, role), cancellationToken);
+    }
+
+    private static GeneralLedgerAccount Account(Guid companyId, string number, string name, AccountType type, bool isControlAccount = false, string? role = null) => new()
+    {
+        Id = Guid.NewGuid(),
+        CompanyId = companyId,
+        Number = number,
+        Name = name,
+        Type = type,
+        IsControlAccount = isControlAccount,
+        IsActive = true,
+        OperationalRole = role
     };
 }

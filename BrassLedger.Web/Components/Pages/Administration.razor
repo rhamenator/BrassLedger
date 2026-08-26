@@ -7,6 +7,7 @@
 @inject ICompanyManagementService CompanyManagementService
 @inject IConsolidationService ConsolidationService
 @inject IAccountingPeriodService AccountingPeriodService
+@inject IAccountingAccountRoleService AccountingAccountRoleService
 @inject IBackupService BackupService
 @inject NavigationManager NavigationManager
 
@@ -255,6 +256,52 @@ else
         </section>
 
         <section class="panel">
+            <h2>Operational account routing</h2>
+            <p class="page-intro">Choose which active ledger account each accounting workflow uses. Account numbers remain yours to design; BrassLedger routes by these company-scoped roles. Reassigning a control role requires zero balances and no open dependent records.</p>
+            @if (!AccountingAccountRoles.Authorized)
+            {
+                <p class="muted-copy">Managing operational routing requires both user-administration and ledger-management authority.</p>
+            }
+            else
+            {
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>Workflow role</th><th>Current account</th><th>Replacement</th><th>Action</th></tr></thead>
+                        <tbody>
+                        @foreach (var role in AccountingAccountRoles.Roles)
+                        {
+                            <tr>
+                                <td><strong>@role.Name</strong><br /><small>@role.Description<br />Requires @(role.RequiresControlAccount ? "control" : "non-control") @role.RequiredAccountType.ToLowerInvariant() account.</small></td>
+                                <td>@(role.AccountId.HasValue ? $"{role.AccountNumber} — {role.AccountName}" : "Not configured")<br /><small>Balance @role.AccountBalance.ToString("N2")</small></td>
+                                <td>
+                                    <select class="field-input" aria-label="@($"Account for {role.Name}")" value="@OperationalAccountSelections.GetValueOrDefault(role.Code)" @onchange="args => SelectOperationalAccount(role.Code, args.Value)">
+                                        <option value="@Guid.Empty">Select an eligible account</option>
+                                        @foreach (var account in EligibleOperationalAccounts(role))
+                                        {
+                                            <option value="@account.AccountId">@account.Number — @account.Name (@account.Balance.ToString("N2"))</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td>
+                                    @if (PendingOperationalAccountRole == role.Code)
+                                    {
+                                        <button class="action-danger" type="button" @onclick="() => AssignOperationalAccountAsync(role, true)">Confirm routing change</button>
+                                        <button class="action-secondary" type="button" @onclick="CancelOperationalAccountAssignment">Cancel</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="action-secondary" type="button" disabled="@(OperationalAccountSelections.GetValueOrDefault(role.Code) == Guid.Empty || OperationalAccountSelections.GetValueOrDefault(role.Code) == role.AccountId)" @onclick="() => AssignOperationalAccountAsync(role, false)">Review change</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="panel">
             <h2>Accounting controls and audit trail</h2>
             <p class="page-intro">Close a period only after review. Every journal posting and period status change is retained as business audit evidence for the active company.</p>
             <EditForm Model="AccountingPeriodForm" OnValidSubmit="SaveAccountingPeriodAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Period starts</label><InputDate aria-label="Accounting period start" class="field-input" @bind-Value="AccountingPeriodForm.StartsOn" /></div><div class="field-group"><label class="field-label">Period ends</label><InputDate aria-label="Accounting period end" class="field-input" @bind-Value="AccountingPeriodForm.EndsOn" /></div><div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Accounting period notes" class="field-input" @bind-Value="AccountingPeriodForm.Notes" /></div></div><button class="action-secondary" type="submit">Save accounting period</button></EditForm>
@@ -458,6 +505,9 @@ else
     private IReadOnlyList<ConsolidationGroupSnapshot> ConsolidationGroups { get; set; } = [];
     private ConsolidatedBalanceReport? ConsolidatedBalance { get; set; }
     private AccountingControlsSnapshot AccountingControls { get; set; } = new([], []);
+    private AccountingAccountRoleWorkspace AccountingAccountRoles { get; set; } = new(false, [], []);
+    private Dictionary<string, Guid> OperationalAccountSelections { get; } = new(StringComparer.Ordinal);
+    private string? PendingOperationalAccountRole { get; set; }
     private AccountingPeriodEditor AccountingPeriodForm { get; set; } = new();
     private IntegrationConnectionEditor IntegrationForm { get; set; } = new();
     private QuickBooksConnectionEditor QuickBooksForm { get; set; } = new();
@@ -796,6 +846,41 @@ else
 
     private Task TogglePeriodStatusAsync(AccountingPeriodSnapshot period) => SetPeriodStatusAsync(period.Id, period.Status != "Closed");
 
+    private IReadOnlyList<AccountingAccountRoleCandidate> EligibleOperationalAccounts(AccountingAccountRoleSnapshot role) =>
+        AccountingAccountRoles.Accounts.Where(account =>
+            account.AccountType == role.RequiredAccountType
+            && account.IsControlAccount == role.RequiresControlAccount
+            && (string.IsNullOrWhiteSpace(account.AssignedRole) || account.AssignedRole == role.Code)).ToArray();
+
+    private void SelectOperationalAccount(string roleCode, object? value)
+    {
+        OperationalAccountSelections[roleCode] = Guid.TryParse(value?.ToString(), out var accountId) ? accountId : Guid.Empty;
+        PendingOperationalAccountRole = null;
+    }
+
+    private async Task AssignOperationalAccountAsync(AccountingAccountRoleSnapshot role, bool confirmed)
+    {
+        var accountId = OperationalAccountSelections.GetValueOrDefault(role.Code);
+        if (accountId == Guid.Empty) return;
+        if (!confirmed)
+        {
+            PendingOperationalAccountRole = role.Code;
+            StatusMessage = $"Confirm changing {role.Name}. Future workflow postings will use the selected account; existing journal entries are not rewritten.";
+            return;
+        }
+
+        var result = await AccountingAccountRoleService.AssignAsync(new(role.Code, accountId, role.AccountId, true));
+        StatusMessage = result.Succeeded ? $"{role.Name} routing changed. Existing journal entries were not modified." : result.ErrorMessage;
+        PendingOperationalAccountRole = null;
+        if (result.Succeeded) await ReloadOperationalAccountRolesAsync();
+    }
+
+    private void CancelOperationalAccountAssignment()
+    {
+        PendingOperationalAccountRole = null;
+        StatusMessage = "Operational account change cancelled.";
+    }
+
     private async Task SaveConsolidationGroupAsync()
     {
         var members = ConsolidationForm.MemberCompanyIds.Select(companyId => new ConsolidationMemberRequest(companyId, ConsolidationForm.OwnershipPercentages.GetValueOrDefault(companyId, 1m))).ToArray();
@@ -853,7 +938,15 @@ else
         Companies = await CompanyManagementService.GetMyCompaniesAsync();
         ConsolidationGroups = await ConsolidationService.GetGroupsAsync();
         AccountingControls = await AccountingPeriodService.GetSnapshotAsync();
+        await ReloadOperationalAccountRolesAsync();
         PermissionLabels = Snapshot.Permissions.ToDictionary(permission => permission.Code, permission => permission.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task ReloadOperationalAccountRolesAsync()
+    {
+        AccountingAccountRoles = await AccountingAccountRoleService.GetWorkspaceAsync();
+        OperationalAccountSelections.Clear();
+        foreach (var role in AccountingAccountRoles.Roles) OperationalAccountSelections[role.Code] = role.AccountId ?? Guid.Empty;
     }
 
     private sealed class CreateRoleForm

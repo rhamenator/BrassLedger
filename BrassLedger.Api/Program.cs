@@ -694,6 +694,17 @@ api.MapPut("/accounting-periods", async (SaveAccountingPeriodRequest request, IA
     var result = await service.SavePeriodAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["period"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 api.MapGet("/accounting-controls", async (int? auditEntryLimit, IAccountingPeriodService service, CancellationToken cancellationToken) => Results.Ok(await service.GetSnapshotAsync(auditEntryLimit ?? 100, cancellationToken))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+api.MapGet("/accounting/operational-account-roles", async (IAccountingAccountRoleService service, CancellationToken cancellationToken) =>
+{
+    var workspace = await service.GetWorkspaceAsync(cancellationToken);
+    return workspace.Authorized ? Results.Ok(workspace) : Results.Forbid();
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageUsers, BrassLedgerAuthorizationPolicies.ManageLedger);
+api.MapPut("/accounting/operational-account-roles", async (AssignAccountingAccountRoleRequest request, IAccountingAccountRoleService service, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!await HasValidAntiforgeryTokenAsync(antiforgery, context)) return Results.BadRequest(new { error = "invalid_antiforgery_token" });
+    var result = await service.AssignAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["operationalAccountRole"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageUsers, BrassLedgerAuthorizationPolicies.ManageLedger);
 api.MapPost("/accounting-periods/{periodId:guid}/status", async (Guid periodId, bool close, string? notes, IAccountingPeriodService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SetPeriodStatusAsync(periodId, close, notes ?? string.Empty, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["period"] = [result.ErrorMessage] });

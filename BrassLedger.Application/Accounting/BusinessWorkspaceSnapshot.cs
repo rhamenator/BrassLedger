@@ -56,7 +56,8 @@ public sealed record AccountSnapshot(
     string Name,
     string Type,
     decimal Balance,
-    bool IsControlAccount);
+    bool IsControlAccount,
+    string OperationalRole = "");
 
 public sealed record JournalEntrySnapshot(
     string EntryNumber,

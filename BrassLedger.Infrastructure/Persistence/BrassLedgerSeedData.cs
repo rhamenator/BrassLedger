@@ -289,7 +289,7 @@ internal static class BrassLedgerSeedData
         await dbContext.Users.AddAsync(adminUser, cancellationToken);
         var accounts = DefaultAccountingSetup.CreateAccounts(companyId);
         await dbContext.Accounts.AddRangeAsync(accounts, cancellationToken);
-        await dbContext.BankAccounts.AddAsync(DefaultAccountingSetup.CreateOperatingBankAccount(companyId, accounts.Single(account => account.Number == "1000").Id), cancellationToken);
+        await dbContext.BankAccounts.AddAsync(DefaultAccountingSetup.CreateOperatingBankAccount(companyId, accounts.Single(account => account.OperationalRole == AccountingAccountRoles.OperatingCash).Id), cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         await TaxAdministrationService.EnsureBaselineTaxRulesAsync(dbContext, companyId, cancellationToken);
     }

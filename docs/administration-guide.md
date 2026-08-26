@@ -76,6 +76,14 @@ Use these rules consistently:
 - `BrassLedger.Web/wwwroot` is the source location for committed static assets
 - `artifacts` is a publish output folder and should be disposable
 
+## Operational account routing
+
+Accounting workflows use company-scoped operational roles instead of reserved account numbers. Open **Administration → Operational account routing** to review the active account used for cash defaults, transfers, receivables, payables, inventory, deposits and advances, sales tax, payroll, equity, revenue, foreign-exchange gains or losses, and cost or payroll expense. An eligible account must be active, have the required account type, have the required control-account setting, and cannot serve a second operational role.
+
+Every change has a separate confirmation step, optimistic concurrency protection, and an immutable business-audit event. Existing journal entries are never rewritten. Receivables, payables, inventory, deposit, advance, transfer-clearing, sales-tax, and payroll-liability roles cannot be reassigned while the current or replacement account has a nonzero balance; subledger roles also check their open dependent records. Use an authorized transfer or adjustment workflow to clear and reconcile the old account first. Never change roles by editing the database directly.
+
+The equivalent API is `GET` and antiforgery-protected `PUT /api/accounting/operational-account-roles`. The caller needs both user-administration and ledger-management authority and must submit the displayed current account ID plus explicit confirmation. A stale request is rejected rather than overwriting a later administrator's choice.
+
 ## Database upgrades
 
 BrassLedger records every applied schema step in `BrassLedgerSchemaVersions`. A brand-new empty database is created from the current model and immediately receives the ordered baseline and subsequent version records. A database from a prerelease that predates the ledger traverses the legacy compatibility bridge exactly once, inside the baseline transaction, and is then governed by the same ordered migrations. Normal subsequent startup applies only missing versions; it does not replay the legacy compatibility script.
@@ -92,6 +100,8 @@ Before upgrading a production installation:
 6. Keep the pre-upgrade backup until business-owner reconciliation is complete.
 
 Schema version `2026082509-named-user-sessions` introduces mandatory durable session identifiers. Cookies issued by an older application version do not contain those identifiers and are intentionally rejected after the upgraded application starts; plan for every operator to sign in again.
+
+Schema version `2026082513-operational-account-roles` adds the nullable role column and a company-scoped unique index, then backfills the original starter chart by account number once. After that migration, account numbers are labels only: workflow routing follows the configured role.
 
 The automated infrastructure suite exercises fresh creation, pre-ledger adoption, an independently missing ordered migration, refusal of a future version, and business-data retention on SQLite. CI also provisions an isolated PostgreSQL database and runs the creation and incremental-migration scenario there. Maintainers can run the PostgreSQL test locally by setting `BRASSLEDGER_TEST_POSTGRES` to an isolated database whose name contains `brassledger_test`; the test deliberately recreates that database's `public` schema.
 

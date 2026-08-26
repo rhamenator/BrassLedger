@@ -905,6 +905,60 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task OperationalAccountRoleApi_RequiresCombinedAuthorityAntiforgeryConfirmationAndCurrentState()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        Guid replacementId;
+        Guid? expectedCurrentId;
+        await using (var setupScope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var dbFactory = setupScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var controllerRole = await db.AccessRoles.SingleAsync(role => role.Name == "Controller");
+            controllerRole.Permissions = string.Join('|', controllerRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Append(BrassLedgerPermissions.UserManage).Distinct(StringComparer.OrdinalIgnoreCase));
+            var companyId = await db.Companies.Select(company => company.Id).FirstAsync();
+            expectedCurrentId = await db.Accounts.Where(account => account.CompanyId == companyId && account.OperationalRole == AccountingAccountRoles.DefaultRevenue).Select(account => (Guid?)account.Id).SingleAsync();
+            replacementId = Guid.NewGuid();
+            db.Accounts.Add(new GeneralLedgerAccount { Id = replacementId, CompanyId = companyId, Number = "4998", Name = "API configured revenue", Type = AccountType.Revenue, IsActive = true });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var workspaceResponse = await client.GetAsync("/api/accounting/operational-account-roles");
+        Assert.Equal(HttpStatusCode.OK, workspaceResponse.StatusCode);
+        var workspace = await workspaceResponse.Content.ReadFromJsonAsync<AccountingAccountRoleWorkspace>();
+        Assert.True(workspace!.Authorized);
+        Assert.Equal(expectedCurrentId, Assert.Single(workspace.Roles, role => role.Code == AccountingAccountRoles.DefaultRevenue).AccountId);
+
+        var request = new AssignAccountingAccountRoleRequest(AccountingAccountRoles.DefaultRevenue, replacementId, expectedCurrentId, true);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync("/api/accounting/operational-account-roles", request)).StatusCode);
+        var antiforgery = await GetAntiforgeryTokenAsync(client);
+        using var unconfirmedRequest = new HttpRequestMessage(HttpMethod.Put, "/api/accounting/operational-account-roles")
+        {
+            Content = JsonContent.Create(request with { ConfirmAssignment = false })
+        };
+        unconfirmedRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(unconfirmedRequest)).StatusCode);
+        using var confirmedRequest = new HttpRequestMessage(HttpMethod.Put, "/api/accounting/operational-account-roles") { Content = JsonContent.Create(request) };
+        confirmedRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(confirmedRequest)).StatusCode);
+        using var staleRequest = new HttpRequestMessage(HttpMethod.Put, "/api/accounting/operational-account-roles") { Content = JsonContent.Create(request) };
+        staleRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(staleRequest)).StatusCode);
+
+        await using (var verifyScope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var dbFactory = verifyScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            Assert.Equal(AccountingAccountRoles.DefaultRevenue, (await db.Accounts.SingleAsync(account => account.Id == replacementId)).OperationalRole);
+            Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "accounting.operational_account_role_assigned" && audit.EntityId == replacementId);
+        }
+
+        using var operations = await CreateAuthenticatedClientAsync(isolatedFactory, "operations");
+        Assert.Equal(HttpStatusCode.Forbidden, (await operations.GetAsync("/api/accounting/operational-account-roles")).StatusCode);
+    }
+
+    [Fact]
     public async Task QuickBooksOAuthApi_RequiresAntiforgeryAndCompletesAuditedConnectionLifecycle()
     {
         using var isolatedFactory = new BrassLedgerApiFactory(configureSecurityEmail: false, configureQuickBooks: true);

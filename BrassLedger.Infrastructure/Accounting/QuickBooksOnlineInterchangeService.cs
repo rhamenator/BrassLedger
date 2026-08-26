@@ -86,8 +86,13 @@ public sealed class QuickBooksOnlineInterchangeService(
         db.AccountingInterchangeBatches.Add(batch);
         db.BusinessAuditEntries.Add(new BusinessAuditEntry
         {
-            Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = options.DryRun ? "accounting-interchange.quickbooks.validated" : "accounting-interchange.quickbooks.imported",
-            EntityType = nameof(AccountingInterchangeBatch), EntityId = batch.Id, OccurredAtUtc = batch.ProcessedAtUtc,
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            UserId = ResolveUserId(),
+            Action = options.DryRun ? "accounting-interchange.quickbooks.validated" : "accounting-interchange.quickbooks.imported",
+            EntityType = nameof(AccountingInterchangeBatch),
+            EntityId = batch.Id,
+            OccurredAtUtc = batch.ProcessedAtUtc,
             DetailJson = System.Text.Json.JsonSerializer.Serialize(new { provider = "quickbooks-online", entity = normalizedEntity, fileName = Path.GetFileName(options.FileName), contentSha256 = parsed.ContentSha256, rowCount = rows.Count, importedCount = result.ImportedCount, options.DryRun })
         });
         try { await db.SaveChangesAsync(cancellationToken); }
@@ -190,7 +195,8 @@ public sealed class QuickBooksOnlineInterchangeService(
     {
         var errors = new List<string>();
         var customers = await db.Customers.Where(customer => customer.CompanyId == companyId).Select(customer => new { customer.Id, customer.CustomerNumber, customer.Name }).ToListAsync(ct);
-        var revenueAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount && account.Type == AccountType.Revenue).Select(account => new { account.Number, account.Name }).ToListAsync(ct);
+        var revenueAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount && account.Type == AccountType.Revenue).Select(account => new { account.Number, account.Name, account.OperationalRole }).ToListAsync(ct);
+        var defaultRevenueAccount = revenueAccounts.SingleOrDefault(account => account.OperationalRole == AccountingAccountRoles.DefaultRevenue)?.Number ?? string.Empty;
         var imports = new Dictionary<string, (Guid CustomerId, DateOnly InvoiceDate, DateOnly DueDate, List<SalesInvoiceLineRequest> Lines)>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
         {
@@ -199,7 +205,7 @@ public sealed class QuickBooksOnlineInterchangeService(
             var customerReference = Value(row, "customer", "customer name");
             var customerMatches = customers.Where(customer => customer.CustomerNumber.Equals(customerReference, StringComparison.OrdinalIgnoreCase) || customer.Name.Equals(customerReference, StringComparison.OrdinalIgnoreCase)).ToArray();
             var accountReference = Value(row, "income account", "revenue account", "account");
-            if (string.IsNullOrWhiteSpace(accountReference)) accountReference = "4000";
+            if (string.IsNullOrWhiteSpace(accountReference)) accountReference = defaultRevenueAccount;
             var accountMatches = revenueAccounts.Where(account => account.Number.Equals(accountReference, StringComparison.OrdinalIgnoreCase) || account.Name.Equals(accountReference, StringComparison.OrdinalIgnoreCase)).ToArray();
             var amountText = Value(row, "item amount", "line amount", "amount");
             var taxText = Value(row, "tax amount", "line tax amount");
@@ -324,29 +330,29 @@ public sealed class QuickBooksOnlineInterchangeService(
     private static string EscapeCsv(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
     private static string ToQuickBooksType(GeneralLedgerAccount account) => account.Type switch
     {
-        AccountType.Asset when account.Number == "1100" => "Accounts Receivable",
+        AccountType.Asset when account.OperationalRole == AccountingAccountRoles.AccountsReceivable => "Accounts Receivable",
         AccountType.Asset when account.Name.Contains("inventory", StringComparison.OrdinalIgnoreCase) => "Other Current Asset",
         AccountType.Asset when account.Name.Contains("cash", StringComparison.OrdinalIgnoreCase) || account.Name.Contains("bank", StringComparison.OrdinalIgnoreCase) || account.Name.Contains("clearing", StringComparison.OrdinalIgnoreCase) => "Bank",
         AccountType.Asset => "Other Current Asset",
-        AccountType.Liability when account.Number == "2000" => "Accounts Payable",
+        AccountType.Liability when account.OperationalRole == AccountingAccountRoles.AccountsPayable => "Accounts Payable",
         AccountType.Liability => "Other Current Liability",
         AccountType.Equity => "Equity",
         AccountType.Revenue => "Income",
         _ => "Expense"
     };
 
-    private static string ToQuickBooksDetailType(GeneralLedgerAccount account) => account.Number switch
+    private static string ToQuickBooksDetailType(GeneralLedgerAccount account) => account.OperationalRole switch
     {
-        "1000" or "1010" => "Cash on hand",
-        "1100" => "Accounts Receivable",
-        "1200" => "Inventory",
-        "2000" => "Accounts Payable",
-        "2100" => "Sales tax payable",
-        "2200" => "Payroll tax payables",
-        "3000" => "Owner's equity",
-        "4000" => "Sales of Product Income",
-        "5100" => "Supplies & materials - COGS",
-        "6100" => "Payroll Expenses",
+        AccountingAccountRoles.OperatingCash or AccountingAccountRoles.PayrollClearing or AccountingAccountRoles.BankTransferClearing => "Cash on hand",
+        AccountingAccountRoles.AccountsReceivable => "Accounts Receivable",
+        AccountingAccountRoles.InventoryAsset => "Inventory",
+        AccountingAccountRoles.AccountsPayable => "Accounts Payable",
+        AccountingAccountRoles.SalesTaxPayable => "Sales tax payable",
+        AccountingAccountRoles.PayrollLiabilities => "Payroll tax payables",
+        AccountingAccountRoles.OwnerEquity => "Owner's equity",
+        AccountingAccountRoles.DefaultRevenue => "Sales of Product Income",
+        AccountingAccountRoles.CostOfGoodsSold => "Supplies & materials - COGS",
+        AccountingAccountRoles.PayrollExpense => "Payroll Expenses",
         _ => account.Type.ToString()
     };
     private static bool TryParseAccountType(string value, out AccountType type)
@@ -419,8 +425,13 @@ public sealed class QuickBooksOnlineInterchangeService(
         db.AccountingInterchangeBatches.Add(batch);
         db.BusinessAuditEntries.Add(new BusinessAuditEntry
         {
-            Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = duplicateCount > 0 ? "accounting-interchange.quickbooks.duplicate-rejected" : "accounting-interchange.quickbooks.rejected",
-            EntityType = nameof(AccountingInterchangeBatch), EntityId = batch.Id, OccurredAtUtc = batch.ProcessedAtUtc,
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            UserId = ResolveUserId(),
+            Action = duplicateCount > 0 ? "accounting-interchange.quickbooks.duplicate-rejected" : "accounting-interchange.quickbooks.rejected",
+            EntityType = nameof(AccountingInterchangeBatch),
+            EntityId = batch.Id,
+            OccurredAtUtc = batch.ProcessedAtUtc,
             DetailJson = System.Text.Json.JsonSerializer.Serialize(new { provider = "quickbooks-online", entity = entityType, batch.FileName, batch.ContentSha256, batch.RowCount, batch.DuplicateCount, batch.RejectedCount, errors, options.DryRun })
         });
         await db.SaveChangesAsync(cancellationToken);
@@ -429,9 +440,22 @@ public sealed class QuickBooksOnlineInterchangeService(
 
     private AccountingInterchangeBatch NewBatch(Guid companyId, string entityType, AccountingInterchangeImportOptions options, string contentSha256, string status, int rowCount, int importedCount, IReadOnlyList<string> errors, string? committedImportKey, int duplicateCount = 0) => new()
     {
-        Id = Guid.NewGuid(), CompanyId = companyId, ProviderCode = "quickbooks-online", EntityType = entityType, FileName = Path.GetFileName(options.FileName), ContentSha256 = contentSha256,
-        CommittedImportKey = committedImportKey, Status = status, IsDryRun = options.DryRun, RowCount = rowCount, ImportedCount = importedCount, DuplicateCount = duplicateCount,
-        RejectedCount = errors.Count == 0 ? 0 : Math.Max(1, rowCount), RejectionJson = System.Text.Json.JsonSerializer.Serialize(errors), ProcessedByUserId = ResolveUserId(), ProcessedAtUtc = DateTimeOffset.UtcNow
+        Id = Guid.NewGuid(),
+        CompanyId = companyId,
+        ProviderCode = "quickbooks-online",
+        EntityType = entityType,
+        FileName = Path.GetFileName(options.FileName),
+        ContentSha256 = contentSha256,
+        CommittedImportKey = committedImportKey,
+        Status = status,
+        IsDryRun = options.DryRun,
+        RowCount = rowCount,
+        ImportedCount = importedCount,
+        DuplicateCount = duplicateCount,
+        RejectedCount = errors.Count == 0 ? 0 : Math.Max(1, rowCount),
+        RejectionJson = System.Text.Json.JsonSerializer.Serialize(errors),
+        ProcessedByUserId = ResolveUserId(),
+        ProcessedAtUtc = DateTimeOffset.UtcNow
     };
 
     private static string BuildCommittedImportKey(string entityType, string contentSha256) => $"quickbooks-online:{entityType}:{contentSha256}";

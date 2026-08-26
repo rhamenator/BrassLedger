@@ -34,8 +34,9 @@ public static class ServiceCollectionExtensions
     internal const string NamedUserSessionSchemaVersion = "2026082509-named-user-sessions";
     internal const string QuickBooksOAuthSchemaVersion = "2026082510-quickbooks-oauth-connections";
     internal const string ExternalEntitySyncSchemaVersion = "2026082511-external-entity-sync";
-    internal const string CurrentSchemaVersion = "2026082512-quickbooks-credential-operation-leases";
-    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, SecurityEmailActionValiditySchemaVersion, NamedUserSessionSchemaVersion, QuickBooksOAuthSchemaVersion, ExternalEntitySyncSchemaVersion, CurrentSchemaVersion];
+    internal const string QuickBooksCredentialOperationLeaseSchemaVersion = "2026082512-quickbooks-credential-operation-leases";
+    internal const string CurrentSchemaVersion = "2026082513-operational-account-roles";
+    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, SecurityEmailActionValiditySchemaVersion, NamedUserSessionSchemaVersion, QuickBooksOAuthSchemaVersion, ExternalEntitySyncSchemaVersion, QuickBooksCredentialOperationLeaseSchemaVersion, CurrentSchemaVersion];
 
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
@@ -126,6 +127,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICompanyManagementService, CompanyManagementService>();
         services.AddScoped<IConsolidationService, ConsolidationService>();
         services.AddScoped<IAccountingPeriodService, AccountingPeriodService>();
+        services.AddScoped<IAccountingAccountRoleService, AccountingAccountRoleService>();
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IIntegrationService, IntegrationService>();
         services.AddSingleton<IQuickBooksOnlineClient, QuickBooksOnlineClient>();
@@ -307,8 +309,10 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {QuickBooksOAuthSchemaVersion} is recorded without prerequisite {NamedUserSessionSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (applied.Contains(ExternalEntitySyncSchemaVersion) && !applied.Contains(QuickBooksOAuthSchemaVersion))
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {ExternalEntitySyncSchemaVersion} is recorded without prerequisite {QuickBooksOAuthSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
-        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(ExternalEntitySyncSchemaVersion))
-            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {ExternalEntitySyncSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(QuickBooksCredentialOperationLeaseSchemaVersion) && !applied.Contains(ExternalEntitySyncSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {QuickBooksCredentialOperationLeaseSchemaVersion} is recorded without prerequisite {ExternalEntitySyncSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(QuickBooksCredentialOperationLeaseSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {QuickBooksCredentialOperationLeaseSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (!applied.Contains(BaselineSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
             {
@@ -348,8 +352,11 @@ public static class ServiceCollectionExtensions
         if (!applied.Contains(ExternalEntitySyncSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, ExternalEntitySyncSchemaVersion, "Added durable external-entity links and auditable dry-run or committed synchronization history.", () => EnsureExternalEntitySyncSchemaAsync(dbContext, cancellationToken), cancellationToken);
 
+        if (!applied.Contains(QuickBooksCredentialOperationLeaseSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, QuickBooksCredentialOperationLeaseSchemaVersion, "Added expiring distributed leases for QuickBooks credential-mutating operations.", () => EnsureQuickBooksCredentialOperationLeaseSchemaAsync(dbContext, cancellationToken), cancellationToken);
+
         if (!applied.Contains(CurrentSchemaVersion))
-            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added expiring distributed leases for QuickBooks credential-mutating operations.", () => EnsureQuickBooksCredentialOperationLeaseSchemaAsync(dbContext, cancellationToken), cancellationToken);
+            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added company-scoped operational account roles for configurable accounting routing.", () => EnsureOperationalAccountRoleSchemaAsync(dbContext, cancellationToken), cancellationToken);
     }
 
     private static async Task ApplySchemaVersionAsync(BrassLedgerDbContext dbContext, string version, string description, Func<Task> apply, CancellationToken cancellationToken)
@@ -585,6 +592,100 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "IntegrationConnections" ADD COLUMN IF NOT EXISTS "CredentialOperationLeaseId" text NOT NULL DEFAULT '';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "IntegrationConnections" ADD COLUMN IF NOT EXISTS "CredentialOperation" text NOT NULL DEFAULT '';""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "IntegrationConnections" ADD COLUMN IF NOT EXISTS "CredentialOperationLeaseExpiresAtUtc" timestamptz NULL;""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureOperationalAccountRoleSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await EnsureSqliteColumnAsync(dbContext, "Accounts", "OperationalRole", "ALTER TABLE \"Accounts\" ADD COLUMN \"OperationalRole\" TEXT NULL;", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""
+                UPDATE "Accounts" AS target
+                SET "OperationalRole" = CASE "Number"
+                    WHEN '1000' THEN 'OperatingCash'
+                    WHEN '1010' THEN 'PayrollClearing'
+                    WHEN '1050' THEN 'BankTransferClearing'
+                    WHEN '1100' THEN 'AccountsReceivable'
+                    WHEN '1200' THEN 'InventoryAsset'
+                    WHEN '1300' THEN 'VendorAdvances'
+                    WHEN '2000' THEN 'AccountsPayable'
+                    WHEN '2100' THEN 'SalesTaxPayable'
+                    WHEN '2150' THEN 'CustomerDeposits'
+                    WHEN '2200' THEN 'PayrollLiabilities'
+                    WHEN '3000' THEN 'OwnerEquity'
+                    WHEN '4000' THEN 'DefaultRevenue'
+                    WHEN '4300' THEN 'ForeignExchangeGain'
+                    WHEN '5100' THEN 'CostOfGoodsSold'
+                    WHEN '6100' THEN 'PayrollExpense'
+                    WHEN '6300' THEN 'ForeignExchangeLoss'
+                    ELSE NULL END
+                WHERE "OperationalRole" IS NULL
+                  AND "Number" IN ('1000','1010','1050','1100','1200','1300','2000','2100','2150','2200','3000','4000','4300','5100','6100','6300')
+                  AND (("Number" IN ('1000','1010','1050') AND "Type" = 'Asset' AND "IsControlAccount" = 0)
+                    OR ("Number" IN ('1100','1200','1300') AND "Type" = 'Asset' AND "IsControlAccount" = 1)
+                    OR ("Number" IN ('2000','2100','2150','2200') AND "Type" = 'Liability' AND "IsControlAccount" = 1)
+                    OR ("Number" = '3000' AND "Type" = 'Equity' AND "IsControlAccount" = 0)
+                    OR ("Number" IN ('4000','4300') AND "Type" = 'Revenue' AND "IsControlAccount" = 0)
+                    OR ("Number" IN ('5100','6100','6300') AND "Type" = 'Expense' AND "IsControlAccount" = 0))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM "Accounts" AS existing
+                      WHERE existing."CompanyId" = target."CompanyId"
+                        AND existing."OperationalRole" = CASE target."Number"
+                            WHEN '1000' THEN 'OperatingCash' WHEN '1010' THEN 'PayrollClearing' WHEN '1050' THEN 'BankTransferClearing'
+                            WHEN '1100' THEN 'AccountsReceivable' WHEN '1200' THEN 'InventoryAsset' WHEN '1300' THEN 'VendorAdvances'
+                            WHEN '2000' THEN 'AccountsPayable' WHEN '2100' THEN 'SalesTaxPayable' WHEN '2150' THEN 'CustomerDeposits'
+                            WHEN '2200' THEN 'PayrollLiabilities' WHEN '3000' THEN 'OwnerEquity' WHEN '4000' THEN 'DefaultRevenue'
+                            WHEN '4300' THEN 'ForeignExchangeGain' WHEN '5100' THEN 'CostOfGoodsSold' WHEN '6100' THEN 'PayrollExpense'
+                            WHEN '6300' THEN 'ForeignExchangeLoss' ELSE NULL END);
+                """, cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_Accounts_CompanyId_OperationalRole" ON "Accounts" ("CompanyId", "OperationalRole");""", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "Accounts" ADD COLUMN IF NOT EXISTS "OperationalRole" text NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""
+                UPDATE "Accounts" AS target
+                SET "OperationalRole" = CASE "Number"
+                    WHEN '1000' THEN 'OperatingCash'
+                    WHEN '1010' THEN 'PayrollClearing'
+                    WHEN '1050' THEN 'BankTransferClearing'
+                    WHEN '1100' THEN 'AccountsReceivable'
+                    WHEN '1200' THEN 'InventoryAsset'
+                    WHEN '1300' THEN 'VendorAdvances'
+                    WHEN '2000' THEN 'AccountsPayable'
+                    WHEN '2100' THEN 'SalesTaxPayable'
+                    WHEN '2150' THEN 'CustomerDeposits'
+                    WHEN '2200' THEN 'PayrollLiabilities'
+                    WHEN '3000' THEN 'OwnerEquity'
+                    WHEN '4000' THEN 'DefaultRevenue'
+                    WHEN '4300' THEN 'ForeignExchangeGain'
+                    WHEN '5100' THEN 'CostOfGoodsSold'
+                    WHEN '6100' THEN 'PayrollExpense'
+                    WHEN '6300' THEN 'ForeignExchangeLoss'
+                    ELSE NULL END
+                WHERE "OperationalRole" IS NULL
+                  AND "Number" IN ('1000','1010','1050','1100','1200','1300','2000','2100','2150','2200','3000','4000','4300','5100','6100','6300')
+                  AND (("Number" IN ('1000','1010','1050') AND "Type" = 'Asset' AND "IsControlAccount" = false)
+                    OR ("Number" IN ('1100','1200','1300') AND "Type" = 'Asset' AND "IsControlAccount" = true)
+                    OR ("Number" IN ('2000','2100','2150','2200') AND "Type" = 'Liability' AND "IsControlAccount" = true)
+                    OR ("Number" = '3000' AND "Type" = 'Equity' AND "IsControlAccount" = false)
+                    OR ("Number" IN ('4000','4300') AND "Type" = 'Revenue' AND "IsControlAccount" = false)
+                    OR ("Number" IN ('5100','6100','6300') AND "Type" = 'Expense' AND "IsControlAccount" = false))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM "Accounts" AS existing
+                      WHERE existing."CompanyId" = target."CompanyId"
+                        AND existing."OperationalRole" = CASE target."Number"
+                            WHEN '1000' THEN 'OperatingCash' WHEN '1010' THEN 'PayrollClearing' WHEN '1050' THEN 'BankTransferClearing'
+                            WHEN '1100' THEN 'AccountsReceivable' WHEN '1200' THEN 'InventoryAsset' WHEN '1300' THEN 'VendorAdvances'
+                            WHEN '2000' THEN 'AccountsPayable' WHEN '2100' THEN 'SalesTaxPayable' WHEN '2150' THEN 'CustomerDeposits'
+                            WHEN '2200' THEN 'PayrollLiabilities' WHEN '3000' THEN 'OwnerEquity' WHEN '4000' THEN 'DefaultRevenue'
+                            WHEN '4300' THEN 'ForeignExchangeGain' WHEN '5100' THEN 'CostOfGoodsSold' WHEN '6100' THEN 'PayrollExpense'
+                            WHEN '6300' THEN 'ForeignExchangeLoss' ELSE NULL END);
+                """, cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_Accounts_CompanyId_OperationalRole" ON "Accounts" ("CompanyId", "OperationalRole");""", cancellationToken);
         }
     }
 

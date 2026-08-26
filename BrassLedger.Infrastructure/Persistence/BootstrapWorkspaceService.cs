@@ -82,7 +82,7 @@ public sealed class BootstrapWorkspaceService(
         await dbContext.CompanyMemberships.AddAsync(new CompanyMembership { Id = Guid.NewGuid(), UserId = adminUser.Id, CompanyId = companyId, Role = adminRole.Name, IsOwner = true, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow }, cancellationToken);
         var accounts = DefaultAccountingSetup.CreateAccounts(companyId);
         await dbContext.Accounts.AddRangeAsync(accounts, cancellationToken);
-        await dbContext.BankAccounts.AddAsync(DefaultAccountingSetup.CreateOperatingBankAccount(companyId, accounts.Single(account => account.Number == "1000").Id), cancellationToken);
+        await dbContext.BankAccounts.AddAsync(DefaultAccountingSetup.CreateOperatingBankAccount(companyId, accounts.Single(account => account.OperationalRole == AccountingAccountRoles.OperatingCash).Id), cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return BootstrapWorkspaceResult.Created(new AuthenticatedUser(

@@ -212,28 +212,29 @@ else
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        SetInvoiceDefaults();
         SyncPaymentApplications();
     }
 
     private async Task SaveInvoiceDraftAsync()
     {
         var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount)).ToArray();
-        var result = await TransactionService.SaveInvoiceDraftAsync(new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? "4000", $"Invoice {InvoiceForm.Number}", lines));
+        var result = await TransactionService.SaveInvoiceDraftAsync(new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? DefaultRevenueAccountNumber, $"Invoice {InvoiceForm.Number}", lines));
         StatusMessage = result.Succeeded ? "Invoice draft saved." : result.ErrorMessage;
         if (result.Succeeded)
         {
             Workspace = await WorkspaceService.GetWorkspaceAsync();
-            InvoiceForm.Reset();
+            InvoiceForm.Reset(DefaultRevenueAccountNumber);
             SyncPaymentApplications();
         }
     }
 
-    private async Task SaveRecurringInvoiceTemplateAsync() { var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount)).ToArray(); var request = new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? "4000", $"Recurring invoice {InvoiceForm.Number}", lines); var result = await TransactionService.SaveRecurringInvoiceTemplateAsync(new SaveRecurringInvoiceTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring invoice template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); InvoiceForm.Reset(); } }
+    private async Task SaveRecurringInvoiceTemplateAsync() { var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount)).ToArray(); var request = new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? DefaultRevenueAccountNumber, $"Recurring invoice {InvoiceForm.Number}", lines); var result = await TransactionService.SaveRecurringInvoiceTemplateAsync(new SaveRecurringInvoiceTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring invoice template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); InvoiceForm.Reset(DefaultRevenueAccountNumber); } }
     private async Task GenerateRecurringDraftsAsync() { var result = await TransactionService.GenerateDueRecurringDocumentsAsync(RecurringForm.GenerateThrough); StatusMessage = result.Succeeded ? "Due recurring drafts generated." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task ApproveWorkflowAsync(Guid id) { var result = await TransactionService.ApproveSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Invoice draft approved." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task PostWorkflowAsync(Guid id) { var result = await TransactionService.PostApprovedSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Approved invoice posted." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); SyncPaymentApplications(); }
 
-    private void AddInvoiceLine() => InvoiceForm.Lines.Add(new InvoiceLineEditor());
+    private void AddInvoiceLine() => InvoiceForm.Lines.Add(new InvoiceLineEditor { RevenueAccount = DefaultRevenueAccountNumber });
     private void RemoveInvoiceLine(InvoiceLineEditor line) { if (InvoiceForm.Lines.Count > 1) InvoiceForm.Lines.Remove(line); }
 
     private async Task ApplyPaymentAsync()
@@ -263,6 +264,14 @@ else
         PaymentForm.Applications.AddRange(Workspace.Receivables.Invoices.Where(invoice => invoice.BalanceDue > 0).Select(invoice => new PaymentApplicationEditor(invoice.Id, invoice.CustomerId, invoice.InvoiceNumber, invoice.DueDate, invoice.BalanceDue)));
     }
 
+    private string DefaultRevenueAccountNumber => Workspace?.GeneralLedger.Accounts.SingleOrDefault(account => account.OperationalRole == BrassLedger.Domain.Accounting.AccountingAccountRoles.DefaultRevenue)?.Number ?? string.Empty;
+
+    private void SetInvoiceDefaults()
+    {
+        foreach (var line in InvoiceForm.Lines.Where(line => string.IsNullOrWhiteSpace(line.RevenueAccount))) line.RevenueAccount = DefaultRevenueAccountNumber;
+        if (string.IsNullOrWhiteSpace(AdjustmentForm.OffsetAccount)) AdjustmentForm.OffsetAccount = DefaultRevenueAccountNumber;
+    }
+
     private sealed class InvoiceEditor
     {
         public Guid CustomerId { get; set; }
@@ -271,7 +280,7 @@ else
         public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30));
         public List<InvoiceLineEditor> Lines { get; } = [new()];
         public decimal Total => Lines.Sum(line => line.Total);
-        public void Reset() { Number = string.Empty; Lines.Clear(); Lines.Add(new InvoiceLineEditor()); }
+        public void Reset(string defaultRevenueAccount) { Number = string.Empty; Lines.Clear(); Lines.Add(new InvoiceLineEditor { RevenueAccount = defaultRevenueAccount }); }
     }
     private sealed class InvoiceLineEditor
     {
@@ -280,7 +289,7 @@ else
         public decimal UnitPrice { get; set; }
         public decimal Discount { get; set; }
         public decimal Tax { get; set; }
-        public string RevenueAccount { get; set; } = "4000";
+        public string RevenueAccount { get; set; } = string.Empty;
         public decimal Total => decimal.Round(Quantity * UnitPrice - Discount + Tax, 2, MidpointRounding.AwayFromZero);
     }
     private sealed class PaymentEditor
@@ -301,7 +310,7 @@ else
         public Guid DocumentId { get; } = documentId; public Guid CounterpartyId { get; } = counterpartyId; public string DocumentNumber { get; } = documentNumber; public DateOnly DueDate { get; } = dueDate; public decimal OpenBalance { get; } = openBalance; public bool Selected { get; set; } public decimal Amount { get; set; } = openBalance;
     }
     private sealed class PaymentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Kind { get; set; } = "Returned"; public string Reason { get; set; } = string.Empty; }
-    private sealed class CustomerAdjustmentEditor { public Guid InvoiceId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; public string OffsetAccount { get; set; } = "4000"; public string Reason { get; set; } = string.Empty; public string Kind { get; set; } = "CreditMemo"; public void Reset() { InvoiceId = Guid.Empty; Amount = 0; Reference = string.Empty; Reason = string.Empty; } }
+    private sealed class CustomerAdjustmentEditor { public Guid InvoiceId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; public string OffsetAccount { get; set; } = string.Empty; public string Reason { get; set; } = string.Empty; public string Kind { get; set; } = "CreditMemo"; public void Reset() { InvoiceId = Guid.Empty; Amount = 0; Reference = string.Empty; Reason = string.Empty; } }
     private sealed class RefundEditor { public Guid PaymentId { get; set; } public Guid BankId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; public string Reason { get; set; } = string.Empty; public void Reset() { PaymentId = Guid.Empty; Amount = 0; Reference = string.Empty; Reason = string.Empty; } }
     private sealed class VoidEditor { public Guid DocumentId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; public void Reset() { DocumentId = Guid.Empty; Reason = string.Empty; } }
     private sealed class AdjustmentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; }

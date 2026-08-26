@@ -153,7 +153,7 @@ public sealed class BusinessWorkspaceService(
                 Equity: SumByType(accounts, AccountType.Equity),
                 Revenue: SumByType(accounts, AccountType.Revenue),
                 Expenses: SumByType(accounts, AccountType.Expense),
-                Accounts: accounts.Select(x => new AccountSnapshot(x.Number, x.Name, x.Type.ToString(), x.CurrentBalance, x.IsControlAccount)).ToArray(),
+                Accounts: accounts.Select(x => new AccountSnapshot(x.Number, x.Name, x.Type.ToString(), x.CurrentBalance, x.IsControlAccount, x.OperationalRole ?? string.Empty)).ToArray(),
                 RecentEntries: journalEntries.Select(x => new JournalEntrySnapshot(x.EntryNumber, x.PostedOn, x.SourceModule, x.Description, x.TotalAmount, x.Id, x.Reference, x.Status, x.ReversalOfJournalEntryId, x.ReversedByJournalEntryId)).ToArray()),
             Receivables: new ReceivablesWorkspace(
                 OpenBalance: invoices.Sum(x => x.BalanceDue),

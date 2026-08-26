@@ -24,7 +24,7 @@ public sealed class CompanyManagementService(IDbContextFactory<BrassLedgerDbCont
         await SecurityAdministrationService.EnsureBuiltInRolesAsync(db, company.Id, cancellationToken);
         var adminRole = await db.AccessRoles.SingleAsync(role => role.CompanyId == company.Id && role.Name == "Administrator", cancellationToken);
         db.CompanyMemberships.Add(new CompanyMembership { Id = Guid.NewGuid(), UserId = userId.Value, CompanyId = company.Id, Role = adminRole.Name, IsOwner = true, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
-        var accounts = DefaultAccountingSetup.CreateAccounts(company.Id); db.Accounts.AddRange(accounts); db.BankAccounts.Add(DefaultAccountingSetup.CreateOperatingBankAccount(company.Id, accounts.Single(account => account.Number == "1000").Id));
+        var accounts = DefaultAccountingSetup.CreateAccounts(company.Id); db.Accounts.AddRange(accounts); db.BankAccounts.Add(DefaultAccountingSetup.CreateOperatingBankAccount(company.Id, accounts.Single(account => account.OperationalRole == AccountingAccountRoles.OperatingCash).Id));
         await db.SaveChangesAsync(cancellationToken); return CompanyManagementResult.Success(company.Id);
     }
 

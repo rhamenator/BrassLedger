@@ -299,6 +299,7 @@ public sealed class GeneralLedgerAccount
     public decimal CurrentBalance { get; set; }
     public bool IsControlAccount { get; set; }
     public bool IsActive { get; set; }
+    public string? OperationalRole { get; set; }
 }
 
 public sealed class JournalEntry
@@ -897,7 +898,7 @@ public sealed class PayrollDeductionPlan
     public bool ExemptFromFica { get; set; }
     public bool ExemptFromFuta { get; set; }
     public bool ReducesDisposableEarnings { get; set; }
-    public string LiabilityAccountNumber { get; set; } = "2200";
+    public string LiabilityAccountNumber { get; set; } = string.Empty;
     public int Priority { get; set; } = 100;
     public decimal? EmployeeLimitPerPay { get; set; }
     public decimal? EmployeeAnnualLimit { get; set; }
@@ -988,7 +989,7 @@ public sealed class PayrollDeductionLine
     public bool ExemptFromFederalIncomeTax { get; set; }
     public bool ExemptFromFica { get; set; }
     public bool ExemptFromFuta { get; set; }
-    public string LiabilityAccountNumber { get; set; } = "2200";
+    public string LiabilityAccountNumber { get; set; } = string.Empty;
     public bool LimitApplied { get; set; }
     public string LimitRuleCode { get; set; } = "None";
     public string CalculationTraceJson { get; set; } = "{}";
@@ -1026,7 +1027,7 @@ public sealed class PayrollLiability
     public string JurisdictionCode { get; set; } = string.Empty;
     public string JurisdictionName { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public string LiabilityAccountNumber { get; set; } = "2200";
+    public string LiabilityAccountNumber { get; set; } = string.Empty;
     public decimal OriginalAmount { get; set; }
     public decimal OutstandingAmount { get; set; }
     public string Status { get; set; } = "Open";
