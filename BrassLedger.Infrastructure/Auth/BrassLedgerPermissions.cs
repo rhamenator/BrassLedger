@@ -28,6 +28,7 @@ public static class BrassLedgerPermissions
     public const string ProjectsManage = "projects.manage";
     public const string ProjectChangeOrderPrepare = "projects.change-orders.prepare";
     public const string ProjectChangeOrderApprove = "projects.change-orders.approve";
+    public const string ProjectBillingPrepare = "projects.billing.prepare";
     public const string ReportingManage = "reporting.manage";
     public const string TaxManage = "tax.manage";
     public const string PublishManage = "publish.manage";
@@ -62,6 +63,7 @@ public static class BrassLedgerPermissions
         new(ProjectsManage, "Projects", "Review and manage project accounting."),
         new(ProjectChangeOrderPrepare, "Project change-order preparation", "Prepare, correct, submit, and cancel project change orders."),
         new(ProjectChangeOrderApprove, "Project change-order approval", "Approve or reject independently prepared project change orders."),
+        new(ProjectBillingPrepare, "Project billing preparation", "Maintain billing rates and prepare, correct, or cancel source-derived project billing proposals."),
         new(ReportingManage, "Reporting", "Run operational reports, forms, and labels."),
         new(TaxManage, "Taxes", "Maintain tax profiles and tax-facing workflows."),
         new(PublishManage, "Publishing", "Prepare packaged outputs and release artifacts."),

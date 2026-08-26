@@ -41,8 +41,13 @@ public sealed partial class AccountingTransactionService
             if (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(job.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The project changed after it was displayed. Refresh before saving it.");
             var contractChanged = RoundCurrency(request.ContractAmount) != job.ContractAmount;
             var budgetChanged = RoundCurrency(request.BudgetAmount) != job.BudgetAmount;
+            var billingTermsChanged = request.CustomerId != job.CustomerId
+                || !string.Equals(billingMethod, job.BillingMethod, StringComparison.Ordinal)
+                || request.RetainagePercent != job.RetainagePercent;
             if ((contractChanged || budgetChanged) && (await db.ProjectChangeOrders.AnyAsync(change => change.ProjectJobId == job.Id, cancellationToken) || await HasProjectScopeActivityAsync(db, job.Id, cancellationToken)))
                 return TransactionResult.Failure("Use a controlled project change order to revise contract or budget amounts after project activity begins.");
+            if (billingTermsChanged && await db.ProjectBillingProposals.AnyAsync(proposal => proposal.ProjectJobId == job.Id, cancellationToken))
+                return TransactionResult.Failure("Customer, billing method, and retainage cannot be changed after project billing history exists. Create a new project or use the applicable controlled billing workflow.");
             prior = new { job.JobNumber, job.Name, job.CustomerId, job.CustomerName, job.StartDate, job.ExpectedEndDate, job.BillingMethod, job.ContractAmount, job.BudgetAmount, job.RetainagePercent, job.Status };
         }
         else
@@ -290,6 +295,7 @@ public sealed partial class AccountingTransactionService
     private static async Task<bool> HasOpenProjectActivityAsync(BrassLedgerDbContext db, Guid companyId, Guid projectJobId, CancellationToken cancellationToken)
     {
         if (await db.ProjectChangeOrders.AnyAsync(changeOrder => changeOrder.CompanyId == companyId && changeOrder.ProjectJobId == projectJobId && changeOrder.Status != "Approved" && changeOrder.Status != "Cancelled", cancellationToken)) return true;
+        if (await db.ProjectBillingProposals.AnyAsync(proposal => proposal.CompanyId == companyId && proposal.ProjectJobId == projectJobId && proposal.Status != "Posted" && proposal.Status != "Cancelled" && proposal.Status != "Voided", cancellationToken)) return true;
         if (await db.JournalEntryLines.Where(line => line.ProjectJobId == projectJobId).Join(db.JournalEntries.Where(entry => entry.CompanyId == companyId && !entry.IsPosted && entry.Status != "Cancelled"), line => line.JournalEntryId, entry => entry.Id, (_, _) => true).AnyAsync(cancellationToken)) return true;
         if (await db.SalesQuoteLines.Where(line => line.ProjectJobId == projectJobId).Join(db.SalesQuotes.Where(quote => quote.CompanyId == companyId && (quote.Status == "Draft" || quote.Status == "Approved")), line => line.SalesQuoteId, quote => quote.Id, (_, _) => true).AnyAsync(cancellationToken)) return true;
         if (await db.SalesOrderLines.Where(line => line.ProjectJobId == projectJobId).Join(db.SalesOrders.Where(order => order.CompanyId == companyId && order.Status != "Closed" && order.Status != "Cancelled"), line => line.SalesOrderId, order => order.Id, (_, _) => true).AnyAsync(cancellationToken)) return true;
@@ -312,6 +318,7 @@ public sealed partial class AccountingTransactionService
         if (await db.PurchaseRequisitionLines.AnyAsync(line => line.ProjectJobId == projectJobId, cancellationToken)) return true;
         if (await db.PurchaseOrderLines.AnyAsync(line => line.ProjectJobId == projectJobId, cancellationToken)) return true;
         if (await db.PayrollTimeEntries.AnyAsync(line => line.ProjectJobId == projectJobId, cancellationToken)) return true;
+        if (await db.ProjectBillingProposals.AnyAsync(proposal => proposal.ProjectJobId == projectJobId, cancellationToken)) return true;
         return await db.PayrollEarningLines.AnyAsync(line => line.ProjectJobId == projectJobId, cancellationToken);
     }
 

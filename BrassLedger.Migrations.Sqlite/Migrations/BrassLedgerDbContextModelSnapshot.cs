@@ -5505,6 +5505,313 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("PayrollTimecards");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("GrossAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("InvoiceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("MarkupAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectBillingProposalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("RetainageAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RevenueAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("SourceCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectBillingProposalId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("ProjectBillingLines");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingProposal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BillingBasis")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("BillingThrough")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CancellationReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CancelledByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ContractAmountSnapshot")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("CostMarkupPercent")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("DueDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("GrossAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("InvoiceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("InvoiceDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InvoiceNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PreparedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PreparedProjectConcurrencyToken")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PreviewFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ProgressPercentToDate")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("RetainageAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("RetainagePercentSnapshot")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RetainageReleaseOfProposalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RevenueAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SubledgerDocumentWorkflowId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("ProjectJobId");
+
+                    b.HasIndex("RetainageReleaseOfProposalId");
+
+                    b.HasIndex("SubledgerDocumentWorkflowId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "InvoiceNumber")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "ProjectJobId", "Status", "BillingThrough");
+
+                    b.ToTable("ProjectBillingProposals");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingRate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EarningCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("EffectiveOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("EffectiveThrough")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("HourlyRate")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ProjectJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectJobId");
+
+                    b.HasIndex("CompanyId", "ProjectJobId", "EarningCode", "EffectiveOn")
+                        .IsUnique();
+
+                    b.ToTable("ProjectBillingRates");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingSourceReservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectBillingProposalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectBillingProposalId");
+
+                    b.HasIndex("ProjectJobId");
+
+                    b.HasIndex("CompanyId", "SourceKey")
+                        .IsUnique();
+
+                    b.ToTable("ProjectBillingSourceReservations");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectChangeOrder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9237,6 +9544,65 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .WithMany()
                         .HasForeignKey("PayrollRunId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingLine", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectBillingProposal", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectBillingProposalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingProposal", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectBillingProposal", null)
+                        .WithMany()
+                        .HasForeignKey("RetainageReleaseOfProposalId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.SubledgerDocumentWorkflow", null)
+                        .WithMany()
+                        .HasForeignKey("SubledgerDocumentWorkflowId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingRate", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingSourceReservation", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectBillingProposal", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectBillingProposalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectChangeOrder", b =>

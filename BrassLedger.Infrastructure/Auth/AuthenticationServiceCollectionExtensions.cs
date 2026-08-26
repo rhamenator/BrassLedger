@@ -148,11 +148,14 @@ public static class AuthenticationServiceCollectionExtensions
                 policy.RequireAssertion(context =>
                     context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectsManage)
                     || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectChangeOrderPrepare)
-                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectChangeOrderApprove)));
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectChangeOrderApprove)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectBillingPrepare)));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectChangeOrderPrepare));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ApproveProjectChangeOrders, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectChangeOrderApprove));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.PrepareProjectBilling, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectBillingPrepare));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageReporting, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManagePublishing, policy =>

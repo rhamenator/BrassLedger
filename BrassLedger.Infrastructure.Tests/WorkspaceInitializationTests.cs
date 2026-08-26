@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("22", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("23", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -86,6 +86,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826181954_AddControlledPayrollReview';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826192156_AddProjectLedgerDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826210012_AddControlledProjectChangeOrders';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826225614_AddControlledProjectBilling';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectBillingProposals';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectChangeOrders';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
@@ -117,7 +119,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("22", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("23", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -139,6 +141,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826181954_AddControlledPayrollReview';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826192156_AddProjectLedgerDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826210012_AddControlledProjectChangeOrders';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826225614_AddControlledProjectBilling';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -698,6 +701,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains(roles, role => role.Name == "Project Change Order Preparer" && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderPrepare, StringComparison.Ordinal));
         Assert.Contains(roles, role => role.Name == "Project Change Order Approver" && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderApprove, StringComparison.Ordinal));
         Assert.Contains(roles, role => role.Name == "Controller" && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderPrepare, StringComparison.Ordinal) && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderApprove, StringComparison.Ordinal));
+        Assert.Contains(roles, role => role.Name == "Project Billing Preparer" && role.Permissions.Contains(BrassLedgerPermissions.ProjectBillingPrepare, StringComparison.Ordinal) && role.Permissions.Contains(BrassLedgerPermissions.SubledgerPrepare, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -4546,6 +4550,270 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using (var db = await factory.CreateDbContextAsync()) project = await db.ProjectJobs.SingleAsync(candidate => candidate.Id == project.Id);
         var closed = await transactions.CloseProjectJobAsync(new(project.Id, new DateOnly(2026, 9, 30), "No remaining activity", project.ConcurrencyToken));
         Assert.True(closed.Succeeded, closed.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ProjectBilling_DerivesApprovedTimeControlsReviewPostingCorrectionAndSourceReuse()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; Guid customerId; Guid employeeId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(x => x.Id).SingleAsync();
+            customerId = await db.Customers.OrderBy(x => x.CustomerNumber).Select(x => x.Id).FirstAsync();
+            employeeId = await db.Employees.OrderBy(x => x.EmployeeNumber).Select(x => x.Id).FirstAsync();
+        }
+        var preparerId = Guid.NewGuid(); var reviewerId = Guid.NewGuid(); var posterId = Guid.NewGuid();
+        void SetUser(Guid userId, params string[] permissions)
+        {
+            var claims = permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)).ToList();
+            claims.Add(new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()));
+            claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+
+        SetUser(preparerId, BrassLedgerPermissions.ProjectsManage, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var projectResult = await transactions.SaveProjectJobAsync(new(null, "JOB-BILLING-1", "Controlled project billing", customerId, new DateOnly(2026, 8, 1), null, "TimeAndMaterials", 1_000m, 700m, 0.10m));
+        Assert.True(projectResult.Succeeded, projectResult.ErrorMessage);
+        var projectId = projectResult.Id!.Value;
+        var rateResult = await transactions.SaveProjectBillingRateAsync(new(null, projectId, "REGULAR", 100m, new DateOnly(2026, 8, 1), null));
+        Assert.True(rateResult.Succeeded, rateResult.ErrorMessage);
+        var overlappingRate = await transactions.SaveProjectBillingRateAsync(new(null, projectId, "REGULAR", 110m, new DateOnly(2026, 8, 15), null));
+        Assert.False(overlappingRate.Succeeded);
+        Assert.Contains("overlapping", overlappingRate.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        Guid firstTimeEntryId; Guid secondTimeEntryId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var card = new PayrollTimecard { Id = Guid.NewGuid(), CompanyId = companyId, EmployeeId = employeeId, PeriodStart = new DateOnly(2026, 8, 17), PeriodEnd = new DateOnly(2026, 8, 23), Status = "Approved", PreparedByUserId = preparerId, PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedByUserId = reviewerId, ApprovedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+            firstTimeEntryId = Guid.NewGuid(); secondTimeEntryId = Guid.NewGuid();
+            db.PayrollTimecards.Add(card);
+            db.PayrollTimeEntries.AddRange(
+                new PayrollTimeEntry { Id = firstTimeEntryId, PayrollTimecardId = card.Id, Sequence = 1, WorkDate = new DateOnly(2026, 8, 18), EarningCode = "REGULAR", EarningType = "Regular", Hours = 2m, Rate = 30m, Amount = 60m, ProjectJobId = projectId },
+                new PayrollTimeEntry { Id = secondTimeEntryId, PayrollTimecardId = card.Id, Sequence = 2, WorkDate = new DateOnly(2026, 8, 19), EarningCode = "REGULAR", EarningType = "Regular", Hours = 1m, Rate = 30m, Amount = 30m, ProjectJobId = projectId });
+            await db.SaveChangesAsync();
+        }
+
+        var previewRequest = new ProjectBillingPreviewRequest(projectId, "PB-1001", new DateOnly(2026, 8, 18), new DateOnly(2026, 8, 25), new DateOnly(2026, 9, 24), "4000", "August approved project time", IncludeCosts: false);
+        var preview = await transactions.PreviewProjectBillingAsync(previewRequest);
+        Assert.True(preview.Succeeded, preview.ErrorMessage);
+        var previewLine = Assert.Single(preview.Lines);
+        Assert.Equal(firstTimeEntryId, previewLine.SourceId);
+        Assert.Equal(200m, preview.GrossAmount);
+        Assert.Equal(20m, preview.RetainageAmount);
+        Assert.Equal(180m, preview.InvoiceAmount);
+        var staleSave = await transactions.SaveProjectBillingProposalAsync(new(null, previewRequest, preview.Fingerprint, "stale"));
+        Assert.False(staleSave.Succeeded);
+        var saved = await transactions.SaveProjectBillingProposalAsync(new(null, previewRequest, preview.Fingerprint, preview.ProjectConcurrencyToken));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        ProjectBillingProposal proposal; SubledgerDocumentWorkflow workflow; ProjectJob project;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            proposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == saved.Id);
+            workflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == proposal.SubledgerDocumentWorkflowId);
+            project = await db.ProjectJobs.SingleAsync(x => x.Id == projectId);
+            Assert.Equal("Reserved", (await db.ProjectBillingSourceReservations.SingleAsync(x => x.SourceKey == $"TIME:{firstTimeEntryId:N}")).Status);
+        }
+        var closeBlocked = await transactions.CloseProjectJobAsync(new(projectId, new DateOnly(2026, 8, 31), "Billing remains unresolved", project.ConcurrencyToken));
+        Assert.False(closeBlocked.Succeeded);
+
+        SetUser(preparerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        var selfReview = await transactions.ApproveSubledgerDocumentAsync(workflow.Id);
+        Assert.False(selfReview.Succeeded);
+        Assert.Contains("prepared", selfReview.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        var rejected = await transactions.RejectSubledgerDocumentAsync(new(workflow.Id, "Clarify the time description", workflow.ConcurrencyToken));
+        Assert.True(rejected.Succeeded, rejected.ErrorMessage);
+
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var bypass = await transactions.SaveInvoiceDraftAsync(new(customerId, "PB-1001", new DateOnly(2026, 8, 25), new DateOnly(2026, 9, 24), 180m, 0m, "4000", "Bypass project derivation"));
+        Assert.False(bypass.Succeeded);
+        Assert.Contains("project billing", bypass.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync()) proposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == proposal.Id);
+        var correctionRequest = previewRequest with { Description = "August approved project time — reviewed", ExistingProposalId = proposal.Id };
+        var correctedPreview = await transactions.PreviewProjectBillingAsync(correctionRequest);
+        Assert.True(correctedPreview.Succeeded, correctedPreview.ErrorMessage);
+        var corrected = await transactions.SaveProjectBillingProposalAsync(new(proposal.Id, correctionRequest, correctedPreview.Fingerprint, correctedPreview.ProjectConcurrencyToken, proposal.ConcurrencyToken));
+        Assert.True(corrected.Succeeded, corrected.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) { proposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == proposal.Id); workflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == proposal.SubledgerDocumentWorkflowId); }
+        Assert.Equal("Draft", proposal.Status);
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(workflow.Id)).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        var posted = await transactions.PostApprovedSubledgerDocumentAsync(workflow.Id);
+        Assert.True(posted.Succeeded, posted.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            proposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == proposal.Id);
+            Assert.Equal("Posted", proposal.Status);
+            Assert.Equal("Billed", (await db.ProjectBillingSourceReservations.SingleAsync(x => x.SourceKey == $"TIME:{firstTimeEntryId:N}")).Status);
+            var invoice = await db.SalesInvoices.SingleAsync(x => x.Id == posted.Id);
+            Assert.Equal(180m, invoice.TotalAmount);
+            var invoiceLine = await db.SalesInvoiceLines.SingleAsync(x => x.SalesInvoiceId == invoice.Id);
+            Assert.Equal(20m, invoiceLine.DiscountAmount);
+            Assert.Equal(projectId, invoiceLine.ProjectJobId);
+        }
+        SetUser(posterId, BrassLedgerPermissions.PayrollReverse);
+        PayrollTimecard billedTimecard;
+        await using (var db = await factory.CreateDbContextAsync()) billedTimecard = await db.PayrollTimecards.SingleAsync(x => x.EmployeeId == employeeId && x.PeriodStart == new DateOnly(2026, 8, 17));
+        var billedTimecardVoid = await transactions.VoidPayrollTimecardAsync(new(billedTimecard.Id, "Cannot invalidate billed time", billedTimecard.ConcurrencyToken));
+        Assert.False(billedTimecardVoid.Succeeded); Assert.Contains("project billing", billedTimecardVoid.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var duplicateSource = await transactions.PreviewProjectBillingAsync(previewRequest with { InvoiceNumber = "PB-1001-DUP" });
+        Assert.False(duplicateSource.Succeeded);
+        Assert.Contains("No eligible", duplicateSource.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var secondRequest = previewRequest with { InvoiceNumber = "PB-1002", BillingThrough = new DateOnly(2026, 8, 19), SelectedTimeEntryIds = [secondTimeEntryId] };
+        var secondPreview = await transactions.PreviewProjectBillingAsync(secondRequest);
+        Assert.True(secondPreview.Succeeded, secondPreview.ErrorMessage);
+        var secondSaved = await transactions.SaveProjectBillingProposalAsync(new(null, secondRequest, secondPreview.Fingerprint, secondPreview.ProjectConcurrencyToken));
+        Assert.True(secondSaved.Succeeded, secondSaved.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) proposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == secondSaved.Id);
+        var cancelled = await transactions.CancelProjectBillingProposalAsync(new(proposal.Id, "Customer deferred this billing", proposal.ConcurrencyToken));
+        Assert.True(cancelled.Succeeded, cancelled.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) Assert.Equal("Released", (await db.ProjectBillingSourceReservations.SingleAsync(x => x.SourceKey == $"TIME:{secondTimeEntryId:N}")).Status);
+        var reusable = await transactions.PreviewProjectBillingAsync(secondRequest with { InvoiceNumber = "PB-1003" });
+        Assert.True(reusable.Succeeded, reusable.ErrorMessage);
+        Assert.Equal(secondTimeEntryId, Assert.Single(reusable.Lines).SourceId);
+
+        var workspace = await workspaceService.GetWorkspaceAsync();
+        Assert.Contains(workspace.Projects.BillingRates!, x => x.ProjectJobId == projectId && x.EarningCode == "REGULAR");
+        Assert.Contains(workspace.Projects.BillingProposals!, x => x.Id == saved.Id && x.Status == "Posted" && x.Lines.Count == 1);
+
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PaymentReverse);
+        var voided = await transactions.VoidInvoiceAsync(new(posted.Id!.Value, new DateOnly(2026, 8, 26), "Customer cancelled the billed work"));
+        Assert.True(voided.Succeeded, voided.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal("Voided", (await db.ProjectBillingProposals.SingleAsync(x => x.Id == saved.Id)).Status);
+            Assert.Equal("Released", (await db.ProjectBillingSourceReservations.SingleAsync(x => x.SourceKey == $"TIME:{firstTimeEntryId:N}")).Status);
+        }
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var afterVoid = await transactions.PreviewProjectBillingAsync(previewRequest with { InvoiceNumber = "PB-1004" });
+        Assert.True(afterVoid.Succeeded, afterVoid.ErrorMessage);
+        Assert.Equal(firstTimeEntryId, Assert.Single(afterVoid.Lines).SourceId);
+        SetUser(posterId, BrassLedgerPermissions.PayrollReverse);
+        await using (var db = await factory.CreateDbContextAsync()) billedTimecard = await db.PayrollTimecards.SingleAsync(x => x.Id == billedTimecard.Id);
+        Assert.True((await transactions.VoidPayrollTimecardAsync(new(billedTimecard.Id, "Customer cancelled all billed work", billedTimecard.ConcurrencyToken))).Succeeded);
+
+        Guid consumedTimeEntryId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var consumedCard = new PayrollTimecard { Id = Guid.NewGuid(), CompanyId = companyId, EmployeeId = employeeId, PeriodStart = new DateOnly(2026, 8, 24), PeriodEnd = new DateOnly(2026, 8, 30), Status = "Consumed", PreparedByUserId = preparerId, PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedByUserId = reviewerId, ApprovedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+            consumedTimeEntryId = Guid.NewGuid();
+            db.PayrollTimecards.Add(consumedCard);
+            db.PayrollTimeEntries.Add(new PayrollTimeEntry { Id = consumedTimeEntryId, PayrollTimecardId = consumedCard.Id, Sequence = 1, WorkDate = new DateOnly(2026, 8, 25), EarningCode = "REGULAR", EarningType = "Regular", Hours = 1.5m, Rate = 30m, Amount = 45m, ProjectJobId = projectId });
+            await db.SaveChangesAsync();
+        }
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var consumedRequest = previewRequest with { InvoiceNumber = "PB-1005", BillingThrough = new DateOnly(2026, 8, 25), Description = "Payroll-consumed approved time", SelectedTimeEntryIds = [consumedTimeEntryId] };
+        var consumedPreview = await transactions.PreviewProjectBillingAsync(consumedRequest); Assert.True(consumedPreview.Succeeded, consumedPreview.ErrorMessage); Assert.Equal(consumedTimeEntryId, Assert.Single(consumedPreview.Lines).SourceId);
+        var consumedSaved = await transactions.SaveProjectBillingProposalAsync(new(null, consumedRequest, consumedPreview.Fingerprint, consumedPreview.ProjectConcurrencyToken)); Assert.True(consumedSaved.Succeeded, consumedSaved.ErrorMessage);
+        ProjectBillingProposal consumedProposal; SubledgerDocumentWorkflow consumedWorkflow;
+        await using (var db = await factory.CreateDbContextAsync()) { consumedProposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == consumedSaved.Id); consumedWorkflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == consumedProposal.SubledgerDocumentWorkflowId); }
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(consumedWorkflow.Id)).Succeeded);
+    }
+
+    [Fact]
+    public async Task ProjectBilling_EnforcesFixedPriceProgressAndDerivesCostPlusPostedCosts()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; Guid customerId;
+        await using (var db = await factory.CreateDbContextAsync()) { companyId = await db.Companies.Select(x => x.Id).SingleAsync(); customerId = await db.Customers.OrderBy(x => x.CustomerNumber).Select(x => x.Id).FirstAsync(); }
+        var userId = Guid.NewGuid(); var reviewerId = Guid.NewGuid(); var posterId = Guid.NewGuid();
+        void SetUser(Guid id, params string[] permissions) { var claims = permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)).ToList(); claims.Add(new(System.Security.Claims.ClaimTypes.NameIdentifier, id.ToString())); claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString())); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
+        SetUser(userId, BrassLedgerPermissions.ProjectsManage, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+
+        var fixedResult = await transactions.SaveProjectJobAsync(new(null, "JOB-FIXED-BILL", "Progress billing", customerId, new DateOnly(2026, 8, 1), null, "FixedPrice", 10_000m, 7_000m, 0.05m));
+        Assert.True(fixedResult.Succeeded, fixedResult.ErrorMessage);
+        var fixedRequest = new ProjectBillingPreviewRequest(fixedResult.Id!.Value, "PB-FIXED-1", new DateOnly(2026, 8, 31), new DateOnly(2026, 8, 31), new DateOnly(2026, 9, 30), "4000", "August progress billing", ProgressPercentToDate: 0.25m, IncludeLabor: false, IncludeCosts: false);
+        var fixedPreview = await transactions.PreviewProjectBillingAsync(fixedRequest);
+        Assert.True(fixedPreview.Succeeded, fixedPreview.ErrorMessage);
+        Assert.Equal("FixedPriceProgress", fixedPreview.BillingBasis);
+        Assert.Equal(2_500m, fixedPreview.GrossAmount); Assert.Equal(125m, fixedPreview.RetainageAmount); Assert.Equal(2_375m, fixedPreview.InvoiceAmount);
+        var fixedSaved = await transactions.SaveProjectBillingProposalAsync(new(null, fixedRequest, fixedPreview.Fingerprint, fixedPreview.ProjectConcurrencyToken));
+        Assert.True(fixedSaved.Succeeded, fixedSaved.ErrorMessage);
+        var regressive = await transactions.PreviewProjectBillingAsync(fixedRequest with { InvoiceNumber = "PB-FIXED-2", ProgressPercentToDate = 0.20m });
+        Assert.False(regressive.Succeeded); Assert.Contains("does not exceed", regressive.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var overContract = await transactions.PreviewProjectBillingAsync(fixedRequest with { InvoiceNumber = "PB-FIXED-3", ProgressPercentToDate = 0m, MilestoneAmount = 8_000m });
+        Assert.False(overContract.Succeeded); Assert.Contains("authorized", overContract.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        ProjectBillingProposal fixedProposal; SubledgerDocumentWorkflow fixedWorkflow; ProjectJob fixedProject;
+        await using (var db = await factory.CreateDbContextAsync()) { fixedProposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == fixedSaved.Id); fixedWorkflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == fixedProposal.SubledgerDocumentWorkflowId); fixedProject = await db.ProjectJobs.SingleAsync(x => x.Id == fixedResult.Id); }
+        var changedTerms = await transactions.SaveProjectJobAsync(new(fixedProject.Id, fixedProject.JobNumber, fixedProject.Name, customerId, fixedProject.StartDate!.Value, fixedProject.ExpectedEndDate, fixedProject.BillingMethod, fixedProject.ContractAmount, fixedProject.BudgetAmount, 0.06m, fixedProject.ConcurrencyToken));
+        Assert.False(changedTerms.Succeeded); Assert.Contains("billing history", changedTerms.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var renamed = await transactions.SaveProjectJobAsync(new(fixedProject.Id, fixedProject.JobNumber, "Progress billing renamed", customerId, fixedProject.StartDate.Value, fixedProject.ExpectedEndDate, fixedProject.BillingMethod, fixedProject.ContractAmount, fixedProject.BudgetAmount, fixedProject.RetainagePercent, fixedProject.ConcurrencyToken));
+        Assert.True(renamed.Succeeded, renamed.ErrorMessage);
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        var staleApproval = await transactions.ApproveSubledgerDocumentAsync(fixedWorkflow.Id);
+        Assert.False(staleApproval.Succeeded); Assert.Contains("project", staleApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase); Assert.Contains("fresh preview", staleApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await transactions.RejectSubledgerDocumentAsync(new(fixedWorkflow.Id, "Project changed after billing preparation", fixedWorkflow.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) fixedProposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == fixedProposal.Id);
+        SetUser(userId, BrassLedgerPermissions.ProjectsManage, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var correctedFixedRequest = fixedRequest with { ExistingProposalId = fixedProposal.Id, Description = "August progress billing after project review" };
+        var correctedFixedPreview = await transactions.PreviewProjectBillingAsync(correctedFixedRequest); Assert.True(correctedFixedPreview.Succeeded, correctedFixedPreview.ErrorMessage);
+        Assert.True((await transactions.SaveProjectBillingProposalAsync(new(fixedProposal.Id, correctedFixedRequest, correctedFixedPreview.Fingerprint, correctedFixedPreview.ProjectConcurrencyToken, fixedProposal.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) { fixedProposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == fixedProposal.Id); fixedWorkflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == fixedProposal.SubledgerDocumentWorkflowId); }
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove); Assert.True((await transactions.ApproveSubledgerDocumentAsync(fixedWorkflow.Id)).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost); var fixedPosted = await transactions.PostApprovedSubledgerDocumentAsync(fixedWorkflow.Id); Assert.True(fixedPosted.Succeeded, fixedPosted.ErrorMessage);
+        SetUser(userId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var releaseRequest = fixedRequest with { InvoiceNumber = "PB-FIXED-RET-1", Description = "Partial retainage release", ProgressPercentToDate = 0m, RetainageReleaseOfProposalId = fixedProposal.Id, RetainageReleaseAmount = 60m };
+        var releasePreview = await transactions.PreviewProjectBillingAsync(releaseRequest); Assert.True(releasePreview.Succeeded, releasePreview.ErrorMessage); Assert.Equal("RetainageRelease", releasePreview.BillingBasis); Assert.Equal(60m, releasePreview.InvoiceAmount); Assert.Equal(0m, releasePreview.RetainageAmount);
+        var releaseSaved = await transactions.SaveProjectBillingProposalAsync(new(null, releaseRequest, releasePreview.Fingerprint, releasePreview.ProjectConcurrencyToken)); Assert.True(releaseSaved.Succeeded, releaseSaved.ErrorMessage);
+        var excessiveRelease = await transactions.PreviewProjectBillingAsync(releaseRequest with { InvoiceNumber = "PB-FIXED-RET-2", RetainageReleaseAmount = 70m }); Assert.False(excessiveRelease.Succeeded); Assert.Contains("65.00", excessiveRelease.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PaymentReverse);
+        var blockedOriginalVoid = await transactions.VoidInvoiceAsync(new(fixedPosted.Id!.Value, new DateOnly(2026, 9, 1), "Original cannot bypass its retainage release")); Assert.False(blockedOriginalVoid.Succeeded); Assert.Contains("retainage release", blockedOriginalVoid.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetUser(userId, BrassLedgerPermissions.ProjectsManage, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+
+        var costPlusResult = await transactions.SaveProjectJobAsync(new(null, "JOB-COSTPLUS-BILL", "Cost-plus billing", customerId, new DateOnly(2026, 8, 1), null, "CostPlus", 5_000m, 3_000m, 0m));
+        Assert.True(costPlusResult.Succeeded, costPlusResult.ErrorMessage);
+        Guid costLineId; Guid costJournalId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var expense = await db.Accounts.SingleAsync(x => x.CompanyId == companyId && x.Number == "5100");
+            var offset = await db.Accounts.SingleAsync(x => x.CompanyId == companyId && x.Number == "4000");
+            var entry = new JournalEntry { Id = Guid.NewGuid(), CompanyId = companyId, EntryNumber = "CP-COST-1", PostedOn = new DateOnly(2026, 8, 20), SourceModule = "General Ledger", Reference = "CP-COST-1", Description = "Eligible subcontractor cost", TotalAmount = 100m, Status = "Posted", IsPosted = true, CreatedAtUtc = DateTimeOffset.UtcNow, PostedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+            costJournalId = entry.Id;
+            costLineId = Guid.NewGuid(); db.JournalEntries.Add(entry);
+            db.JournalEntryLines.AddRange(new JournalEntryLine { Id = costLineId, JournalEntryId = entry.Id, AccountId = expense.Id, ProjectJobId = costPlusResult.Id, Description = "Subcontractor cost", Debit = 100m }, new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = offset.Id, ProjectJobId = costPlusResult.Id, Description = "Test offset", Credit = 100m });
+            await db.SaveChangesAsync();
+        }
+        var costRequest = new ProjectBillingPreviewRequest(costPlusResult.Id!.Value, "PB-CP-1", new DateOnly(2026, 8, 31), new DateOnly(2026, 8, 31), new DateOnly(2026, 9, 30), "4000", "August cost-plus billing", CostMarkupPercent: 0.20m, IncludeLabor: false, IncludeCosts: true, SelectedJournalEntryLineIds: [costLineId]);
+        var costPreview = await transactions.PreviewProjectBillingAsync(costRequest);
+        Assert.True(costPreview.Succeeded, costPreview.ErrorMessage);
+        var costLine = Assert.Single(costPreview.Lines);
+        Assert.Equal("PostedCost", costLine.SourceType); Assert.Equal(100m, costLine.SourceCost); Assert.Equal(20m, costLine.MarkupAmount); Assert.Equal(120m, costLine.GrossAmount);
+        var costSaved = await transactions.SaveProjectBillingProposalAsync(new(null, costRequest, costPreview.Fingerprint, costPreview.ProjectConcurrencyToken));
+        Assert.True(costSaved.Succeeded, costSaved.ErrorMessage);
+        SetUser(userId, BrassLedgerPermissions.JournalReverse);
+        var reservedCostReversal = await transactions.ReverseJournalEntryAsync(new(costJournalId, new DateOnly(2026, 9, 1), "Cannot reverse a reserved billed cost"));
+        Assert.False(reservedCostReversal.Succeeded); Assert.Contains("project billing", reservedCostReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ProjectBillingProposal costProposal; SubledgerDocumentWorkflow costWorkflow;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            costProposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == costSaved.Id);
+            costWorkflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == costProposal.SubledgerDocumentWorkflowId);
+            var sourceJournal = await db.JournalEntries.SingleAsync(x => x.Id == costJournalId);
+            sourceJournal.Status = "Reversed";
+            sourceJournal.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            await db.SaveChangesAsync();
+        }
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        var reversedSourceApproval = await transactions.ApproveSubledgerDocumentAsync(costWorkflow.Id);
+        Assert.False(reversedSourceApproval.Succeeded); Assert.Contains("reversed", reversedSourceApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetUser(userId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var reversedPreview = await transactions.PreviewProjectBillingAsync(costRequest with { InvoiceNumber = "PB-CP-2" });
+        Assert.False(reversedPreview.Succeeded); Assert.Contains("No eligible", reversedPreview.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<TransactionResult> PostInvoiceThroughWorkflowAsync(IAccountingTransactionService transactions, CreateInvoiceRequest request)

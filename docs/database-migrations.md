@@ -52,6 +52,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddProjectLedgerDimensions` expands the project master record and adds optional project foreign keys to journal, sales, purchasing, receivables, payables, and payroll earning lines. It maps legacy `Open` and `Billing` projects to `Active`, assigns the time-and-materials billing label where none existed, and links a legacy project to a same-company customer only when its retained customer name identifies that customer. Lost-history adoption requires the project lifecycle columns, representative source and ledger dimensions, and the journal project index. Downgrade is prohibited because removing these columns could delete project attribution and lifecycle evidence; restore a verified pre-upgrade backup instead.
 
+`AddControlledProjectBilling` adds effective-dated rates, source-derived proposals and lines, retainage-release provenance, prepared-project concurrency evidence, and reusable source reservations linked one-to-one with controlled receivables drafts. Lost-history adoption requires all four tables, the proposal fingerprint and prepared-project token, workflow link, and unique company/source reservation index. Downgrade is prohibited because it could delete billing derivation, retainage, rate, reservation, and invoice-workflow evidence; restore a verified pre-upgrade backup instead.
+
 ## Verification
 
 At minimum, run:

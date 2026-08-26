@@ -43,7 +43,7 @@ public sealed class VisualRegressionTests
         await using var session = await _fixture.CreateSessionAsync(browserKind);
         await session.SignInAsync();
         await session.GotoAsync("/projects");
-        await session.WaitForHeadingAsync("Track project setup, commitments, costs, and revenue.");
+        await session.WaitForHeadingAsync("Control project scope, cost, billing, and revenue.");
         await session.AssertNoUiFailuresAsync("projects visual snapshot");
         await session.AssertSnapshotAsync("projects");
     }

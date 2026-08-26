@@ -16,7 +16,7 @@ public sealed class ProjectChangeOrderWorkflowTests(PlaywrightWebAppFixture fixt
         {
             await preparation.SignInAsync("e2e-project-preparer", returnPath: "/projects");
             await preparation.GotoAsync("/projects");
-            await preparation.WaitForHeadingAsync("Track project setup, commitments, costs, and revenue.");
+            await preparation.WaitForHeadingAsync("Control project scope, cost, billing, and revenue.");
             Assert.Empty(await preparation.Page.Locator("input[aria-label='Project number']").AllAsync());
             await preparation.Page.Locator("select[aria-label='Change order project']").SelectOptionAsync(new SelectOptionValue { Index = 1 });
             await preparation.Page.Locator("input[aria-label='Change order number']").FillAsync(number);

@@ -25,7 +25,8 @@ public static class BrassLedgerRoleTemplates
             BrassLedgerPermissions.PublishManage,
             BrassLedgerPermissions.ProjectsManage,
             BrassLedgerPermissions.ProjectChangeOrderPrepare,
-            BrassLedgerPermissions.ProjectChangeOrderApprove
+            BrassLedgerPermissions.ProjectChangeOrderApprove,
+            BrassLedgerPermissions.ProjectBillingPrepare
         ]),
         new("project-change-order-preparer", "Project Change Order Preparer", "Prepares and submits project change orders without approval authority.", false, false,
         [
@@ -37,6 +38,14 @@ public static class BrassLedgerRoleTemplates
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.ProjectChangeOrderApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("project-billing-preparer", "Project Billing Preparer", "Maintains project billing rates and prepares source-derived customer invoice drafts without approval or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ReceivablesManage,
+            BrassLedgerPermissions.SubledgerPrepare,
+            BrassLedgerPermissions.ProjectBillingPrepare,
             BrassLedgerPermissions.ReportingManage
         ]),
         new("receivables-preparer", "Receivables Preparer", "Creates customer invoice and recurring invoice drafts without approval or posting authority.", false, false,

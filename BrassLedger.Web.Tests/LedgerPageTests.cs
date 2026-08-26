@@ -26,7 +26,8 @@ public sealed class LedgerPageTests : TestContext
             BrassLedgerAuthorizationPolicies.ManageProjects,
             BrassLedgerAuthorizationPolicies.AccessProjects,
             BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders,
-            BrassLedgerAuthorizationPolicies.ApproveProjectChangeOrders);
+            BrassLedgerAuthorizationPolicies.ApproveProjectChangeOrders,
+            BrassLedgerAuthorizationPolicies.PrepareProjectBilling);
         Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(TestWorkspaceData.CreateWorkspace()));
         Services.AddSingleton<IAccountingTransactionService>(new StubAccountingTransactionService());
         Services.AddSingleton<IAccountingInterchangeService>(new StubAccountingInterchangeService());
@@ -110,6 +111,12 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("select[aria-label='Change order project']"));
         Assert.NotNull(cut.Find("input[aria-label='Change order number']"));
         Assert.Contains("Project change orders", cut.Markup);
+        Assert.NotNull(cut.Find("select[aria-label='Billing rate project']"));
+        Assert.NotNull(cut.Find("input[aria-label='Hourly billing rate']"));
+        Assert.NotNull(cut.Find("select[aria-label='Project billing project']"));
+        Assert.NotNull(cut.Find("input[aria-label='Project billing invoice number']"));
+        Assert.Contains("Preview billing", cut.Markup);
+        Assert.Contains("Project billing proposals", cut.Markup);
         Assert.Contains("Gross margin", cut.Markup);
         cut.FindAll("button").First(button => button.TextContent.Contains("JOB-5007", StringComparison.Ordinal)).Click();
         Assert.Contains("JOB-5007 ledger", cut.Markup);
@@ -196,6 +203,10 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> SaveProjectChangeOrderDraftAsync(SaveProjectChangeOrderDraftRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> SubmitProjectChangeOrderAsync(SubmitProjectChangeOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectChangeOrderId));
     public Task<TransactionResult> DecideProjectChangeOrderAsync(DecideProjectChangeOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectChangeOrderId));
+    public Task<TransactionResult> SaveProjectBillingRateAsync(SaveProjectBillingRateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<ProjectBillingPreview> PreviewProjectBillingAsync(ProjectBillingPreviewRequest request, CancellationToken cancellationToken = default) => Task.FromResult(ProjectBillingPreview.Failure("Not configured in this component test."));
+    public Task<TransactionResult> SaveProjectBillingProposalAsync(SaveProjectBillingProposalRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> CancelProjectBillingProposalAsync(CancelProjectBillingProposalRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectBillingProposalId));
     public Task<TransactionResult> CancelProjectChangeOrderAsync(CancelProjectChangeOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectChangeOrderId));
     public Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));

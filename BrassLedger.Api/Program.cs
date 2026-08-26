@@ -198,6 +198,48 @@ api.MapPost("/project-change-orders/{projectChangeOrderId:guid}/cancellation", a
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectChangeOrder"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders);
 
+api.MapPost("/projects/{projectJobId:guid}/billing-rates", async (Guid projectJobId, SaveProjectBillingRateRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id.HasValue || request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("A new billing-rate request must match the route project and cannot contain an identifier."));
+    var result = await service.SaveProjectBillingRateAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/project-billing-rates/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectBillingRate"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectBilling);
+
+api.MapPut("/projects/{projectJobId:guid}/billing-rates/{projectBillingRateId:guid}", async (Guid projectJobId, Guid projectBillingRateId, SaveProjectBillingRateRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id != projectBillingRateId || request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("The billing-rate and project identifiers in the route and request must match."));
+    var result = await service.SaveProjectBillingRateAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectBillingRate"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectBilling);
+
+api.MapPost("/projects/{projectJobId:guid}/billing-preview", async (Guid projectJobId, ProjectBillingPreviewRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.ProjectJobId != projectJobId) return Results.BadRequest(ProjectBillingPreview.Failure("The project identifier in the route and request must match."));
+    var preview = await service.PreviewProjectBillingAsync(request, cancellationToken);
+    return preview.Succeeded ? Results.Ok(preview) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectBilling"] = [preview.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectBilling);
+
+api.MapPost("/projects/{projectJobId:guid}/billing-proposals", async (Guid projectJobId, SaveProjectBillingProposalRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id.HasValue || request.PreviewRequest.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("A new billing proposal must match the route project and cannot contain an identifier."));
+    var result = await service.SaveProjectBillingProposalAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/project-billing-proposals/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectBilling"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectBilling);
+
+api.MapPut("/projects/{projectJobId:guid}/billing-proposals/{proposalId:guid}", async (Guid projectJobId, Guid proposalId, SaveProjectBillingProposalRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id != proposalId || request.PreviewRequest.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("The proposal and project identifiers in the route and request must match."));
+    var result = await service.SaveProjectBillingProposalAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectBilling"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectBilling);
+
+api.MapPost("/project-billing-proposals/{proposalId:guid}/cancellation", async (Guid proposalId, CancelProjectBillingProposalRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.ProjectBillingProposalId != proposalId) return Results.BadRequest(TransactionResult.Failure("The billing-proposal identifier in the route and request must match."));
+    var result = await service.CancelProjectBillingProposalAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectBilling"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectBilling);
+
 api.MapGet("/reporting-catalog", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
 {
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Reporting);

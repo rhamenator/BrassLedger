@@ -1646,6 +1646,87 @@ public sealed class ProjectChangeOrder
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
+public sealed class ProjectBillingRate
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ProjectJobId { get; set; }
+    public string EarningCode { get; set; } = "*";
+    public decimal HourlyRate { get; set; }
+    public DateOnly EffectiveOn { get; set; }
+    public DateOnly? EffectiveThrough { get; set; }
+    public bool IsActive { get; set; } = true;
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? UpdatedByUserId { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ProjectBillingProposal
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ProjectJobId { get; set; }
+    public Guid CustomerId { get; set; }
+    public Guid SubledgerDocumentWorkflowId { get; set; }
+    public Guid? RetainageReleaseOfProposalId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public DateOnly BillingThrough { get; set; }
+    public DateOnly InvoiceDate { get; set; }
+    public DateOnly DueDate { get; set; }
+    public string BillingBasis { get; set; } = string.Empty;
+    public decimal ProgressPercentToDate { get; set; }
+    public decimal CostMarkupPercent { get; set; }
+    public decimal ContractAmountSnapshot { get; set; }
+    public decimal RetainagePercentSnapshot { get; set; }
+    public decimal GrossAmount { get; set; }
+    public decimal RetainageAmount { get; set; }
+    public decimal InvoiceAmount { get; set; }
+    public string RevenueAccountNumber { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string PreviewFingerprint { get; set; } = string.Empty;
+    public string PreparedProjectConcurrencyToken { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
+    public Guid PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ProjectBillingLine
+{
+    public Guid Id { get; set; }
+    public Guid ProjectBillingProposalId { get; set; }
+    public int Sequence { get; set; }
+    public string SourceType { get; set; } = string.Empty;
+    public Guid? SourceId { get; set; }
+    public string SourceKey { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal SourceCost { get; set; }
+    public decimal MarkupAmount { get; set; }
+    public decimal GrossAmount { get; set; }
+    public decimal RetainageAmount { get; set; }
+    public decimal InvoiceAmount { get; set; }
+    public string RevenueAccountNumber { get; set; } = string.Empty;
+}
+
+public sealed class ProjectBillingSourceReservation
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ProjectJobId { get; set; }
+    public string SourceKey { get; set; } = string.Empty;
+    public Guid ProjectBillingProposalId { get; set; }
+    public string Status { get; set; } = "Reserved";
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
 public sealed class TaxProfile
 {
     public Guid Id { get; set; }

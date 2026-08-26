@@ -385,6 +385,15 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "ProjectChangeOrders", "SubmittedProjectConcurrencyToken", cancellationToken)
                 && await HasColumnAsync(dbContext, "ProjectChangeOrders", "ContractAmountAfter", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ProjectChangeOrders_CompanyId_ProjectJobId_ChangeOrderNumber", cancellationToken);
+        if (migrationId.EndsWith("_AddControlledProjectBilling", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "ProjectBillingRates", cancellationToken)
+                && await HasTableAsync(dbContext, "ProjectBillingProposals", cancellationToken)
+                && await HasTableAsync(dbContext, "ProjectBillingLines", cancellationToken)
+                && await HasTableAsync(dbContext, "ProjectBillingSourceReservations", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectBillingProposals", "PreviewFingerprint", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectBillingProposals", "PreparedProjectConcurrencyToken", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ProjectBillingProposals_SubledgerDocumentWorkflowId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ProjectBillingSourceReservations_CompanyId_SourceKey", cancellationToken);
         return false;
     }
 

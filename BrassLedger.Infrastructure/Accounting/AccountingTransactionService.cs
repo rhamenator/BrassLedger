@@ -195,6 +195,9 @@ public sealed partial class AccountingTransactionService(
         if (request.ReversalDate < original.PostedOn) return TransactionResult.Failure("A reversal cannot precede the original posting date.");
         if (await IsInCompletedReconciliationAsync(db, original.Id, cancellationToken)) return TransactionResult.Failure("A reconciled journal entry cannot be reversed until the reconciliation is reopened.");
         var originalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == original.Id).ToListAsync(cancellationToken);
+        var projectBillingSourceKeys = originalLines.Select(line => $"COST:{line.Id:N}").ToArray();
+        if (await db.ProjectBillingSourceReservations.AnyAsync(reservation => reservation.CompanyId == companyId && projectBillingSourceKeys.Contains(reservation.SourceKey) && reservation.Status != "Released", cancellationToken))
+            return TransactionResult.Failure("This journal contains project costs reserved or posted in project billing. Cancel or void the related project billing before reversing the journal.");
         var accountIds = originalLines.Select(line => line.AccountId).Distinct().ToArray();
         var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
         var reversingLines = originalLines.Select(line => new JournalLineRequest(accounts[line.AccountId].Number, line.Credit, line.Debit, $"Reversal: {line.Description}", line.ProjectJobId)).ToArray();
@@ -654,9 +657,16 @@ public sealed partial class AccountingTransactionService(
         var approvingUserId = ResolveUserId();
         if (approvingUserId.HasValue && workflow.CreatedByUserId == approvingUserId)
             return TransactionResult.Failure("The person who prepared an invoice or bill draft cannot approve it.");
+        var projectBilling = await db.ProjectBillingProposals.SingleOrDefaultAsync(item => item.SubledgerDocumentWorkflowId == workflow.Id && item.CompanyId == companyId, cancellationToken);
+        if (projectBilling is not null)
+        {
+            var projectBillingError = await ValidateProjectBillingApprovalAsync(db, companyId, projectBilling, cancellationToken);
+            if (projectBillingError is not null) return TransactionResult.Failure(projectBillingError);
+        }
         var validation = await ValidateSubledgerPostingAsync(companyId, workflow.DocumentType, workflow.DocumentScope, workflow.PayloadJson, cancellationToken);
         if (!validation.Succeeded) return TransactionResult.Failure($"The draft cannot be approved because it is not postable: {validation.ErrorMessage}");
         workflow.Status = "Approved"; workflow.ApprovedByUserId = approvingUserId; workflow.ApprovedAtUtc = DateTimeOffset.UtcNow; workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        if (projectBilling is not null) { projectBilling.Status = "Approved"; projectBilling.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
         AddWorkflowAudit(db, workflow, "subledger-document.approved");
         try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The draft changed during approval. Refresh and try again."); }
         return TransactionResult.Success(workflow.Id);
@@ -681,6 +691,8 @@ public sealed partial class AccountingTransactionService(
         workflow.RejectedAtUtc = DateTimeOffset.UtcNow;
         workflow.DecisionReason = request.Reason.Trim();
         workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var projectBilling = await db.ProjectBillingProposals.SingleOrDefaultAsync(item => item.SubledgerDocumentWorkflowId == workflow.Id && item.CompanyId == companyId, cancellationToken);
+        if (projectBilling is not null) { projectBilling.Status = "Rejected"; projectBilling.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
         AddWorkflowAudit(db, workflow, "subledger-document.rejected", new { workflow.DecisionReason });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The draft changed during rejection. Refresh and try again."); }
@@ -727,6 +739,14 @@ public sealed partial class AccountingTransactionService(
         catch (DbUpdateException) { return TransactionResult.Failure("The approved draft could not be posted atomically. The entire posting was rolled back; refresh and try again."); }
         if (!posting.Succeeded) return posting;
         workflow.Status = "Posted"; workflow.PostedDocumentId = posting.Id; workflow.PostedByUserId = postingUserId; workflow.PostedAtUtc = DateTimeOffset.UtcNow; workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var projectBilling = await db.ProjectBillingProposals.SingleOrDefaultAsync(item => item.SubledgerDocumentWorkflowId == workflow.Id && item.CompanyId == companyId, cancellationToken);
+        if (projectBilling is not null)
+        {
+            projectBilling.Status = "Posted";
+            projectBilling.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            var reservations = await db.ProjectBillingSourceReservations.Where(item => item.ProjectBillingProposalId == projectBilling.Id && item.Status == "Reserved").ToListAsync(cancellationToken);
+            foreach (var reservation in reservations) { reservation.Status = "Billed"; reservation.UpdatedAtUtc = DateTimeOffset.UtcNow; reservation.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
+        }
         AddWorkflowAudit(db, workflow, "subledger-document.posted");
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The approved draft changed while it was posting. The entire posting was rolled back; refresh and try again."); }
@@ -1082,12 +1102,16 @@ public sealed partial class AccountingTransactionService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var reference = string.Empty; var documentDate = default(DateOnly); var amount = 0m; var counterpartyId = Guid.Empty;
         InventoryShipment? invoiceShipment = null;
+        ProjectBillingProposal? projectBillingInvoice = null;
         List<SalesInvoiceLine> fulfillmentInvoiceLines = [];
         if (receivable)
         {
             var invoice = await db.SalesInvoices.SingleOrDefaultAsync(item => item.Id == request.DocumentId && item.CompanyId == companyId, cancellationToken);
             if (invoice is null) return TransactionResult.Failure("Invoice not found.");
             if (invoice.Status == "Voided" || invoice.BalanceDue != invoice.TotalAmount) return TransactionResult.Failure("Only a fully open, unadjusted invoice can be voided.");
+            projectBillingInvoice = await db.ProjectBillingProposals.SingleOrDefaultAsync(proposal => proposal.CompanyId == companyId && db.SubledgerDocumentWorkflows.Any(workflow => workflow.Id == proposal.SubledgerDocumentWorkflowId && workflow.PostedDocumentId == invoice.Id), cancellationToken);
+            if (projectBillingInvoice is not null && await db.ProjectBillingProposals.AnyAsync(release => release.RetainageReleaseOfProposalId == projectBillingInvoice.Id && release.Status != "Cancelled" && release.Status != "Voided", cancellationToken))
+                return TransactionResult.Failure("Void or cancel every retainage release derived from this project billing before voiding its original invoice.");
             if (invoice.InventoryShipmentId.HasValue)
             {
                 invoiceShipment = await db.InventoryShipments.SingleOrDefaultAsync(shipment => shipment.Id == invoice.InventoryShipmentId.Value && shipment.CompanyId == companyId, cancellationToken);
@@ -1118,6 +1142,16 @@ public sealed partial class AccountingTransactionService(
         {
             var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == request.DocumentId, cancellationToken); invoice.BalanceDue = 0; invoice.Status = "Voided"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
             (await db.Customers.SingleAsync(item => item.Id == counterpartyId, cancellationToken)).OpenBalance -= amount;
+            if (projectBillingInvoice is not null)
+            {
+                projectBillingInvoice.Status = "Voided";
+                projectBillingInvoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+                var reservations = await db.ProjectBillingSourceReservations.Where(item => item.ProjectBillingProposalId == projectBillingInvoice.Id && item.Status == "Billed").ToListAsync(cancellationToken);
+                foreach (var reservation in reservations) { reservation.Status = "Released"; reservation.UpdatedAtUtc = DateTimeOffset.UtcNow; reservation.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
+                var project = await db.ProjectJobs.SingleAsync(item => item.Id == projectBillingInvoice.ProjectJobId && item.CompanyId == companyId, cancellationToken);
+                project.ConcurrencyToken = Guid.NewGuid().ToString("N");
+                AddProjectBillingAudit(db, companyId, "project-billing-proposal.voided", projectBillingInvoice.Id, projectBillingInvoice.ProjectJobId, new { invoice.Id, request.VoidDate, reason = request.Reason.Trim(), releasedSources = reservations.Count });
+            }
             if (invoiceShipment is not null)
             {
                 invoiceShipment.SalesInvoiceId = null;
@@ -2090,6 +2124,10 @@ public sealed partial class AccountingTransactionService(
         if (timecard is null) return TransactionResult.Failure("Payroll timecard not found.");
         if (timecard.Status is "Voided" or "Consumed" || timecard.PayrollRunId.HasValue) return TransactionResult.Failure("A voided or payroll-consumed timecard cannot be voided again.");
         if (!string.Equals(timecard.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The timecard changed after it was opened. Refresh and review it again.");
+        var timeEntryIds = await db.PayrollTimeEntries.Where(entry => entry.PayrollTimecardId == timecard.Id).Select(entry => entry.Id).ToListAsync(cancellationToken);
+        var billingSourceKeys = timeEntryIds.Select(id => $"TIME:{id:N}").ToArray();
+        if (billingSourceKeys.Length > 0 && await db.ProjectBillingSourceReservations.AnyAsync(reservation => reservation.CompanyId == companyId && billingSourceKeys.Contains(reservation.SourceKey) && reservation.Status != "Released", cancellationToken))
+            return TransactionResult.Failure("This timecard contains time reserved or posted in project billing. Cancel or void the related project billing before voiding the timecard.");
         timecard.Status = "Voided"; timecard.VoidedByUserId = ResolveUserId(); timecard.VoidedAtUtc = DateTimeOffset.UtcNow; timecard.VoidReason = request.Reason.Trim(); timecard.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddTimecardAudit(db, companyId, "payroll-timecard.voided", timecard, new { timecard.VoidReason });
         try { await db.SaveChangesAsync(cancellationToken); }
@@ -3068,6 +3106,8 @@ public sealed partial class AccountingTransactionService(
         var normalizedNumber = documentNumber.Trim();
         var existing = await db.SubledgerDocumentWorkflows.SingleOrDefaultAsync(item => item.CompanyId == companyId && item.DocumentType == documentType && item.DocumentScope == documentScope && item.DocumentNumber == normalizedNumber && item.IsRecurringTemplate == recurring, cancellationToken);
         if (existing is not null && (existing.Status != "Rejected" || recurring)) return TransactionResult.Failure("That draft or recurring template number already exists for this customer or vendor.");
+        if (existing is not null && await db.ProjectBillingProposals.AnyAsync(item => item.SubledgerDocumentWorkflowId == existing.Id && item.CompanyId == companyId, cancellationToken))
+            return TransactionResult.Failure("This rejected invoice was derived from project billing. Correct or cancel it from Projects so its source reservations and audit trail remain consistent.");
         var validation = await ValidateSubledgerPostingAsync(companyId, documentType, documentScope, payloadJson, cancellationToken);
         if (!validation.Succeeded) return TransactionResult.Failure($"The draft or recurring template is not postable: {validation.ErrorMessage}");
         if (existing is not null)
@@ -3290,6 +3330,9 @@ public sealed partial class AccountingTransactionService(
         var original = await db.JournalEntries.SingleOrDefaultAsync(entry => entry.Id == originalJournalEntryId && entry.CompanyId == companyId && entry.IsPosted, cancellationToken);
         if (original is null || original.ReversedByJournalEntryId.HasValue) return TransactionResult.Failure("The original journal is unavailable or has already been reversed.");
         var originalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == originalJournalEntryId).ToListAsync(cancellationToken);
+        var projectBillingSourceKeys = originalLines.Select(line => $"COST:{line.Id:N}").ToArray();
+        if (await db.ProjectBillingSourceReservations.AnyAsync(reservation => reservation.CompanyId == companyId && projectBillingSourceKeys.Contains(reservation.SourceKey) && reservation.Status != "Released", cancellationToken))
+            return TransactionResult.Failure("This transaction contains project costs reserved or posted in project billing. Cancel or void the related project billing before reversing it.");
         var accountIds = originalLines.Select(line => line.AccountId).Distinct().ToArray();
         var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
         if (originalLines.Count < 2 || accounts.Count != accountIds.Length) return TransactionResult.Failure("The original journal distribution is unavailable.");
@@ -3311,7 +3354,8 @@ public sealed partial class AccountingTransactionService(
             db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, ProjectJobId = line.ProjectJobId, Description = line.Description, Debit = line.Debit, Credit = line.Credit });
         }
         AddJournalAudit(db, companyId, userId, "journal.posted", entry, new { entry.SourceDocumentType, entry.SourceDocumentId });
-        await db.SaveChangesAsync(cancellationToken);
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The source transaction changed while it was being reversed. The entire reversal was rolled back; refresh and try again."); }
         return TransactionResult.Success(entry.Id);
     }
 

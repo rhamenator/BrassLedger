@@ -367,7 +367,9 @@ public sealed record ProjectsWorkspace(
     decimal Revenue = 0,
     decimal Commitments = 0,
     IReadOnlyList<ProjectLedgerLineSnapshot>? LedgerLines = null,
-    IReadOnlyList<ProjectChangeOrderSnapshot>? ChangeOrders = null);
+    IReadOnlyList<ProjectChangeOrderSnapshot>? ChangeOrders = null,
+    IReadOnlyList<ProjectBillingRateSnapshot>? BillingRates = null,
+    IReadOnlyList<ProjectBillingProposalSnapshot>? BillingProposals = null);
 
 public sealed record ProjectJobSnapshot(
     string JobNumber,
@@ -426,6 +428,10 @@ public sealed record ProjectChangeOrderSnapshot(
     DateTimeOffset? CancelledAtUtc,
     string CancellationReason,
     string ConcurrencyToken);
+
+public sealed record ProjectBillingRateSnapshot(Guid Id, Guid ProjectJobId, string ProjectJobNumber, string EarningCode, decimal HourlyRate, DateOnly EffectiveOn, DateOnly? EffectiveThrough, bool IsActive, string ConcurrencyToken);
+public sealed record ProjectBillingLineSnapshot(int Sequence, string SourceType, Guid? SourceId, string SourceKey, string Description, decimal Quantity, decimal UnitPrice, decimal SourceCost, decimal MarkupAmount, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber);
+public sealed record ProjectBillingProposalSnapshot(Guid Id, Guid ProjectJobId, string ProjectJobNumber, Guid SubledgerDocumentWorkflowId, Guid? RetainageReleaseOfProposalId, string InvoiceNumber, DateOnly BillingThrough, DateOnly InvoiceDate, DateOnly DueDate, string BillingBasis, decimal ProgressPercentToDate, decimal CostMarkupPercent, decimal ContractAmountSnapshot, decimal RetainagePercentSnapshot, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber, string Description, string Status, DateTimeOffset PreparedAtUtc, DateTimeOffset? CancelledAtUtc, string CancellationReason, string ConcurrencyToken, IReadOnlyList<ProjectBillingLineSnapshot> Lines);
 
 public sealed record ReportingWorkspace(
     int ReportCount,

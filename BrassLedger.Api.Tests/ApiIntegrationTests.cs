@@ -1592,7 +1592,23 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal("Closed", project.Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/projects/{Guid.NewGuid()}/reopen", new ReopenProjectJobRequest(project.Id, "Mismatched route", project.ConcurrencyToken))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/projects/{project.Id}/reopen", new ReopenProjectJobRequest(project.Id, "Approved follow-up scope", project.ConcurrencyToken))).StatusCode);
-        Assert.Equal("Active", Assert.Single((await client.GetFromJsonAsync<ProjectsWorkspace>("/api/projects"))!.Jobs, candidate => candidate.Id == project.Id).Status);
+        project = Assert.Single((await client.GetFromJsonAsync<ProjectsWorkspace>("/api/projects"))!.Jobs, candidate => candidate.Id == project.Id);
+        Assert.Equal("Active", project.Status);
+        var billingRequest = new ProjectBillingPreviewRequest(project.Id, "PB-API-001", new DateOnly(2026, 9, 30), new DateOnly(2026, 9, 30), new DateOnly(2026, 10, 30), "4000", "API milestone billing", MilestoneAmount: 1_000m, IncludeLabor: false, IncludeCosts: false);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/projects/{Guid.NewGuid()}/billing-preview", billingRequest)).StatusCode);
+        var previewResponse = await client.PostAsJsonAsync($"/api/projects/{project.Id}/billing-preview", billingRequest);
+        Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
+        var preview = await previewResponse.Content.ReadFromJsonAsync<ProjectBillingPreview>();
+        Assert.True(preview!.Succeeded); Assert.Equal(1_000m, preview.GrossAmount);
+        var saveBillingRequest = new SaveProjectBillingProposalRequest(null, billingRequest, preview.Fingerprint, preview.ProjectConcurrencyToken);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/projects/{Guid.NewGuid()}/billing-proposals", saveBillingRequest)).StatusCode);
+        var billingResponse = await client.PostAsJsonAsync($"/api/projects/{project.Id}/billing-proposals", saveBillingRequest);
+        Assert.Equal(HttpStatusCode.Created, billingResponse.StatusCode);
+        var billingResult = await billingResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var billing = Assert.Single((await client.GetFromJsonAsync<ProjectsWorkspace>("/api/projects"))!.BillingProposals!, candidate => candidate.Id == billingResult!.Id);
+        Assert.Equal("Draft", billing.Status); Assert.Equal("FixedPriceMilestone", billing.BillingBasis);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/project-billing-proposals/{Guid.NewGuid()}/cancellation", new CancelProjectBillingProposalRequest(billing.Id, "Mismatched route", billing.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/project-billing-proposals/{billing.Id}/cancellation", new CancelProjectBillingProposalRequest(billing.Id, "Customer deferred milestone billing", billing.ConcurrencyToken))).StatusCode);
     }
 
     private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null, string userName = "controller", bool includeAntiforgery = true)

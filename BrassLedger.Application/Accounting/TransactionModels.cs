@@ -68,6 +68,32 @@ public sealed record SaveProjectChangeOrderDraftRequest(Guid? Id, Guid ProjectJo
 public sealed record SubmitProjectChangeOrderRequest(Guid ProjectChangeOrderId, string ConcurrencyToken);
 public sealed record DecideProjectChangeOrderRequest(Guid ProjectChangeOrderId, bool Approve, string Reason, string ConcurrencyToken);
 public sealed record CancelProjectChangeOrderRequest(Guid ProjectChangeOrderId, string Reason, string ConcurrencyToken);
+public sealed record SaveProjectBillingRateRequest(Guid? Id, Guid ProjectJobId, string EarningCode, decimal HourlyRate, DateOnly EffectiveOn, DateOnly? EffectiveThrough, bool IsActive = true, string ConcurrencyToken = "");
+public sealed record ProjectBillingPreviewRequest(
+    Guid ProjectJobId,
+    string InvoiceNumber,
+    DateOnly BillingThrough,
+    DateOnly InvoiceDate,
+    DateOnly DueDate,
+    string RevenueAccountNumber,
+    string Description,
+    decimal ProgressPercentToDate = 0m,
+    decimal MilestoneAmount = 0m,
+    decimal CostMarkupPercent = 0m,
+    bool IncludeLabor = true,
+    bool IncludeCosts = true,
+    IReadOnlyList<Guid>? SelectedTimeEntryIds = null,
+    IReadOnlyList<Guid>? SelectedJournalEntryLineIds = null,
+    Guid? ExistingProposalId = null,
+    Guid? RetainageReleaseOfProposalId = null,
+    decimal RetainageReleaseAmount = 0m);
+public sealed record ProjectBillingPreviewLine(string SourceType, Guid? SourceId, string SourceKey, string Description, decimal Quantity, decimal UnitPrice, decimal SourceCost, decimal MarkupAmount, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber);
+public sealed record ProjectBillingPreview(bool Succeeded, string ErrorMessage, Guid ProjectJobId, string ProjectConcurrencyToken, string BillingBasis, decimal ContractAmount, decimal PreviouslyBilledGross, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string Fingerprint, IReadOnlyList<ProjectBillingPreviewLine> Lines)
+{
+    public static ProjectBillingPreview Failure(string error) => new(false, error, Guid.Empty, string.Empty, string.Empty, 0m, 0m, 0m, 0m, 0m, string.Empty, []);
+}
+public sealed record SaveProjectBillingProposalRequest(Guid? Id, ProjectBillingPreviewRequest PreviewRequest, string PreviewFingerprint, string ProjectConcurrencyToken, string ConcurrencyToken = "");
+public sealed record CancelProjectBillingProposalRequest(Guid ProjectBillingProposalId, string Reason, string ConcurrencyToken);
 public sealed record EmployeePayrollInput(Guid EmployeeId, decimal GrossPay, IReadOnlyList<PayrollEarningInput>? Earnings = null, IReadOnlyList<PayrollDeductionInput>? Deductions = null);
 public sealed record PostEmployeePayrollRunRequest(Guid BankAccountId, DateOnly PayDate, string Reference, IReadOnlyList<EmployeePayrollInput> Employees, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null, string RunType = "Regular", IReadOnlyList<Guid>? ApprovedTimecardIds = null, Guid? Id = null, string ConcurrencyToken = "");
 public sealed record PayrollTaxEstimate(string ObligationCode, string JurisdictionCode, string JurisdictionName, string TaxType, decimal TaxableWages, decimal YearToDateTaxableWagesBefore, decimal EmployeeAmount, decimal EmployerAmount, Guid? TaxRuleSetId, Guid? TaxContentPackageId, string ContentVersion, string Source, string CalculationTraceJson);
@@ -242,6 +268,10 @@ public interface IAccountingTransactionService
     Task<TransactionResult> SubmitProjectChangeOrderAsync(SubmitProjectChangeOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> DecideProjectChangeOrderAsync(DecideProjectChangeOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> CancelProjectChangeOrderAsync(CancelProjectChangeOrderRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveProjectBillingRateAsync(SaveProjectBillingRateRequest request, CancellationToken cancellationToken = default);
+    Task<ProjectBillingPreview> PreviewProjectBillingAsync(ProjectBillingPreviewRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveProjectBillingProposalAsync(SaveProjectBillingProposalRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CancelProjectBillingProposalAsync(CancelProjectBillingProposalRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveInventoryWarehouseAsync(SaveInventoryWarehouseRequest request, CancellationToken cancellationToken = default);

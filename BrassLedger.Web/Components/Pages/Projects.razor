@@ -13,8 +13,8 @@ else
 {
     <section class="page-shell">
         <header class="page-header">
-            <div><p class="eyebrow">Project accounting</p><h1>Track project setup, commitments, costs, and revenue.</h1></div>
-            <p class="page-intro">Amounts come from approved purchase commitments and posted project-tagged journal lines. Closing a project prevents new transactions while preserving its ledger history.</p>
+            <div><p class="eyebrow">Project accounting</p><h1>Control project scope, cost, billing, and revenue.</h1></div>
+            <p class="page-intro">Amounts come from approved commitments and posted project-tagged ledger lines. Source-derived billing preserves contract, retainage, review, and audit controls.</p>
         </header>
 
         @if (!string.IsNullOrWhiteSpace(StatusMessage))
@@ -143,6 +143,63 @@ else
             }
         </section>
 
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareProjectBilling"><Authorized Context="projectBillingAuthorization">
+            <section class="panel">
+                <h2>@(BillingRateForm.Id.HasValue ? "Edit project billing rate" : "Add project billing rate")</h2>
+                <p class="page-intro">Rates are effective-dated. Use an earning code such as REGULAR, or * as the fallback for time entries without a specific rate.</p>
+                <EditForm Model="BillingRateForm" OnValidSubmit="SaveBillingRateAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Project</label><InputSelect aria-label="Billing rate project" class="field-input" @bind-Value="BillingRateForm.ProjectJobId" disabled="@BillingRateForm.Id.HasValue"><option value="@Guid.Empty">Select project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status == "Active" && project.BillingMethod == "TimeAndMaterials")) { <option value="@project.Id">@project.JobNumber — @project.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Earning code</label><InputText aria-label="Billing rate earning code" class="field-input" @bind-Value="BillingRateForm.EarningCode" /></div>
+                    <div class="field-group"><label class="field-label">Hourly billing rate</label><InputNumber aria-label="Hourly billing rate" class="field-input" @bind-Value="BillingRateForm.HourlyRate" /></div>
+                    <div class="field-group"><label class="field-label">Effective on</label><InputDate aria-label="Billing rate effective date" class="field-input" @bind-Value="BillingRateForm.EffectiveOn" /></div>
+                    <div class="field-group"><label class="field-label">Effective through</label><InputDate aria-label="Billing rate end date" class="field-input" @bind-Value="BillingRateForm.EffectiveThrough" /></div>
+                    <div class="field-group"><label><InputCheckbox aria-label="Billing rate active" @bind-Value="BillingRateForm.IsActive" /> Active</label></div>
+                    <button class="action-primary" type="submit">Save billing rate</button>
+                    @if (BillingRateForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="BillingRateForm.Reset">Cancel edit</button> }
+                </div></EditForm>
+                @if ((Workspace.Projects.BillingRates ?? []).Count == 0) { <p class="empty-state">No project billing rates have been configured.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Project billing rates"><thead><tr><th>Project</th><th>Earning code</th><th>Rate</th><th>Effective</th><th>Status</th><th>Action</th></tr></thead><tbody>@foreach (var rate in Workspace.Projects.BillingRates ?? []) { <tr><td>@rate.ProjectJobNumber</td><td>@rate.EarningCode</td><td>@rate.HourlyRate.ToString("C")</td><td>@rate.EffectiveOn — @(rate.EffectiveThrough?.ToString() ?? "Open")</td><td>@(rate.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => BillingRateForm.Load(rate)">Edit</button></td></tr> }</tbody></table></div> }
+            </section>
+
+            <section class="panel">
+                <h2>@(BillingForm.Id.HasValue ? $"Correct project billing {BillingForm.InvoiceNumber}" : "Prepare project billing")</h2>
+                <p class="page-intro">Preview first. The preview derives eligible approved time or posted cost, applies contract and retainage controls, and displays every source before it creates a controlled receivables draft.</p>
+                <div class="auth-form">
+                    <div class="field-group"><label class="field-label">Project</label><InputSelect aria-label="Project billing project" class="field-input" @bind-Value="BillingForm.ProjectJobId" disabled="@(BillingForm.Id.HasValue || BillingForm.RetainageReleaseOfProposalId.HasValue)"><option value="@Guid.Empty">Select project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status == "Active" && project.BillingMethod != "Internal")) { <option value="@project.Id">@project.JobNumber — @project.Name (@BillingMethodLabel(project.BillingMethod))</option> }</InputSelect></div>
+                    @if (BillingForm.RetainageReleaseOfProposalId.HasValue) { <div class="field-group"><label class="field-label">Retainage source</label><InputSelect aria-label="Retainage source billing" class="field-input" @bind-Value="BillingForm.RetainageReleaseOfProposalId" disabled><option value="@BillingForm.RetainageReleaseOfProposalId">@((Workspace.Projects.BillingProposals ?? []).Single(x => x.Id == BillingForm.RetainageReleaseOfProposalId).InvoiceNumber)</option></InputSelect></div><div class="field-group"><label class="field-label">Retainage release amount</label><InputNumber aria-label="Retainage release amount" class="field-input" @bind-Value="BillingForm.RetainageReleaseAmount" /></div> }
+                    <div class="field-group"><label class="field-label">Invoice number</label><InputText aria-label="Project billing invoice number" class="field-input" @bind-Value="BillingForm.InvoiceNumber" /></div>
+                    <div class="field-group"><label class="field-label">Billing through</label><InputDate aria-label="Project billing through date" class="field-input" @bind-Value="BillingForm.BillingThrough" /></div>
+                    <div class="field-group"><label class="field-label">Invoice date</label><InputDate aria-label="Project billing invoice date" class="field-input" @bind-Value="BillingForm.InvoiceDate" /></div>
+                    <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Project billing due date" class="field-input" @bind-Value="BillingForm.DueDate" /></div>
+                    <div class="field-group"><label class="field-label">Revenue account</label><InputSelect aria-label="Project billing revenue account" class="field-input" @bind-Value="BillingForm.RevenueAccountNumber"><option value="">Select revenue account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => account.Type == "Revenue" && !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Project billing description" class="field-input" @bind-Value="BillingForm.Description" /></div>
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject?.BillingMethod == "FixedPrice") { <div class="field-group"><label class="field-label">Cumulative progress percent</label><InputNumber aria-label="Project billing cumulative progress percent" class="field-input" @bind-Value="BillingForm.ProgressPercentDisplay" /></div><div class="field-group"><label class="field-label">Milestone amount</label><InputNumber aria-label="Project billing milestone amount" class="field-input" @bind-Value="BillingForm.MilestoneAmount" /></div><p class="page-intro">Enter cumulative progress or a milestone amount, not both.</p> }
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject?.BillingMethod is "TimeAndMaterials" or "CostPlus") { <div class="field-group"><label class="field-label">Cost markup percent</label><InputNumber aria-label="Project billing cost markup percent" class="field-input" @bind-Value="BillingForm.CostMarkupPercentDisplay" /></div> }
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject?.BillingMethod == "TimeAndMaterials") { <div class="field-group"><label><InputCheckbox aria-label="Include approved labor" @bind-Value="BillingForm.IncludeLabor" /> Include approved labor</label></div><div class="field-group"><label><InputCheckbox aria-label="Include posted project costs" @bind-Value="BillingForm.IncludeCosts" /> Include posted non-payroll project costs</label></div> }
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject?.BillingMethod == "CostPlus") { <p class="page-intro">Cost-plus billing includes eligible posted project expense lines through the cutoff, including posted payroll cost.</p> }
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject is null) { <p class="page-intro">Select a project to display the inputs required by its billing method.</p> }
+                    <button class="action-primary" type="button" @onclick="PreviewBillingAsync">Preview billing</button>
+                    @if (BillingForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelBillingEdit">Cancel correction</button> }
+                </div>
+                @if (BillingPreview is not null)
+                {
+                    <div class="panel-subsection"><h3>Billing preview</h3><p class="page-intro">Basis: @BillingPreview.BillingBasis. Prior gross billing: @BillingPreview.PreviouslyBilledGross.ToString("C"). Gross: @BillingPreview.GrossAmount.ToString("C"); retainage: @BillingPreview.RetainageAmount.ToString("C"); invoice draft: @BillingPreview.InvoiceAmount.ToString("C").</p>
+                    <div class="table-scroll"><table class="data-table" aria-label="Project billing preview"><thead><tr><th>Source</th><th>Description</th><th>Quantity</th><th>Rate / price</th><th>Source cost</th><th>Markup</th><th>Gross</th><th>Retainage</th><th>Invoice</th></tr></thead><tbody>@foreach (var line in BillingPreview.Lines) { <tr><td>@line.SourceType</td><td>@line.Description</td><td>@line.Quantity</td><td>@line.UnitPrice.ToString("C")</td><td>@line.SourceCost.ToString("C")</td><td>@line.MarkupAmount.ToString("C")</td><td>@line.GrossAmount.ToString("C")</td><td>@line.RetainageAmount.ToString("C")</td><td>@line.InvoiceAmount.ToString("C")</td></tr> }</tbody></table></div>
+                    <button class="action-primary" type="button" @onclick="SaveBillingProposalAsync">Create controlled invoice draft</button></div>
+                }
+            </section>
+
+            <section class="panel"><h2>Project billing proposals</h2>
+                @if ((Workspace.Projects.BillingProposals ?? []).Count == 0) { <p class="empty-state">No project billing proposals have been prepared.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Project billing proposals"><thead><tr><th>Project</th><th>Invoice</th><th>Through</th><th>Basis</th><th>Gross</th><th>Retainage</th><th>Invoice amount</th><th>Status</th><th>Sources</th><th>Action</th></tr></thead><tbody>@foreach (var proposal in Workspace.Projects.BillingProposals ?? []) { <tr><td>@proposal.ProjectJobNumber</td><td>@proposal.InvoiceNumber</td><td>@proposal.BillingThrough</td><td>@proposal.BillingBasis</td><td>@proposal.GrossAmount.ToString("C")</td><td>@proposal.RetainageAmount.ToString("C")</td><td>@proposal.InvoiceAmount.ToString("C")</td><td>@proposal.Status</td><td>@proposal.Lines.Count</td><td>@if (proposal.Status == "Rejected") { <button class="action-secondary" type="button" @onclick="() => BeginBillingCorrection(proposal)">Correct</button> } @if (proposal.Status is "Draft" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => BeginBillingCancellation(proposal)">Cancel</button> } @if (proposal.Status == "Posted" && proposal.BillingBasis != "RetainageRelease" && proposal.RetainageAmount > 0m) { <button class="action-secondary" type="button" @onclick="() => BeginRetainageRelease(proposal)">Release retainage</button> }</td></tr> }</tbody></table></div> }
+            </section>
+        </Authorized></AuthorizeView>
+
+        @if (BillingCancellationForm is not null)
+        {
+            <section class="panel"><h2>Cancel project billing @BillingCancellationForm.InvoiceNumber</h2><EditForm Model="BillingCancellationForm" OnValidSubmit="CompleteBillingCancellationAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Cancellation reason</label><InputText aria-label="Project billing cancellation reason" class="field-input" @bind-Value="BillingCancellationForm.Reason" /></div><button class="action-primary" type="submit">Cancel and release sources</button><button class="action-secondary" type="button" @onclick="() => BillingCancellationForm = null">Keep billing</button></div></EditForm></section>
+        }
+
         @if (SelectedProject is not null)
         {
             <section class="panel">
@@ -163,12 +220,17 @@ else
     private ChangeOrderEditor ChangeOrderForm { get; } = new();
     private ChangeOrderDecisionEditor? ChangeOrderDecisionForm;
     private ChangeOrderCancellationEditor? ChangeOrderCancellationForm;
+    private BillingRateEditor BillingRateForm { get; } = new();
+    private ProjectBillingEditor BillingForm { get; } = new();
+    private ProjectBillingPreview? BillingPreview;
+    private BillingCancellationEditor? BillingCancellationForm;
     private Guid? SelectedProjectId;
     private string StatusMessage = string.Empty;
     private ProjectJobSnapshot? SelectedProject => Workspace?.Projects.Jobs.SingleOrDefault(project => project.Id == SelectedProjectId);
+    private ProjectJobSnapshot? BillingProject => Workspace?.Projects.Jobs.SingleOrDefault(project => project.Id == BillingForm.ProjectJobId);
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
-    private async Task ReloadAsync() { Workspace = await WorkspaceService.GetWorkspaceAsync(); if (SelectedProjectId.HasValue && Workspace.Projects.Jobs.All(project => project.Id != SelectedProjectId)) SelectedProjectId = null; }
+    private async Task ReloadAsync() { Workspace = await WorkspaceService.GetWorkspaceAsync(); if (SelectedProjectId.HasValue && Workspace.Projects.Jobs.All(project => project.Id != SelectedProjectId)) SelectedProjectId = null; if (string.IsNullOrWhiteSpace(BillingForm.RevenueAccountNumber)) BillingForm.RevenueAccountNumber = DefaultRevenueAccountNumber; }
     private async Task SaveProjectAsync() { var result = await TransactionService.SaveProjectJobAsync(new(ProjectForm.Id, ProjectForm.JobNumber, ProjectForm.Name, ProjectForm.CustomerId, ProjectForm.StartDate, ProjectForm.ExpectedEndDate, ProjectForm.BillingMethod, ProjectForm.ContractAmount, ProjectForm.BudgetAmount, ProjectForm.RetainagePercentDisplay / 100m, ProjectForm.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project {ProjectForm.JobNumber} saved." : result.ErrorMessage; if (result.Succeeded) { SelectedProjectId = result.Id; ProjectForm.Reset(); await ReloadAsync(); } }
     private void EditProject(ProjectJobSnapshot project) { ProjectForm.Load(project); StatusMessage = string.Empty; }
     private void CancelEdit() => ProjectForm.Reset();
@@ -186,6 +248,16 @@ else
     private async Task CompleteChangeOrderDecisionAsync() { var form = ChangeOrderDecisionForm!; var result = await TransactionService.DecideProjectChangeOrderAsync(new(form.Id, form.Approve, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {form.ChangeOrderNumber} {(form.Approve ? "approved" : "rejected")}." : result.ErrorMessage; if (result.Succeeded) { ChangeOrderDecisionForm = null; await ReloadAsync(); } }
     private void BeginChangeOrderCancellation(ProjectChangeOrderSnapshot changeOrder) => ChangeOrderCancellationForm = new(changeOrder.Id, changeOrder.ChangeOrderNumber, changeOrder.ConcurrencyToken);
     private async Task CompleteChangeOrderCancellationAsync() { var form = ChangeOrderCancellationForm!; var result = await TransactionService.CancelProjectChangeOrderAsync(new(form.Id, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {form.ChangeOrderNumber} cancelled." : result.ErrorMessage; if (result.Succeeded) { ChangeOrderCancellationForm = null; await ReloadAsync(); } }
+    private async Task SaveBillingRateAsync() { var form = BillingRateForm; var result = await TransactionService.SaveProjectBillingRateAsync(new(form.Id, form.ProjectJobId, form.EarningCode, form.HourlyRate, form.EffectiveOn, form.EffectiveThrough, form.IsActive, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Project billing rate saved." : result.ErrorMessage; if (result.Succeeded) { form.Reset(); await ReloadAsync(); } }
+    private ProjectBillingPreviewRequest CurrentBillingRequest() => new(BillingForm.ProjectJobId, BillingForm.InvoiceNumber, BillingForm.BillingThrough, BillingForm.InvoiceDate, BillingForm.DueDate, BillingForm.RevenueAccountNumber, BillingForm.Description, BillingForm.ProgressPercentDisplay / 100m, BillingForm.MilestoneAmount, BillingForm.CostMarkupPercentDisplay / 100m, BillingForm.IncludeLabor, BillingForm.IncludeCosts, ExistingProposalId: BillingForm.Id, RetainageReleaseOfProposalId: BillingForm.RetainageReleaseOfProposalId, RetainageReleaseAmount: BillingForm.RetainageReleaseAmount);
+    private async Task PreviewBillingAsync() { BillingPreview = await TransactionService.PreviewProjectBillingAsync(CurrentBillingRequest()); StatusMessage = BillingPreview.Succeeded ? "Review the derived billing sources and totals before creating the invoice draft." : BillingPreview.ErrorMessage; if (!BillingPreview.Succeeded) BillingPreview = null; }
+    private async Task SaveBillingProposalAsync() { var preview = BillingPreview!; var result = await TransactionService.SaveProjectBillingProposalAsync(new(BillingForm.Id, CurrentBillingRequest(), preview.Fingerprint, preview.ProjectConcurrencyToken, BillingForm.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project billing {BillingForm.InvoiceNumber} saved as a controlled receivables draft." : result.ErrorMessage; if (result.Succeeded) { BillingForm.Reset(DefaultRevenueAccountNumber); BillingPreview = null; await ReloadAsync(); } }
+    private void BeginBillingCorrection(ProjectBillingProposalSnapshot proposal) { BillingForm.Load(proposal); BillingPreview = null; StatusMessage = "Preview the corrected billing before saving it."; }
+    private void BeginRetainageRelease(ProjectBillingProposalSnapshot proposal) { BillingForm.Reset(proposal.RevenueAccountNumber); BillingForm.ProjectJobId = proposal.ProjectJobId; BillingForm.RetainageReleaseOfProposalId = proposal.Id; BillingForm.RetainageReleaseAmount = proposal.RetainageAmount; BillingForm.BillingThrough = DateOnly.FromDateTime(DateTime.Today); BillingForm.InvoiceDate = BillingForm.BillingThrough; BillingForm.DueDate = BillingForm.InvoiceDate.AddDays(30); BillingForm.Description = $"Retainage release from {proposal.InvoiceNumber}"; BillingForm.IncludeLabor = false; BillingForm.IncludeCosts = false; BillingPreview = null; StatusMessage = "Enter a release invoice number and preview the remaining retainage before creating its controlled draft."; }
+    private void CancelBillingEdit() { BillingForm.Reset(DefaultRevenueAccountNumber); BillingPreview = null; }
+    private void BeginBillingCancellation(ProjectBillingProposalSnapshot proposal) => BillingCancellationForm = new(proposal.Id, proposal.InvoiceNumber, proposal.ConcurrencyToken);
+    private async Task CompleteBillingCancellationAsync() { var form = BillingCancellationForm!; var result = await TransactionService.CancelProjectBillingProposalAsync(new(form.Id, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project billing {form.InvoiceNumber} cancelled and its source reservations released." : result.ErrorMessage; if (result.Succeeded) { BillingCancellationForm = null; await ReloadAsync(); } }
+    private string DefaultRevenueAccountNumber => Workspace?.GeneralLedger.Accounts.SingleOrDefault(account => account.OperationalRole == BrassLedger.Domain.Accounting.AccountingAccountRoles.DefaultRevenue)?.Number ?? string.Empty;
 
     private sealed class ProjectEditor
     {
@@ -205,4 +277,17 @@ else
     }
     private sealed class ChangeOrderDecisionEditor(Guid id, string changeOrderNumber, bool approve, string concurrencyToken) { public Guid Id { get; } = id; public string ChangeOrderNumber { get; } = changeOrderNumber; public bool Approve { get; } = approve; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = string.Empty; }
     private sealed class ChangeOrderCancellationEditor(Guid id, string changeOrderNumber, string concurrencyToken) { public Guid Id { get; } = id; public string ChangeOrderNumber { get; } = changeOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = string.Empty; }
+    private sealed class BillingRateEditor
+    {
+        public Guid? Id { get; set; } public Guid ProjectJobId { get; set; } public string EarningCode { get; set; } = "*"; public decimal HourlyRate { get; set; } public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? EffectiveThrough { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectBillingRateSnapshot rate) { Id = rate.Id; ProjectJobId = rate.ProjectJobId; EarningCode = rate.EarningCode; HourlyRate = rate.HourlyRate; EffectiveOn = rate.EffectiveOn; EffectiveThrough = rate.EffectiveThrough; IsActive = rate.IsActive; ConcurrencyToken = rate.ConcurrencyToken; }
+        public void Reset() { Id = null; ProjectJobId = Guid.Empty; EarningCode = "*"; HourlyRate = 0m; EffectiveOn = DateOnly.FromDateTime(DateTime.Today); EffectiveThrough = null; IsActive = true; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class ProjectBillingEditor
+    {
+        public Guid? Id { get; set; } public Guid ProjectJobId { get; set; } public Guid? RetainageReleaseOfProposalId { get; set; } public decimal RetainageReleaseAmount { get; set; } public string InvoiceNumber { get; set; } = string.Empty; public DateOnly BillingThrough { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly InvoiceDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today).AddDays(30); public string RevenueAccountNumber { get; set; } = string.Empty; public string Description { get; set; } = "Project billing"; public decimal ProgressPercentDisplay { get; set; } public decimal MilestoneAmount { get; set; } public decimal CostMarkupPercentDisplay { get; set; } public bool IncludeLabor { get; set; } = true; public bool IncludeCosts { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectBillingProposalSnapshot proposal) { Id = proposal.Id; ProjectJobId = proposal.ProjectJobId; RetainageReleaseOfProposalId = proposal.RetainageReleaseOfProposalId; RetainageReleaseAmount = proposal.BillingBasis == "RetainageRelease" ? proposal.InvoiceAmount : 0m; InvoiceNumber = proposal.InvoiceNumber; BillingThrough = proposal.BillingThrough; InvoiceDate = proposal.InvoiceDate; DueDate = proposal.DueDate; RevenueAccountNumber = proposal.RevenueAccountNumber; Description = proposal.Description; ProgressPercentDisplay = proposal.ProgressPercentToDate * 100m; MilestoneAmount = proposal.BillingBasis == "FixedPriceMilestone" ? proposal.GrossAmount : 0m; CostMarkupPercentDisplay = proposal.CostMarkupPercent * 100m; IncludeLabor = proposal.BillingBasis == "TimeAndMaterials"; IncludeCosts = proposal.BillingBasis is "TimeAndMaterials" or "CostPlus"; ConcurrencyToken = proposal.ConcurrencyToken; }
+        public void Reset(string revenueAccount = "") { Id = null; ProjectJobId = Guid.Empty; RetainageReleaseOfProposalId = null; RetainageReleaseAmount = 0m; InvoiceNumber = string.Empty; BillingThrough = DateOnly.FromDateTime(DateTime.Today); InvoiceDate = BillingThrough; DueDate = BillingThrough.AddDays(30); RevenueAccountNumber = revenueAccount; Description = "Project billing"; ProgressPercentDisplay = 0m; MilestoneAmount = 0m; CostMarkupPercentDisplay = 0m; IncludeLabor = true; IncludeCosts = true; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class BillingCancellationEditor(Guid id, string invoiceNumber, string concurrencyToken) { public Guid Id { get; } = id; public string InvoiceNumber { get; } = invoiceNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = string.Empty; }
 }

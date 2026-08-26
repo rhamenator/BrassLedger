@@ -95,6 +95,12 @@ Best practices:
 - review payment proposals before releasing checks or payments
 - reconcile payable aging to the control account
 
+### Projects
+
+Use Projects to maintain the customer contract, budget, billing method, retainage, effective-dated labor billing rates, and controlled change orders. Prepare a billing preview before creating an invoice draft. Review every included approved-time or posted-cost source, markup, contract-to-date amount, retainage, and net invoice total. If the underlying project, rates, prior billing, or eligible sources change after preview, BrassLedger requires a new preview.
+
+Project billing creates an ordinary receivables draft; it does not post an invoice immediately. The preparer cannot approve that draft, and its approver cannot post it. Correct a rejected project billing from Projects so source reservations and derivation remain synchronized. Cancel a draft or rejected proposal to release its sources. After a retained invoice posts, use **Release retainage** for partial or full controlled release invoices. Void dependent retainage releases before voiding their original invoice. See the [project accounting guide](project-accounting-guide.md) for calculation rules and current accounting boundaries.
+
 ### Operations
 
 Operations covers inventory, order flow, fulfillment, and the documents that accompany physical work.
