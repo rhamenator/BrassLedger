@@ -17,6 +17,7 @@ internal static class DefaultAccountingSetup
         Account(companyId, "1500", "Fixed Assets", AccountType.Asset),
         Account(companyId, "1590", "Accumulated Depreciation", AccountType.Asset),
         Account(companyId, "2000", "Accounts Payable", AccountType.Liability, true, AccountingAccountRoles.AccountsPayable),
+        Account(companyId, "2050", "Goods Received Not Invoiced", AccountType.Liability, true, AccountingAccountRoles.GoodsReceivedNotInvoiced),
         Account(companyId, "2100", "Sales Tax Payable", AccountType.Liability, true, AccountingAccountRoles.SalesTaxPayable),
         Account(companyId, "2150", "Customer Deposits", AccountType.Liability, true, AccountingAccountRoles.CustomerDeposits),
         Account(companyId, "2200", "Payroll Liabilities", AccountType.Liability, true, AccountingAccountRoles.PayrollLiabilities),
@@ -62,6 +63,7 @@ internal static class DefaultAccountingSetup
             {
                 await EnsureRoleAccountAsync(dbContext, companyId, "2100", "Sales Tax Payable", AccountType.Liability, true, AccountingAccountRoles.SalesTaxPayable, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "2200", "Payroll Liabilities", AccountType.Liability, true, AccountingAccountRoles.PayrollLiabilities, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "2050", "Goods Received Not Invoiced", AccountType.Liability, true, AccountingAccountRoles.GoodsReceivedNotInvoiced, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "1300", "Vendor Advances", AccountType.Asset, true, AccountingAccountRoles.VendorAdvances, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "1050", "Bank Transfer Clearing", AccountType.Asset, false, AccountingAccountRoles.BankTransferClearing, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "2150", "Customer Deposits", AccountType.Liability, true, AccountingAccountRoles.CustomerDeposits, cancellationToken);

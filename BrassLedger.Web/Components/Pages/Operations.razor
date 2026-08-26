@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageOperations)]
 @inject IBusinessWorkspaceService WorkspaceService
 @inject IAccountingTransactionService TransactionService
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Operations</PageTitle>
 
@@ -20,10 +21,12 @@ else
                 <h1>Operational flow from stock to shipment.</h1>
             </div>
             <p class="page-intro">
-                Inventory, order entry, purchase order, and point-of-sale are grouped into one operations surface for the
-                application, with POS able to reuse the order pipeline instead of staying a siloed legacy module.
+                Prepare and approve purchase orders, receive inventory at average cost, and match receipts to vendor bills.
+                Each posted receipt records inventory and goods received not invoiced in the ledger.
             </p>
         </header>
+
+        @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status">@StatusMessage</p> }
 
         <section class="stats-grid">
             <article class="stat-card accent-sand">
@@ -45,12 +48,45 @@ else
         </section>
 
         <section class="content-grid">
+            @if (CanPreparePurchaseOrders)
+            {
+            <article class="panel">
+                <h2>Prepare purchase order</h2>
+                <p class="page-intro">Save a multi-line draft for a company vendor. A user with purchasing authority must approve it before receiving.</p>
+                <EditForm Model="PurchaseOrderForm" OnValidSubmit="SavePurchaseOrderAsync">
+                    <div class="auth-form">
+                        <div class="field-group"><label class="field-label">Vendor</label><InputSelect aria-label="Purchase order vendor" class="field-input" @bind-Value="PurchaseOrderForm.VendorId"><option value="@Guid.Empty">Select vendor</option>@foreach (var vendor in Workspace.Payables.Vendors) { <option value="@vendor.Id">@vendor.VendorNumber — @vendor.Name</option> }</InputSelect></div>
+                        <div class="field-group"><label class="field-label">Order number</label><InputText aria-label="Purchase order number" class="field-input" @bind-Value="PurchaseOrderForm.OrderNumber" /></div>
+                        <div class="field-group"><label class="field-label">Order date</label><InputDate aria-label="Purchase order date" class="field-input" @bind-Value="PurchaseOrderForm.OrderedOn" /></div>
+                        <div class="field-group"><label class="field-label">Expected date</label><InputDate aria-label="Purchase order expected date" class="field-input" @bind-Value="PurchaseOrderForm.ExpectedOn" /></div>
+                        <div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Purchase order notes" class="field-input" @bind-Value="PurchaseOrderForm.Notes" /></div>
+                        @for (var index = 0; index < PurchaseOrderForm.Lines.Count; index++)
+                        {
+                            var lineIndex = index;
+                            var line = PurchaseOrderForm.Lines[lineIndex];
+                            <fieldset class="panel-subsection">
+                                <legend>Line @(lineIndex + 1)</legend>
+                                <div class="field-group"><label class="field-label">Inventory item</label><InputSelect aria-label="@($"Purchase order line {lineIndex + 1} item")" class="field-input" @bind-Value="line.InventoryItemId"><option value="@Guid.Empty">Select item</option>@foreach (var item in Workspace.Operations.InventoryItems) { <option value="@item.Id">@item.Sku — @item.Description</option> }</InputSelect></div>
+                                <div class="field-group"><label class="field-label">Description</label><InputText aria-label="@($"Purchase order line {lineIndex + 1} description")" class="field-input" @bind-Value="line.Description" /></div>
+                                <div class="field-group"><label class="field-label">Quantity</label><InputNumber aria-label="@($"Purchase order line {lineIndex + 1} quantity")" class="field-input" @bind-Value="line.Quantity" /></div>
+                                <div class="field-group"><label class="field-label">Unit cost</label><InputNumber aria-label="@($"Purchase order line {lineIndex + 1} unit cost")" class="field-input" @bind-Value="line.UnitCost" /></div>
+                                @if (PurchaseOrderForm.Lines.Count > 1) { <button class="action-secondary" type="button" @onclick="() => RemovePurchaseOrderLine(lineIndex)">Remove line</button> }
+                            </fieldset>
+                        }
+                        <button class="action-secondary" type="button" @onclick="AddPurchaseOrderLine">Add line</button>
+                        <button class="action-primary" type="submit">Save purchase-order draft</button>
+                    </div>
+                </EditForm>
+            </article>
+            }
+            @if (CanManagePurchasing)
+            {
             <article class="panel">
                 <h2>Inventory adjustment</h2>
                 <p class="page-intro">Use documented count adjustments only. The system posts the inventory value and offset automatically; it will reject closed-period postings and negative on-hand quantity.</p>
-                @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status">@StatusMessage</p> }
                 <EditForm Model="AdjustmentForm" OnValidSubmit="RecordAdjustmentAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Item</label><InputSelect aria-label="Inventory adjustment item" class="field-input" @bind-Value="AdjustmentForm.InventoryItemId"><option value="@Guid.Empty">Select item</option>@foreach (var item in Workspace.Operations.InventoryItems) { <option value="@item.Id">@item.Sku — @item.Description</option> }</InputSelect></div><div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Inventory adjustment date" class="field-input" @bind-Value="AdjustmentForm.OccurredOn" /></div><div class="field-group"><label class="field-label">Quantity change</label><InputNumber aria-label="Inventory quantity change" class="field-input" @bind-Value="AdjustmentForm.QuantityChange" /></div><div class="field-group"><label class="field-label">Unit cost</label><InputNumber aria-label="Inventory adjustment unit cost" class="field-input" @bind-Value="AdjustmentForm.UnitCost" /></div><div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Inventory adjustment reference" class="field-input" @bind-Value="AdjustmentForm.Reference" /></div><div class="field-group"><label class="field-label">Description</label><InputText aria-label="Inventory adjustment description" class="field-input" @bind-Value="AdjustmentForm.Description" /></div><button class="action-primary" type="submit">Post adjustment</button></div></EditForm>
             </article>
+            }
             <article class="panel">
                 <h2>Inventory</h2>
                 <table class="data-table">
@@ -61,6 +97,7 @@ else
                             <th>On hand</th>
                             <th>Reorder point</th>
                             <th>Unit price</th>
+                            <th>Average cost</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -72,6 +109,7 @@ else
                                 <td>@item.QuantityOnHand</td>
                                 <td>@item.ReorderPoint</td>
                                 <td>@item.UnitPrice.ToString("C")</td>
+                                <td>@item.UnitCost.ToString("C")</td>
                             </tr>
                         }
                     </tbody>
@@ -116,6 +154,8 @@ else
                         <th>Status</th>
                         <th>Ordered</th>
                         <th>Total</th>
+                        <th>Progress</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -127,11 +167,63 @@ else
                             <td>@order.Status</td>
                             <td>@order.OrderedOn.ToString("MMM d, yyyy")</td>
                             <td>@order.TotalAmount.ToString("C")</td>
+                            <td>@((order.Lines ?? []).Sum(line => line.ReceivedQuantity)) / @((order.Lines ?? []).Sum(line => line.OrderedQuantity)) received<br />@((order.Lines ?? []).Sum(line => line.InvoicedQuantity)) invoiced</td>
+                            <td>
+                                @if (CanManagePurchasing && order.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => ApprovePurchaseOrderAsync(order)">Approve</button> }
+                                @if (CanManagePurchasing && order.Status is "Approved" or "PartiallyReceived") { <button class="action-secondary" type="button" @onclick="() => BeginReceipt(order)">Receive</button> }
+                            </td>
                         </tr>
                     }
                 </tbody>
             </table>
         </section>
+
+        @if (CanManagePurchasing && ReceiptForm is not null)
+        {
+            <section class="panel">
+                <h2>Receive @ReceiptForm.PurchaseOrderNumber</h2>
+                <EditForm Model="ReceiptForm" OnValidSubmit="PostReceiptAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Receipt number</label><InputText aria-label="Inventory receipt number" class="field-input" @bind-Value="ReceiptForm.ReceiptNumber" /></div>
+                    <div class="field-group"><label class="field-label">Received date</label><InputDate aria-label="Inventory receipt date" class="field-input" @bind-Value="ReceiptForm.ReceivedOn" /></div>
+                    @foreach (var line in ReceiptForm.Lines) { <div class="field-group"><label class="field-label">@line.Sku remaining @line.RemainingQuantity</label><InputNumber aria-label="@($"Receive {line.Sku} quantity")" class="field-input" @bind-Value="line.Quantity" /></div> }
+                    <button class="action-primary" type="submit">Post inventory receipt</button><button class="action-secondary" type="button" @onclick="CancelReceipt">Cancel</button>
+                </div></EditForm>
+            </section>
+        }
+
+        <section class="panel">
+            <h2>Inventory receipts and invoice matching</h2>
+            <p class="page-intro">Matching is exact: the vendor bill uses the quantities and costs accepted on the receipt. Void an unapplied matched bill before reversing its receipt.</p>
+            <table class="data-table"><thead><tr><th>Receipt</th><th>Purchase order</th><th>Date</th><th>Status</th><th>Total</th><th>Invoice</th><th>Action</th></tr></thead><tbody>
+                @foreach (var receipt in Workspace.Operations.InventoryReceipts ?? [])
+                {
+                    <tr><td>@receipt.ReceiptNumber</td><td>@receipt.PurchaseOrderNumber</td><td>@receipt.ReceivedOn.ToString("MMM d, yyyy")</td><td>@receipt.Status</td><td>@receipt.TotalAmount.ToString("C")</td><td>@(receipt.VendorBillId.HasValue ? "Matched" : "Unmatched")</td><td>
+                        @if (CanManagePurchasing && receipt.Status == "Posted" && !receipt.VendorBillId.HasValue) { @if (CanMatchReceiptBills) { <button class="action-secondary" type="button" @onclick="() => BeginBillMatch(receipt)">Create matched bill</button> }<button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, false)">Reverse receipt</button> }
+                        @if (CanMatchReceiptBills && receipt.Status == "Posted" && receipt.VendorBillId.HasValue) { <button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, true)">Void matched bill</button> }
+                    </td></tr>
+                }
+            </tbody></table>
+        </section>
+
+        @if (CanMatchReceiptBills && BillMatchForm is not null)
+        {
+            <section class="panel"><h2>Create bill for receipt @BillMatchForm.ReceiptNumber</h2><EditForm Model="BillMatchForm" OnValidSubmit="MatchBillAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Vendor bill number</label><InputText aria-label="Matched vendor bill number" class="field-input" @bind-Value="BillMatchForm.BillNumber" /></div>
+                <div class="field-group"><label class="field-label">Bill date</label><InputDate aria-label="Matched vendor bill date" class="field-input" @bind-Value="BillMatchForm.BillDate" /></div>
+                <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Matched vendor bill due date" class="field-input" @bind-Value="BillMatchForm.DueDate" /></div>
+                <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Matched vendor bill description" class="field-input" @bind-Value="BillMatchForm.Description" /></div>
+                <button class="action-primary" type="submit">Post matched vendor bill</button><button class="action-secondary" type="button" @onclick="CancelBillMatch">Cancel</button>
+            </div></EditForm></section>
+        }
+
+        @if (CorrectionForm is not null)
+        {
+            <section class="panel"><h2>@(CorrectionForm.VoidBill ? "Void matched bill" : "Reverse inventory receipt") for @CorrectionForm.ReceiptNumber</h2><p class="page-intro">This creates a dated reversing journal and preserves the original documents. Review the date and enter a specific correction reason before confirming.</p><EditForm Model="CorrectionForm" OnValidSubmit="ExecuteCorrectionAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Correction date</label><InputDate aria-label="Purchase correction date" class="field-input" @bind-Value="CorrectionForm.CorrectionDate" /></div>
+                <div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Purchase correction reason" class="field-input" @bind-Value="CorrectionForm.Reason" /></div>
+                <button class="action-primary" type="submit">@(CorrectionForm.VoidBill ? "Confirm bill void" : "Confirm receipt reversal")</button><button class="action-secondary" type="button" @onclick="CancelCorrection">Cancel</button>
+            </div></EditForm></section>
+        }
     </section>
 }
 
@@ -139,14 +231,68 @@ else
     private BusinessWorkspaceSnapshot? Workspace;
     private string? StatusMessage;
     private InventoryAdjustmentEditor AdjustmentForm { get; } = new();
+    private PurchaseOrderEditor PurchaseOrderForm { get; } = new();
+    private ReceiptEditor? ReceiptForm;
+    private BillMatchEditor? BillMatchForm;
+    private PurchaseCorrectionEditor? CorrectionForm;
+    private bool CanPreparePurchaseOrders;
+    private bool CanManagePurchasing;
+    private bool CanMatchReceiptBills;
 
     protected override async Task OnInitializedAsync()
     {
+        var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+        var privileged = user.IsInRole("Administrator") || user.IsInRole("Owner/CEO");
+        CanPreparePurchaseOrders = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage);
+        CanManagePurchasing = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage);
+        CanMatchReceiptBills = CanManagePurchasing && (privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage));
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
     private async Task RecordAdjustmentAsync()
     {
         var result = await TransactionService.RecordInventoryAdjustmentAsync(new RecordInventoryAdjustmentRequest(AdjustmentForm.InventoryItemId, AdjustmentForm.OccurredOn, AdjustmentForm.QuantityChange, AdjustmentForm.UnitCost, AdjustmentForm.Reference, AdjustmentForm.Description)); StatusMessage = result.Succeeded ? "Inventory adjustment posted." : result.ErrorMessage; if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
+    private void AddPurchaseOrderLine() => PurchaseOrderForm.Lines.Add(new());
+    private void RemovePurchaseOrderLine(int index) => PurchaseOrderForm.Lines.RemoveAt(index);
+    private async Task SavePurchaseOrderAsync()
+    {
+        var result = await TransactionService.SavePurchaseOrderAsync(new SavePurchaseOrderRequest(null, PurchaseOrderForm.VendorId, PurchaseOrderForm.OrderNumber, PurchaseOrderForm.OrderedOn, PurchaseOrderForm.ExpectedOn, PurchaseOrderForm.Notes, PurchaseOrderForm.Lines.Select(line => new PurchaseOrderLineRequest(line.InventoryItemId, line.Description, line.Quantity, line.UnitCost)).ToArray()));
+        StatusMessage = result.Succeeded ? "Purchase-order draft saved." : result.ErrorMessage;
+        if (result.Succeeded) { PurchaseOrderForm.Reset(); await ReloadAsync(); }
+    }
+    private async Task ApprovePurchaseOrderAsync(PurchaseOrderSnapshot order)
+    {
+        var result = await TransactionService.ApprovePurchaseOrderAsync(new ApprovePurchaseOrderRequest(order.Id, order.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Purchase order {order.OrderNumber} approved." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync();
+    }
+    private void BeginReceipt(PurchaseOrderSnapshot order) => ReceiptForm = new ReceiptEditor(order.Id, order.OrderNumber, order.ConcurrencyToken, (order.Lines ?? []).Where(line => line.ReceivedQuantity < line.OrderedQuantity).Select(line => new ReceiptLineEditor(line.Id, line.Sku, line.OrderedQuantity - line.ReceivedQuantity)).ToList());
+    private void CancelReceipt() => ReceiptForm = null;
+    private async Task PostReceiptAsync()
+    {
+        var form = ReceiptForm!; var result = await TransactionService.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(form.PurchaseOrderId, form.ReceiptNumber, form.ReceivedOn, form.Lines.Where(line => line.Quantity > 0m).Select(line => new ReceivePurchaseOrderLineRequest(line.PurchaseOrderLineId, line.Quantity)).ToArray(), form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Inventory receipt posted." : result.ErrorMessage; if (result.Succeeded) { ReceiptForm = null; await ReloadAsync(); }
+    }
+    private void BeginBillMatch(InventoryReceiptSnapshot receipt) => BillMatchForm = new BillMatchEditor(receipt.Id, receipt.ReceiptNumber, receipt.ConcurrencyToken);
+    private void CancelBillMatch() => BillMatchForm = null;
+    private async Task MatchBillAsync()
+    {
+        var form = BillMatchForm!; var result = await TransactionService.MatchPurchaseOrderReceiptBillAsync(new MatchPurchaseOrderReceiptBillRequest(form.InventoryReceiptId, form.BillNumber, form.BillDate, form.DueDate, form.Description, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Vendor bill matched and posted." : result.ErrorMessage; if (result.Succeeded) { BillMatchForm = null; await ReloadAsync(); }
+    }
+    private void BeginCorrection(InventoryReceiptSnapshot receipt, bool voidBill) => CorrectionForm = new PurchaseCorrectionEditor(receipt.Id, receipt.ReceiptNumber, receipt.ConcurrencyToken, voidBill);
+    private void CancelCorrection() => CorrectionForm = null;
+    private async Task ExecuteCorrectionAsync()
+    {
+        var form = CorrectionForm!;
+        var result = form.VoidBill
+            ? await TransactionService.UnmatchPurchaseOrderReceiptBillAsync(new UnmatchPurchaseOrderReceiptBillRequest(form.InventoryReceiptId, form.CorrectionDate, form.Reason, form.ConcurrencyToken))
+            : await TransactionService.ReverseInventoryReceiptAsync(new ReverseInventoryReceiptRequest(form.InventoryReceiptId, form.CorrectionDate, form.Reason, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? form.VoidBill ? "Matched vendor bill voided; the receipt is available to match again." : "Inventory receipt reversed." : result.ErrorMessage;
+        if (result.Succeeded) { CorrectionForm = null; await ReloadAsync(); }
+    }
+    private async Task ReloadAsync() => Workspace = await WorkspaceService.GetWorkspaceAsync();
     private sealed class InventoryAdjustmentEditor { public Guid InventoryItemId { get; set; } public DateOnly OccurredOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal QuantityChange { get; set; } public decimal UnitCost { get; set; } public string Reference { get; set; } = $"INV-{DateTime.Today:yyyyMMdd}"; public string Description { get; set; } = "Inventory count adjustment"; }
+    private sealed class PurchaseOrderEditor { public Guid VendorId { get; set; } public string OrderNumber { get; set; } = $"PO-{DateTime.Today:yyyyMMdd}"; public DateOnly OrderedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? ExpectedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(7)); public string Notes { get; set; } = ""; public List<PurchaseOrderLineEditor> Lines { get; } = [new()]; public void Reset() { VendorId = Guid.Empty; OrderNumber = $"PO-{DateTime.Now:yyyyMMddHHmm}"; OrderedOn = DateOnly.FromDateTime(DateTime.Today); ExpectedOn = OrderedOn.AddDays(7); Notes = ""; Lines.Clear(); Lines.Add(new()); } }
+    private sealed class PurchaseOrderLineEditor { public Guid InventoryItemId { get; set; } public string Description { get; set; } = "Inventory purchase"; public decimal Quantity { get; set; } = 1m; public decimal UnitCost { get; set; } }
+    private sealed class ReceiptEditor(Guid purchaseOrderId, string purchaseOrderNumber, string concurrencyToken, List<ReceiptLineEditor> lines) { public Guid PurchaseOrderId { get; } = purchaseOrderId; public string PurchaseOrderNumber { get; } = purchaseOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string ReceiptNumber { get; set; } = $"RCV-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly ReceivedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public List<ReceiptLineEditor> Lines { get; } = lines; }
+    private sealed class ReceiptLineEditor(Guid purchaseOrderLineId, string sku, decimal remainingQuantity) { public Guid PurchaseOrderLineId { get; } = purchaseOrderLineId; public string Sku { get; } = sku; public decimal RemainingQuantity { get; } = remainingQuantity; public decimal Quantity { get; set; } = remainingQuantity; }
+    private sealed class BillMatchEditor(Guid inventoryReceiptId, string receiptNumber, string concurrencyToken) { public Guid InventoryReceiptId { get; } = inventoryReceiptId; public string ReceiptNumber { get; } = receiptNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string BillNumber { get; set; } = $"BILL-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly BillDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); public string Description { get; set; } = "Inventory receipt vendor bill"; }
+    private sealed class PurchaseCorrectionEditor(Guid inventoryReceiptId, string receiptNumber, string concurrencyToken, bool voidBill) { public Guid InventoryReceiptId { get; } = inventoryReceiptId; public string ReceiptNumber { get; } = receiptNumber; public string ConcurrencyToken { get; } = concurrencyToken; public bool VoidBill { get; } = voidBill; public DateOnly CorrectionDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = ""; }
 }

@@ -256,7 +256,59 @@ public static class ServiceCollectionExtensions
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(historyRepository.GetCreateIfNotExistsScript(), cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(historyRepository.GetInsertScript(new HistoryRow(baselineId, "8.0.30")), cancellationToken);
+        foreach (var migrationId in availableMigrations.Where(id => !string.Equals(id, baselineId, StringComparison.Ordinal)).OrderBy(id => id, StringComparer.Ordinal))
+        {
+            if (await IsMigrationSchemaAlreadyPresentAsync(dbContext, migrationId, cancellationToken))
+                await dbContext.Database.ExecuteSqlRawAsync(historyRepository.GetInsertScript(new HistoryRow(migrationId, "8.0.30")), cancellationToken);
+        }
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task<bool> IsMigrationSchemaAlreadyPresentAsync(BrassLedgerDbContext dbContext, string migrationId, CancellationToken cancellationToken)
+    {
+        if (migrationId.EndsWith("_AddAccountingSchedules", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "AccountingSchedules", cancellationToken)
+                && await HasTableAsync(dbContext, "AccountingScheduleInstallments", cancellationToken);
+        if (migrationId.EndsWith("_AddFixedAssetDisposals", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "AccountingSchedules", "DisposalJournalEntryId", cancellationToken);
+        if (migrationId.EndsWith("_AddPurchaseReceiving", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "PurchaseOrderLines", cancellationToken)
+                && await HasTableAsync(dbContext, "InventoryReceipts", cancellationToken)
+                && await HasTableAsync(dbContext, "InventoryReceiptLines", cancellationToken)
+                && await HasColumnAsync(dbContext, "InventoryItems", "UnitCost", cancellationToken)
+                && await HasColumnAsync(dbContext, "VendorBills", "InventoryReceiptId", cancellationToken);
+        return false;
+    }
+
+    private static async Task<bool> HasTableAsync(BrassLedgerDbContext dbContext, string tableName, CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.Transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandText = dbContext.Database.IsNpgsql()
+            ? "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = @name;"
+            : "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = @name;";
+        var parameter = command.CreateParameter(); parameter.ParameterName = "@name"; parameter.Value = tableName; command.Parameters.Add(parameter);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
+    }
+
+    private static async Task<bool> HasColumnAsync(BrassLedgerDbContext dbContext, string tableName, string columnName, CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.Transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction();
+        if (dbContext.Database.IsNpgsql())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = @table AND column_name = @column;";
+            var table = command.CreateParameter(); table.ParameterName = "@table"; table.Value = tableName; command.Parameters.Add(table);
+            var column = command.CreateParameter(); column.ParameterName = "@column"; column.Value = columnName; command.Parameters.Add(column);
+        }
+        else
+        {
+            command.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{tableName.Replace("'", "''", StringComparison.Ordinal)}') WHERE name = @column;";
+            var column = command.CreateParameter(); column.ParameterName = "@column"; column.Value = columnName; command.Parameters.Add(column);
+        }
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
     }
 
     private static BootstrapOptions BuildBootstrapOptions(IConfiguration configuration, bool seedSampleData)

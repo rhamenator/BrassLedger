@@ -13,11 +13,13 @@ public sealed class LedgerPageTests : TestContext
     {
         var authorization = this.AddTestAuthorization();
         authorization.SetAuthorized("controller");
+        authorization.SetRoles("Administrator");
         authorization.SetPolicies(
             BrassLedgerAuthorizationPolicies.PrepareJournals,
             BrassLedgerAuthorizationPolicies.ApproveJournals,
             BrassLedgerAuthorizationPolicies.PostJournals,
-            BrassLedgerAuthorizationPolicies.ReverseJournals);
+            BrassLedgerAuthorizationPolicies.ReverseJournals,
+            BrassLedgerAuthorizationPolicies.ManageOperations);
         Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(TestWorkspaceData.CreateWorkspace()));
         Services.AddSingleton<IAccountingTransactionService>(new StubAccountingTransactionService());
         Services.AddSingleton<IAccountingInterchangeService>(new StubAccountingInterchangeService());
@@ -37,6 +39,20 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("Fixed assets, prepaids, and loans", cut.Markup);
         cut.Find("select[aria-label='Accounting schedule type']").Change("Loan");
         Assert.Contains("Loan payment bank account", cut.Markup);
+    }
+
+    [Fact]
+    public void OperationsPage_ExposesPurchaseOrderReceivingAndMatchingWorkflow()
+    {
+        var cut = RenderComponent<Operations>();
+
+        Assert.Contains("Prepare purchase order", cut.Markup);
+        Assert.NotNull(cut.Find("select[aria-label='Purchase order vendor']"));
+        Assert.NotNull(cut.Find("select[aria-label='Purchase order line 1 item']"));
+        cut.FindAll("button").Single(button => button.TextContent.Trim() == "Add line").Click();
+        Assert.NotNull(cut.Find("select[aria-label='Purchase order line 2 item']"));
+        Assert.Contains("Inventory receipts and invoice matching", cut.Markup);
+        Assert.Contains("Average cost", cut.Markup);
     }
 }
 
@@ -103,6 +119,12 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.PaymentId));
     public Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> SavePurchaseOrderAsync(SavePurchaseOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> ApprovePurchaseOrderAsync(ApprovePurchaseOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.PurchaseOrderId));
+    public Task<TransactionResult> ReceivePurchaseOrderAsync(ReceivePurchaseOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> MatchPurchaseOrderReceiptBillAsync(MatchPurchaseOrderReceiptBillRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> UnmatchPurchaseOrderReceiptBillAsync(UnmatchPurchaseOrderReceiptBillRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryReceiptId));
+    public Task<TransactionResult> ReverseInventoryReceiptAsync(ReverseInventoryReceiptRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryReceiptId));
 }
 
 internal sealed class StubAccountingInterchangeService : IAccountingInterchangeService

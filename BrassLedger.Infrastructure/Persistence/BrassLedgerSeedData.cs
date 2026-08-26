@@ -107,11 +107,11 @@ internal static class BrassLedgerSeedData
 
         var inventoryItems = new[]
         {
-            new InventoryItem { Id = Guid.Parse("a59d6164-b872-471f-a3d5-ed3ea80be4b6"), CompanyId = CompanyId, Sku = "FG-100", Description = "Machined Brass Valve", UnitPrice = 185m, QuantityOnHand = 84m, ReorderPoint = 40m, IsActive = true },
-            new InventoryItem { Id = Guid.Parse("855c69d5-8f1b-469f-a269-99d2d914cf39"), CompanyId = CompanyId, Sku = "FG-200", Description = "Compression Fitting Kit", UnitPrice = 92m, QuantityOnHand = 33m, ReorderPoint = 36m, IsActive = true },
-            new InventoryItem { Id = Guid.Parse("5691f062-f8a8-47e6-a620-b49c463b75a8"), CompanyId = CompanyId, Sku = "RM-110", Description = "Brass Sheet 4x8", UnitPrice = 430m, QuantityOnHand = 18m, ReorderPoint = 12m, IsActive = true },
-            new InventoryItem { Id = Guid.Parse("1bdf9fc0-c040-40bc-9f26-5495751321b5"), CompanyId = CompanyId, Sku = "RM-220", Description = "Steel Fastener Pack", UnitPrice = 16m, QuantityOnHand = 220m, ReorderPoint = 80m, IsActive = true },
-            new InventoryItem { Id = Guid.Parse("b2547f8c-46c7-44bc-a9ff-13210ef32d60"), CompanyId = CompanyId, Sku = "SRV-900", Description = "Field Install Service", UnitPrice = 1250m, QuantityOnHand = 12m, ReorderPoint = 4m, IsActive = true }
+            new InventoryItem { Id = Guid.Parse("a59d6164-b872-471f-a3d5-ed3ea80be4b6"), CompanyId = CompanyId, Sku = "FG-100", Description = "Machined Brass Valve", UnitPrice = 185m, UnitCost = 185m, QuantityOnHand = 84m, ReorderPoint = 40m, IsActive = true },
+            new InventoryItem { Id = Guid.Parse("855c69d5-8f1b-469f-a269-99d2d914cf39"), CompanyId = CompanyId, Sku = "FG-200", Description = "Compression Fitting Kit", UnitPrice = 92m, UnitCost = 92m, QuantityOnHand = 33m, ReorderPoint = 36m, IsActive = true },
+            new InventoryItem { Id = Guid.Parse("5691f062-f8a8-47e6-a620-b49c463b75a8"), CompanyId = CompanyId, Sku = "RM-110", Description = "Brass Sheet 4x8", UnitPrice = 430m, UnitCost = 430m, QuantityOnHand = 18m, ReorderPoint = 12m, IsActive = true },
+            new InventoryItem { Id = Guid.Parse("1bdf9fc0-c040-40bc-9f26-5495751321b5"), CompanyId = CompanyId, Sku = "RM-220", Description = "Steel Fastener Pack", UnitPrice = 16m, UnitCost = 16m, QuantityOnHand = 220m, ReorderPoint = 80m, IsActive = true },
+            new InventoryItem { Id = Guid.Parse("b2547f8c-46c7-44bc-a9ff-13210ef32d60"), CompanyId = CompanyId, Sku = "SRV-900", Description = "Field Install Service", UnitPrice = 1250m, UnitCost = 1250m, QuantityOnHand = 12m, ReorderPoint = 4m, IsActive = true }
         };
 
         var salesOrders = new[]

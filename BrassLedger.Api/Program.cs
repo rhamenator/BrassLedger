@@ -837,7 +837,50 @@ api.MapPost("/integrations/quickbooks-online/mappings/remove", async (RemoveQuic
 api.MapPost("/inventory-adjustments", async (RecordInventoryAdjustmentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.RecordInventoryAdjustmentAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["inventory"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/purchase-orders", async (SavePurchaseOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SavePurchaseOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/purchase-orders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage));
+
+api.MapPost("/purchase-orders/{purchaseOrderId:guid}/approval", async (Guid purchaseOrderId, ApprovePurchaseOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseOrderId != purchaseOrderId) return Results.BadRequest(new { error = "purchase_order_id_mismatch" });
+    var result = await service.ApprovePurchaseOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/purchase-orders/{purchaseOrderId:guid}/receipts", async (Guid purchaseOrderId, ReceivePurchaseOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseOrderId != purchaseOrderId) return Results.BadRequest(new { error = "purchase_order_id_mismatch" });
+    var result = await service.ReceivePurchaseOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-receipts/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["receipt"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/inventory-receipts/{inventoryReceiptId:guid}/vendor-bill", async (Guid inventoryReceiptId, MatchPurchaseOrderReceiptBillRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryReceiptId != inventoryReceiptId) return Results.BadRequest(new { error = "inventory_receipt_id_mismatch" });
+    var result = await service.MatchPurchaseOrderReceiptBillAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/payables/bills/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["receiptBill"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy =>
+{
+    policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage);
+    policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage);
+});
+
+api.MapPost("/inventory-receipts/{inventoryReceiptId:guid}/vendor-bill/void", async (Guid inventoryReceiptId, UnmatchPurchaseOrderReceiptBillRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryReceiptId != inventoryReceiptId) return Results.BadRequest(new { error = "inventory_receipt_id_mismatch" });
+    var result = await service.UnmatchPurchaseOrderReceiptBillAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["receiptBill"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy =>
+{
+    policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage);
+    policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage);
+});
+
+api.MapPost("/inventory-receipts/{inventoryReceiptId:guid}/reversal", async (Guid inventoryReceiptId, ReverseInventoryReceiptRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryReceiptId != inventoryReceiptId) return Results.BadRequest(new { error = "inventory_receipt_id_mismatch" });
+    var result = await service.ReverseInventoryReceiptAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["receipt"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
 
 api.MapGet("/interchange/quickbooks-online/{entity}.csv", async (string entity, IAccountingInterchangeService service, CancellationToken cancellationToken) =>
 {

@@ -70,6 +70,14 @@ public sealed record ReversePayrollRunRequest(Guid PayrollRunId, DateOnly Revers
 public sealed record SaveEmployeePayrollSetupRequest(Guid EmployeeId, string FilingStatus, int Allowances, decimal AdditionalWithholding, decimal PreTaxBenefitDeductions, decimal PostTaxBenefitDeductions, string ResidenceState = "", string ResidenceCity = "", string WorkState = "", string WorkCity = "", string PayrollFrequency = "Biweekly", int FederalFormW4Year = 2026, bool FederalStep2MultipleJobs = false, decimal FederalStep3Credits = 0, decimal FederalStep4OtherIncome = 0, decimal FederalStep4Deductions = 0, bool FederalWithholdingExempt = false);
 public sealed record SaveEmployeeEmploymentDetailsRequest(Guid EmployeeId, string AddressLine1, string AddressLine2, string PostalCode, string ResidenceCounty, string ResidenceSchoolDistrict, string WorkCounty, string WorkSchoolDistrict, DateOnly? EmploymentStartedOn, DateOnly? EmploymentEndedOn, decimal HourlyRate, decimal OvertimeRate, bool DirectDepositEnabled, string BankAccountType, string SocialSecurityNumber = "", string BankRoutingNumber = "", string BankAccountNumber = "", bool ClearSocialSecurityNumber = false, bool ClearBankDetails = false, string ConcurrencyToken = "", DateOnly? DirectDepositAuthorizationOn = null, string DirectDepositAuthorizationReference = "", bool ClearDirectDepositAuthorization = false, string AddressCity = "", string AddressState = "");
 public sealed record RecordInventoryAdjustmentRequest(Guid InventoryItemId, DateOnly OccurredOn, decimal QuantityChange, decimal UnitCost, string Reference, string Description);
+public sealed record PurchaseOrderLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal UnitCost);
+public sealed record SavePurchaseOrderRequest(Guid? Id, Guid VendorId, string OrderNumber, DateOnly OrderedOn, DateOnly? ExpectedOn, string Notes, IReadOnlyList<PurchaseOrderLineRequest> Lines, string ConcurrencyToken = "");
+public sealed record ApprovePurchaseOrderRequest(Guid PurchaseOrderId, string ConcurrencyToken);
+public sealed record ReceivePurchaseOrderLineRequest(Guid PurchaseOrderLineId, decimal Quantity);
+public sealed record ReceivePurchaseOrderRequest(Guid PurchaseOrderId, string ReceiptNumber, DateOnly ReceivedOn, IReadOnlyList<ReceivePurchaseOrderLineRequest> Lines, string ConcurrencyToken);
+public sealed record MatchPurchaseOrderReceiptBillRequest(Guid InventoryReceiptId, string BillNumber, DateOnly BillDate, DateOnly DueDate, string Description, string ConcurrencyToken);
+public sealed record ReverseInventoryReceiptRequest(Guid InventoryReceiptId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
+public sealed record UnmatchPurchaseOrderReceiptBillRequest(Guid InventoryReceiptId, DateOnly VoidDate, string Reason, string ConcurrencyToken);
 public sealed record SavePayrollJurisdictionRuleRequest(Guid? Id, string ResidenceJurisdiction, string WorkJurisdiction, bool ExemptWorkWithholding, decimal ResidentCreditRate, bool IsActive, string Notes);
 public sealed record TransactionResult(bool Succeeded, string ErrorMessage, Guid? Id = null)
 {
@@ -149,6 +157,12 @@ public interface IAccountingTransactionService
     Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SavePurchaseOrderAsync(SavePurchaseOrderRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ApprovePurchaseOrderAsync(ApprovePurchaseOrderRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReceivePurchaseOrderAsync(ReceivePurchaseOrderRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> MatchPurchaseOrderReceiptBillAsync(MatchPurchaseOrderReceiptBillRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> UnmatchPurchaseOrderReceiptBillAsync(UnmatchPurchaseOrderReceiptBillRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseInventoryReceiptAsync(ReverseInventoryReceiptRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Exports and imports the core list CSV shapes used by QuickBooks Online.</summary>

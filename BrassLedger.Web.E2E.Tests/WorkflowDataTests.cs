@@ -82,4 +82,28 @@ public sealed class WorkflowDataTests
         await reporting.AssertReportingCatalogAsync();
         await reportingSession.AssertNoUiFailuresAsync("reporting workflow");
     }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task PurchaseOrder_PreparationApprovalReceiptAndBillMatch_WorkAcrossSeparatedRoles(BrowserKind browserKind)
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var orderNumber = $"PO-E2E-{suffix}";
+        var receiptNumber = $"RCV-E2E-{suffix}";
+        var billNumber = $"BILL-E2E-{suffix}";
+        await using (var preparerSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await preparerSession.SignInAsync("sales");
+            var preparation = new OperationsPage(preparerSession);
+            await preparation.OpenAsync();
+            await preparation.PreparePurchaseOrderAsync(orderNumber);
+            await preparerSession.AssertNoUiFailuresAsync("purchase-order preparation");
+        }
+        await using var purchasingSession = await _fixture.CreateSessionAsync(browserKind);
+        await purchasingSession.SignInAsync("operations");
+        var purchasing = new OperationsPage(purchasingSession);
+        await purchasing.OpenAsync();
+        await purchasing.ApproveReceiveAndMatchAsync(orderNumber, receiptNumber, billNumber);
+        await purchasingSession.AssertNoUiFailuresAsync("purchase-order approval, receipt, and invoice match");
+    }
 }

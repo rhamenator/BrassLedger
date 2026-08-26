@@ -54,6 +54,7 @@ Module-by-module usage links:
 - Receivables: [docs/user-guide.md#receivables](docs/user-guide.md#receivables)
 - Payables: [docs/user-guide.md#payables](docs/user-guide.md#payables)
 - Operations: [docs/user-guide.md#operations](docs/user-guide.md#operations)
+- Purchasing and inventory receiving: [docs/purchasing-guide.md](docs/purchasing-guide.md)
 - Payroll: [docs/user-guide.md#payroll](docs/user-guide.md#payroll)
 - Payroll workflow and federal calculation: [docs/payroll-guide.md](docs/payroll-guide.md)
 - Projects: [docs/user-guide.md#projects](docs/user-guide.md#projects)

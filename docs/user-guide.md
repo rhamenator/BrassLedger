@@ -95,12 +95,15 @@ Best practices:
 
 Operations covers inventory, order flow, fulfillment, and the documents that accompany physical work.
 
+The current purchasing workflow separates preparation from approval. Create a purchase-order draft with one or more inventory lines, have a purchasing operator approve it, and receive only the quantities physically accepted. Partial receipts remain open. Each receipt updates on-hand quantity and moving-average cost and posts Inventory against GRNI. When the corresponding vendor invoice agrees with that receipt, use **Create matched bill** to clear GRNI into Accounts Payable. See [Purchasing and inventory receiving](purchasing-guide.md) for accounting, correction, and current-boundary details.
+
 Best practices:
 
 - resolve stock exceptions before committing shipment promises
 - keep quantity movement aligned with financial posting timing
 - review open orders and backorders daily in active environments
 - treat printed operational documents as controlled output
+- reverse or compensate incorrect receipts through the displayed workflow; never edit their generated journals
 
 ### Payroll
 

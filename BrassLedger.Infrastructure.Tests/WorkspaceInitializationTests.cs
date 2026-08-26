@@ -63,10 +63,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("3", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("4", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -97,9 +98,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("3", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("4", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -323,6 +325,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('AccountingSchedules') WHERE name = 'DisposalJournalEntryId';"));
     }
 
@@ -1492,6 +1495,108 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(36m, movement.TotalCost);
         var lines = await after.JournalEntryLines.Where(line => line.JournalEntryId == result.Id).ToListAsync();
         Assert.Equal(lines.Sum(line => line.Debit), lines.Sum(line => line.Credit));
+    }
+
+    [Fact]
+    public async Task PurchasingWorkflow_PartiallyReceivesInventory_AndThreeWayMatchesAccrual()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var before = await factory.CreateDbContextAsync();
+        var vendor = await before.Vendors.FirstAsync();
+        var item = await before.InventoryItems.FirstAsync();
+        var priorQuantity = item.QuantityOnHand;
+        var priorCost = item.UnitCost;
+        var inventoryBalance = await before.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.InventoryAsset).Select(account => account.CurrentBalance).SingleAsync();
+        var grniBalance = await before.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.GoodsReceivedNotInvoiced).Select(account => account.CurrentBalance).SingleAsync();
+        var payableBalance = await before.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.AccountsPayable).Select(account => account.CurrentBalance).SingleAsync();
+
+        var saved = await transactions.SavePurchaseOrderAsync(new SavePurchaseOrderRequest(null, vendor.Id, "PO-RECEIVE-1", new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 8), "Test inventory purchase", [new PurchaseOrderLineRequest(item.Id, "Purchased inventory", 5m, 20m)]));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        await using (var approveDb = await factory.CreateDbContextAsync())
+        {
+            var draft = await approveDb.PurchaseOrders.SingleAsync(order => order.Id == saved.Id);
+            var approved = await transactions.ApprovePurchaseOrderAsync(new ApprovePurchaseOrderRequest(draft.Id, draft.ConcurrencyToken));
+            Assert.True(approved.Succeeded, approved.ErrorMessage);
+        }
+        Guid poLineId; string approvedToken;
+        await using (var receiveDb = await factory.CreateDbContextAsync())
+        {
+            var order = await receiveDb.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id);
+            approvedToken = order.ConcurrencyToken;
+            poLineId = await receiveDb.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).Select(line => line.Id).SingleAsync();
+        }
+        var staleReceipt = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id!.Value, "RCV-STALE-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 1m)], "stale-token"));
+        Assert.False(staleReceipt.Succeeded); Assert.Contains("changed", staleReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var overReceipt = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id.Value, "RCV-OVER-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 6m)], approvedToken));
+        Assert.False(overReceipt.Succeeded); Assert.Contains("exceeds", overReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var received = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id!.Value, "RCV-RECEIVE-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 2m)], approvedToken));
+        Assert.True(received.Succeeded, received.ErrorMessage);
+
+        await using (var receiptDb = await factory.CreateDbContextAsync())
+        {
+            var order = await receiptDb.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id);
+            var line = await receiptDb.PurchaseOrderLines.SingleAsync(candidate => candidate.Id == poLineId);
+            var receivedItem = await receiptDb.InventoryItems.SingleAsync(candidate => candidate.Id == item.Id);
+            var receipt = await receiptDb.InventoryReceipts.SingleAsync(candidate => candidate.Id == received.Id);
+            Assert.Equal("PartiallyReceived", order.Status);
+            Assert.Equal(2m, line.ReceivedQuantity);
+            Assert.Equal(0m, line.InvoicedQuantity);
+            Assert.Equal(priorQuantity + 2m, receivedItem.QuantityOnHand);
+            Assert.Equal(decimal.Round(((priorQuantity * priorCost) + 40m) / (priorQuantity + 2m), 2, MidpointRounding.AwayFromZero), receivedItem.UnitCost);
+            Assert.Equal(40m, receipt.TotalAmount);
+            Assert.Equal(inventoryBalance + 40m, await receiptDb.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.InventoryAsset).Select(account => account.CurrentBalance).SingleAsync());
+            Assert.Equal(grniBalance + 40m, await receiptDb.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.GoodsReceivedNotInvoiced).Select(account => account.CurrentBalance).SingleAsync());
+        }
+
+        string receiptToken;
+        await using (var matchDb = await factory.CreateDbContextAsync()) receiptToken = await matchDb.InventoryReceipts.Where(receipt => receipt.Id == received.Id).Select(receipt => receipt.ConcurrencyToken).SingleAsync();
+        var matched = await transactions.MatchPurchaseOrderReceiptBillAsync(new MatchPurchaseOrderReceiptBillRequest(received.Id!.Value, "BILL-RECEIVE-1", new DateOnly(2026, 8, 4), new DateOnly(2026, 9, 3), "Matched inventory invoice", receiptToken));
+        Assert.True(matched.Succeeded, matched.ErrorMessage);
+        var unsafeGenericVoid = await transactions.VoidVendorBillAsync(new VoidSubledgerDocumentRequest(matched.Id!.Value, new DateOnly(2026, 8, 4), "Would desynchronize receiving"));
+        Assert.False(unsafeGenericVoid.Succeeded); Assert.Contains("inventory receipt", unsafeGenericVoid.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using var after = await factory.CreateDbContextAsync();
+        var bill = await after.VendorBills.SingleAsync(candidate => candidate.Id == matched.Id);
+        var matchedReceipt = await after.InventoryReceipts.SingleAsync(candidate => candidate.Id == received.Id);
+        Assert.Equal(received.Id, bill.InventoryReceiptId);
+        Assert.Equal(matched.Id, await after.VendorBills.Where(candidate => candidate.InventoryReceiptId == matchedReceipt.Id).Select(candidate => (Guid?)candidate.Id).SingleAsync());
+        Assert.Equal(40m, bill.BalanceDue);
+        Assert.Equal(grniBalance, await after.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.GoodsReceivedNotInvoiced).Select(account => account.CurrentBalance).SingleAsync());
+        Assert.Equal(payableBalance + 40m, await after.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.AccountsPayable).Select(account => account.CurrentBalance).SingleAsync());
+        Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "purchase-receipt.bill.matched" && audit.EntityId == received.Id);
+    }
+
+    [Fact]
+    public async Task PurchasingWorkflow_UnmatchesBillThenReversesLatestReceipt_WithoutLosingHistory()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        Guid vendorId; Guid itemId; decimal priorQuantity; decimal priorCost;
+        await using (var db = await factory.CreateDbContextAsync()) { var vendor = await db.Vendors.FirstAsync(); var seedItem = await db.InventoryItems.FirstAsync(); vendorId = vendor.Id; itemId = seedItem.Id; priorQuantity = seedItem.QuantityOnHand; priorCost = seedItem.UnitCost; }
+        var saved = await transactions.SavePurchaseOrderAsync(new SavePurchaseOrderRequest(null, vendorId, "PO-REVERSE-1", new DateOnly(2026, 8, 10), null, "Reversal test", [new PurchaseOrderLineRequest(itemId, "Reversible receipt", 1m, 25m)])); Assert.True(saved.Succeeded, saved.ErrorMessage);
+        Guid lineId; string token;
+        await using (var db = await factory.CreateDbContextAsync()) { var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id); Assert.True((await transactions.ApprovePurchaseOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded); }
+        await using (var db = await factory.CreateDbContextAsync()) { var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id); token = order.ConcurrencyToken; lineId = await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).Select(line => line.Id).SingleAsync(); }
+        var received = await transactions.ReceivePurchaseOrderAsync(new(saved.Id!.Value, "RCV-REVERSE-1", new DateOnly(2026, 8, 11), [new(lineId, 1m)], token)); Assert.True(received.Succeeded, received.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) token = await db.InventoryReceipts.Where(receipt => receipt.Id == received.Id).Select(receipt => receipt.ConcurrencyToken).SingleAsync();
+        var matched = await transactions.MatchPurchaseOrderReceiptBillAsync(new(received.Id!.Value, "BILL-REVERSE-1", new DateOnly(2026, 8, 12), new DateOnly(2026, 9, 11), "Invoice to correct", token)); Assert.True(matched.Succeeded, matched.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) token = await db.InventoryReceipts.Where(receipt => receipt.Id == received.Id).Select(receipt => receipt.ConcurrencyToken).SingleAsync();
+        var unmatched = await transactions.UnmatchPurchaseOrderReceiptBillAsync(new(received.Id!.Value, new DateOnly(2026, 8, 12), "Incorrect vendor invoice number", token)); Assert.True(unmatched.Succeeded, unmatched.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) token = await db.InventoryReceipts.Where(receipt => receipt.Id == received.Id).Select(receipt => receipt.ConcurrencyToken).SingleAsync();
+        var reversed = await transactions.ReverseInventoryReceiptAsync(new(received.Id!.Value, new DateOnly(2026, 8, 13), "Goods were not accepted", token)); Assert.True(reversed.Succeeded, reversed.ErrorMessage);
+        await using var after = await factory.CreateDbContextAsync();
+        var item = await after.InventoryItems.SingleAsync(candidate => candidate.Id == itemId);
+        var receipt = await after.InventoryReceipts.SingleAsync(candidate => candidate.Id == received.Id);
+        var bill = await after.VendorBills.SingleAsync(candidate => candidate.Id == matched.Id);
+        Assert.Equal(priorQuantity, item.QuantityOnHand); Assert.Equal(priorCost, item.UnitCost);
+        Assert.Equal("Reversed", receipt.Status); Assert.NotNull(receipt.ReversalJournalEntryId); Assert.False(await after.VendorBills.AnyAsync(candidate => candidate.InventoryReceiptId == receipt.Id));
+        Assert.Equal("Voided", bill.Status); Assert.Equal(0m, bill.BalanceDue); Assert.Null(bill.InventoryReceiptId);
+        Assert.Equal("Approved", await after.PurchaseOrders.Where(order => order.Id == saved.Id).Select(order => order.Status).SingleAsync());
+        Assert.Equal(2, await after.InventoryTransactions.CountAsync(movement => movement.Reference == "RCV-REVERSE-1" || movement.Reference == "REV-RCV-REVERSE-1"));
     }
 
     [Fact]

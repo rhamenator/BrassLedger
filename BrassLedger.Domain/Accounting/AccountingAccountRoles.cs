@@ -9,6 +9,7 @@ public static class AccountingAccountRoles
     public const string InventoryAsset = "InventoryAsset";
     public const string VendorAdvances = "VendorAdvances";
     public const string AccountsPayable = "AccountsPayable";
+    public const string GoodsReceivedNotInvoiced = "GoodsReceivedNotInvoiced";
     public const string SalesTaxPayable = "SalesTaxPayable";
     public const string CustomerDeposits = "CustomerDeposits";
     public const string PayrollLiabilities = "PayrollLiabilities";
@@ -28,6 +29,7 @@ public static class AccountingAccountRoles
         new(InventoryAsset, "Inventory asset", "Control account used for inventory value and quantity adjustments.", AccountType.Asset, true, true),
         new(VendorAdvances, "Vendor advances", "Control account used for unapplied vendor payments and refunds.", AccountType.Asset, true, true),
         new(AccountsPayable, "Accounts payable", "Control account used by vendor bills, credits, and payment applications.", AccountType.Liability, true, true),
+        new(GoodsReceivedNotInvoiced, "Goods received not invoiced", "Control account used for received inventory awaiting a matched vendor invoice.", AccountType.Liability, true, true),
         new(SalesTaxPayable, "Sales-tax payable", "Control account used for sales-tax liabilities.", AccountType.Liability, true, true),
         new(CustomerDeposits, "Customer deposits", "Control account used for unapplied customer receipts and refunds.", AccountType.Liability, true, true),
         new(PayrollLiabilities, "Payroll liabilities", "Control account used for employee deductions and employer payroll obligations.", AccountType.Liability, true, true),

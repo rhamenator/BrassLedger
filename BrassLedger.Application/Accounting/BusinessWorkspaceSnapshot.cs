@@ -145,7 +145,8 @@ public sealed record OperationsWorkspace(
     int OpenPurchaseOrderCount,
     IReadOnlyList<InventoryItemSnapshot> InventoryItems,
     IReadOnlyList<SalesOrderSnapshot> SalesOrders,
-    IReadOnlyList<PurchaseOrderSnapshot> PurchaseOrders);
+    IReadOnlyList<PurchaseOrderSnapshot> PurchaseOrders,
+    IReadOnlyList<InventoryReceiptSnapshot>? InventoryReceipts = null);
 
 public sealed record InventoryItemSnapshot(
     string Sku,
@@ -153,7 +154,8 @@ public sealed record InventoryItemSnapshot(
     decimal UnitPrice,
     decimal QuantityOnHand,
     decimal ReorderPoint,
-    Guid Id = default);
+    Guid Id = default,
+    decimal UnitCost = 0m);
 
 public sealed record SalesOrderSnapshot(
     string OrderNumber,
@@ -167,7 +169,17 @@ public sealed record PurchaseOrderSnapshot(
     string VendorName,
     DateOnly OrderedOn,
     string Status,
-    decimal TotalAmount);
+    decimal TotalAmount,
+    Guid Id = default,
+    Guid VendorId = default,
+    DateOnly? ExpectedOn = null,
+    string Notes = "",
+    string ConcurrencyToken = "",
+    IReadOnlyList<PurchaseOrderLineSnapshot>? Lines = null);
+
+public sealed record PurchaseOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal UnitCost, decimal ReceivedQuantity, decimal InvoicedQuantity, decimal LineTotal);
+public sealed record InventoryReceiptSnapshot(Guid Id, Guid PurchaseOrderId, string PurchaseOrderNumber, string ReceiptNumber, DateOnly ReceivedOn, string Status, decimal TotalAmount, Guid? VendorBillId, string ConcurrencyToken, IReadOnlyList<InventoryReceiptLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId);
+public sealed record InventoryReceiptLineSnapshot(Guid Id, Guid PurchaseOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal LineTotal);
 
 public sealed record TreasuryWorkspace(
     decimal CashOnHand,
