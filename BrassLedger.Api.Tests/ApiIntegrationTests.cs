@@ -232,6 +232,18 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var invoicedShipment = Assert.Single((await receivables.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.InventoryShipments!, candidate => candidate.Id == shipment.Id);
         Assert.NotNull(invoicedShipment.SalesInvoiceId);
         Assert.Contains((await receivables.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.Receivables.Invoices, invoice => invoice.Id == invoicedShipment.SalesInvoiceId && invoice.TotalAmount == 42m);
+        var returnRequest = new AuthorizeCustomerReturnRequest(invoicedShipment.Id, $"RMA-{orderNumber}", new DateOnly(2026, 8, 23), "API customer return", [new(invoicedShipment.Lines.Single().Id, 1m)], invoicedShipment.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync($"/api/inventory-shipments/{invoicedShipment.Id}/customer-returns", returnRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await sales.PostAsJsonAsync($"/api/inventory-shipments/{invoicedShipment.Id}/customer-returns", returnRequest)).StatusCode);
+        var authorization = Assert.Single((await sales.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.CustomerReturnAuthorizations!, item => item.ReturnNumber == returnRequest.ReturnNumber); var returnLine = Assert.Single(authorization.Lines);
+        var receiveRequest = new ReceiveCustomerReturnRequest(authorization.Id, $"CRCV-{orderNumber}", new DateOnly(2026, 8, 24), null, null, [new(returnLine.Id, 1m)], authorization.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync($"/api/customer-returns/{authorization.Id}/receipts", receiveRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await warehouse.PostAsJsonAsync($"/api/customer-returns/{authorization.Id}/receipts", receiveRequest)).StatusCode);
+        var returnReceipt = Assert.Single((await warehouse.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.CustomerReturnReceipts!, item => item.ReceiptNumber == receiveRequest.ReceiptNumber);
+        var creditRequest = new CreditCustomerReturnRequest(returnReceipt.Id, $"CM-{orderNumber}", new DateOnly(2026, 8, 25), "API accepted return", returnReceipt.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync($"/api/customer-return-receipts/{returnReceipt.Id}/credit", creditRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await receivables.PostAsJsonAsync($"/api/customer-return-receipts/{returnReceipt.Id}/credit", creditRequest)).StatusCode);
+        var returnCredit = Assert.Single((await receivables.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.CustomerReturnCredits!, item => item.CreditNumber == creditRequest.CreditNumber); Assert.Equal(21m, returnCredit.TotalAmount); Assert.Equal(21m, returnCredit.SourceAppliedAmount); Assert.Equal(0m, returnCredit.AvailableAmount);
         var partiallyFulfilled = Assert.Single((await sales.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == approved.Id);
         var cancellation = new CancelSalesOrderRequest(partiallyFulfilled.Id, "Customer cancelled final unit", partiallyFulfilled.ConcurrencyToken);
         Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync($"/api/sales-orders/{partiallyFulfilled.Id}/cancellation", cancellation)).StatusCode);

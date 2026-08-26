@@ -64,6 +64,10 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("table[aria-label='Sales backorder promises']"));
         Assert.Contains("Pick tickets commit an exact bin", cut.Markup);
         Assert.Contains("Customer shipments and invoicing", cut.Markup);
+        Assert.NotNull(cut.Find("table[aria-label='Customer return authorizations']"));
+        Assert.NotNull(cut.Find("table[aria-label='Customer return receipts']"));
+        Assert.NotNull(cut.Find("table[aria-label='Customer return credits']"));
+        Assert.Contains("Sales authorizes; fulfillment receives; receivables credits", cut.Markup);
     }
 }
 
@@ -153,6 +157,16 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> ShipSalesOrderAsync(ShipSalesOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> InvoiceInventoryShipmentAsync(InvoiceInventoryShipmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> ReverseInventoryShipmentAsync(ReverseInventoryShipmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryShipmentId));
+    public Task<TransactionResult> AuthorizeCustomerReturnAsync(AuthorizeCustomerReturnRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> CancelCustomerReturnAsync(CancelCustomerReturnRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.CustomerReturnAuthorizationId));
+    public Task<TransactionResult> ReceiveCustomerReturnAsync(ReceiveCustomerReturnRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> ReverseCustomerReturnReceiptAsync(ReverseCustomerReturnReceiptRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.CustomerReturnReceiptId));
+    public Task<TransactionResult> CreditCustomerReturnAsync(CreditCustomerReturnRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> ReverseCustomerReturnCreditAsync(ReverseCustomerReturnCreditRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.CustomerReturnCreditId));
+    public Task<TransactionResult> ApplyCustomerReturnCreditAsync(ApplyCustomerReturnCreditRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> ReverseCustomerReturnCreditApplicationAsync(ReverseCustomerReturnCreditApplicationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.CustomerReturnCreditApplicationId));
+    public Task<TransactionResult> RefundCustomerReturnCreditAsync(RefundCustomerReturnCreditRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> ReverseCustomerReturnCreditRefundAsync(ReverseCustomerReturnCreditRefundRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.CustomerReturnCreditRefundId));
     public Task<TransactionResult> SavePurchaseOrderAsync(SavePurchaseOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> ApprovePurchaseOrderAsync(ApprovePurchaseOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.PurchaseOrderId));
     public Task<TransactionResult> ReceivePurchaseOrderAsync(ReceivePurchaseOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));

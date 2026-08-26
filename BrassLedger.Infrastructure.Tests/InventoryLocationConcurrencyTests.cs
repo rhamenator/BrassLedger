@@ -145,6 +145,80 @@ public sealed class InventoryLocationConcurrencyTests
         }
     }
 
+    [PostgresFact]
+    public async Task PostgreSql_ConcurrentCustomerReturnAuthorizationsCannotOverreserveShipment()
+    {
+        var baseConnectionString = Environment.GetEnvironmentVariable("BRASSLEDGER_TEST_POSTGRES")!;
+        var databaseName = $"brassledger_test_returns_{Guid.NewGuid():N}";
+        var administrationBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString) { Database = "postgres", Pooling = false };
+        var testBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString) { Database = databaseName, Pooling = false };
+        var quotedDatabase = new NpgsqlCommandBuilder().QuoteIdentifier(databaseName);
+        await using (var administration = new NpgsqlConnection(administrationBuilder.ConnectionString))
+        {
+            await administration.OpenAsync();
+            await using var create = administration.CreateCommand(); create.CommandText = $"CREATE DATABASE {quotedDatabase}"; await create.ExecuteNonQueryAsync();
+        }
+
+        var contentRoot = Path.Combine(Path.GetTempPath(), "BrassLedger.ReturnConcurrency.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(contentRoot);
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Postgres"] = testBuilder.ConnectionString }).Build();
+            var services = new ServiceCollection(); services.AddBrassLedgerInfrastructure(configuration, contentRoot, seedSampleData: true);
+            using var provider = services.BuildServiceProvider(); await provider.InitializeBrassLedgerAsync();
+
+            Guid companyId; Guid customerId; Guid itemId;
+            using (var readScope = provider.CreateScope())
+            {
+                var factory = readScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+                companyId = await db.Companies.Select(company => company.Id).SingleAsync(); customerId = await db.Customers.Where(customer => customer.CompanyId == companyId).Select(customer => customer.Id).FirstAsync(); itemId = await db.InventoryItems.Where(item => item.CompanyId == companyId && item.Sku == "RM-220").Select(item => item.Id).SingleAsync();
+            }
+
+            Guid orderId;
+            using (var salesScope = provider.CreateScope())
+            {
+                SetCompanyContext(salesScope, companyId, BrassLedgerPermissions.SalesManage); var sales = salesScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+                var saved = await sales.SaveSalesOrderAsync(new(null, customerId, "SO-RACE-RETURN", new DateOnly(2026, 8, 26), null, "Return authorization race", [new SalesOrderLineRequest(itemId, "Concurrent return", 1m, 10m, 0m, 0m, "4000")])); Assert.True(saved.Succeeded, saved.ErrorMessage); orderId = saved.Id!.Value;
+                var factory = salesScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync(); var order = await db.SalesOrders.SingleAsync(candidate => candidate.Id == orderId);
+                var approved = await sales.ApproveSalesOrderAsync(new(order.Id, order.ConcurrencyToken)); Assert.True(approved.Succeeded, approved.ErrorMessage);
+            }
+
+            Guid orderLineId; string orderToken;
+            using (var readScope = provider.CreateScope())
+            {
+                var factory = readScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync(); orderLineId = await db.SalesOrderLines.Where(line => line.SalesOrderId == orderId).Select(line => line.Id).SingleAsync(); orderToken = await db.SalesOrders.Where(order => order.Id == orderId).Select(order => order.ConcurrencyToken).SingleAsync();
+            }
+            Guid shipmentId;
+            using (var fulfillmentScope = provider.CreateScope())
+            {
+                SetCompanyContext(fulfillmentScope, companyId, BrassLedgerPermissions.FulfillmentManage); var fulfillment = fulfillmentScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+                var allocated = await fulfillment.AllocateSalesOrderAsync(new(orderId, [new AllocateSalesOrderLineRequest(orderLineId, 1m)], orderToken)); Assert.True(allocated.Succeeded, allocated.ErrorMessage);
+                var factory = fulfillmentScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync(); orderToken = await db.SalesOrders.Where(order => order.Id == orderId).Select(order => order.ConcurrencyToken).SingleAsync();
+                var shipped = await fulfillment.ShipSalesOrderAsync(new(orderId, "SHIP-RACE-RETURN", new DateOnly(2026, 8, 26), [new ShipSalesOrderLineRequest(orderLineId, 1m)], orderToken)); Assert.True(shipped.Succeeded, shipped.ErrorMessage); shipmentId = shipped.Id!.Value;
+            }
+
+            Guid shipmentLineId; string shipmentToken;
+            using (var readScope = provider.CreateScope())
+            {
+                var factory = readScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync(); shipmentLineId = await db.InventoryShipmentLines.Where(line => line.InventoryShipmentId == shipmentId).Select(line => line.Id).SingleAsync(); shipmentToken = await db.InventoryShipments.Where(shipment => shipment.Id == shipmentId).Select(shipment => shipment.ConcurrencyToken).SingleAsync();
+            }
+            using var firstScope = provider.CreateScope(); using var secondScope = provider.CreateScope();
+            var first = Task.Run(async () => { SetCompanyContext(firstScope, companyId, BrassLedgerPermissions.SalesManage); return await firstScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().AuthorizeCustomerReturnAsync(new(shipmentId, "RMA-RACE-A", new DateOnly(2026, 8, 26), "Concurrent authorization A", [new AuthorizeCustomerReturnLineRequest(shipmentLineId, .75m)], shipmentToken)); });
+            var second = Task.Run(async () => { SetCompanyContext(secondScope, companyId, BrassLedgerPermissions.SalesManage); return await secondScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().AuthorizeCustomerReturnAsync(new(shipmentId, "RMA-RACE-B", new DateOnly(2026, 8, 26), "Concurrent authorization B", [new AuthorizeCustomerReturnLineRequest(shipmentLineId, .75m)], shipmentToken)); });
+            var results = await Task.WhenAll(first, second); Assert.Single(results, result => result.Succeeded); Assert.Single(results, result => !result.Succeeded);
+
+            using var verifyScope = provider.CreateScope(); var verifyFactory = verifyScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var verify = await verifyFactory.CreateDbContextAsync();
+            Assert.Equal(.75m, await (from line in verify.CustomerReturnAuthorizationLines join authorization in verify.CustomerReturnAuthorizations on line.CustomerReturnAuthorizationId equals authorization.Id where authorization.InventoryShipmentId == shipmentId && authorization.Status != "Cancelled" select line.AuthorizedQuantity).SumAsync());
+        }
+        finally
+        {
+            NpgsqlConnection.ClearAllPools();
+            await using var administration = new NpgsqlConnection(administrationBuilder.ConnectionString); await administration.OpenAsync();
+            await using var drop = administration.CreateCommand(); drop.CommandText = $"DROP DATABASE IF EXISTS {quotedDatabase} WITH (FORCE)"; await drop.ExecuteNonQueryAsync();
+            try { Directory.Delete(contentRoot, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
     private static void SetCompanyContext(IServiceScope scope, Guid companyId, string permission)
     {
         scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext = new DefaultHttpContext

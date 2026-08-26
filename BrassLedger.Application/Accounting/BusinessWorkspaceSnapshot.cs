@@ -153,7 +153,10 @@ public sealed record OperationsWorkspace(
     IReadOnlyList<InventoryTransferSnapshot>? InventoryTransfers = null,
     IReadOnlyList<InventoryPickSnapshot>? InventoryPicks = null,
     IReadOnlyList<InventoryPackingSlipSnapshot>? InventoryPackingSlips = null,
-    IReadOnlyList<SalesOrderBackorderPromiseSnapshot>? BackorderPromises = null);
+    IReadOnlyList<SalesOrderBackorderPromiseSnapshot>? BackorderPromises = null,
+    IReadOnlyList<CustomerReturnAuthorizationSnapshot>? CustomerReturnAuthorizations = null,
+    IReadOnlyList<CustomerReturnReceiptSnapshot>? CustomerReturnReceipts = null,
+    IReadOnlyList<CustomerReturnCreditSnapshot>? CustomerReturnCredits = null);
 
 public sealed record InventoryItemSnapshot(
     string Sku,
@@ -208,6 +211,13 @@ public sealed record SalesOrderSnapshot(
 public sealed record SalesOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal AllocatedQuantity, decimal ShippedQuantity, decimal CancelledQuantity, decimal ReturnedQuantity, decimal InvoicedQuantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber, Guid? AllocationWarehouseId = null, Guid? AllocationBinId = null, string AllocationLocation = "");
 public sealed record InventoryShipmentSnapshot(Guid Id, Guid SalesOrderId, string SalesOrderNumber, string ShipmentNumber, DateOnly ShippedOn, string Status, decimal TotalCost, Guid? SalesInvoiceId, string ConcurrencyToken, IReadOnlyList<InventoryShipmentLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId, Guid? WarehouseId = null, Guid? BinId = null, string Location = "", Guid? InventoryPackingSlipId = null);
 public sealed record InventoryShipmentLineSnapshot(Guid Id, Guid SalesOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal TotalCost);
+public sealed record CustomerReturnAuthorizationSnapshot(Guid Id, Guid InventoryShipmentId, string ShipmentNumber, Guid SalesOrderId, string SalesOrderNumber, Guid CustomerId, string CustomerName, string ReturnNumber, DateOnly AuthorizedOn, string Reason, string Status, string ConcurrencyToken, IReadOnlyList<CustomerReturnAuthorizationLineSnapshot> Lines);
+public sealed record CustomerReturnAuthorizationLineSnapshot(Guid Id, Guid InventoryShipmentLineId, Guid SalesOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal AuthorizedQuantity, decimal ReceivedQuantity);
+public sealed record CustomerReturnReceiptSnapshot(Guid Id, Guid CustomerReturnAuthorizationId, string ReturnNumber, string ReceiptNumber, DateOnly ReceivedOn, string Status, decimal TotalCost, Guid WarehouseId, Guid BinId, string Location, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<CustomerReturnReceiptLineSnapshot> Lines);
+public sealed record CustomerReturnReceiptLineSnapshot(Guid Id, Guid CustomerReturnAuthorizationLineId, Guid InventoryShipmentLineId, Guid SalesOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal TotalCost);
+public sealed record CustomerReturnCreditSnapshot(Guid Id, Guid CustomerReturnReceiptId, string ReceiptNumber, Guid SalesInvoiceId, string InvoiceNumber, Guid CustomerId, string CustomerName, string CreditNumber, DateOnly CreditDate, string Reason, string Status, decimal Subtotal, decimal TaxAmount, decimal TotalAmount, decimal SourceAppliedAmount, decimal AppliedAmount, decimal RefundedAmount, decimal AvailableAmount, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<CustomerReturnCreditApplicationSnapshot> Applications, IReadOnlyList<CustomerReturnCreditRefundSnapshot> Refunds);
+public sealed record CustomerReturnCreditApplicationSnapshot(Guid Id, Guid SalesInvoiceId, string InvoiceNumber, DateOnly AppliedOn, decimal Amount, string Status, string ConcurrencyToken);
+public sealed record CustomerReturnCreditRefundSnapshot(Guid Id, Guid BankAccountId, string BankAccountName, string Reference, DateOnly RefundDate, decimal Amount, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken);
 
 public sealed record PurchaseOrderSnapshot(
     string OrderNumber,

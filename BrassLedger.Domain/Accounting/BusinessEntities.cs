@@ -564,6 +564,7 @@ public sealed class SubledgerPayment
     public DateTimeOffset CreatedAtUtc { get; set; }
     public Guid? ReversedByUserId { get; set; }
     public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
     public string ReversalReason { get; set; } = string.Empty;
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
@@ -915,6 +916,153 @@ public sealed class InventoryShipmentLine
     public decimal Quantity { get; set; }
     public decimal UnitCost { get; set; }
     public decimal TotalCost { get; set; }
+}
+
+public sealed class CustomerReturnAuthorization
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid InventoryShipmentId { get; set; }
+    public Guid SalesOrderId { get; set; }
+    public Guid CustomerId { get; set; }
+    public string ReturnNumber { get; set; } = string.Empty;
+    public DateOnly AuthorizedOn { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string Status { get; set; } = "Open";
+    public Guid? AuthorizedByUserId { get; set; }
+    public DateTimeOffset AuthorizedAtUtc { get; set; }
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class CustomerReturnAuthorizationLine
+{
+    public Guid Id { get; set; }
+    public Guid CustomerReturnAuthorizationId { get; set; }
+    public Guid InventoryShipmentLineId { get; set; }
+    public Guid SalesOrderLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public int Sequence { get; set; }
+    public decimal AuthorizedQuantity { get; set; }
+    public decimal ReceivedQuantity { get; set; }
+}
+
+public sealed class CustomerReturnReceipt
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid CustomerReturnAuthorizationId { get; set; }
+    public Guid WarehouseId { get; set; }
+    public Guid BinId { get; set; }
+    public string ReceiptNumber { get; set; } = string.Empty;
+    public DateOnly ReceivedOn { get; set; }
+    public string Status { get; set; } = "Posted";
+    public decimal TotalCost { get; set; }
+    public Guid JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReceivedByUserId { get; set; }
+    public DateTimeOffset ReceivedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class CustomerReturnReceiptLine
+{
+    public Guid Id { get; set; }
+    public Guid CustomerReturnReceiptId { get; set; }
+    public Guid CustomerReturnAuthorizationLineId { get; set; }
+    public Guid InventoryShipmentLineId { get; set; }
+    public Guid SalesOrderLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public int Sequence { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TotalCost { get; set; }
+}
+
+public sealed class CustomerReturnCredit
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid CustomerReturnReceiptId { get; set; }
+    public Guid SalesInvoiceId { get; set; }
+    public Guid CustomerId { get; set; }
+    public string CreditNumber { get; set; } = string.Empty;
+    public DateOnly CreditDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string Status { get; set; } = "Posted";
+    public decimal Subtotal { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal TotalAmount { get; set; }
+    public decimal SourceAppliedAmount { get; set; }
+    public decimal AppliedAmount { get; set; }
+    public decimal RefundedAmount { get; set; }
+    public Guid JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class CustomerReturnCreditLine
+{
+    public Guid Id { get; set; }
+    public Guid CustomerReturnCreditId { get; set; }
+    public Guid CustomerReturnReceiptLineId { get; set; }
+    public Guid SalesInvoiceLineId { get; set; }
+    public Guid RevenueAccountId { get; set; }
+    public int Sequence { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal NetAmount { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal TotalAmount { get; set; }
+}
+
+public sealed class CustomerReturnCreditApplication
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid CustomerReturnCreditId { get; set; }
+    public Guid SalesInvoiceId { get; set; }
+    public DateOnly AppliedOn { get; set; }
+    public decimal Amount { get; set; }
+    public string Status { get; set; } = "Posted";
+    public Guid? AppliedByUserId { get; set; }
+    public DateTimeOffset AppliedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class CustomerReturnCreditRefund
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid CustomerReturnCreditId { get; set; }
+    public Guid BankAccountId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateOnly RefundDate { get; set; }
+    public decimal Amount { get; set; }
+    public string Status { get; set; } = "Posted";
+    public Guid JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? RefundedByUserId { get; set; }
+    public DateTimeOffset RefundedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class PurchaseOrder

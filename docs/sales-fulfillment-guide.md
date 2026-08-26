@@ -36,6 +36,20 @@ Shipment invoicing debits **Accounts receivable**, credits each line's reviewed 
 
 The selling price and moving-average cost remain independent. A shipment never changes the item's average cost.
 
+## Customer returns and credits
+
+Returns use a three-role provenance chain instead of an amount-only credit memo:
+
+1. Sales authorizes exact quantities from one posted shipment. Existing open authorizations are subtracted from the quantity still eligible for return.
+2. Fulfillment receives some or all authorized units into an active warehouse/bin. Receipt posts Inventory against COGS at the immutable unit cost on each original shipment line and records a location-level inventory movement.
+3. Receivables credits one posted receipt after the original shipment is invoiced. Net revenue, line tax, and rounding come from the exact original invoice lines; the credit therefore cannot drift from the sale it reverses.
+
+The credit first reduces the original invoice up to its balance. A remainder is a customer-level available credit: receivables can apply it to another open invoice for the same customer without another GL posting, or refund it from a mapped bank account with an AR/cash posting. Customer open balance includes both open invoices and available credit, so a paid-invoice return can correctly produce a negative customer balance until settlement.
+
+Every return number, receipt number, credit number, and refund reference is company-unique. Dates cannot precede their source documents; posting dates obey closed-period controls. Quantity, company, permission, concurrency, and active-location checks occur on the server, not only in the UI.
+
+Corrections proceed in dependency order: reverse later refund or credit applications, reverse the credit, reverse the physical receipt while the returned stock is still in its receipt bin, then cancel the authorization if required. Original journals and documents remain immutable, and each transition creates an audit event. A shipment with an active return authorization cannot be reversed.
+
 ## Corrections
 
 Do not edit shipment or invoice journals. An invoiced shipment cannot be physically reversed. First void its fully open, unapplied invoice through the normal controlled invoice-void workflow. That clears the shipment's invoice link and restores its uninvoiced quantities while retaining the invoice, its provenance, and all journals. Reversing that invoice void restores the exact link and quantities.
@@ -50,4 +64,4 @@ Older prerelease databases may contain sales-order headers with no authoritative
 
 ## Current boundary
 
-This workflow covers line-based quotes, approval, withdrawal, expiration-aware one-time conversion, line-based sales orders, approval, auditable amendment/reapproval, open-quantity cancellation, dated backorder promises, warehouse/bin reservations, partial picks, multiple packing slips, packing-backed or direct partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Customer return authorization and credit/refund coordination, lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.
+This workflow covers line-based quotes, approval, withdrawal, expiration-aware one-time conversion, line-based sales orders, approval, auditable amendment/reapproval, open-quantity cancellation, dated backorder promises, warehouse/bin reservations, partial picks, multiple packing slips, packing-backed or direct partial shipments, moving-average COGS, shipment-derived invoices, controlled shipment correction, customer return authorization and partial receiving, source-derived credits, credit application, cash refunds, and dependency-ordered reversals. Lots/serials and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.

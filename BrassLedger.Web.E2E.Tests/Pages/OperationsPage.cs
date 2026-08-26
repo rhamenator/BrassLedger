@@ -213,6 +213,31 @@ public sealed class OperationsPage
         Assert.Contains("Invoiced", await row.InnerTextAsync());
     }
 
+    public async Task AuthorizeCustomerReturnAsync(string shipmentNumber, string returnNumber)
+    {
+        var shipmentRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber });
+        await shipmentRow.GetByRole(AriaRole.Button, new() { Name = "Authorize return" }).ClickAsync();
+        await _session.Page.GetByLabel("Customer return authorization number").FillAsync(returnNumber);
+        await _session.Page.GetByLabel("Customer return authorization reason").FillAsync("Browser-tested customer return");
+        await _session.Page.GetByLabel("Return RM-220 quantity").FillAsync("1");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Authorize customer return" }).ClickAsync();
+        await _session.Page.GetByText($"Customer return {returnNumber} authorized.", new() { Exact = true }).WaitForAsync();
+        var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer return authorizations" }).Locator("tr").Filter(new() { HasTextString = returnNumber }); await Assertions.Expect(row).ToContainTextAsync("Open");
+    }
+
+    public async Task ReceiveCustomerReturnAsync(string returnNumber, string receiptNumber)
+    {
+        var authorizationRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer return authorizations" }).Locator("tr").Filter(new() { HasTextString = returnNumber }); await authorizationRow.GetByRole(AriaRole.Button, new() { Name = "Receive" }).ClickAsync();
+        await _session.Page.GetByLabel("Customer return receipt number").FillAsync(receiptNumber); await _session.Page.GetByLabel("Receive returned RM-220 quantity").FillAsync("1"); await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post physical return receipt" }).ClickAsync();
+        await _session.Page.GetByText($"Physical return receipt {receiptNumber} posted.", new() { Exact = true }).WaitForAsync(); var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer return receipts" }).Locator("tr").Filter(new() { HasTextString = receiptNumber }); await Assertions.Expect(row).ToContainTextAsync("Posted");
+    }
+
+    public async Task CreditCustomerReturnAsync(string receiptNumber, string creditNumber)
+    {
+        var receiptRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer return receipts" }).Locator("tr").Filter(new() { HasTextString = receiptNumber }); await receiptRow.GetByRole(AriaRole.Button, new() { Name = "Create credit" }).ClickAsync();
+        await _session.Page.GetByLabel("Customer return credit number").FillAsync(creditNumber); await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post return credit" }).ClickAsync(); await _session.Page.GetByText($"Customer return credit {creditNumber} posted.", new() { Exact = true }).WaitForAsync(); var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer return credits" }).Locator("tr").Filter(new() { HasTextString = creditNumber }); await Assertions.Expect(row).ToContainTextAsync("Posted"); await Assertions.Expect(row).ToContainTextAsync("$0.00");
+    }
+
     public async Task ApproveReceiveAndMatchAsync(string orderNumber, string receiptNumber, string billNumber)
     {
         var orderRow = _session.Page.Locator("tr").Filter(new() { HasTextString = orderNumber });

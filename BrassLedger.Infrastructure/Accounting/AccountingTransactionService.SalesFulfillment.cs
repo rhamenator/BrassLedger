@@ -355,6 +355,7 @@ public sealed partial class AccountingTransactionService
         if (shipment is null) return TransactionResult.Failure("Inventory shipment not found.");
         if (shipment.Status != "Posted" || shipment.ReversalJournalEntryId.HasValue) return TransactionResult.Failure("Only an unreversed posted shipment can be reversed.");
         if (shipment.SalesInvoiceId.HasValue) return TransactionResult.Failure("Void the shipment invoice before reversing the physical shipment.");
+        if (await db.CustomerReturnAuthorizations.AnyAsync(x => x.CompanyId == companyId && x.InventoryShipmentId == shipment.Id && x.Status != "Cancelled", cancellationToken)) return TransactionResult.Failure("Cancel the customer return authorization and reverse any return receipts before reversing the shipment.");
         if (!string.Equals(shipment.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The shipment changed after it was opened. Refresh and review it again.");
         if (request.ReversalDate < shipment.ShippedOn) return TransactionResult.Failure("The reversal date cannot precede the shipment date.");
         var shipmentLines = await db.InventoryShipmentLines.Where(line => line.InventoryShipmentId == shipment.Id).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);

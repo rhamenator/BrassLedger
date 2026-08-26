@@ -971,6 +971,56 @@ api.MapPost("/inventory-shipments/{inventoryShipmentId:guid}/reversal", async (G
     var result = await service.ReverseInventoryShipmentAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["shipment"] = [result.ErrorMessage] });
 }).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
 
+api.MapPost("/inventory-shipments/{inventoryShipmentId:guid}/customer-returns", async (Guid inventoryShipmentId, AuthorizeCustomerReturnRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryShipmentId != inventoryShipmentId) return Results.BadRequest(new { error = "inventory_shipment_id_mismatch" }); var result = await service.AuthorizeCustomerReturnAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/customer-returns/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturn"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
+api.MapPost("/customer-returns/{customerReturnAuthorizationId:guid}/cancellation", async (Guid customerReturnAuthorizationId, CancelCustomerReturnRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.CustomerReturnAuthorizationId != customerReturnAuthorizationId) return Results.BadRequest(new { error = "customer_return_id_mismatch" }); var result = await service.CancelCustomerReturnAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturn"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
+api.MapPost("/customer-returns/{customerReturnAuthorizationId:guid}/receipts", async (Guid customerReturnAuthorizationId, ReceiveCustomerReturnRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.CustomerReturnAuthorizationId != customerReturnAuthorizationId) return Results.BadRequest(new { error = "customer_return_id_mismatch" }); var result = await service.ReceiveCustomerReturnAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/customer-return-receipts/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturnReceipt"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
+api.MapPost("/customer-return-receipts/{customerReturnReceiptId:guid}/reversal", async (Guid customerReturnReceiptId, ReverseCustomerReturnReceiptRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.CustomerReturnReceiptId != customerReturnReceiptId) return Results.BadRequest(new { error = "customer_return_receipt_id_mismatch" }); var result = await service.ReverseCustomerReturnReceiptAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturnReceipt"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage).RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PaymentReverse));
+
+api.MapPost("/customer-return-receipts/{customerReturnReceiptId:guid}/credit", async (Guid customerReturnReceiptId, CreditCustomerReturnRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.CustomerReturnReceiptId != customerReturnReceiptId) return Results.BadRequest(new { error = "customer_return_receipt_id_mismatch" }); var result = await service.CreditCustomerReturnAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/customer-return-credits/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturnCredit"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage));
+
+api.MapPost("/customer-return-credits/{customerReturnCreditId:guid}/applications", async (Guid customerReturnCreditId, ApplyCustomerReturnCreditRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.CustomerReturnCreditId != customerReturnCreditId) return Results.BadRequest(new { error = "customer_return_credit_id_mismatch" }); var result = await service.ApplyCustomerReturnCreditAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/customer-return-credit-applications/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturnCreditApplication"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage));
+
+api.MapPost("/customer-return-credit-applications/{customerReturnCreditApplicationId:guid}/reversal", async (Guid customerReturnCreditApplicationId, ReverseCustomerReturnCreditApplicationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.CustomerReturnCreditApplicationId != customerReturnCreditApplicationId) return Results.BadRequest(new { error = "customer_return_credit_application_id_mismatch" }); var result = await service.ReverseCustomerReturnCreditApplicationAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturnCreditApplication"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
+api.MapPost("/customer-return-credits/{customerReturnCreditId:guid}/refunds", async (Guid customerReturnCreditId, RefundCustomerReturnCreditRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.CustomerReturnCreditId != customerReturnCreditId) return Results.BadRequest(new { error = "customer_return_credit_id_mismatch" }); var result = await service.RefundCustomerReturnCreditAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/customer-return-credit-refunds/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturnCreditRefund"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReceivables);
+
+api.MapPost("/customer-return-credit-refunds/{customerReturnCreditRefundId:guid}/reversal", async (Guid customerReturnCreditRefundId, ReverseCustomerReturnCreditRefundRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.CustomerReturnCreditRefundId != customerReturnCreditRefundId) return Results.BadRequest(new { error = "customer_return_credit_refund_id_mismatch" }); var result = await service.ReverseCustomerReturnCreditRefundAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturnCreditRefund"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
+api.MapPost("/customer-return-credits/{customerReturnCreditId:guid}/reversal", async (Guid customerReturnCreditId, ReverseCustomerReturnCreditRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.CustomerReturnCreditId != customerReturnCreditId) return Results.BadRequest(new { error = "customer_return_credit_id_mismatch" }); var result = await service.ReverseCustomerReturnCreditAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturnCredit"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
 api.MapPost("/purchase-orders", async (SavePurchaseOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SavePurchaseOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/purchase-orders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseOrder"] = [result.ErrorMessage] });
