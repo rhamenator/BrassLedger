@@ -125,6 +125,16 @@ public sealed record ReceivePurchaseOrderRequest(Guid PurchaseOrderId, string Re
 public sealed record MatchPurchaseOrderReceiptBillRequest(Guid InventoryReceiptId, string BillNumber, DateOnly BillDate, DateOnly DueDate, string Description, string ConcurrencyToken);
 public sealed record ReverseInventoryReceiptRequest(Guid InventoryReceiptId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record UnmatchPurchaseOrderReceiptBillRequest(Guid InventoryReceiptId, DateOnly VoidDate, string Reason, string ConcurrencyToken);
+public sealed record AuthorizeSupplierReturnLineRequest(Guid InventoryReceiptLineId, decimal Quantity);
+public sealed record AuthorizeSupplierReturnRequest(Guid InventoryReceiptId, string ReturnNumber, DateOnly AuthorizedOn, string Reason, IReadOnlyList<AuthorizeSupplierReturnLineRequest> Lines, string ReceiptConcurrencyToken);
+public sealed record CancelSupplierReturnRequest(Guid SupplierReturnAuthorizationId, string Reason, string ConcurrencyToken);
+public sealed record ShipSupplierReturnLineRequest(Guid SupplierReturnAuthorizationLineId, decimal Quantity);
+public sealed record ShipSupplierReturnRequest(Guid SupplierReturnAuthorizationId, string ShipmentNumber, DateOnly ShippedOn, Guid? WarehouseId, Guid? BinId, IReadOnlyList<ShipSupplierReturnLineRequest> Lines, string ConcurrencyToken);
+public sealed record ApplySupplierReturnCreditRequest(Guid SupplierReturnShipmentId, Guid VendorBillId, DateOnly AppliedOn, decimal Amount, string ConcurrencyToken);
+public sealed record RefundSupplierReturnCreditRequest(Guid SupplierReturnShipmentId, Guid BankAccountId, string Reference, DateOnly RefundDate, decimal Amount, string ConcurrencyToken);
+public sealed record ReverseSupplierReturnShipmentRequest(Guid SupplierReturnShipmentId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
+public sealed record ReverseSupplierReturnCreditApplicationRequest(Guid SupplierReturnCreditApplicationId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
+public sealed record ReverseSupplierReturnCreditRefundRequest(Guid SupplierReturnCreditRefundId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record SavePayrollJurisdictionRuleRequest(Guid? Id, string ResidenceJurisdiction, string WorkJurisdiction, bool ExemptWorkWithholding, decimal ResidentCreditRate, bool IsActive, string Notes);
 public sealed record TransactionResult(bool Succeeded, string ErrorMessage, Guid? Id = null)
 {
@@ -248,6 +258,14 @@ public interface IAccountingTransactionService
     Task<TransactionResult> MatchPurchaseOrderReceiptBillAsync(MatchPurchaseOrderReceiptBillRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> UnmatchPurchaseOrderReceiptBillAsync(UnmatchPurchaseOrderReceiptBillRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReverseInventoryReceiptAsync(ReverseInventoryReceiptRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> AuthorizeSupplierReturnAsync(AuthorizeSupplierReturnRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CancelSupplierReturnAsync(CancelSupplierReturnRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ShipSupplierReturnAsync(ShipSupplierReturnRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ApplySupplierReturnCreditAsync(ApplySupplierReturnCreditRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RefundSupplierReturnCreditAsync(RefundSupplierReturnCreditRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseSupplierReturnShipmentAsync(ReverseSupplierReturnShipmentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseSupplierReturnCreditApplicationAsync(ReverseSupplierReturnCreditApplicationRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseSupplierReturnCreditRefundAsync(ReverseSupplierReturnCreditRefundRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Exports and imports the core list CSV shapes used by QuickBooks Online.</summary>

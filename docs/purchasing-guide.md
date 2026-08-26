@@ -14,6 +14,14 @@ A receipt posts its accepted value as a debit to the configured **Inventory asse
 
 An exact invoice match posts a debit to GRNI and a credit to the configured **Accounts payable** control account, creates an open vendor bill, and updates the vendor subledger. The resulting bill uses the normal payment, credit, and reporting workflows. BrassLedger rejects a receipt whose quantity exceeds the unreceived order quantity and rejects a receipt or match based on a stale concurrency token.
 
+## Supplier returns and vendor credits
+
+Use **Return to supplier** on a posted receipt to authorize exact quantities from its immutable receipt lines. Authorization reserves those quantities but does not move stock or post accounting. A return may then be shipped in one or more parts from the warehouse/bin that physically contains the goods. Shipment removes unreserved stock at the source receipt cost and recalculates the remaining moving-average cost; BrassLedger refuses a return that would make quantity or inventory value negative.
+
+The accounting depends on invoice timing. A shipment made before matching the receipt debits GRNI and credits Inventory, and a later match bills only the net units retained. A shipment made after matching debits Accounts Payable and credits Inventory. The resulting vendor credit first reduces any balance still due on that source bill. Payables can deliberately apply the remaining credit to another open bill for the same vendor or record a cash refund to a mapped bank account. Credit allocation is a non-posting subledger action because the AP reduction was recorded by the physical return; a cash refund posts Cash against AP.
+
+Return authorizations, shipments, allocations, refunds, and reversals retain source receipt, purchase-order line, vendor-bill, inventory-location, journal, actor, timestamp, and reason provenance. Quantities and amounts remain visible as gross history plus returned, credited, applied, refunded, and available values. Company-scoped numbers, permissions, optimistic concurrency, closed-period controls, and duplicate protection apply throughout.
+
 The starter chart uses account 2050 for GRNI, but workflows resolve the company-scoped operational role rather than relying on that number. Existing companies receive a starter GRNI control account only when neither the role nor proposed number is already present. An administrator cannot reassign the role while unmatched posted receipts remain.
 
 ## Corrections
@@ -22,8 +30,10 @@ Do not edit generated journals. A fully open, unapplied matched bill can be void
 
 An unmatched receipt can then be reversed. Direct reversal is allowed only when it remains the latest valuation event for every affected item. BrassLedger records prior quantity and moving-average cost on each receipt line, reverses Inventory and GRNI, restores those values, and retains receipt and journal history. If later stock movement exists, enter a current compensating inventory adjustment instead of rewriting historical valuation.
 
+Corrections follow dependency order. Reverse supplier-credit refunds and manually applied credits before reversing their physical return shipment. A pre-invoice return cannot be reversed after its receipt has subsequently been matched until that matched bill is voided. A physical return must still be the latest valuation event for every affected item. Cancel an unused authorization with a reason; an authorization with a posted shipment can be cancelled only after those shipments are reversed.
+
 All postings enforce company isolation, active vendors and items, closed accounting periods, configured control accounts, balanced entries, unique order/receipt/bill numbers, optimistic concurrency, and business-audit events.
 
 ## Current boundary
 
-This workflow intentionally supports separate purchase requisitions, exact approved conversion, exact receipt-level matching, warehouse/bin receiving, and moving-average valuation. Price/quantity variance approval, landed-cost allocation, lots, serial numbers, FIFO layers, and supplier returns remain separate production-readiness work. Do not represent those capabilities as implemented.
+This workflow supports separate purchase requisitions, exact approved conversion, exact receipt-level matching, warehouse/bin receiving, moving-average valuation, receipt-provenance supplier returns, vendor-credit settlement, and dependency-ordered corrections. Price/quantity variance approval, landed-cost allocation, lots, serial numbers, and FIFO layers remain separate production-readiness work. Do not represent those capabilities as implemented.

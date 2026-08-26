@@ -146,6 +146,44 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task SupplierReturnApi_PreservesReceiptProvenance_AndSeparatesPurchasingFromCreditReversal()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var purchasing = await CreateAuthenticatedClientAsync(isolatedFactory, "operations");
+        using var controller = await CreateAuthenticatedClientAsync(isolatedFactory, "controller");
+        using var sales = await CreateAuthenticatedClientAsync(isolatedFactory, "sales");
+        var workspace = await purchasing.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var vendor = workspace!.Payables.Vendors.First(); var item = workspace.Operations.InventoryItems.First(); var bank = workspace.Treasury.BankAccounts.First(); var suffix = Guid.NewGuid().ToString("N")[..8]; var date = new DateOnly(2026, 8, 20);
+
+        var orderResponse = await purchasing.PostAsJsonAsync("/api/purchase-orders", new SavePurchaseOrderRequest(null, vendor.Id, $"PO-SR-{suffix}", date, date.AddDays(2), "Supplier return API", [new PurchaseOrderLineRequest(item.Id, "Returnable inventory", 2m, 17m)]));
+        Assert.Equal(HttpStatusCode.Created, orderResponse.StatusCode); var orderResult = await orderResponse.Content.ReadFromJsonAsync<TransactionResult>(); var order = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseOrders, candidate => candidate.Id == orderResult!.Id);
+        Assert.Equal(HttpStatusCode.OK, (await purchasing.PostAsJsonAsync($"/api/purchase-orders/{order.Id}/approval", new ApprovePurchaseOrderRequest(order.Id, order.ConcurrencyToken))).StatusCode);
+        order = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseOrders, candidate => candidate.Id == order.Id); var orderLine = Assert.Single(order.Lines!);
+        Assert.Equal(HttpStatusCode.Created, (await purchasing.PostAsJsonAsync($"/api/purchase-orders/{order.Id}/receipts", new ReceivePurchaseOrderRequest(order.Id, $"RCV-SR-{suffix}", date.AddDays(1), [new ReceivePurchaseOrderLineRequest(orderLine.Id, 2m)], order.ConcurrencyToken))).StatusCode);
+        var receipt = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.InventoryReceipts!, candidate => candidate.PurchaseOrderId == order.Id); var receiptLine = Assert.Single(receipt.Lines);
+        Assert.Equal(HttpStatusCode.Created, (await purchasing.PostAsJsonAsync($"/api/inventory-receipts/{receipt.Id}/vendor-bill", new MatchPurchaseOrderReceiptBillRequest(receipt.Id, $"BILL-SR-{suffix}", date.AddDays(2), date.AddDays(32), "Source receipt bill", receipt.ConcurrencyToken))).StatusCode);
+        workspace = await purchasing.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"); var sourceBill = Assert.Single(workspace!.Payables.Bills, candidate => candidate.BillNumber == $"BILL-SR-{suffix}");
+        Assert.Equal(HttpStatusCode.Created, (await controller.PostAsJsonAsync("/api/vendor-payments", new RecordVendorPaymentRequest(vendor.Id, bank.Id, date.AddDays(3), 34m, $"PAY-SR-{suffix}", "ACH", [new PaymentDocumentApplicationRequest(sourceBill.Id, 34m)]))).StatusCode);
+        var targetBillResponse = await controller.PostAsJsonAsync("/api/vendor-bills", new CreateVendorBillRequest(vendor.Id, $"TARGET-SR-{suffix}", date.AddDays(3), date.AddDays(33), 25m, "5100", "Credit application target")); Assert.Equal(HttpStatusCode.Created, targetBillResponse.StatusCode); var targetBillResult = await targetBillResponse.Content.ReadFromJsonAsync<TransactionResult>();
+
+        receipt = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.InventoryReceipts!, candidate => candidate.Id == receipt.Id); var authorizationRequest = new AuthorizeSupplierReturnRequest(receipt.Id, $"SRA-{suffix}", date.AddDays(4), "Damaged inventory", [new(receiptLine.Id, 1m)], receipt.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync($"/api/inventory-receipts/{receipt.Id}/supplier-returns", authorizationRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await purchasing.PostAsJsonAsync($"/api/inventory-receipts/{Guid.NewGuid()}/supplier-returns", authorizationRequest)).StatusCode);
+        var authorizationResponse = await purchasing.PostAsJsonAsync($"/api/inventory-receipts/{receipt.Id}/supplier-returns", authorizationRequest); Assert.Equal(HttpStatusCode.Created, authorizationResponse.StatusCode);
+        var authorization = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SupplierReturnAuthorizations!, candidate => candidate.ReturnNumber == authorizationRequest.ReturnNumber); var authorizationLine = Assert.Single(authorization.Lines);
+        var staleShipment = new ShipSupplierReturnRequest(authorization.Id, $"SRS-STALE-{suffix}", date.AddDays(5), null, null, [new(authorizationLine.Id, 1m)], "stale-token"); Assert.Equal(HttpStatusCode.BadRequest, (await purchasing.PostAsJsonAsync($"/api/supplier-returns/{authorization.Id}/shipments", staleShipment)).StatusCode);
+        var shipmentResponse = await purchasing.PostAsJsonAsync($"/api/supplier-returns/{authorization.Id}/shipments", staleShipment with { ShipmentNumber = $"SRS-{suffix}", ConcurrencyToken = authorization.ConcurrencyToken }); Assert.Equal(HttpStatusCode.Created, shipmentResponse.StatusCode);
+        var shipment = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SupplierReturnShipments!, candidate => candidate.ShipmentNumber == $"SRS-{suffix}"); Assert.True(shipment.CreatesVendorCredit); Assert.Equal(sourceBill.Id, shipment.SourceVendorBillId); Assert.Equal(17m, shipment.AvailableAmount);
+
+        var applyRequest = new ApplySupplierReturnCreditRequest(shipment.Id, targetBillResult!.Id!.Value, date.AddDays(6), 10m, shipment.ConcurrencyToken); Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync($"/api/supplier-return-shipments/{shipment.Id}/applications", applyRequest)).StatusCode); var applyResponse = await controller.PostAsJsonAsync($"/api/supplier-return-shipments/{shipment.Id}/applications", applyRequest); Assert.Equal(HttpStatusCode.Created, applyResponse.StatusCode); var applyResult = await applyResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        shipment = Assert.Single((await controller.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SupplierReturnShipments!, candidate => candidate.Id == shipment.Id); var refundRequest = new RefundSupplierReturnCreditRequest(shipment.Id, bank.Id, $"REF-SR-{suffix}", date.AddDays(7), 7m, shipment.ConcurrencyToken); var refundResponse = await controller.PostAsJsonAsync($"/api/supplier-return-shipments/{shipment.Id}/refunds", refundRequest); Assert.Equal(HttpStatusCode.Created, refundResponse.StatusCode); var refundResult = await refundResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        shipment = Assert.Single((await controller.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SupplierReturnShipments!, candidate => candidate.Id == shipment.Id); Assert.Equal(0m, shipment.AvailableAmount); var application = Assert.Single(shipment.Applications, candidate => candidate.Id == applyResult!.Id); var refund = Assert.Single(shipment.Refunds, candidate => candidate.Id == refundResult!.Id);
+        Assert.Equal(HttpStatusCode.OK, (await controller.PostAsJsonAsync($"/api/supplier-return-credit-refunds/{refund.Id}/reversal", new ReverseSupplierReturnCreditRefundRequest(refund.Id, date.AddDays(8), "Refund correction", refund.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await controller.PostAsJsonAsync($"/api/supplier-return-credit-applications/{application.Id}/reversal", new ReverseSupplierReturnCreditApplicationRequest(application.Id, date.AddDays(8), "Application correction", application.ConcurrencyToken))).StatusCode);
+        shipment = Assert.Single((await controller.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SupplierReturnShipments!, candidate => candidate.Id == shipment.Id); Assert.Equal(17m, shipment.AvailableAmount); Assert.Equal(HttpStatusCode.Forbidden, (await controller.PostAsJsonAsync($"/api/supplier-return-shipments/{shipment.Id}/reversal", new ReverseSupplierReturnShipmentRequest(shipment.Id, date.AddDays(9), "Controller lacks purchasing authority", shipment.ConcurrencyToken))).StatusCode);
+    }
+
+    [Fact]
     public async Task InventoryLocationApi_SeparatesConfigurationFromMovement_AndTransfersWithoutPosting()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();

@@ -2581,6 +2581,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<decimal>("ReturnedQuantity")
+                        .HasColumnType("numeric");
+
                     b.Property<int>("Sequence")
                         .HasColumnType("integer");
 
@@ -5311,6 +5314,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("CreditedQuantity")
+                        .HasColumnType("numeric");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("text");
@@ -5336,6 +5342,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<decimal>("ReceivedQuantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
+
+                    b.Property<decimal>("ReturnedQuantity")
+                        .HasColumnType("numeric");
 
                     b.Property<int>("Sequence")
                         .HasColumnType("integer");
@@ -6404,6 +6413,430 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.ToTable("SubledgerPaymentApplications");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnAuthorization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("AuthorizedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AuthorizedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("AuthorizedOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("CancellationReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CancelledByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("InventoryReceiptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PurchaseOrderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReturnNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("VendorId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryReceiptId");
+
+                    b.HasIndex("PurchaseOrderId");
+
+                    b.HasIndex("VendorId");
+
+                    b.HasIndex("CompanyId", "ReturnNumber")
+                        .IsUnique();
+
+                    b.ToTable("SupplierReturnAuthorizations");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnAuthorizationLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AuthorizedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("InventoryReceiptLineId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PurchaseOrderLineId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("ShippedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<Guid>("SupplierReturnAuthorizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("InventoryReceiptLineId");
+
+                    b.HasIndex("PurchaseOrderLineId");
+
+                    b.HasIndex("SupplierReturnAuthorizationId", "InventoryReceiptLineId")
+                        .IsUnique();
+
+                    b.HasIndex("SupplierReturnAuthorizationId", "Sequence")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SupplierReturnAuthorizationLines_SupplierReturnAuthorizati~1");
+
+                    b.ToTable("SupplierReturnAuthorizationLines");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnCreditApplication", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTimeOffset>("AppliedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AppliedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("AppliedOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("ReversalDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("ReversalReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ReversedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReversedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("SupplierReturnShipmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VendorBillId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SupplierReturnShipmentId");
+
+                    b.HasIndex("VendorBillId");
+
+                    b.HasIndex("CompanyId", "SupplierReturnShipmentId", "Status");
+
+                    b.ToTable("SupplierReturnCreditApplications");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnCreditRefund", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("BankAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly>("RefundDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset>("RefundedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RefundedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("ReversalDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReversalReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ReversedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReversedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("SupplierReturnShipmentId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankAccountId");
+
+                    b.HasIndex("JournalEntryId");
+
+                    b.HasIndex("ReversalJournalEntryId");
+
+                    b.HasIndex("SupplierReturnShipmentId");
+
+                    b.HasIndex("CompanyId", "Reference")
+                        .IsUnique();
+
+                    b.ToTable("SupplierReturnCreditRefunds");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnShipment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AppliedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("BinId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("CreatesVendorCredit")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("RefundedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateOnly?>("ReversalDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReversalReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ReversedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReversedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ShipmentNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("ShippedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ShippedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("ShippedOn")
+                        .HasColumnType("date");
+
+                    b.Property<decimal>("SourceAppliedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("SourceVendorBillId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("SupplierReturnAuthorizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BinId");
+
+                    b.HasIndex("JournalEntryId");
+
+                    b.HasIndex("ReversalJournalEntryId");
+
+                    b.HasIndex("SourceVendorBillId");
+
+                    b.HasIndex("SupplierReturnAuthorizationId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("CompanyId", "ShipmentNumber")
+                        .IsUnique();
+
+                    b.ToTable("SupplierReturnShipments");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnShipmentLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("InventoryReceiptLineId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("PriorQuantityOnHand")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<decimal>("PriorUnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("PurchaseOrderLineId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<decimal>("ResultingUnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SupplierReturnAuthorizationLineId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SupplierReturnShipmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("InventoryReceiptLineId");
+
+                    b.HasIndex("PurchaseOrderLineId");
+
+                    b.HasIndex("SupplierReturnAuthorizationLineId");
+
+                    b.HasIndex("SupplierReturnShipmentId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("SupplierReturnShipmentId", "SupplierReturnAuthorizationLineId")
+                        .IsUnique();
+
+                    b.ToTable("SupplierReturnShipmentLines");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.TaxContentPackage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7023,6 +7456,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid>("ExpenseAccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("InventoryReceiptLineId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("LineTotal")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
@@ -7048,6 +7484,8 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ExpenseAccountId");
+
+                    b.HasIndex("InventoryReceiptLineId");
 
                     b.HasIndex("VendorBillId", "Sequence")
                         .IsUnique();
@@ -8171,6 +8609,165 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnAuthorization", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.PurchaseOrder", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Vendor", null)
+                        .WithMany()
+                        .HasForeignKey("VendorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnAuthorizationLine", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryReceiptLine", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryReceiptLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.PurchaseOrderLine", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.SupplierReturnAuthorization", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierReturnAuthorizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnCreditApplication", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.SupplierReturnShipment", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierReturnShipmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.VendorBill", null)
+                        .WithMany()
+                        .HasForeignKey("VendorBillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnCreditRefund", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.BankAccount", null)
+                        .WithMany()
+                        .HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.SupplierReturnShipment", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierReturnShipmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnShipment", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryBin", null)
+                        .WithMany()
+                        .HasForeignKey("BinId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.VendorBill", null)
+                        .WithMany()
+                        .HasForeignKey("SourceVendorBillId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.SupplierReturnAuthorization", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierReturnAuthorizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryWarehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SupplierReturnShipmentLine", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryReceiptLine", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryReceiptLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.PurchaseOrderLine", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.SupplierReturnAuthorizationLine", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierReturnAuthorizationLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.SupplierReturnShipment", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierReturnShipmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.UserSession", b =>
                 {
                     b.HasOne("BrassLedger.Domain.Accounting.AppUser", null)
@@ -8200,6 +8797,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasForeignKey("ExpenseAccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryReceiptLine", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryReceiptLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.VendorBill", null)
                         .WithMany()

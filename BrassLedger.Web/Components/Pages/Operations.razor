@@ -527,15 +527,58 @@ else
         <section class="panel">
             <h2>Inventory receipts and invoice matching</h2>
             <p class="page-intro">Matching is exact: the vendor bill uses the quantities and costs accepted on the receipt. Void an unapplied matched bill before reversing its receipt.</p>
-            <table class="data-table"><thead><tr><th>Receipt</th><th>Purchase order</th><th>Location</th><th>Date</th><th>Status</th><th>Total</th><th>Invoice</th><th>Action</th></tr></thead><tbody>
+            <table class="data-table" aria-label="Inventory receipts"><thead><tr><th>Receipt</th><th>Purchase order</th><th>Location</th><th>Date</th><th>Status</th><th>Total</th><th>Invoice</th><th>Action</th></tr></thead><tbody>
                 @foreach (var receipt in Workspace.Operations.InventoryReceipts ?? [])
                 {
                     <tr><td>@receipt.ReceiptNumber</td><td>@receipt.PurchaseOrderNumber</td><td>@receipt.Location</td><td>@receipt.ReceivedOn.ToString("MMM d, yyyy")</td><td>@receipt.Status</td><td>@receipt.TotalAmount.ToString("C")</td><td>@(receipt.VendorBillId.HasValue ? "Matched" : "Unmatched")</td><td>
+                        @if (CanManagePurchasing && receipt.Status == "Posted" && AvailableSupplierReturnLines(receipt).Count > 0) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturn(receipt)">Return to supplier</button> }
                         @if (CanManagePurchasing && receipt.Status == "Posted" && !receipt.VendorBillId.HasValue) { @if (CanMatchReceiptBills) { <button class="action-secondary" type="button" @onclick="() => BeginBillMatch(receipt)">Create matched bill</button> }<button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, false)">Reverse receipt</button> }
                         @if (CanMatchReceiptBills && receipt.Status == "Posted" && receipt.VendorBillId.HasValue) { <button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, true)">Void matched bill</button> }
                     </td></tr>
                 }
             </tbody></table>
+        </section>
+
+        @if (CanManagePurchasing && SupplierReturnAuthorizationForm is not null)
+        {
+            <section class="panel"><h2>Authorize return from receipt @SupplierReturnAuthorizationForm.ReceiptNumber</h2><p class="page-intro">Authorization reserves received quantities without moving stock. Enter only the quantities the vendor has agreed to accept.</p><EditForm Model="SupplierReturnAuthorizationForm" OnValidSubmit="AuthorizeSupplierReturnAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Return authorization number</label><InputText aria-label="Supplier return authorization number" class="field-input" @bind-Value="SupplierReturnAuthorizationForm.ReturnNumber" /></div>
+                <div class="field-group"><label class="field-label">Authorization date</label><InputDate aria-label="Supplier return authorization date" class="field-input" @bind-Value="SupplierReturnAuthorizationForm.AuthorizedOn" /></div>
+                <div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Supplier return authorization reason" class="field-input" @bind-Value="SupplierReturnAuthorizationForm.Reason" /></div>
+                @foreach (var line in SupplierReturnAuthorizationForm.Lines) { <div class="field-group"><label class="field-label">@line.Sku available @line.AvailableQuantity</label><InputNumber aria-label="@($"Return {line.Sku} quantity")" class="field-input" @bind-Value="line.Quantity" /></div> }
+                <button class="action-primary" type="submit">Authorize supplier return</button><button class="action-secondary" type="button" @onclick="CancelSupplierReturnAuthorization">Cancel</button>
+            </div></EditForm></section>
+        }
+
+        @if (CanManagePurchasing && SupplierReturnShipmentForm is not null)
+        {
+            <section class="panel"><h2>Ship supplier return @SupplierReturnShipmentForm.ReturnNumber</h2><p class="page-intro">Choose the physical stock location. Posting removes inventory at the original receipt cost and records either a GRNI reduction or a vendor credit.</p><EditForm Model="SupplierReturnShipmentForm" OnValidSubmit="ShipSupplierReturnAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Shipment number</label><InputText aria-label="Supplier return shipment number" class="field-input" @bind-Value="SupplierReturnShipmentForm.ShipmentNumber" /></div>
+                <div class="field-group"><label class="field-label">Shipment date</label><InputDate aria-label="Supplier return shipment date" class="field-input" @bind-Value="SupplierReturnShipmentForm.ShippedOn" /></div>
+                <div class="field-group"><label class="field-label">Warehouse/bin</label><InputSelect aria-label="Supplier return shipment bin" class="field-input" @bind-Value="SupplierReturnShipmentForm.BinId"><option value="@Guid.Empty">Select stock location</option>@foreach (var warehouse in (Workspace.Operations.Warehouses ?? []).Where(item => item.IsActive)) { @foreach (var bin in warehouse.Bins.Where(item => item.IsActive)) { <option value="@bin.Id">@warehouse.Code/@bin.Code — @bin.Name</option> } }</InputSelect></div>
+                @foreach (var line in SupplierReturnShipmentForm.Lines) { <div class="field-group"><label class="field-label">@line.Sku remaining @line.RemainingQuantity</label><InputNumber aria-label="@($"Ship returned {line.Sku} quantity")" class="field-input" @bind-Value="line.Quantity" /></div> }
+                <button class="action-primary" type="submit">Post supplier-return shipment</button><button class="action-secondary" type="button" @onclick="CancelSupplierReturnShipment">Cancel</button>
+            </div></EditForm></section>
+        }
+
+        @if (SupplierReturnCancellationForm is not null)
+        {
+            <section class="panel"><h2>Cancel supplier return @SupplierReturnCancellationForm.ReturnNumber</h2><EditForm Model="SupplierReturnCancellationForm" OnValidSubmit="CancelSupplierReturnAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Supplier return cancellation reason" class="field-input" @bind-Value="SupplierReturnCancellationForm.Reason" /></div><button class="action-primary" type="submit">Confirm cancellation</button><button class="action-secondary" type="button" @onclick="DismissSupplierReturnCancellation">Keep authorization</button></div></EditForm></section>
+        }
+
+        @if (CanManagePayables && SupplierReturnCreditSettlementForm is not null)
+        {
+            <section class="panel"><h2>Settle vendor credit from @SupplierReturnCreditSettlementForm.ShipmentNumber</h2><EditForm Model="SupplierReturnCreditSettlementForm" OnValidSubmit="SettleSupplierReturnCreditAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Method</label><InputSelect aria-label="Supplier return credit settlement method" class="field-input" @bind-Value="SupplierReturnCreditSettlementForm.Method"><option value="Apply">Apply to vendor bill</option><option value="Refund">Record cash refund</option></InputSelect></div>@if (SupplierReturnCreditSettlementForm.Method == "Apply") { <div class="field-group"><label class="field-label">Vendor bill</label><InputSelect aria-label="Supplier return credit target bill" class="field-input" @bind-Value="SupplierReturnCreditSettlementForm.VendorBillId"><option value="@Guid.Empty">Select open bill</option>@foreach (var bill in Workspace.Payables.Bills.Where(bill => bill.VendorId == SupplierReturnCreditSettlementForm.VendorId && bill.BalanceDue > 0m && bill.Status != "Voided")) { <option value="@bill.Id">@bill.BillNumber — @bill.BalanceDue.ToString("C") due</option> }</InputSelect></div> } else { <div class="field-group"><label class="field-label">Bank account</label><InputSelect aria-label="Supplier return credit refund bank" class="field-input" @bind-Value="SupplierReturnCreditSettlementForm.BankAccountId"><option value="@Guid.Empty">Select bank account</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Refund reference</label><InputText aria-label="Supplier return credit refund reference" class="field-input" @bind-Value="SupplierReturnCreditSettlementForm.Reference" /></div> }<div class="field-group"><label class="field-label">Date</label><InputDate aria-label="Supplier return credit settlement date" class="field-input" @bind-Value="SupplierReturnCreditSettlementForm.SettledOn" /></div><div class="field-group"><label class="field-label">Amount (available @SupplierReturnCreditSettlementForm.AvailableAmount.ToString("C"))</label><InputNumber aria-label="Supplier return credit settlement amount" class="field-input" @bind-Value="SupplierReturnCreditSettlementForm.Amount" /></div><button class="action-primary" type="submit">Post vendor-credit settlement</button><button class="action-secondary" type="button" @onclick="CancelSupplierReturnCreditSettlement">Cancel</button></div></EditForm></section>
+        }
+
+        @if (SupplierReturnReversalForm is not null)
+        {
+            <section class="panel"><h2>Reverse @SupplierReturnReversalForm.DocumentLabel</h2><EditForm Model="SupplierReturnReversalForm" OnValidSubmit="ReverseSupplierReturnDocumentAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Supplier return reversal date" class="field-input" @bind-Value="SupplierReturnReversalForm.ReversalDate" /></div><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Supplier return reversal reason" class="field-input" @bind-Value="SupplierReturnReversalForm.Reason" /></div><button class="action-primary" type="submit">Confirm reversal</button><button class="action-secondary" type="button" @onclick="CancelSupplierReturnReversal">Cancel</button></div></EditForm></section>
+        }
+
+        <section class="panel"><h2>Supplier returns and vendor credits</h2><p class="page-intro">Returns remain linked to the exact receipt and purchase-order lines. Reverse later credit settlements before reversing a physical shipment.</p>
+            <div class="table-scroll"><table class="data-table" aria-label="Supplier return authorizations"><thead><tr><th>Return</th><th>Receipt</th><th>Vendor</th><th>Date</th><th>Status</th><th>Progress</th><th>Action</th></tr></thead><tbody>@foreach (var authorization in Workspace.Operations.SupplierReturnAuthorizations ?? []) { <tr><td>@authorization.ReturnNumber</td><td>@authorization.ReceiptNumber</td><td>@authorization.VendorName</td><td>@authorization.AuthorizedOn</td><td>@authorization.Status @if (!string.IsNullOrWhiteSpace(authorization.CancellationReason)) { <span>— @authorization.CancellationReason</span> }</td><td>@authorization.Lines.Sum(line => line.ShippedQuantity) / @authorization.Lines.Sum(line => line.AuthorizedQuantity) shipped</td><td>@if (CanManagePurchasing && authorization.Status is "Open" or "PartiallyShipped") { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnShipment(authorization)">Ship return</button> @if (!HasPostedSupplierReturnShipment(authorization.Id)) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnCancellation(authorization)">Cancel authorization</button> } }</td></tr> }</tbody></table></div>
+            <div class="table-scroll"><table class="data-table" aria-label="Supplier return shipments"><thead><tr><th>Shipment</th><th>Return</th><th>Vendor</th><th>Location</th><th>Accounting</th><th>Total</th><th>Applied</th><th>Refunded</th><th>Available</th><th>Status</th><th>Action</th></tr></thead><tbody>@foreach (var shipment in Workspace.Operations.SupplierReturnShipments ?? []) { <tr><td>@shipment.ShipmentNumber</td><td>@shipment.ReturnNumber</td><td>@shipment.VendorName</td><td>@shipment.Location</td><td>@(shipment.CreatesVendorCredit ? $"Vendor credit ({shipment.SourceVendorBillNumber})" : "GRNI reduction")</td><td>@shipment.TotalAmount.ToString("C")</td><td>@shipment.AppliedAmount.ToString("C")</td><td>@shipment.RefundedAmount.ToString("C")</td><td>@shipment.AvailableAmount.ToString("C")</td><td>@shipment.Status</td><td>@if (CanManagePayables && shipment.Status == "Posted" && shipment.CreatesVendorCredit && shipment.AvailableAmount > 0m) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnCreditSettlement(shipment)">Apply or refund</button> } @foreach (var application in shipment.Applications.Where(item => item.Status == "Posted")) { @if (CanReverseTransactions) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnApplicationReversal(application, shipment.ShipmentNumber)">Reverse @application.VendorBillNumber application</button> } } @foreach (var refund in shipment.Refunds.Where(item => item.Status == "Posted")) { @if (CanReverseTransactions) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnRefundReversal(refund, shipment.ShipmentNumber)">Reverse refund @refund.Reference</button> } } @if (CanReverseTransactions && CanManagePurchasing && shipment.Status == "Posted" && shipment.AppliedAmount == shipment.SourceAppliedAmount && shipment.RefundedAmount == 0m && shipment.Applications.All(item => item.Status != "Posted")) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnShipmentReversal(shipment)">Reverse shipment</button> }</td></tr> }</tbody></table></div>
         </section>
 
         @if (CanMatchReceiptBills && BillMatchForm is not null)
@@ -597,8 +640,14 @@ else
     private ReceiptEditor? ReceiptForm;
     private BillMatchEditor? BillMatchForm;
     private PurchaseCorrectionEditor? CorrectionForm;
+    private SupplierReturnAuthorizationEditor? SupplierReturnAuthorizationForm;
+    private SupplierReturnShipmentEditor? SupplierReturnShipmentForm;
+    private SupplierReturnCancellationEditor? SupplierReturnCancellationForm;
+    private SupplierReturnCreditSettlementEditor? SupplierReturnCreditSettlementForm;
+    private SupplierReturnReversalEditor? SupplierReturnReversalForm;
     private bool CanManageRequisitions;
     private bool CanManagePurchasing;
+    private bool CanManagePayables;
     private bool CanMatchReceiptBills;
     private bool CanManageSales;
     private bool CanFulfillSales;
@@ -611,7 +660,8 @@ else
         var privileged = user.IsInRole("Administrator") || user.IsInRole("Owner/CEO");
         CanManageRequisitions = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage);
         CanManagePurchasing = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage);
-        CanMatchReceiptBills = CanManagePurchasing && (privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage));
+        CanManagePayables = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage);
+        CanMatchReceiptBills = CanManagePurchasing && CanManagePayables;
         CanManageSales = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage);
         CanFulfillSales = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage);
         CanInvoiceShipments = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage);
@@ -888,6 +938,48 @@ else
     {
         var form = ReceiptForm!; var bin = FindBin(form.BinId); var result = await TransactionService.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(form.PurchaseOrderId, form.ReceiptNumber, form.ReceivedOn, form.Lines.Where(line => line.Quantity > 0m).Select(line => new ReceivePurchaseOrderLineRequest(line.PurchaseOrderLineId, line.Quantity)).ToArray(), form.ConcurrencyToken, bin?.WarehouseId, bin?.Id)); StatusMessage = result.Succeeded ? "Inventory receipt posted." : result.ErrorMessage; if (result.Succeeded) { ReceiptForm = null; await ReloadAsync(); }
     }
+    private IReadOnlyList<SupplierReturnAuthorizationLineEditor> AvailableSupplierReturnLines(InventoryReceiptSnapshot receipt)
+    {
+        var activeAuthorizations = (Workspace?.Operations.SupplierReturnAuthorizations ?? []).Where(item => item.InventoryReceiptId == receipt.Id && item.Status != "Cancelled").SelectMany(item => item.Lines);
+        return receipt.Lines.Select(line => new SupplierReturnAuthorizationLineEditor(line.Id, line.Sku, Math.Max(0m, line.Quantity - activeAuthorizations.Where(item => item.InventoryReceiptLineId == line.Id).Sum(item => item.AuthorizedQuantity)))).Where(line => line.AvailableQuantity > 0m).ToArray();
+    }
+    private void BeginSupplierReturn(InventoryReceiptSnapshot receipt) => SupplierReturnAuthorizationForm = new(receipt.Id, receipt.ReceiptNumber, receipt.ReceivedOn, receipt.ConcurrencyToken, AvailableSupplierReturnLines(receipt).ToList());
+    private void CancelSupplierReturnAuthorization() => SupplierReturnAuthorizationForm = null;
+    private async Task AuthorizeSupplierReturnAsync()
+    {
+        var form = SupplierReturnAuthorizationForm!; var result = await TransactionService.AuthorizeSupplierReturnAsync(new(form.InventoryReceiptId, form.ReturnNumber, form.AuthorizedOn, form.Reason, form.Lines.Where(line => line.Quantity > 0m).Select(line => new AuthorizeSupplierReturnLineRequest(line.InventoryReceiptLineId, line.Quantity)).ToArray(), form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Supplier return {form.ReturnNumber} authorized." : result.ErrorMessage; if (result.Succeeded) { SupplierReturnAuthorizationForm = null; await ReloadAsync(); }
+    }
+    private void BeginSupplierReturnShipment(SupplierReturnAuthorizationSnapshot authorization)
+    {
+        var receipt = (Workspace?.Operations.InventoryReceipts ?? []).Single(item => item.Id == authorization.InventoryReceiptId);
+        SupplierReturnShipmentForm = new(authorization.Id, authorization.ReturnNumber, authorization.AuthorizedOn, authorization.ConcurrencyToken, receipt.BinId ?? Guid.Empty, authorization.Lines.Where(line => line.ShippedQuantity < line.AuthorizedQuantity).Select(line => new SupplierReturnShipmentLineEditor(line.Id, line.Sku, line.AuthorizedQuantity - line.ShippedQuantity)).ToList());
+    }
+    private void CancelSupplierReturnShipment() => SupplierReturnShipmentForm = null;
+    private async Task ShipSupplierReturnAsync()
+    {
+        var form = SupplierReturnShipmentForm!; var bin = FindBin(form.BinId); var result = await TransactionService.ShipSupplierReturnAsync(new(form.SupplierReturnAuthorizationId, form.ShipmentNumber, form.ShippedOn, bin?.WarehouseId, bin?.Id, form.Lines.Where(line => line.Quantity > 0m).Select(line => new ShipSupplierReturnLineRequest(line.SupplierReturnAuthorizationLineId, line.Quantity)).ToArray(), form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Supplier-return shipment {form.ShipmentNumber} posted." : result.ErrorMessage; if (result.Succeeded) { SupplierReturnShipmentForm = null; await ReloadAsync(); }
+    }
+    private bool HasPostedSupplierReturnShipment(Guid authorizationId) => (Workspace?.Operations.SupplierReturnShipments ?? []).Any(item => item.SupplierReturnAuthorizationId == authorizationId && item.Status == "Posted");
+    private void BeginSupplierReturnCancellation(SupplierReturnAuthorizationSnapshot authorization) => SupplierReturnCancellationForm = new(authorization.Id, authorization.ReturnNumber, authorization.ConcurrencyToken);
+    private void DismissSupplierReturnCancellation() => SupplierReturnCancellationForm = null;
+    private async Task CancelSupplierReturnAsync()
+    {
+        var form = SupplierReturnCancellationForm!; var result = await TransactionService.CancelSupplierReturnAsync(new(form.SupplierReturnAuthorizationId, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Supplier return {form.ReturnNumber} cancelled." : result.ErrorMessage; if (result.Succeeded) { SupplierReturnCancellationForm = null; await ReloadAsync(); }
+    }
+    private void BeginSupplierReturnCreditSettlement(SupplierReturnShipmentSnapshot shipment) => SupplierReturnCreditSettlementForm = new(shipment.Id, shipment.ShipmentNumber, shipment.VendorId, shipment.ConcurrencyToken, shipment.ShippedOn, shipment.AvailableAmount);
+    private void CancelSupplierReturnCreditSettlement() => SupplierReturnCreditSettlementForm = null;
+    private async Task SettleSupplierReturnCreditAsync()
+    {
+        var form = SupplierReturnCreditSettlementForm!; var result = form.Method == "Apply" ? await TransactionService.ApplySupplierReturnCreditAsync(new(form.SupplierReturnShipmentId, form.VendorBillId, form.SettledOn, form.Amount, form.ConcurrencyToken)) : await TransactionService.RefundSupplierReturnCreditAsync(new(form.SupplierReturnShipmentId, form.BankAccountId, form.Reference, form.SettledOn, form.Amount, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Supplier-return credit settlement posted." : result.ErrorMessage; if (result.Succeeded) { SupplierReturnCreditSettlementForm = null; await ReloadAsync(); }
+    }
+    private void BeginSupplierReturnShipmentReversal(SupplierReturnShipmentSnapshot shipment) => SupplierReturnReversalForm = SupplierReturnReversalEditor.ForShipment(shipment.Id, $"shipment {shipment.ShipmentNumber}", shipment.ConcurrencyToken, shipment.ShippedOn);
+    private void BeginSupplierReturnApplicationReversal(SupplierReturnCreditApplicationSnapshot application, string shipmentNumber) => SupplierReturnReversalForm = SupplierReturnReversalEditor.ForApplication(application.Id, $"{shipmentNumber} application to {application.VendorBillNumber}", application.ConcurrencyToken, application.AppliedOn);
+    private void BeginSupplierReturnRefundReversal(SupplierReturnCreditRefundSnapshot refund, string shipmentNumber) => SupplierReturnReversalForm = SupplierReturnReversalEditor.ForRefund(refund.Id, $"{shipmentNumber} refund {refund.Reference}", refund.ConcurrencyToken, refund.RefundDate);
+    private void CancelSupplierReturnReversal() => SupplierReturnReversalForm = null;
+    private async Task ReverseSupplierReturnDocumentAsync()
+    {
+        var form = SupplierReturnReversalForm!; var result = form.Kind switch { "Shipment" => await TransactionService.ReverseSupplierReturnShipmentAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)), "Application" => await TransactionService.ReverseSupplierReturnCreditApplicationAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)), _ => await TransactionService.ReverseSupplierReturnCreditRefundAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)) }; StatusMessage = result.Succeeded ? $"Supplier-return {form.Kind.ToLowerInvariant()} reversed." : result.ErrorMessage; if (result.Succeeded) { SupplierReturnReversalForm = null; await ReloadAsync(); }
+    }
     private void BeginBillMatch(InventoryReceiptSnapshot receipt) => BillMatchForm = new BillMatchEditor(receipt.Id, receipt.ReceiptNumber, receipt.ConcurrencyToken);
     private void CancelBillMatch() => BillMatchForm = null;
     private async Task MatchBillAsync()
@@ -1040,6 +1132,20 @@ else
     private sealed class PurchaseOrderLineEditor { public Guid InventoryItemId { get; set; } public string Description { get; set; } = "Inventory purchase"; public decimal Quantity { get; set; } = 1m; public decimal UnitCost { get; set; } }
     private sealed class ReceiptEditor(Guid purchaseOrderId, string purchaseOrderNumber, string concurrencyToken, List<ReceiptLineEditor> lines) { public Guid PurchaseOrderId { get; } = purchaseOrderId; public string PurchaseOrderNumber { get; } = purchaseOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public Guid BinId { get; set; } public string ReceiptNumber { get; set; } = $"RCV-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly ReceivedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public List<ReceiptLineEditor> Lines { get; } = lines; }
     private sealed class ReceiptLineEditor(Guid purchaseOrderLineId, string sku, decimal remainingQuantity) { public Guid PurchaseOrderLineId { get; } = purchaseOrderLineId; public string Sku { get; } = sku; public decimal RemainingQuantity { get; } = remainingQuantity; public decimal Quantity { get; set; } = remainingQuantity; }
+    private sealed class SupplierReturnAuthorizationEditor(Guid inventoryReceiptId, string receiptNumber, DateOnly receivedOn, string concurrencyToken, List<SupplierReturnAuthorizationLineEditor> lines) { public Guid InventoryReceiptId { get; } = inventoryReceiptId; public string ReceiptNumber { get; } = receiptNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string ReturnNumber { get; set; } = $"SRA-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly AuthorizedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today) < receivedOn ? receivedOn : DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = "Return to supplier"; public List<SupplierReturnAuthorizationLineEditor> Lines { get; } = lines; }
+    private sealed class SupplierReturnAuthorizationLineEditor(Guid inventoryReceiptLineId, string sku, decimal availableQuantity) { public Guid InventoryReceiptLineId { get; } = inventoryReceiptLineId; public string Sku { get; } = sku; public decimal AvailableQuantity { get; } = availableQuantity; public decimal Quantity { get; set; } = availableQuantity; }
+    private sealed class SupplierReturnShipmentEditor(Guid supplierReturnAuthorizationId, string returnNumber, DateOnly authorizedOn, string concurrencyToken, Guid binId, List<SupplierReturnShipmentLineEditor> lines) { public Guid SupplierReturnAuthorizationId { get; } = supplierReturnAuthorizationId; public string ReturnNumber { get; } = returnNumber; public string ConcurrencyToken { get; } = concurrencyToken; public Guid BinId { get; set; } = binId; public string ShipmentNumber { get; set; } = $"SRS-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly ShippedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today) < authorizedOn ? authorizedOn : DateOnly.FromDateTime(DateTime.Today); public List<SupplierReturnShipmentLineEditor> Lines { get; } = lines; }
+    private sealed class SupplierReturnShipmentLineEditor(Guid supplierReturnAuthorizationLineId, string sku, decimal remainingQuantity) { public Guid SupplierReturnAuthorizationLineId { get; } = supplierReturnAuthorizationLineId; public string Sku { get; } = sku; public decimal RemainingQuantity { get; } = remainingQuantity; public decimal Quantity { get; set; } = remainingQuantity; }
+    private sealed class SupplierReturnCancellationEditor(Guid supplierReturnAuthorizationId, string returnNumber, string concurrencyToken) { public Guid SupplierReturnAuthorizationId { get; } = supplierReturnAuthorizationId; public string ReturnNumber { get; } = returnNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = ""; }
+    private sealed class SupplierReturnCreditSettlementEditor(Guid supplierReturnShipmentId, string shipmentNumber, Guid vendorId, string concurrencyToken, DateOnly shippedOn, decimal availableAmount) { public Guid SupplierReturnShipmentId { get; } = supplierReturnShipmentId; public string ShipmentNumber { get; } = shipmentNumber; public Guid VendorId { get; } = vendorId; public string ConcurrencyToken { get; } = concurrencyToken; public decimal AvailableAmount { get; } = availableAmount; public string Method { get; set; } = "Apply"; public Guid VendorBillId { get; set; } public Guid BankAccountId { get; set; } public string Reference { get; set; } = $"VREF-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly SettledOn { get; set; } = DateOnly.FromDateTime(DateTime.Today) < shippedOn ? shippedOn : DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } = availableAmount; }
+    private sealed class SupplierReturnReversalEditor
+    {
+        private SupplierReturnReversalEditor(Guid documentId, string documentLabel, string concurrencyToken, string kind, DateOnly documentDate) { DocumentId = documentId; DocumentLabel = documentLabel; ConcurrencyToken = concurrencyToken; Kind = kind; var today = DateOnly.FromDateTime(DateTime.Today); ReversalDate = today < documentDate ? documentDate : today; }
+        public static SupplierReturnReversalEditor ForShipment(Guid id, string label, string token, DateOnly date) => new(id, label, token, "Shipment", date);
+        public static SupplierReturnReversalEditor ForApplication(Guid id, string label, string token, DateOnly date) => new(id, label, token, "Application", date);
+        public static SupplierReturnReversalEditor ForRefund(Guid id, string label, string token, DateOnly date) => new(id, label, token, "Refund", date);
+        public Guid DocumentId { get; } public string DocumentLabel { get; } public string ConcurrencyToken { get; } public string Kind { get; } public DateOnly ReversalDate { get; set; } public string Reason { get; set; } = "";
+    }
     private sealed class BillMatchEditor(Guid inventoryReceiptId, string receiptNumber, string concurrencyToken) { public Guid InventoryReceiptId { get; } = inventoryReceiptId; public string ReceiptNumber { get; } = receiptNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string BillNumber { get; set; } = $"BILL-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly BillDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); public string Description { get; set; } = "Inventory receipt vendor bill"; }
     private sealed class PurchaseCorrectionEditor(Guid inventoryReceiptId, string receiptNumber, string concurrencyToken, bool voidBill) { public Guid InventoryReceiptId { get; } = inventoryReceiptId; public string ReceiptNumber { get; } = receiptNumber; public string ConcurrencyToken { get; } = concurrencyToken; public bool VoidBill { get; } = voidBill; public DateOnly CorrectionDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = ""; }
 }

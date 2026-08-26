@@ -273,6 +273,24 @@ public sealed class OperationsPage
         Assert.Contains("Matched", await receiptRow.InnerTextAsync());
     }
 
+    public async Task AuthorizeAndShipSupplierReturnAsync(string receiptNumber, string returnNumber, string shipmentNumber)
+    {
+        var receiptRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory receipts" }).Locator("tr").Filter(new() { HasTextString = receiptNumber });
+        await receiptRow.GetByRole(AriaRole.Button, new() { Name = "Return to supplier" }).ClickAsync();
+        await _session.Page.GetByLabel("Supplier return authorization number").FillAsync(returnNumber);
+        await _session.Page.GetByLabel("Supplier return authorization reason").FillAsync("Browser-tested supplier return");
+        await _session.Page.Locator("input[aria-label^='Return '][aria-label$=' quantity']").FillAsync("1");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Authorize supplier return" }).ClickAsync();
+        await _session.Page.GetByText($"Supplier return {returnNumber} authorized.", new() { Exact = true }).WaitForAsync();
+        var authorizationRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Supplier return authorizations" }).Locator("tr").Filter(new() { HasTextString = returnNumber });
+        await authorizationRow.GetByRole(AriaRole.Button, new() { Name = "Ship return" }).ClickAsync();
+        await _session.Page.GetByLabel("Supplier return shipment number").FillAsync(shipmentNumber);
+        await _session.Page.Locator("input[aria-label^='Ship returned '][aria-label$=' quantity']").FillAsync("1");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post supplier-return shipment" }).ClickAsync();
+        await _session.Page.GetByText($"Supplier-return shipment {shipmentNumber} posted.", new() { Exact = true }).WaitForAsync();
+        var shipmentRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Supplier return shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber }); await Assertions.Expect(shipmentRow).ToContainTextAsync("Vendor credit"); await Assertions.Expect(shipmentRow).ToContainTextAsync("Posted");
+    }
+
     private ILocator SalesOrderRow(string orderNumber) =>
         _session.Page.GetByRole(AriaRole.Table, new() { Name = "Sales orders" }).Locator("tr").Filter(new()
         {

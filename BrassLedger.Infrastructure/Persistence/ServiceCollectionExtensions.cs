@@ -318,6 +318,16 @@ public static class ServiceCollectionExtensions
             return await HasTableAsync(dbContext, "PurchaseRequisitions", cancellationToken)
                 && await HasTableAsync(dbContext, "PurchaseRequisitionLines", cancellationToken)
                 && await HasColumnAsync(dbContext, "PurchaseOrders", "PurchaseRequisitionId", cancellationToken);
+        if (migrationId.EndsWith("_AddSupplierReturns", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "SupplierReturnAuthorizations", cancellationToken)
+                && await HasTableAsync(dbContext, "SupplierReturnAuthorizationLines", cancellationToken)
+                && await HasTableAsync(dbContext, "SupplierReturnShipments", cancellationToken)
+                && await HasTableAsync(dbContext, "SupplierReturnShipmentLines", cancellationToken)
+                && await HasTableAsync(dbContext, "SupplierReturnCreditApplications", cancellationToken)
+                && await HasTableAsync(dbContext, "SupplierReturnCreditRefunds", cancellationToken)
+                && await HasColumnAsync(dbContext, "InventoryReceiptLines", "ReturnedQuantity", cancellationToken)
+                && await HasColumnAsync(dbContext, "PurchaseOrderLines", "CreditedQuantity", cancellationToken)
+                && await HasColumnAsync(dbContext, "VendorBillLines", "InventoryReceiptLineId", cancellationToken);
         return false;
     }
 

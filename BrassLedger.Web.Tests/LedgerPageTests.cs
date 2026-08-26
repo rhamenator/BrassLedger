@@ -69,6 +69,9 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("table[aria-label='Customer return receipts']"));
         Assert.NotNull(cut.Find("table[aria-label='Customer return credits']"));
         Assert.Contains("Sales authorizes; fulfillment receives; receivables credits", cut.Markup);
+        Assert.NotNull(cut.Find("table[aria-label='Supplier return authorizations']"));
+        Assert.NotNull(cut.Find("table[aria-label='Supplier return shipments']"));
+        Assert.Contains("Returns remain linked to the exact receipt and purchase-order lines", cut.Markup);
     }
 }
 
@@ -179,6 +182,14 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> MatchPurchaseOrderReceiptBillAsync(MatchPurchaseOrderReceiptBillRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> UnmatchPurchaseOrderReceiptBillAsync(UnmatchPurchaseOrderReceiptBillRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryReceiptId));
     public Task<TransactionResult> ReverseInventoryReceiptAsync(ReverseInventoryReceiptRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryReceiptId));
+    public Task<TransactionResult> AuthorizeSupplierReturnAsync(AuthorizeSupplierReturnRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> CancelSupplierReturnAsync(CancelSupplierReturnRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SupplierReturnAuthorizationId));
+    public Task<TransactionResult> ShipSupplierReturnAsync(ShipSupplierReturnRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> ApplySupplierReturnCreditAsync(ApplySupplierReturnCreditRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> RefundSupplierReturnCreditAsync(RefundSupplierReturnCreditRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> ReverseSupplierReturnShipmentAsync(ReverseSupplierReturnShipmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SupplierReturnShipmentId));
+    public Task<TransactionResult> ReverseSupplierReturnCreditApplicationAsync(ReverseSupplierReturnCreditApplicationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SupplierReturnCreditApplicationId));
+    public Task<TransactionResult> ReverseSupplierReturnCreditRefundAsync(ReverseSupplierReturnCreditRefundRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SupplierReturnCreditRefundId));
 }
 
 internal sealed class StubAccountingInterchangeService : IAccountingInterchangeService

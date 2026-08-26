@@ -129,7 +129,7 @@ public sealed partial class AccountingTransactionService
         foreach (var requested in requestedLines)
         {
             var line = orderLines.Single(candidate => candidate.Id == requested.PurchaseOrderLineId);
-            if (RoundQuantity(requested.Quantity) > line.OrderedQuantity - line.ReceivedQuantity) return TransactionResult.Failure($"Receipt quantity exceeds the remaining quantity for line {line.Sequence}.");
+            if (RoundQuantity(requested.Quantity) > line.OrderedQuantity - (line.ReceivedQuantity - line.ReturnedQuantity)) return TransactionResult.Failure($"Receipt quantity exceeds the remaining net quantity for line {line.Sequence}.");
         }
         var itemIds = orderLines.Where(line => requestedIds.Contains(line.Id)).Select(line => line.InventoryItemId).ToArray();
         var items = await db.InventoryItems.Where(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
@@ -187,8 +187,7 @@ public sealed partial class AccountingTransactionService
             db.InventoryReceiptLines.Add(new InventoryReceiptLine { Id = Guid.NewGuid(), InventoryReceiptId = receipt.Id, PurchaseOrderLineId = orderLine.Id, InventoryItemId = item.Id, Sequence = ++sequence, Quantity = quantity, UnitCost = orderLine.UnitCost, LineTotal = lineTotal, PriorQuantityOnHand = priorQuantity, PriorUnitCost = priorCost, ResultingUnitCost = resultingCost });
             db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, OccurredOn = request.ReceivedOn, TransactionType = "Purchase receipt", QuantityChange = quantity, UnitCost = orderLine.UnitCost, TotalCost = lineTotal, Reference = receiptNumber, JournalEntryId = posting.Id.Value });
         }
-        order.Status = orderLines.All(line => line.ReceivedQuantity == line.OrderedQuantity) ? "Received" : "PartiallyReceived";
-        order.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        SetPurchaseOrderReturnStatus(order, orderLines);
         AddPurchasingAudit(db, companyId, "inventory-receipt.posted", nameof(InventoryReceipt), receipt.Id, new { receipt.ReceiptNumber, order.Id, order.OrderNumber, receipt.TotalAmount, lineCount = requestedLines.Length });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The purchase order or inventory changed while the receipt was posting. Refresh and try again."); }
@@ -214,25 +213,27 @@ public sealed partial class AccountingTransactionService
         if (await db.VendorBills.AnyAsync(bill => bill.CompanyId == companyId && bill.BillNumber == billNumber, cancellationToken)) return TransactionResult.Failure("Bill number already exists.");
         var receiptLines = await db.InventoryReceiptLines.Where(line => line.InventoryReceiptId == receipt.Id).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
         if (receiptLines.Count == 0 || receiptLines.Sum(line => line.LineTotal) != receipt.TotalAmount) return TransactionResult.Failure("The receipt lines do not reconcile to the receipt total.");
+        var matchLines = receiptLines.Select(line => new { Source = line, Quantity = line.Quantity - line.ReturnedQuantity, Amount = RoundCurrency((line.Quantity - line.ReturnedQuantity) * line.UnitCost) }).Where(line => line.Quantity > 0m).ToArray();
+        var matchTotal = matchLines.Sum(line => line.Amount);
+        if (matchLines.Length == 0 || matchTotal <= 0m) return TransactionResult.Failure("No unreturned receipt quantity remains to match to a vendor bill.");
         var grni = await db.Accounts.SingleOrDefaultAsync(account => account.CompanyId == companyId && account.IsActive && account.OperationalRole == AccountingAccountRoles.GoodsReceivedNotInvoiced, cancellationToken);
         if (grni is null) return TransactionResult.Failure("Configure an active goods received not invoiced account before matching this bill.");
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var billId = Guid.NewGuid();
         var posting = await PostAsync(db, companyId, request.BillDate, "Accounts Payable", billNumber, request.Description,
-            [new(OperationalRoleReference(AccountingAccountRoles.GoodsReceivedNotInvoiced), receipt.TotalAmount, 0m, "Clear received inventory accrual"), new(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), 0m, receipt.TotalAmount, "Accounts payable")],
+            [new(OperationalRoleReference(AccountingAccountRoles.GoodsReceivedNotInvoiced), matchTotal, 0m, "Clear net received inventory accrual"), new(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), 0m, matchTotal, "Accounts payable")],
             cancellationToken, allowControlAccounts: true, sourceDocumentId: billId, sourceDocumentType: "VendorBill", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
-        var bill = new VendorBill { Id = billId, CompanyId = companyId, VendorId = vendor.Id, BillNumber = billNumber, BillDate = request.BillDate, DueDate = request.DueDate, Status = "Open", TotalAmount = receipt.TotalAmount, BalanceDue = receipt.TotalAmount, PurchaseOrderId = order.Id, InventoryReceiptId = receipt.Id, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        var bill = new VendorBill { Id = billId, CompanyId = companyId, VendorId = vendor.Id, BillNumber = billNumber, BillDate = request.BillDate, DueDate = request.DueDate, Status = "Open", TotalAmount = matchTotal, BalanceDue = matchTotal, PurchaseOrderId = order.Id, InventoryReceiptId = receipt.Id, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.VendorBills.Add(bill);
-        db.VendorBillLines.AddRange(receiptLines.Select((line, index) => new VendorBillLine { Id = Guid.NewGuid(), VendorBillId = bill.Id, Sequence = index + 1, ExpenseAccountId = grni.Id, Description = $"Receipt {receipt.ReceiptNumber}, line {line.Sequence}", Quantity = line.Quantity, UnitCost = line.UnitCost, LineTotal = line.LineTotal }));
+        db.VendorBillLines.AddRange(matchLines.Select((line, index) => new VendorBillLine { Id = Guid.NewGuid(), VendorBillId = bill.Id, InventoryReceiptLineId = line.Source.Id, Sequence = index + 1, ExpenseAccountId = grni.Id, Description = $"Receipt {receipt.ReceiptNumber}, line {line.Source.Sequence}", Quantity = line.Quantity, UnitCost = line.Source.UnitCost, LineTotal = line.Amount }));
         var poLines = await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).ToDictionaryAsync(line => line.Id, cancellationToken);
-        foreach (var line in receiptLines) poLines[line.PurchaseOrderLineId].InvoicedQuantity += line.Quantity;
-        vendor.OpenBalance += receipt.TotalAmount;
+        foreach (var line in matchLines) poLines[line.Source.PurchaseOrderLineId].InvoicedQuantity += line.Quantity;
+        vendor.OpenBalance += matchTotal;
         receipt.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        order.Status = poLines.Values.All(line => line.ReceivedQuantity == line.OrderedQuantity && line.InvoicedQuantity == line.OrderedQuantity) ? "Closed" : poLines.Values.All(line => line.ReceivedQuantity == line.OrderedQuantity) ? "Received" : "PartiallyReceived";
-        order.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        AddPurchasingAudit(db, companyId, "purchase-receipt.bill.matched", nameof(InventoryReceipt), receipt.Id, new { purchaseOrderId = order.Id, vendorBillId = bill.Id, bill.BillNumber, receipt.TotalAmount });
+        SetPurchaseOrderReturnStatus(order, poLines.Values);
+        AddPurchasingAudit(db, companyId, "purchase-receipt.bill.matched", nameof(InventoryReceipt), receipt.Id, new { purchaseOrderId = order.Id, vendorBillId = bill.Id, bill.BillNumber, grossReceiptAmount = receipt.TotalAmount, matchedNetAmount = matchTotal });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The receipt, purchase order, or vendor changed while the bill was posting. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The bill number or receipt match changed concurrently. Refresh and try again."); }
@@ -254,7 +255,7 @@ public sealed partial class AccountingTransactionService
         if (bill is null) return TransactionResult.Failure("A matched posted receipt is required.");
         if (bill.Status != "Open" || bill.BalanceDue != bill.TotalAmount) return TransactionResult.Failure("Only a fully open, unapplied matched bill can be voided.");
         if (request.VoidDate < bill.BillDate) return TransactionResult.Failure("The void date cannot precede the bill date.");
-        if (await db.SubledgerPaymentApplications.AnyAsync(application => application.DocumentId == bill.Id, cancellationToken) || await db.SubledgerAdjustments.AnyAsync(adjustment => adjustment.CompanyId == companyId && adjustment.DocumentId == bill.Id, cancellationToken))
+        if (await db.SubledgerPaymentApplications.AnyAsync(application => application.DocumentId == bill.Id, cancellationToken) || await db.SubledgerAdjustments.AnyAsync(adjustment => adjustment.CompanyId == companyId && adjustment.DocumentId == bill.Id, cancellationToken) || await db.SupplierReturnShipments.AnyAsync(shipment => shipment.CompanyId == companyId && shipment.SourceVendorBillId == bill.Id && shipment.Status == "Posted", cancellationToken) || await db.SupplierReturnCreditApplications.AnyAsync(application => application.CompanyId == companyId && application.VendorBillId == bill.Id && application.Status == "Posted", cancellationToken))
             return TransactionResult.Failure("A matched bill with payment or adjustment history cannot be voided until that history is reversed.");
         var journalId = await db.JournalEntries.Where(entry => entry.CompanyId == companyId && entry.SourceDocumentType == "VendorBill" && entry.SourceDocumentId == bill.Id && entry.IsPosted).Select(entry => (Guid?)entry.Id).SingleOrDefaultAsync(cancellationToken);
         if (!journalId.HasValue) return TransactionResult.Failure("The matched bill posting could not be found.");
@@ -263,9 +264,11 @@ public sealed partial class AccountingTransactionService
         var reversal = await PostInverseAsync(db, companyId, journalId.Value, request.VoidDate, $"VOID-{bill.BillNumber}", request.Reason.Trim(), bill.Id, "PurchaseReceiptBillVoid", null, cancellationToken, "Accounts Payable");
         if (!reversal.Succeeded) return reversal;
         var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == receipt.PurchaseOrderId && candidate.CompanyId == companyId, cancellationToken);
-        var receiptLines = await db.InventoryReceiptLines.Where(line => line.InventoryReceiptId == receipt.Id).ToListAsync(cancellationToken);
+        var billLines = await db.VendorBillLines.Where(line => line.VendorBillId == bill.Id).ToListAsync(cancellationToken);
+        if (billLines.Any(line => !line.InventoryReceiptLineId.HasValue)) return TransactionResult.Failure("The matched bill is missing receipt-line provenance and cannot be safely voided.");
+        var receiptLines = await db.InventoryReceiptLines.Where(line => line.InventoryReceiptId == receipt.Id).ToDictionaryAsync(line => line.Id, cancellationToken);
         var poLines = await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).ToDictionaryAsync(line => line.Id, cancellationToken);
-        foreach (var line in receiptLines) poLines[line.PurchaseOrderLineId].InvoicedQuantity -= line.Quantity;
+        foreach (var line in billLines) poLines[receiptLines[line.InventoryReceiptLineId!.Value].PurchaseOrderLineId].InvoicedQuantity -= line.Quantity;
         var vendor = await db.Vendors.SingleAsync(candidate => candidate.Id == bill.VendorId && candidate.CompanyId == companyId, cancellationToken);
         vendor.OpenBalance -= bill.TotalAmount;
         bill.Status = "Voided";
@@ -273,8 +276,7 @@ public sealed partial class AccountingTransactionService
         bill.InventoryReceiptId = null;
         bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
         receipt.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        order.Status = poLines.Values.All(line => line.ReceivedQuantity == line.OrderedQuantity) ? "Received" : "PartiallyReceived";
-        order.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        SetPurchaseOrderReturnStatus(order, poLines.Values);
         AddPurchasingAudit(db, companyId, "purchase-receipt.bill.unmatched", nameof(InventoryReceipt), receipt.Id, new { purchaseOrderId = order.Id, vendorBillId = bill.Id, reversalJournalEntryId = reversal.Id, reason = request.Reason.Trim() });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The matched bill changed while it was being voided. Refresh and try again."); }
@@ -291,6 +293,7 @@ public sealed partial class AccountingTransactionService
         var receipt = await db.InventoryReceipts.SingleOrDefaultAsync(candidate => candidate.Id == request.InventoryReceiptId && candidate.CompanyId == companyId, cancellationToken);
         if (receipt is null || receipt.Status != "Posted") return TransactionResult.Failure("Only a posted inventory receipt can be reversed.");
         if (await db.VendorBills.AnyAsync(bill => bill.InventoryReceiptId == receipt.Id, cancellationToken)) return TransactionResult.Failure("Void the matched vendor bill before reversing this receipt.");
+        if (await db.SupplierReturnAuthorizations.AnyAsync(authorization => authorization.CompanyId == companyId && authorization.InventoryReceiptId == receipt.Id && authorization.Status != "Cancelled", cancellationToken)) return TransactionResult.Failure("Cancel every supplier-return authorization before reversing this receipt.");
         if (!string.Equals(receipt.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The receipt changed after it was opened. Refresh and review it again.");
         if (request.ReversalDate < receipt.ReceivedOn) return TransactionResult.Failure("The reversal date cannot precede the receipt date.");
         var receiptLines = await db.InventoryReceiptLines.Where(line => line.InventoryReceiptId == receipt.Id).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
@@ -300,7 +303,8 @@ public sealed partial class AccountingTransactionService
         var location = await ResolveInventoryLocationAsync(db, companyId, receipt.WarehouseId, receipt.BinId, cancellationToken); if (location is null) return TransactionResult.Failure("The receipt warehouse or bin is unavailable.");
         var locationBalances = new Dictionary<Guid, InventoryLocationBalance>();
         foreach (var itemId in itemIds.Distinct()) locationBalances[itemId] = await GetOrCreateInventoryLocationBalanceAsync(db, companyId, itemId, location.Value.Warehouse.Id, location.Value.Bin.Id, cancellationToken);
-        if (receiptLines.Any(line => items[line.InventoryItemId].QuantityOnHand != line.PriorQuantityOnHand + line.Quantity || items[line.InventoryItemId].UnitCost != line.ResultingUnitCost))
+        var finalLineByItem = receiptLines.GroupBy(line => line.InventoryItemId).Select(group => group.OrderByDescending(line => line.Sequence).First());
+        if (finalLineByItem.Any(line => items[line.InventoryItemId].QuantityOnHand != line.PriorQuantityOnHand + line.Quantity || items[line.InventoryItemId].UnitCost != line.ResultingUnitCost))
             return TransactionResult.Failure("This receipt is no longer the latest valuation event for every item. Post a dated compensating inventory adjustment instead of reversing historical stock movement.");
         foreach (var itemGroup in receiptLines.GroupBy(line => line.InventoryItemId))
         {
@@ -313,7 +317,7 @@ public sealed partial class AccountingTransactionService
         if (!reversal.Succeeded) return reversal;
         var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == receipt.PurchaseOrderId && candidate.CompanyId == companyId, cancellationToken);
         var poLines = await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).ToDictionaryAsync(line => line.Id, cancellationToken);
-        foreach (var line in receiptLines)
+        foreach (var line in receiptLines.OrderByDescending(line => line.Sequence))
         {
             var item = items[line.InventoryItemId];
             item.QuantityOnHand = line.PriorQuantityOnHand;
@@ -331,8 +335,7 @@ public sealed partial class AccountingTransactionService
         receipt.ReversalDate = request.ReversalDate;
         receipt.ReversalReason = request.Reason.Trim();
         receipt.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        order.Status = poLines.Values.Any(line => line.ReceivedQuantity > 0m) ? "PartiallyReceived" : "Approved";
-        order.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        SetPurchaseOrderReturnStatus(order, poLines.Values);
         AddPurchasingAudit(db, companyId, "inventory-receipt.reversed", nameof(InventoryReceipt), receipt.Id, new { order.Id, reversalJournalEntryId = reversal.Id, reason = request.Reason.Trim() });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The receipt, purchase order, or inventory changed while it was being reversed. Refresh and try again."); }

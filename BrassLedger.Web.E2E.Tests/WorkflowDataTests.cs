@@ -105,6 +105,8 @@ public sealed class WorkflowDataTests
         var orderNumber = $"PO-E2E-{suffix}";
         var receiptNumber = $"RCV-E2E-{suffix}";
         var billNumber = $"BILL-E2E-{suffix}";
+        var returnNumber = $"SRA-E2E-{suffix}";
+        var returnShipmentNumber = $"SRS-E2E-{suffix}";
         await using (var preparerSession = await _fixture.CreateSessionAsync(browserKind))
         {
             await preparerSession.SignInAsync("requisition");
@@ -119,7 +121,8 @@ public sealed class WorkflowDataTests
         await purchasing.OpenAsync();
         await purchasing.ApproveAndConvertPurchaseRequisitionAsync(requisitionNumber, orderNumber);
         await purchasing.ApproveReceiveAndMatchAsync(orderNumber, receiptNumber, billNumber);
-        await purchasingSession.AssertNoUiFailuresAsync("purchase-order approval, receipt, and invoice match");
+        await purchasing.AuthorizeAndShipSupplierReturnAsync(receiptNumber, returnNumber, returnShipmentNumber);
+        await purchasingSession.AssertNoUiFailuresAsync("purchase-order approval, receipt, invoice match, and supplier return");
     }
 
     [Theory]

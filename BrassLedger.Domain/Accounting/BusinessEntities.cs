@@ -534,6 +534,7 @@ public sealed class VendorBillLine
 {
     public Guid Id { get; set; }
     public Guid VendorBillId { get; set; }
+    public Guid? InventoryReceiptLineId { get; set; }
     public int Sequence { get; set; }
     public Guid ExpenseAccountId { get; set; }
     public string Description { get; set; } = string.Empty;
@@ -1135,6 +1136,8 @@ public sealed class PurchaseOrderLine
     public decimal UnitCost { get; set; }
     public decimal ReceivedQuantity { get; set; }
     public decimal InvoicedQuantity { get; set; }
+    public decimal ReturnedQuantity { get; set; }
+    public decimal CreditedQuantity { get; set; }
     public decimal LineTotal { get; set; }
 }
 
@@ -1168,11 +1171,127 @@ public sealed class InventoryReceiptLine
     public Guid InventoryItemId { get; set; }
     public int Sequence { get; set; }
     public decimal Quantity { get; set; }
+    public decimal ReturnedQuantity { get; set; }
     public decimal UnitCost { get; set; }
     public decimal LineTotal { get; set; }
     public decimal PriorQuantityOnHand { get; set; }
     public decimal PriorUnitCost { get; set; }
     public decimal ResultingUnitCost { get; set; }
+}
+
+public sealed class SupplierReturnAuthorization
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid InventoryReceiptId { get; set; }
+    public Guid PurchaseOrderId { get; set; }
+    public Guid VendorId { get; set; }
+    public string ReturnNumber { get; set; } = string.Empty;
+    public DateOnly AuthorizedOn { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string Status { get; set; } = "Open";
+    public Guid? AuthorizedByUserId { get; set; }
+    public DateTimeOffset AuthorizedAtUtc { get; set; }
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class SupplierReturnAuthorizationLine
+{
+    public Guid Id { get; set; }
+    public Guid SupplierReturnAuthorizationId { get; set; }
+    public Guid InventoryReceiptLineId { get; set; }
+    public Guid PurchaseOrderLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public int Sequence { get; set; }
+    public decimal AuthorizedQuantity { get; set; }
+    public decimal ShippedQuantity { get; set; }
+    public decimal UnitCost { get; set; }
+}
+
+public sealed class SupplierReturnShipment
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid SupplierReturnAuthorizationId { get; set; }
+    public Guid? SourceVendorBillId { get; set; }
+    public Guid WarehouseId { get; set; }
+    public Guid BinId { get; set; }
+    public string ShipmentNumber { get; set; } = string.Empty;
+    public DateOnly ShippedOn { get; set; }
+    public string Status { get; set; } = "Posted";
+    public decimal TotalAmount { get; set; }
+    public bool CreatesVendorCredit { get; set; }
+    public decimal SourceAppliedAmount { get; set; }
+    public decimal AppliedAmount { get; set; }
+    public decimal RefundedAmount { get; set; }
+    public Guid JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ShippedByUserId { get; set; }
+    public DateTimeOffset ShippedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class SupplierReturnShipmentLine
+{
+    public Guid Id { get; set; }
+    public Guid SupplierReturnShipmentId { get; set; }
+    public Guid SupplierReturnAuthorizationLineId { get; set; }
+    public Guid InventoryReceiptLineId { get; set; }
+    public Guid PurchaseOrderLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public int Sequence { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TotalAmount { get; set; }
+    public decimal PriorQuantityOnHand { get; set; }
+    public decimal PriorUnitCost { get; set; }
+    public decimal ResultingUnitCost { get; set; }
+}
+
+public sealed class SupplierReturnCreditApplication
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid SupplierReturnShipmentId { get; set; }
+    public Guid VendorBillId { get; set; }
+    public DateOnly AppliedOn { get; set; }
+    public decimal Amount { get; set; }
+    public string Status { get; set; } = "Posted";
+    public Guid? AppliedByUserId { get; set; }
+    public DateTimeOffset AppliedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class SupplierReturnCreditRefund
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid SupplierReturnShipmentId { get; set; }
+    public Guid BankAccountId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateOnly RefundDate { get; set; }
+    public decimal Amount { get; set; }
+    public string Status { get; set; } = "Posted";
+    public Guid JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? RefundedByUserId { get; set; }
+    public DateTimeOffset RefundedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class AccountingSchedule

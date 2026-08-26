@@ -1093,6 +1093,54 @@ api.MapPost("/inventory-receipts/{inventoryReceiptId:guid}/reversal", async (Gui
     var result = await service.ReverseInventoryReceiptAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["receipt"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
 
+api.MapPost("/inventory-receipts/{inventoryReceiptId:guid}/supplier-returns", async (Guid inventoryReceiptId, AuthorizeSupplierReturnRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryReceiptId != inventoryReceiptId) return Results.BadRequest(new { error = "inventory_receipt_id_mismatch" });
+    var result = await service.AuthorizeSupplierReturnAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/supplier-returns/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["supplierReturn"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/supplier-returns/{supplierReturnAuthorizationId:guid}/cancellation", async (Guid supplierReturnAuthorizationId, CancelSupplierReturnRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SupplierReturnAuthorizationId != supplierReturnAuthorizationId) return Results.BadRequest(new { error = "supplier_return_authorization_id_mismatch" });
+    var result = await service.CancelSupplierReturnAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["supplierReturn"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/supplier-returns/{supplierReturnAuthorizationId:guid}/shipments", async (Guid supplierReturnAuthorizationId, ShipSupplierReturnRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SupplierReturnAuthorizationId != supplierReturnAuthorizationId) return Results.BadRequest(new { error = "supplier_return_authorization_id_mismatch" });
+    var result = await service.ShipSupplierReturnAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/supplier-return-shipments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["supplierReturnShipment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/supplier-return-shipments/{supplierReturnShipmentId:guid}/applications", async (Guid supplierReturnShipmentId, ApplySupplierReturnCreditRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SupplierReturnShipmentId != supplierReturnShipmentId) return Results.BadRequest(new { error = "supplier_return_shipment_id_mismatch" });
+    var result = await service.ApplySupplierReturnCreditAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/supplier-return-credit-applications/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["supplierReturnCredit"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/supplier-return-shipments/{supplierReturnShipmentId:guid}/refunds", async (Guid supplierReturnShipmentId, RefundSupplierReturnCreditRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SupplierReturnShipmentId != supplierReturnShipmentId) return Results.BadRequest(new { error = "supplier_return_shipment_id_mismatch" });
+    var result = await service.RefundSupplierReturnCreditAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/supplier-return-credit-refunds/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["supplierReturnCredit"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/supplier-return-shipments/{supplierReturnShipmentId:guid}/reversal", async (Guid supplierReturnShipmentId, ReverseSupplierReturnShipmentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SupplierReturnShipmentId != supplierReturnShipmentId) return Results.BadRequest(new { error = "supplier_return_shipment_id_mismatch" });
+    var result = await service.ReverseSupplierReturnShipmentAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["supplierReturnShipment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/supplier-return-credit-applications/{supplierReturnCreditApplicationId:guid}/reversal", async (Guid supplierReturnCreditApplicationId, ReverseSupplierReturnCreditApplicationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SupplierReturnCreditApplicationId != supplierReturnCreditApplicationId) return Results.BadRequest(new { error = "supplier_return_credit_application_id_mismatch" });
+    var result = await service.ReverseSupplierReturnCreditApplicationAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["supplierReturnCreditApplication"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
+api.MapPost("/supplier-return-credit-refunds/{supplierReturnCreditRefundId:guid}/reversal", async (Guid supplierReturnCreditRefundId, ReverseSupplierReturnCreditRefundRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SupplierReturnCreditRefundId != supplierReturnCreditRefundId) return Results.BadRequest(new { error = "supplier_return_credit_refund_id_mismatch" });
+    var result = await service.ReverseSupplierReturnCreditRefundAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["supplierReturnCreditRefund"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
+
 api.MapGet("/interchange/quickbooks-online/{entity}.csv", async (string entity, IAccountingInterchangeService service, CancellationToken cancellationToken) =>
 {
     var export = await service.ExportQuickBooksOnlineCsvAsync(entity, cancellationToken);
