@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("10", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("11", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -74,6 +74,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826090933_AddPickPackBackorders';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826102030_AddCustomerReturns';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826105518_AddPurchaseRequisitions';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -104,7 +105,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("10", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("11", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -114,6 +115,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826090933_AddPickPackBackorders';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826102030_AddCustomerReturns';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826105518_AddPurchaseRequisitions';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -1712,6 +1714,44 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var released = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new AllocateSalesOrderLineRequest(lineId, 0m)], orderToken)); Assert.True(released.Succeeded, released.ErrorMessage);
         await using var after = await factory.CreateDbContextAsync(); Assert.Equal("Cancelled", await after.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.Status).SingleAsync()); Assert.Equal("Cancelled", await after.InventoryPackingSlips.Where(pack => pack.Id == packResult.Id).Select(pack => pack.Status).SingleAsync()); Assert.Equal(0m, await after.SalesOrderLines.Where(line => line.Id == lineId).Select(line => line.AllocatedQuantity).SingleAsync());
         Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "inventory-pick.cancelled" && audit.EntityId == pickResult.Id); Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "inventory-packing-slip.cancelled" && audit.EntityId == packResult.Id);
+    }
+
+    [Fact]
+    public async Task PurchaseRequisitions_EnforceSeparationCompanyScopeConcurrencyAndOneTimeConversion()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>(); var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        Guid companyId; Guid foreignCompanyId; Guid vendorId; Guid itemId; int journalCount;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(company => company.Id).SingleAsync(); vendorId = await db.Vendors.Select(vendor => vendor.Id).FirstAsync(); itemId = await db.InventoryItems.Where(item => item.Sku == "RM-220").Select(item => item.Id).SingleAsync(); journalCount = await db.JournalEntries.CountAsync();
+            foreignCompanyId = Guid.NewGuid(); db.Companies.Add(new Company { Id = foreignCompanyId, Name = "Other requisition company", LegalName = "Other requisition company", BaseCurrency = "USD", FiscalYearStartMonth = 1 }); await db.SaveChangesAsync();
+        }
+        void ActAsCompany(Guid activeCompanyId, params string[] permissions) { var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, activeCompanyId.ToString()) }; claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
+        void ActAs(params string[] permissions) => ActAsCompany(companyId, permissions);
+        var request = new SavePurchaseRequisitionRequest(null, vendorId, "REQ-CONTROL-1", new DateOnly(2026, 8, 20), new DateOnly(2026, 8, 27), "Controlled replenishment", [new(itemId, "Fastener replenishment", 3m, 12.50m)]);
+
+        ActAs(BrassLedgerPermissions.RequisitionManage);
+        Assert.False((await transactions.SavePurchaseOrderAsync(new(null, vendorId, "PO-BYPASS-1", request.RequestedOn, request.NeededBy, request.Purpose, [new(itemId, "Bypass", 3m, 12.50m)]))).Succeeded);
+        var saved = await transactions.SavePurchaseRequisitionAsync(request); Assert.True(saved.Succeeded, saved.ErrorMessage);
+        PurchaseRequisition requisition; await using (var db = await factory.CreateDbContextAsync()) requisition = await db.PurchaseRequisitions.SingleAsync(candidate => candidate.Id == saved.Id);
+        Assert.False((await transactions.SubmitPurchaseRequisitionAsync(new(requisition.Id, "stale-token"))).Succeeded);
+        Assert.True((await transactions.SubmitPurchaseRequisitionAsync(new(requisition.Id, requisition.ConcurrencyToken))).Succeeded);
+
+        await using (var db = await factory.CreateDbContextAsync()) requisition = await db.PurchaseRequisitions.SingleAsync(candidate => candidate.Id == saved.Id);
+        Assert.False((await transactions.DecidePurchaseRequisitionAsync(new(requisition.Id, true, "Unauthorized", requisition.ConcurrencyToken))).Succeeded);
+        ActAsCompany(foreignCompanyId, BrassLedgerPermissions.PurchasingManage);
+        var foreignDecision = await transactions.DecidePurchaseRequisitionAsync(new(requisition.Id, true, "Cross-company", requisition.ConcurrencyToken)); Assert.False(foreignDecision.Succeeded); Assert.Contains("not found", foreignDecision.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(BrassLedgerPermissions.PurchasingManage);
+        Assert.True((await transactions.DecidePurchaseRequisitionAsync(new(requisition.Id, true, "Budget and need reviewed", requisition.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) requisition = await db.PurchaseRequisitions.SingleAsync(candidate => candidate.Id == saved.Id);
+        var converted = await transactions.ConvertPurchaseRequisitionAsync(new(requisition.Id, vendorId, "PO-CONTROL-1", request.RequestedOn, request.NeededBy, request.Purpose, requisition.ConcurrencyToken)); Assert.True(converted.Succeeded, converted.ErrorMessage);
+        Assert.False((await transactions.ConvertPurchaseRequisitionAsync(new(requisition.Id, vendorId, "PO-CONTROL-2", request.RequestedOn, request.NeededBy, request.Purpose, requisition.ConcurrencyToken))).Succeeded);
+
+        await using var after = await factory.CreateDbContextAsync();
+        var finalRequisition = await after.PurchaseRequisitions.SingleAsync(candidate => candidate.Id == saved.Id); var order = await after.PurchaseOrders.SingleAsync(candidate => candidate.Id == converted.Id); var line = await after.PurchaseOrderLines.SingleAsync(candidate => candidate.PurchaseOrderId == order.Id);
+        Assert.Equal("Converted", finalRequisition.Status); Assert.Equal(finalRequisition.Id, order.PurchaseRequisitionId); Assert.Equal("Draft", order.Status); Assert.Equal(37.50m, order.TotalAmount); Assert.Equal(3m, line.OrderedQuantity); Assert.Equal(12.50m, line.UnitCost); Assert.Equal(journalCount, await after.JournalEntries.CountAsync());
+        Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "purchase-requisition.submitted" && audit.EntityId == saved.Id); Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "purchase-requisition.approved" && audit.EntityId == saved.Id); Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "purchase-requisition.converted" && audit.EntityId == saved.Id);
     }
 
     [Fact]

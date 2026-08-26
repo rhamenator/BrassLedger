@@ -314,6 +314,10 @@ public static class ServiceCollectionExtensions
                 && await HasTableAsync(dbContext, "CustomerReturnCreditLines", cancellationToken)
                 && await HasTableAsync(dbContext, "CustomerReturnCreditApplications", cancellationToken)
                 && await HasTableAsync(dbContext, "CustomerReturnCreditRefunds", cancellationToken);
+        if (migrationId.EndsWith("_AddPurchaseRequisitions", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "PurchaseRequisitions", cancellationToken)
+                && await HasTableAsync(dbContext, "PurchaseRequisitionLines", cancellationToken)
+                && await HasColumnAsync(dbContext, "PurchaseOrders", "PurchaseRequisitionId", cancellationToken);
         return false;
     }
 

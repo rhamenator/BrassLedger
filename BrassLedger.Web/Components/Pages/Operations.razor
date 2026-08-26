@@ -108,11 +108,39 @@ else
                 </div></EditForm>
             </article>
             }
-            @if (CanPreparePurchaseOrders)
+            @if (CanManageRequisitions)
             {
             <article class="panel">
-                <h2>Prepare purchase order</h2>
-                <p class="page-intro">Save a multi-line draft for a company vendor. A user with purchasing authority must approve it before receiving.</p>
+                <h2>Prepare purchase requisition</h2>
+                <p class="page-intro">Request inventory without creating supplier authority. Purchasing must approve the submitted request before it can become a purchase-order draft.</p>
+                <EditForm Model="PurchaseRequisitionForm" OnValidSubmit="SavePurchaseRequisitionAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Suggested vendor</label><InputSelect aria-label="Purchase requisition suggested vendor" class="field-input" @bind-Value="PurchaseRequisitionForm.RequestedVendorId"><option value="">Vendor to be selected</option>@foreach (var vendor in Workspace.Payables.Vendors) { <option value="@vendor.Id">@vendor.VendorNumber — @vendor.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Requisition number</label><InputText aria-label="Purchase requisition number" class="field-input" @bind-Value="PurchaseRequisitionForm.RequisitionNumber" /></div>
+                    <div class="field-group"><label class="field-label">Request date</label><InputDate aria-label="Purchase requisition date" class="field-input" @bind-Value="PurchaseRequisitionForm.RequestedOn" /></div>
+                    <div class="field-group"><label class="field-label">Needed by</label><InputDate aria-label="Purchase requisition needed by date" class="field-input" @bind-Value="PurchaseRequisitionForm.NeededBy" /></div>
+                    <div class="field-group"><label class="field-label">Business purpose</label><InputText aria-label="Purchase requisition business purpose" class="field-input" @bind-Value="PurchaseRequisitionForm.Purpose" /></div>
+                    @for (var index = 0; index < PurchaseRequisitionForm.Lines.Count; index++)
+                    {
+                        var lineIndex = index; var line = PurchaseRequisitionForm.Lines[lineIndex];
+                        <fieldset class="panel-subsection"><legend>Requested line @(lineIndex + 1)</legend>
+                            <div class="field-group"><label class="field-label">Inventory item</label><InputSelect aria-label="@($"Purchase requisition line {lineIndex + 1} item")" class="field-input" @bind-Value="line.InventoryItemId"><option value="@Guid.Empty">Select item</option>@foreach (var item in Workspace.Operations.InventoryItems) { <option value="@item.Id">@item.Sku — @item.Description</option> }</InputSelect></div>
+                            <div class="field-group"><label class="field-label">Description</label><InputText aria-label="@($"Purchase requisition line {lineIndex + 1} description")" class="field-input" @bind-Value="line.Description" /></div>
+                            <div class="field-group"><label class="field-label">Quantity</label><InputNumber aria-label="@($"Purchase requisition line {lineIndex + 1} quantity")" class="field-input" @bind-Value="line.Quantity" /></div>
+                            <div class="field-group"><label class="field-label">Estimated unit cost</label><InputNumber aria-label="@($"Purchase requisition line {lineIndex + 1} estimated unit cost")" class="field-input" @bind-Value="line.EstimatedUnitCost" /></div>
+                            @if (PurchaseRequisitionForm.Lines.Count > 1) { <button class="action-secondary" type="button" @onclick="() => RemovePurchaseRequisitionLine(lineIndex)">Remove line</button> }
+                        </fieldset>
+                    }
+                    <button class="action-secondary" type="button" @onclick="AddPurchaseRequisitionLine">Add requested line</button>
+                    <button class="action-primary" type="submit">@(PurchaseRequisitionForm.Id.HasValue ? "Save requisition changes" : "Save requisition draft")</button>
+                    @if (PurchaseRequisitionForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelPurchaseRequisitionEdit">Cancel edit</button> }
+                </div></EditForm>
+            </article>
+            }
+            @if (CanManagePurchasing)
+            {
+            <article class="panel">
+                <h2>Prepare direct purchase order</h2>
+                <p class="page-intro">Purchasing can prepare a direct supplier order when a separate requisition is not required. Converted requisitions create the same reviewable draft automatically.</p>
                 <EditForm Model="PurchaseOrderForm" OnValidSubmit="SavePurchaseOrderAsync">
                     <div class="auth-form">
                         <div class="field-group"><label class="field-label">Vendor</label><InputSelect aria-label="Purchase order vendor" class="field-input" @bind-Value="PurchaseOrderForm.VendorId"><option value="@Guid.Empty">Select vendor</option>@foreach (var vendor in Workspace.Payables.Vendors) { <option value="@vendor.Id">@vendor.VendorNumber — @vendor.Name</option> }</InputSelect></div>
@@ -416,6 +444,39 @@ else
         </section>
 
         <section class="panel">
+            <h2>Purchase requisitions</h2>
+            <p class="page-intro">Drafts remain editable until submission. Purchasing records the decision and converts approved quantities and estimated costs exactly once into a traceable purchase-order draft.</p>
+            <div class="table-scroll"><table class="data-table" aria-label="Purchase requisitions"><thead><tr><th>Requisition</th><th>Requested</th><th>Vendor</th><th>Purpose</th><th>Estimate</th><th>Status</th><th>Result</th><th>Action</th></tr></thead><tbody>
+                @foreach (var requisition in Workspace.Operations.PurchaseRequisitions ?? [])
+                {
+                    <tr><td>@requisition.RequisitionNumber</td><td>@requisition.RequestedOn @if (requisition.NeededBy.HasValue) { <span>needed @requisition.NeededBy</span> }</td><td>@requisition.RequestedVendorName</td><td>@requisition.Purpose</td><td>@requisition.TotalEstimatedAmount.ToString("C")</td><td>@requisition.Status @if (!string.IsNullOrWhiteSpace(requisition.DecisionReason)) { <span>— @requisition.DecisionReason</span> } @if (!string.IsNullOrWhiteSpace(requisition.CancellationReason)) { <span>— @requisition.CancellationReason</span> }</td><td>@(requisition.PurchaseOrderId.HasValue ? requisition.PurchaseOrderNumber : "—")</td><td>
+                        @if (CanManageRequisitions && requisition.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => EditPurchaseRequisition(requisition)">Edit</button> <button class="action-secondary" type="button" @onclick="() => SubmitPurchaseRequisitionAsync(requisition)">Submit</button> }
+                        @if (CanManagePurchasing && requisition.Status == "Submitted") { <button class="action-secondary" type="button" @onclick="() => ApprovePurchaseRequisitionAsync(requisition)">Approve</button> <button class="action-secondary" type="button" @onclick="() => BeginPurchaseRequisitionDecision(requisition, false)">Reject</button> }
+                        @if (CanManagePurchasing && requisition.Status == "Approved") { <button class="action-secondary" type="button" @onclick="() => BeginPurchaseRequisitionConversion(requisition)">Create purchase order</button> }
+                        @if ((CanManageRequisitions && requisition.Status is "Draft" or "Submitted") || (CanManagePurchasing && requisition.Status == "Approved")) { <button class="action-secondary" type="button" @onclick="() => BeginPurchaseRequisitionDecision(requisition, true)">Cancel</button> }
+                    </td></tr>
+                }
+            </tbody></table></div>
+        </section>
+
+        @if (PurchaseRequisitionDecisionForm is not null)
+        {
+            <section class="panel"><h2>@(PurchaseRequisitionDecisionForm.Cancel ? "Cancel" : "Reject") @PurchaseRequisitionDecisionForm.RequisitionNumber</h2><EditForm Model="PurchaseRequisitionDecisionForm" OnValidSubmit="CompletePurchaseRequisitionDecisionAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Purchase requisition decision reason" class="field-input" @bind-Value="PurchaseRequisitionDecisionForm.Reason" /></div><button class="action-primary" type="submit">Confirm</button><button class="action-secondary" type="button" @onclick="DismissPurchaseRequisitionDecision">Keep requisition</button></div></EditForm></section>
+        }
+
+        @if (CanManagePurchasing && PurchaseRequisitionConversionForm is not null)
+        {
+            <section class="panel"><h2>Create purchase order from @PurchaseRequisitionConversionForm.RequisitionNumber</h2><EditForm Model="PurchaseRequisitionConversionForm" OnValidSubmit="ConvertPurchaseRequisitionAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Vendor</label><InputSelect aria-label="Converted purchase order vendor" class="field-input" @bind-Value="PurchaseRequisitionConversionForm.VendorId"><option value="@Guid.Empty">Select vendor</option>@foreach (var vendor in Workspace.Payables.Vendors) { <option value="@vendor.Id">@vendor.VendorNumber — @vendor.Name</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Order number</label><InputText aria-label="Converted purchase order number" class="field-input" @bind-Value="PurchaseRequisitionConversionForm.OrderNumber" /></div>
+                <div class="field-group"><label class="field-label">Order date</label><InputDate aria-label="Converted purchase order date" class="field-input" @bind-Value="PurchaseRequisitionConversionForm.OrderedOn" /></div>
+                <div class="field-group"><label class="field-label">Expected date</label><InputDate aria-label="Converted purchase order expected date" class="field-input" @bind-Value="PurchaseRequisitionConversionForm.ExpectedOn" /></div>
+                <div class="field-group"><label class="field-label">Order notes</label><InputText aria-label="Converted purchase order notes" class="field-input" @bind-Value="PurchaseRequisitionConversionForm.Notes" /></div>
+                <button class="action-primary" type="submit">Create reviewable purchase-order draft</button><button class="action-secondary" type="button" @onclick="CancelPurchaseRequisitionConversion">Cancel</button>
+            </div></EditForm></section>
+        }
+
+        <section class="panel">
             <h2>Purchase orders</h2>
             <table class="data-table">
                 <thead>
@@ -513,6 +574,9 @@ else
     private SalesQuoteWithdrawalEditor? QuoteWithdrawalForm;
     private SalesOrderAmendmentEditor? SalesOrderAmendmentForm;
     private SalesOrderCancellationEditor? SalesOrderCancellationForm;
+    private PurchaseRequisitionEditor PurchaseRequisitionForm { get; } = new();
+    private PurchaseRequisitionDecisionEditor? PurchaseRequisitionDecisionForm;
+    private PurchaseRequisitionConversionEditor? PurchaseRequisitionConversionForm;
     private PurchaseOrderEditor PurchaseOrderForm { get; } = new();
     private SalesAllocationEditor? AllocationForm;
     private InventoryPickEditor? InventoryPickForm;
@@ -533,7 +597,7 @@ else
     private ReceiptEditor? ReceiptForm;
     private BillMatchEditor? BillMatchForm;
     private PurchaseCorrectionEditor? CorrectionForm;
-    private bool CanPreparePurchaseOrders;
+    private bool CanManageRequisitions;
     private bool CanManagePurchasing;
     private bool CanMatchReceiptBills;
     private bool CanManageSales;
@@ -545,7 +609,7 @@ else
     {
         var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
         var privileged = user.IsInRole("Administrator") || user.IsInRole("Owner/CEO");
-        CanPreparePurchaseOrders = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage);
+        CanManageRequisitions = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage);
         CanManagePurchasing = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage);
         CanMatchReceiptBills = CanManagePurchasing && (privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage));
         CanManageSales = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage);
@@ -789,6 +853,23 @@ else
     private void BeginReturnRefundReversal(CustomerReturnCreditRefundSnapshot refund, string creditNumber) => ReturnReversalForm = CustomerReturnReversalEditor.ForRefund(refund.Id, $"{creditNumber} refund {refund.Reference}", refund.ConcurrencyToken, refund.RefundDate);
     private void CancelReturnReversal() => ReturnReversalForm = null;
     private async Task ReverseReturnDocumentAsync() { var form = ReturnReversalForm!; var result = form.Kind switch { "Receipt" => await TransactionService.ReverseCustomerReturnReceiptAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)), "Credit" => await TransactionService.ReverseCustomerReturnCreditAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)), "Application" => await TransactionService.ReverseCustomerReturnCreditApplicationAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)), "Refund" => await TransactionService.ReverseCustomerReturnCreditRefundAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)), _ => TransactionResult.Failure("Unsupported return reversal.") }; StatusMessage = result.Succeeded ? $"{form.DocumentLabel} reversed." : result.ErrorMessage; if (result.Succeeded) { ReturnReversalForm = null; await ReloadAsync(); } }
+    private void AddPurchaseRequisitionLine() => PurchaseRequisitionForm.Lines.Add(new());
+    private void RemovePurchaseRequisitionLine(int index) => PurchaseRequisitionForm.Lines.RemoveAt(index);
+    private void EditPurchaseRequisition(PurchaseRequisitionSnapshot requisition) => PurchaseRequisitionForm.Load(requisition);
+    private void CancelPurchaseRequisitionEdit() => PurchaseRequisitionForm.Reset();
+    private async Task SavePurchaseRequisitionAsync()
+    {
+        var form = PurchaseRequisitionForm; var result = await TransactionService.SavePurchaseRequisitionAsync(new(form.Id, form.RequestedVendorId, form.RequisitionNumber, form.RequestedOn, form.NeededBy, form.Purpose, form.Lines.Select(line => new PurchaseRequisitionLineRequest(line.InventoryItemId, line.Description, line.Quantity, line.EstimatedUnitCost)).ToArray(), form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Purchase-requisition draft saved." : result.ErrorMessage; if (result.Succeeded) { form.Reset(); await ReloadAsync(); }
+    }
+    private async Task SubmitPurchaseRequisitionAsync(PurchaseRequisitionSnapshot requisition) { var result = await TransactionService.SubmitPurchaseRequisitionAsync(new(requisition.Id, requisition.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Purchase requisition {requisition.RequisitionNumber} submitted." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync(); }
+    private async Task ApprovePurchaseRequisitionAsync(PurchaseRequisitionSnapshot requisition) { var result = await TransactionService.DecidePurchaseRequisitionAsync(new(requisition.Id, true, "Approved for purchasing", requisition.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Purchase requisition {requisition.RequisitionNumber} approved." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync(); }
+    private void BeginPurchaseRequisitionDecision(PurchaseRequisitionSnapshot requisition, bool cancel) => PurchaseRequisitionDecisionForm = new(requisition.Id, requisition.RequisitionNumber, requisition.ConcurrencyToken, cancel);
+    private void DismissPurchaseRequisitionDecision() => PurchaseRequisitionDecisionForm = null;
+    private async Task CompletePurchaseRequisitionDecisionAsync() { var form = PurchaseRequisitionDecisionForm!; var result = form.Cancel ? await TransactionService.CancelPurchaseRequisitionAsync(new(form.PurchaseRequisitionId, form.Reason, form.ConcurrencyToken)) : await TransactionService.DecidePurchaseRequisitionAsync(new(form.PurchaseRequisitionId, false, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Purchase requisition {form.RequisitionNumber} {(form.Cancel ? "cancelled" : "rejected")}." : result.ErrorMessage; if (result.Succeeded) { PurchaseRequisitionDecisionForm = null; await ReloadAsync(); } }
+    private void BeginPurchaseRequisitionConversion(PurchaseRequisitionSnapshot requisition) => PurchaseRequisitionConversionForm = new(requisition.Id, requisition.RequisitionNumber, requisition.RequestedVendorId ?? Guid.Empty, requisition.RequestedOn, requisition.NeededBy, requisition.Purpose, requisition.ConcurrencyToken);
+    private void CancelPurchaseRequisitionConversion() => PurchaseRequisitionConversionForm = null;
+    private async Task ConvertPurchaseRequisitionAsync() { var form = PurchaseRequisitionConversionForm!; var result = await TransactionService.ConvertPurchaseRequisitionAsync(new(form.PurchaseRequisitionId, form.VendorId, form.OrderNumber, form.OrderedOn, form.ExpectedOn, form.Notes, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Purchase-order draft {form.OrderNumber} created from {form.RequisitionNumber}." : result.ErrorMessage; if (result.Succeeded) { PurchaseRequisitionConversionForm = null; await ReloadAsync(); } }
     private void AddPurchaseOrderLine() => PurchaseOrderForm.Lines.Add(new());
     private void RemovePurchaseOrderLine(int index) => PurchaseOrderForm.Lines.RemoveAt(index);
     private async Task SavePurchaseOrderAsync()
@@ -934,6 +1015,26 @@ else
         public static CustomerReturnReversalEditor ForApplication(Guid id, string label, string token, DateOnly date) => new(id, label, token, "Application", date);
         public static CustomerReturnReversalEditor ForRefund(Guid id, string label, string token, DateOnly date) => new(id, label, token, "Refund", date);
         public Guid DocumentId { get; } public string DocumentLabel { get; } public string ConcurrencyToken { get; } public string Kind { get; } public bool NeedsDate { get; } public DateOnly ReversalDate { get; set; } public string Reason { get; set; } = "";
+    }
+    private sealed class PurchaseRequisitionEditor
+    {
+        public Guid? Id { get; set; }
+        public Guid? RequestedVendorId { get; set; }
+        public string RequisitionNumber { get; set; } = $"REQ-{DateTime.Now:yyyyMMddHHmm}";
+        public DateOnly RequestedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public DateOnly? NeededBy { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(7));
+        public string Purpose { get; set; } = "Inventory replenishment";
+        public string ConcurrencyToken { get; set; } = "";
+        public List<PurchaseRequisitionLineEditor> Lines { get; } = [new()];
+        public void Load(PurchaseRequisitionSnapshot requisition) { Id = requisition.Id; RequestedVendorId = requisition.RequestedVendorId; RequisitionNumber = requisition.RequisitionNumber; RequestedOn = requisition.RequestedOn; NeededBy = requisition.NeededBy; Purpose = requisition.Purpose; ConcurrencyToken = requisition.ConcurrencyToken; Lines.Clear(); Lines.AddRange(requisition.Lines.Select(line => new PurchaseRequisitionLineEditor { InventoryItemId = line.InventoryItemId, Description = line.Description, Quantity = line.RequestedQuantity, EstimatedUnitCost = line.EstimatedUnitCost })); }
+        public void Reset() { Id = null; RequestedVendorId = null; RequisitionNumber = $"REQ-{DateTime.Now:yyyyMMddHHmm}"; RequestedOn = DateOnly.FromDateTime(DateTime.Today); NeededBy = RequestedOn.AddDays(7); Purpose = "Inventory replenishment"; ConcurrencyToken = ""; Lines.Clear(); Lines.Add(new()); }
+    }
+    private sealed class PurchaseRequisitionLineEditor { public Guid InventoryItemId { get; set; } public string Description { get; set; } = "Requested inventory"; public decimal Quantity { get; set; } = 1m; public decimal EstimatedUnitCost { get; set; } }
+    private sealed class PurchaseRequisitionDecisionEditor(Guid purchaseRequisitionId, string requisitionNumber, string concurrencyToken, bool cancel) { public Guid PurchaseRequisitionId { get; } = purchaseRequisitionId; public string RequisitionNumber { get; } = requisitionNumber; public string ConcurrencyToken { get; } = concurrencyToken; public bool Cancel { get; } = cancel; public string Reason { get; set; } = ""; }
+    private sealed class PurchaseRequisitionConversionEditor
+    {
+        public PurchaseRequisitionConversionEditor(Guid purchaseRequisitionId, string requisitionNumber, Guid vendorId, DateOnly requestedOn, DateOnly? neededBy, string purpose, string concurrencyToken) { PurchaseRequisitionId = purchaseRequisitionId; RequisitionNumber = requisitionNumber; VendorId = vendorId; var today = DateOnly.FromDateTime(DateTime.Today); OrderedOn = today < requestedOn ? requestedOn : today; ExpectedOn = neededBy.HasValue && neededBy.Value >= OrderedOn ? neededBy : OrderedOn.AddDays(7); Notes = purpose; ConcurrencyToken = concurrencyToken; }
+        public Guid PurchaseRequisitionId { get; } public string RequisitionNumber { get; } public Guid VendorId { get; set; } public string OrderNumber { get; set; } = $"PO-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly OrderedOn { get; set; } public DateOnly? ExpectedOn { get; set; } public string Notes { get; set; } public string ConcurrencyToken { get; }
     }
     private sealed class PurchaseOrderEditor { public Guid VendorId { get; set; } public string OrderNumber { get; set; } = $"PO-{DateTime.Today:yyyyMMdd}"; public DateOnly OrderedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? ExpectedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(7)); public string Notes { get; set; } = ""; public List<PurchaseOrderLineEditor> Lines { get; } = [new()]; public void Reset() { VendorId = Guid.Empty; OrderNumber = $"PO-{DateTime.Now:yyyyMMddHHmm}"; OrderedOn = DateOnly.FromDateTime(DateTime.Today); ExpectedOn = OrderedOn.AddDays(7); Notes = ""; Lines.Clear(); Lines.Add(new()); } }
     private sealed class PurchaseOrderLineEditor { public Guid InventoryItemId { get; set; } public string Description { get; set; } = "Inventory purchase"; public decimal Quantity { get; set; } = 1m; public decimal UnitCost { get; set; } }

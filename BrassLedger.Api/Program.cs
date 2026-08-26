@@ -1021,10 +1021,39 @@ api.MapPost("/customer-return-credits/{customerReturnCreditId:guid}/reversal", a
     if (request.CustomerReturnCreditId != customerReturnCreditId) return Results.BadRequest(new { error = "customer_return_credit_id_mismatch" }); var result = await service.ReverseCustomerReturnCreditAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["customerReturnCredit"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
 
+api.MapPost("/purchase-requisitions", async (SavePurchaseRequisitionRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SavePurchaseRequisitionAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/purchase-requisitions/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseRequisition"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage));
+
+api.MapPost("/purchase-requisitions/{purchaseRequisitionId:guid}/submission", async (Guid purchaseRequisitionId, SubmitPurchaseRequisitionRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseRequisitionId != purchaseRequisitionId) return Results.BadRequest(new { error = "purchase_requisition_id_mismatch" });
+    var result = await service.SubmitPurchaseRequisitionAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseRequisition"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage));
+
+api.MapPost("/purchase-requisitions/{purchaseRequisitionId:guid}/decision", async (Guid purchaseRequisitionId, DecidePurchaseRequisitionRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseRequisitionId != purchaseRequisitionId) return Results.BadRequest(new { error = "purchase_requisition_id_mismatch" });
+    var result = await service.DecidePurchaseRequisitionAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseRequisition"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/purchase-requisitions/{purchaseRequisitionId:guid}/cancellation", async (Guid purchaseRequisitionId, CancelPurchaseRequisitionRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseRequisitionId != purchaseRequisitionId) return Results.BadRequest(new { error = "purchase_requisition_id_mismatch" });
+    var result = await service.CancelPurchaseRequisitionAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseRequisition"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations);
+
+api.MapPost("/purchase-requisitions/{purchaseRequisitionId:guid}/purchase-order", async (Guid purchaseRequisitionId, ConvertPurchaseRequisitionRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseRequisitionId != purchaseRequisitionId) return Results.BadRequest(new { error = "purchase_requisition_id_mismatch" });
+    var result = await service.ConvertPurchaseRequisitionAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/purchase-orders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseRequisition"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
 api.MapPost("/purchase-orders", async (SavePurchaseOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SavePurchaseOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/purchase-orders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseOrder"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage));
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
 
 api.MapPost("/purchase-orders/{purchaseOrderId:guid}/approval", async (Guid purchaseOrderId, ApprovePurchaseOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {

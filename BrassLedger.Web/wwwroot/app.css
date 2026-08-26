@@ -260,6 +260,11 @@ h1:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.content-grid > .panel {
+    min-width: 0;
+    overflow-x: auto;
+}
+
 .module-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }

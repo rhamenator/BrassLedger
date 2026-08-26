@@ -6,7 +6,7 @@ purchasing, sales orders, payroll/timecards, banking, jobs, CRM, forms/labels,
 and a property-management cluster.
 
 BrassLedger already has modern, organization-neutral foundations for the core
-ledger, customers/invoices, vendors/bills, inventory, purchase-order lines,
+ledger, customers/invoices, vendors/bills, inventory, controlled purchase requisitions, purchase-order lines,
 partial receiving, exact receipt-to-bill matching, line-based sales quotes with controlled conversion, line-based sales orders with controlled amendment and cancellation,
 reservations, partial shipment, moving-average COGS, shipment invoicing, banking,
 pick tickets, split packing slips, packing-backed shipments, dated backorder promises, source-traceable customer returns and credit/refund settlement,
@@ -18,7 +18,7 @@ explicit non-targets.
 ## Remaining parity work
 
 - lots/serials, landed costs, and FIFO layers (warehouses/bins, pick-pack documents, dated backorder promises, location-aware receiving/reservation/shipping, and customer return/credit workflows are implemented)
-- purchase requisition documents, receipt/bill variance approval, supplier returns, and landed-cost allocation
+- receipt/bill variance approval, supplier returns, and landed-cost allocation
 - payment application and bank reconciliation workflows rather than summaries
 - payroll earning/deduction lines, pay runs, liabilities, and posting
 - project cost transactions, billing, and work-in-progress reconciliation

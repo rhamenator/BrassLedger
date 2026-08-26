@@ -108,14 +108,27 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var workspace = await workspaceResponse.Content.ReadFromJsonAsync<BusinessWorkspaceSnapshot>();
         var vendor = workspace!.Payables.Vendors.First();
         var item = workspace.Operations.InventoryItems.First();
-        var request = new SavePurchaseOrderRequest(null, vendor.Id, "PO-API-1", new DateOnly(2026, 8, 20), new DateOnly(2026, 8, 27), "API purchase workflow", [new PurchaseOrderLineRequest(item.Id, "API inventory", 2m, 15m)]);
+        var request = new SavePurchaseRequisitionRequest(null, vendor.Id, "REQ-API-1", new DateOnly(2026, 8, 20), new DateOnly(2026, 8, 27), "API purchase workflow", [new PurchaseRequisitionLineRequest(item.Id, "API inventory", 2m, 15m)]);
 
-        Assert.Equal(HttpStatusCode.BadRequest, (await preparerWithoutToken.PostAsJsonAsync("/api/purchase-orders", request)).StatusCode);
-        Assert.DoesNotContain((await preparer.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseOrders, order => order.OrderNumber == request.OrderNumber);
-        var savedResponse = await preparer.PostAsJsonAsync("/api/purchase-orders", request);
+        Assert.Equal(HttpStatusCode.BadRequest, (await preparerWithoutToken.PostAsJsonAsync("/api/purchase-requisitions", request)).StatusCode);
+        Assert.DoesNotContain((await preparer.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseRequisitions!, requisition => requisition.RequisitionNumber == request.RequisitionNumber);
+        Assert.Equal(HttpStatusCode.Forbidden, (await preparer.PostAsJsonAsync("/api/purchase-orders", new SavePurchaseOrderRequest(null, vendor.Id, "PO-BYPASS-API-1", request.RequestedOn, request.NeededBy, request.Purpose, [new PurchaseOrderLineRequest(item.Id, "Bypass", 2m, 15m)]))).StatusCode);
+        var savedResponse = await preparer.PostAsJsonAsync("/api/purchase-requisitions", request);
         Assert.Equal(HttpStatusCode.Created, savedResponse.StatusCode);
         var saved = await savedResponse.Content.ReadFromJsonAsync<TransactionResult>();
-        var draft = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseOrders, order => order.Id == saved!.Id);
+        var requisition = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseRequisitions!, candidate => candidate.Id == saved!.Id);
+        Assert.Equal("Draft", requisition.Status);
+        Assert.Equal(2m, Assert.Single(requisition.Lines).RequestedQuantity);
+        Assert.Equal(HttpStatusCode.OK, (await preparer.PostAsJsonAsync($"/api/purchase-requisitions/{requisition.Id}/submission", new SubmitPurchaseRequisitionRequest(requisition.Id, requisition.ConcurrencyToken))).StatusCode);
+        requisition = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseRequisitions!, candidate => candidate.Id == requisition.Id);
+        Assert.Equal(HttpStatusCode.Forbidden, (await preparer.PostAsJsonAsync($"/api/purchase-requisitions/{requisition.Id}/decision", new DecidePurchaseRequisitionRequest(requisition.Id, true, "Bypass", requisition.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await purchasing.PostAsJsonAsync($"/api/purchase-requisitions/{requisition.Id}/decision", new DecidePurchaseRequisitionRequest(requisition.Id, true, "Approved API purchase", requisition.ConcurrencyToken))).StatusCode);
+        requisition = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseRequisitions!, candidate => candidate.Id == requisition.Id);
+        var conversion = new ConvertPurchaseRequisitionRequest(requisition.Id, vendor.Id, "PO-API-1", new DateOnly(2026, 8, 20), new DateOnly(2026, 8, 27), "API purchase workflow", requisition.ConcurrencyToken);
+        var conversionResponse = await purchasing.PostAsJsonAsync($"/api/purchase-requisitions/{requisition.Id}/purchase-order", conversion);
+        Assert.Equal(HttpStatusCode.Created, conversionResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await purchasing.PostAsJsonAsync($"/api/purchase-requisitions/{requisition.Id}/purchase-order", conversion)).StatusCode);
+        var draft = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.PurchaseOrders, order => order.OrderNumber == conversion.OrderNumber);
         Assert.Equal("Draft", draft.Status);
         Assert.Equal(2m, Assert.Single(draft.Lines!).OrderedQuantity);
 

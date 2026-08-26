@@ -1,6 +1,12 @@
 # Purchasing and inventory receiving
 
-BrassLedger provides a controlled purchase-order-to-pay workflow for stocked inventory. A requisitioning operator prepares a multi-line purchase-order draft. A purchasing operator independently approves it, records one or more partial receipts, and can match each receipt to one vendor bill when the invoice agrees with the accepted quantities and prices.
+BrassLedger provides a controlled requisition-to-purchase-order-to-pay workflow for stocked inventory. A requisitioning operator prepares and submits a multi-line request with a business purpose, optional suggested vendor, requested date, needed-by date, quantities, and estimated costs. A purchasing operator independently approves or rejects it, converts an approved request exactly once into a reviewable purchase-order draft, approves that order, records one or more partial receipts, and can match each receipt to one vendor bill when the invoice agrees with the accepted quantities and prices.
+
+## Requisition controls
+
+Requisitioning users cannot create purchase orders directly. They can edit drafts, submit them for purchasing review, and cancel drafts or submitted requests with a reason. Purchasing users can approve or reject submitted requests, cancel approved requests before conversion, and select the final vendor when creating the purchase-order draft. Conversion preserves the reviewed items, descriptions, quantities, estimated unit costs, total, purpose, and source requisition; the purchase order still requires its own approval before receiving.
+
+Each company has its own unique requisition numbers. Status changes use optimistic concurrency, retain the responsible user and timestamp, and create business-audit events. Rejected and cancelled requests remain visible. A converted requisition cannot be converted again, and requisitions themselves do not post journals or change inventory.
 
 ## Accounting flow
 
@@ -20,4 +26,4 @@ All postings enforce company isolation, active vendors and items, closed account
 
 ## Current boundary
 
-This workflow intentionally supports exact receipt-level matching, warehouse/bin receiving, and moving-average valuation. Price/quantity variance approval, landed-cost allocation, lots, serial numbers, FIFO layers, purchase requisitions as separate documents, and supplier returns remain separate production-readiness work. Do not represent those capabilities as implemented.
+This workflow intentionally supports separate purchase requisitions, exact approved conversion, exact receipt-level matching, warehouse/bin receiving, and moving-average valuation. Price/quantity variance approval, landed-cost allocation, lots, serial numbers, FIFO layers, and supplier returns remain separate production-readiness work. Do not represent those capabilities as implemented.

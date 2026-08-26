@@ -111,6 +111,12 @@ public sealed record ApplyCustomerReturnCreditRequest(Guid CustomerReturnCreditI
 public sealed record ReverseCustomerReturnCreditApplicationRequest(Guid CustomerReturnCreditApplicationId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record RefundCustomerReturnCreditRequest(Guid CustomerReturnCreditId, Guid BankAccountId, string Reference, DateOnly RefundDate, decimal Amount, string ConcurrencyToken);
 public sealed record ReverseCustomerReturnCreditRefundRequest(Guid CustomerReturnCreditRefundId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
+public sealed record PurchaseRequisitionLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal EstimatedUnitCost);
+public sealed record SavePurchaseRequisitionRequest(Guid? Id, Guid? RequestedVendorId, string RequisitionNumber, DateOnly RequestedOn, DateOnly? NeededBy, string Purpose, IReadOnlyList<PurchaseRequisitionLineRequest> Lines, string ConcurrencyToken = "");
+public sealed record SubmitPurchaseRequisitionRequest(Guid PurchaseRequisitionId, string ConcurrencyToken);
+public sealed record DecidePurchaseRequisitionRequest(Guid PurchaseRequisitionId, bool Approve, string Reason, string ConcurrencyToken);
+public sealed record CancelPurchaseRequisitionRequest(Guid PurchaseRequisitionId, string Reason, string ConcurrencyToken);
+public sealed record ConvertPurchaseRequisitionRequest(Guid PurchaseRequisitionId, Guid VendorId, string OrderNumber, DateOnly OrderedOn, DateOnly? ExpectedOn, string Notes, string ConcurrencyToken);
 public sealed record PurchaseOrderLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal UnitCost);
 public sealed record SavePurchaseOrderRequest(Guid? Id, Guid VendorId, string OrderNumber, DateOnly OrderedOn, DateOnly? ExpectedOn, string Notes, IReadOnlyList<PurchaseOrderLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record ApprovePurchaseOrderRequest(Guid PurchaseOrderId, string ConcurrencyToken);
@@ -231,6 +237,11 @@ public interface IAccountingTransactionService
     Task<TransactionResult> ReverseCustomerReturnCreditApplicationAsync(ReverseCustomerReturnCreditApplicationRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RefundCustomerReturnCreditAsync(RefundCustomerReturnCreditRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReverseCustomerReturnCreditRefundAsync(ReverseCustomerReturnCreditRefundRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SavePurchaseRequisitionAsync(SavePurchaseRequisitionRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SubmitPurchaseRequisitionAsync(SubmitPurchaseRequisitionRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> DecidePurchaseRequisitionAsync(DecidePurchaseRequisitionRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CancelPurchaseRequisitionAsync(CancelPurchaseRequisitionRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ConvertPurchaseRequisitionAsync(ConvertPurchaseRequisitionRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePurchaseOrderAsync(SavePurchaseOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApprovePurchaseOrderAsync(ApprovePurchaseOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReceivePurchaseOrderAsync(ReceivePurchaseOrderRequest request, CancellationToken cancellationToken = default);

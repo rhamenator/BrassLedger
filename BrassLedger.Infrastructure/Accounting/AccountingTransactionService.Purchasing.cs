@@ -11,7 +11,7 @@ public sealed partial class AccountingTransactionService
 {
     public async Task<TransactionResult> SavePurchaseOrderAsync(SavePurchaseOrderRequest request, CancellationToken cancellationToken = default)
     {
-        if (!HasPermission(BrassLedgerPermissions.RequisitionManage)) return TransactionResult.Failure("You are not authorized to prepare purchase orders.");
+        if (!HasPermission(BrassLedgerPermissions.PurchasingManage)) return TransactionResult.Failure("You are not authorized to prepare purchase orders.");
         var requestedLines = request.Lines?.ToArray() ?? [];
         if (request.VendorId == Guid.Empty || string.IsNullOrWhiteSpace(request.OrderNumber) || requestedLines.Length == 0)
             return TransactionResult.Failure("A vendor, order number, and at least one line are required.");

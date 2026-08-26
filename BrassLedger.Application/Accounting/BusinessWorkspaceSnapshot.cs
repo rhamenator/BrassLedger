@@ -156,7 +156,8 @@ public sealed record OperationsWorkspace(
     IReadOnlyList<SalesOrderBackorderPromiseSnapshot>? BackorderPromises = null,
     IReadOnlyList<CustomerReturnAuthorizationSnapshot>? CustomerReturnAuthorizations = null,
     IReadOnlyList<CustomerReturnReceiptSnapshot>? CustomerReturnReceipts = null,
-    IReadOnlyList<CustomerReturnCreditSnapshot>? CustomerReturnCredits = null);
+    IReadOnlyList<CustomerReturnCreditSnapshot>? CustomerReturnCredits = null,
+    IReadOnlyList<PurchaseRequisitionSnapshot>? PurchaseRequisitions = null);
 
 public sealed record InventoryItemSnapshot(
     string Sku,
@@ -218,6 +219,9 @@ public sealed record CustomerReturnReceiptLineSnapshot(Guid Id, Guid CustomerRet
 public sealed record CustomerReturnCreditSnapshot(Guid Id, Guid CustomerReturnReceiptId, string ReceiptNumber, Guid SalesInvoiceId, string InvoiceNumber, Guid CustomerId, string CustomerName, string CreditNumber, DateOnly CreditDate, string Reason, string Status, decimal Subtotal, decimal TaxAmount, decimal TotalAmount, decimal SourceAppliedAmount, decimal AppliedAmount, decimal RefundedAmount, decimal AvailableAmount, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<CustomerReturnCreditApplicationSnapshot> Applications, IReadOnlyList<CustomerReturnCreditRefundSnapshot> Refunds);
 public sealed record CustomerReturnCreditApplicationSnapshot(Guid Id, Guid SalesInvoiceId, string InvoiceNumber, DateOnly AppliedOn, decimal Amount, string Status, string ConcurrencyToken);
 public sealed record CustomerReturnCreditRefundSnapshot(Guid Id, Guid BankAccountId, string BankAccountName, string Reference, DateOnly RefundDate, decimal Amount, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken);
+
+public sealed record PurchaseRequisitionSnapshot(Guid Id, Guid? RequestedVendorId, string RequestedVendorName, string RequisitionNumber, DateOnly RequestedOn, DateOnly? NeededBy, string Purpose, string Status, decimal TotalEstimatedAmount, string DecisionReason, string CancellationReason, Guid? PurchaseOrderId, string PurchaseOrderNumber, string ConcurrencyToken, IReadOnlyList<PurchaseRequisitionLineSnapshot> Lines);
+public sealed record PurchaseRequisitionLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal RequestedQuantity, decimal EstimatedUnitCost, decimal EstimatedLineTotal);
 
 public sealed record PurchaseOrderSnapshot(
     string OrderNumber,

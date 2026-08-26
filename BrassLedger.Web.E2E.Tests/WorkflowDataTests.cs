@@ -101,6 +101,7 @@ public sealed class WorkflowDataTests
     public async Task PurchaseOrder_PreparationApprovalReceiptAndBillMatch_WorkAcrossSeparatedRoles(BrowserKind browserKind)
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
+        var requisitionNumber = $"REQ-E2E-{suffix}";
         var orderNumber = $"PO-E2E-{suffix}";
         var receiptNumber = $"RCV-E2E-{suffix}";
         var billNumber = $"BILL-E2E-{suffix}";
@@ -109,13 +110,14 @@ public sealed class WorkflowDataTests
             await preparerSession.SignInAsync("requisition");
             var preparation = new OperationsPage(preparerSession);
             await preparation.OpenAsync();
-            await preparation.PreparePurchaseOrderAsync(orderNumber);
-            await preparerSession.AssertNoUiFailuresAsync("purchase-order preparation");
+            await preparation.PrepareAndSubmitPurchaseRequisitionAsync(requisitionNumber);
+            await preparerSession.AssertNoUiFailuresAsync("purchase-requisition preparation and submission");
         }
         await using var purchasingSession = await _fixture.CreateSessionAsync(browserKind);
         await purchasingSession.SignInAsync("operations");
         var purchasing = new OperationsPage(purchasingSession);
         await purchasing.OpenAsync();
+        await purchasing.ApproveAndConvertPurchaseRequisitionAsync(requisitionNumber, orderNumber);
         await purchasing.ApproveReceiveAndMatchAsync(orderNumber, receiptNumber, billNumber);
         await purchasingSession.AssertNoUiFailuresAsync("purchase-order approval, receipt, and invoice match");
     }

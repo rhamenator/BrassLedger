@@ -1069,6 +1069,7 @@ public sealed class PurchaseOrder
 {
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
+    public Guid? PurchaseRequisitionId { get; set; }
     public Guid VendorId { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public DateOnly OrderedOn { get; set; }
@@ -1081,6 +1082,46 @@ public sealed class PurchaseOrder
     public Guid? ApprovedByUserId { get; set; }
     public DateTimeOffset? ApprovedAtUtc { get; set; }
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class PurchaseRequisition
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid? RequestedVendorId { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public DateOnly RequestedOn { get; set; }
+    public DateOnly? NeededBy { get; set; }
+    public string Purpose { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
+    public decimal TotalEstimatedAmount { get; set; }
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? SubmittedByUserId { get; set; }
+    public DateTimeOffset? SubmittedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public Guid? ConvertedByUserId { get; set; }
+    public DateTimeOffset? ConvertedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class PurchaseRequisitionLine
+{
+    public Guid Id { get; set; }
+    public Guid PurchaseRequisitionId { get; set; }
+    public int Sequence { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public decimal RequestedQuantity { get; set; }
+    public decimal EstimatedUnitCost { get; set; }
+    public decimal EstimatedLineTotal { get; set; }
 }
 
 public sealed class PurchaseOrderLine

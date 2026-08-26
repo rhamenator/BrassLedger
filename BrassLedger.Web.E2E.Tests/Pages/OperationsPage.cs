@@ -82,16 +82,32 @@ public sealed class OperationsPage
         Assert.Contains("Reversed", await transferRow.InnerTextAsync());
     }
 
-    public async Task PreparePurchaseOrderAsync(string orderNumber)
+    public async Task PrepareAndSubmitPurchaseRequisitionAsync(string requisitionNumber)
     {
-        await _session.Page.GetByLabel("Purchase order vendor").SelectOptionAsync(new SelectOptionValue { Index = 1 });
-        await _session.Page.GetByLabel("Purchase order number").FillAsync(orderNumber);
-        await _session.Page.GetByLabel("Purchase order line 1 item").SelectOptionAsync(new SelectOptionValue { Index = 1 });
-        await _session.Page.GetByLabel("Purchase order line 1 description").FillAsync("Browser-tested inventory purchase");
-        await _session.Page.GetByLabel("Purchase order line 1 quantity").FillAsync("2");
-        await _session.Page.GetByLabel("Purchase order line 1 unit cost").FillAsync("17.50");
-        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save purchase-order draft" }).ClickAsync();
-        await _session.Page.GetByText("Purchase-order draft saved.", new() { Exact = true }).WaitForAsync();
+        await _session.Page.GetByLabel("Purchase requisition suggested vendor").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Purchase requisition number").FillAsync(requisitionNumber);
+        await _session.Page.GetByLabel("Purchase requisition business purpose").FillAsync("Browser-tested inventory purchase");
+        await _session.Page.GetByLabel("Purchase requisition line 1 item").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Purchase requisition line 1 description").FillAsync("Browser-tested inventory purchase");
+        await _session.Page.GetByLabel("Purchase requisition line 1 quantity").FillAsync("2");
+        await _session.Page.GetByLabel("Purchase requisition line 1 estimated unit cost").FillAsync("17.50");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save requisition draft" }).ClickAsync();
+        await _session.Page.GetByText("Purchase-requisition draft saved.", new() { Exact = true }).WaitForAsync();
+        var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Purchase requisitions" }).Locator("tr").Filter(new() { HasTextString = requisitionNumber });
+        await row.GetByRole(AriaRole.Button, new() { Name = "Submit" }).ClickAsync();
+        await _session.Page.GetByText($"Purchase requisition {requisitionNumber} submitted.", new() { Exact = true }).WaitForAsync();
+    }
+
+    public async Task ApproveAndConvertPurchaseRequisitionAsync(string requisitionNumber, string orderNumber)
+    {
+        var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Purchase requisitions" }).Locator("tr").Filter(new() { HasTextString = requisitionNumber });
+        await row.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
+        await _session.Page.GetByText($"Purchase requisition {requisitionNumber} approved.", new() { Exact = true }).WaitForAsync();
+        row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Purchase requisitions" }).Locator("tr").Filter(new() { HasTextString = requisitionNumber });
+        await row.GetByRole(AriaRole.Button, new() { Name = "Create purchase order" }).ClickAsync();
+        await _session.Page.GetByLabel("Converted purchase order number").FillAsync(orderNumber);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Create reviewable purchase-order draft" }).ClickAsync();
+        await _session.Page.GetByText($"Purchase-order draft {orderNumber} created from {requisitionNumber}.", new() { Exact = true }).WaitForAsync();
     }
 
     public async Task PrepareAndApproveSalesOrderAsync(string orderNumber)

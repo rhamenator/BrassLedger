@@ -5278,6 +5278,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid?>("PreparedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("PurchaseRequisitionId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
@@ -5290,6 +5293,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PurchaseRequisitionId")
+                        .IsUnique();
 
                     b.HasIndex("VendorId");
 
@@ -5346,6 +5352,140 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsUnique();
 
                     b.ToTable("PurchaseOrderLines");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseRequisition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CancellationReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CancelledByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ConvertedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ConvertedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DecisionReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("NeededBy")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PreparedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("RejectedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RejectedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("RequestedOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("RequestedVendorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RequisitionNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("SubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SubmittedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("TotalEstimatedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RequestedVendorId");
+
+                    b.HasIndex("CompanyId", "RequisitionNumber")
+                        .IsUnique();
+
+                    b.ToTable("PurchaseRequisitions");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseRequisitionLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("EstimatedLineTotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("EstimatedUnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PurchaseRequisitionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("RequestedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("PurchaseRequisitionId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("PurchaseRequisitionLines");
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ReportCatalogItem", b =>
@@ -7786,6 +7926,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseOrder", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.PurchaseRequisition", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseRequisitionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.Vendor", null)
                         .WithMany()
                         .HasForeignKey("VendorId")
@@ -7804,6 +7949,29 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.PurchaseOrder", null)
                         .WithMany()
                         .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseRequisition", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.Vendor", null)
+                        .WithMany()
+                        .HasForeignKey("RequestedVendorId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseRequisitionLine", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.PurchaseRequisition", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseRequisitionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
