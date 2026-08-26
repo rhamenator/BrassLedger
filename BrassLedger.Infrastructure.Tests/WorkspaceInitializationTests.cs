@@ -7,6 +7,8 @@ using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -59,7 +61,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var connection = new SqliteConnection($"Data Source={databasePath}");
         await connection.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("20260826014829_InitialCurrentSchema", await ReadScalarAsync(connection, "SELECT MigrationId FROM __EFMigrationsHistory;"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
     }
@@ -76,6 +81,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await using var command = connection.CreateCommand();
             command.CommandText = """
                 DROP TABLE "BrassLedgerSchemaVersions";
+                DROP TABLE "__EFMigrationsHistory";
                 ALTER TABLE "PayrollTimeEntries" DROP COLUMN "W2ReportingJson";
                 """;
             await command.ExecuteNonQueryAsync();
@@ -86,6 +92,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("20260826014829_InitialCurrentSchema", await ReadScalarAsync(verified, "SELECT MigrationId FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -236,6 +243,76 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
+    }
+
+    [Fact]
+    public async Task InitializeBrassLedgerAsync_RejectsUnknownEfMigrationWithoutChangingData()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion") VALUES ('99999999999999_FutureMigration', '99.0.0');""";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => services.InitializeBrassLedgerAsync());
+
+        Assert.Contains("unsupported or newer EF migration", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("automatic downgrade is prohibited", exception.Message, StringComparison.OrdinalIgnoreCase);
+        await using var verified = new SqliteConnection($"Data Source={databasePath}");
+        await verified.OpenAsync();
+        Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
+    }
+
+    [Fact]
+    public async Task InitializeBrassLedgerAsync_RefusesNonemptyUnknownDatabaseWithoutModifyingIt()
+    {
+        var dataDirectory = Path.Combine(_contentRootPath, "App_Data");
+        Directory.CreateDirectory(dataDirectory);
+        var databasePath = Path.Combine(dataDirectory, "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE OtherApplicationData (Value TEXT NOT NULL); INSERT INTO OtherApplicationData (Value) VALUES ('preserve-me');";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        using var services = CreateServiceProvider();
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => services.InitializeBrassLedgerAsync());
+
+        Assert.Contains("not empty", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("refused to modify", exception.Message, StringComparison.OrdinalIgnoreCase);
+        await using var verified = new SqliteConnection($"Data Source={databasePath}");
+        await verified.OpenAsync();
+        Assert.Equal("preserve-me", await ReadScalarAsync(verified, "SELECT Value FROM OtherApplicationData;"));
+        Assert.Equal("0", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('BrassLedgerSchemaVersions', '__EFMigrationsHistory');"));
+    }
+
+    [Fact]
+    public async Task MigrationBaseline_RefusesDestructiveDowngradeAndRetainsBusinessData()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using (var scope = services.CreateScope())
+        {
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var migrator = db.Database.GetService<IMigrator>();
+            var exception = await Assert.ThrowsAsync<NotSupportedException>(() => migrator.MigrateAsync("0"));
+            Assert.Contains("would delete business data", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("prohibited", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using var verified = new SqliteConnection($"Data Source={databasePath}");
+        await verified.OpenAsync();
+        Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
+        Assert.Equal("20260826014829_InitialCurrentSchema", await ReadScalarAsync(verified, "SELECT MigrationId FROM __EFMigrationsHistory;"));
     }
 
     [Fact]

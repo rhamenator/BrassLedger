@@ -13,6 +13,8 @@ using BrassLedger.Application.Taxation;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,7 +38,12 @@ public static class ServiceCollectionExtensions
     internal const string ExternalEntitySyncSchemaVersion = "2026082511-external-entity-sync";
     internal const string QuickBooksCredentialOperationLeaseSchemaVersion = "2026082512-quickbooks-credential-operation-leases";
     internal const string CurrentSchemaVersion = "2026082513-operational-account-roles";
-    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, SecurityEmailActionValiditySchemaVersion, NamedUserSessionSchemaVersion, QuickBooksOAuthSchemaVersion, ExternalEntitySyncSchemaVersion, QuickBooksCredentialOperationLeaseSchemaVersion, CurrentSchemaVersion];
+    internal const string SqliteMigrationAssemblyName = "BrassLedger.Migrations.Sqlite";
+    internal const string PostgreSqlMigrationAssemblyName = "BrassLedger.Migrations.PostgreSql";
+    internal const string SqliteMigrationBaselineId = "20260826014829_InitialCurrentSchema";
+    internal const string PostgreSqlMigrationBaselineId = "20260826014843_InitialCurrentSchema";
+    private static readonly string[] OrderedCompatibilitySchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, SecurityEmailActionValiditySchemaVersion, NamedUserSessionSchemaVersion, QuickBooksOAuthSchemaVersion, ExternalEntitySyncSchemaVersion, QuickBooksCredentialOperationLeaseSchemaVersion, CurrentSchemaVersion];
+    private static readonly HashSet<string> SupportedSchemaVersions = new(OrderedCompatibilitySchemaVersions, StringComparer.Ordinal);
 
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
@@ -71,11 +78,11 @@ public static class ServiceCollectionExtensions
         {
             if (!string.IsNullOrWhiteSpace(postgresConnectionString))
             {
-                options.UseNpgsql(postgresConnectionString);
+                options.UseNpgsql(postgresConnectionString, postgres => postgres.MigrationsAssembly(PostgreSqlMigrationAssemblyName));
             }
             else
             {
-                options.UseSqlite(sqliteConnectionString);
+                options.UseSqlite(sqliteConnectionString, sqlite => sqlite.MigrationsAssembly(SqliteMigrationAssemblyName));
             }
         });
 
@@ -163,11 +170,93 @@ public static class ServiceCollectionExtensions
             .Protect("initialized");
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var databaseCreated = await dbContext.Database.EnsureCreatedAsync(cancellationToken);
-        await ApplySchemaUpgradesAsync(dbContext, databaseCreated, cancellationToken);
+        await MigrateDatabaseAsync(dbContext, cancellationToken);
         await EnsureAccountEmailLookupHashesAsync(dbContext, cancellationToken);
         await BrassLedgerSeedData.SeedAsync(dbContext, passwordHasher, bootstrapOptions, cancellationToken);
         await DefaultAccountingSetup.EnsureMinimumSetupAsync(dbContext, cancellationToken);
+    }
+
+    private static async Task MigrateDatabaseAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        var availableMigrations = dbContext.Database.GetMigrations().ToArray();
+        var baselineId = dbContext.Database.IsNpgsql() ? PostgreSqlMigrationBaselineId : SqliteMigrationBaselineId;
+        if (!availableMigrations.Contains(baselineId, StringComparer.Ordinal))
+            throw new InvalidOperationException($"The configured migration assembly does not contain required baseline {baselineId}. Installation or deployment is incomplete.");
+
+        var creator = dbContext.Database.GetService<IRelationalDatabaseCreator>();
+        var databaseExists = await creator.ExistsAsync(cancellationToken);
+        var hasTables = databaseExists && await creator.HasTablesAsync(cancellationToken);
+        if (!hasTables)
+        {
+            await dbContext.Database.MigrateAsync(cancellationToken);
+            await RecordCompatibilityBaselineAsync(dbContext, cancellationToken);
+            return;
+        }
+
+        var appliedMigrations = (await dbContext.Database.GetAppliedMigrationsAsync(cancellationToken)).ToArray();
+        var unknownMigrations = appliedMigrations.Except(availableMigrations, StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        if (unknownMigrations.Length > 0)
+            throw new InvalidOperationException($"This database contains unsupported or newer EF migration(s): {string.Join(", ", unknownMigrations)}. Upgrade BrassLedger before opening this database; automatic downgrade is prohibited.");
+
+        if (appliedMigrations.Length > 0 && !appliedMigrations.Contains(baselineId, StringComparer.Ordinal))
+            throw new InvalidOperationException($"The EF migration history is inconsistent: required baseline {baselineId} is absent. Restore a verified backup or repair migration history under controlled support supervision.");
+        if (!await HasBrassLedgerSchemaFingerprintAsync(dbContext, cancellationToken))
+            throw new InvalidOperationException("The configured database is not empty but does not contain the required BrassLedger Companies, Users, and Accounts tables. Startup refused to modify an unknown or incomplete database.");
+
+        // Existing BrassLedger databases predate EF migration history. Bring their
+        // ordered compatibility ledger to the migration baseline once, then adopt
+        // that already-present schema without replaying destructive CREATE steps.
+        await ApplySchemaUpgradesAsync(dbContext, cancellationToken);
+        if (appliedMigrations.Length == 0)
+            await AdoptMigrationBaselineAsync(dbContext, baselineId, availableMigrations, cancellationToken);
+
+        await dbContext.Database.MigrateAsync(cancellationToken);
+    }
+
+    private static async Task RecordCompatibilityBaselineAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE TABLE IF NOT EXISTS "BrassLedgerSchemaVersions" ("VersionId" text NOT NULL PRIMARY KEY, "AppliedAtUtc" text NOT NULL, "ProductVersion" text NOT NULL, "Description" text NOT NULL, "Provider" text NOT NULL);""",
+            cancellationToken);
+        foreach (var version in OrderedCompatibilitySchemaVersions)
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"""INSERT INTO "BrassLedgerSchemaVersions" ("VersionId", "AppliedAtUtc", "ProductVersion", "Description", "Provider") VALUES ({version}, {DateTimeOffset.UtcNow.ToString("O")}, {"2026.08.25"}, {$"Compatibility checkpoint recorded by EF migration baseline for {version}."}, {dbContext.Database.ProviderName ?? "Unknown"}) ON CONFLICT ("VersionId") DO NOTHING;""",
+                cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task<bool> HasBrassLedgerSchemaFingerprintAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose) await connection.OpenAsync(cancellationToken);
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = dbContext.Database.IsNpgsql()
+                ? """SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('Companies', 'Users', 'Accounts');"""
+                : """SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('Companies', 'Users', 'Accounts');""";
+            return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 3;
+        }
+        finally
+        {
+            if (shouldClose) await connection.CloseAsync();
+        }
+    }
+
+    private static async Task AdoptMigrationBaselineAsync(BrassLedgerDbContext dbContext, string baselineId, IReadOnlyCollection<string> availableMigrations, CancellationToken cancellationToken)
+    {
+        if (!availableMigrations.Contains(baselineId, StringComparer.Ordinal))
+            throw new InvalidOperationException($"The configured migration assembly does not contain required baseline {baselineId}. Installation or deployment is incomplete.");
+
+        var historyRepository = dbContext.Database.GetService<IHistoryRepository>();
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(historyRepository.GetCreateIfNotExistsScript(), cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(historyRepository.GetInsertScript(new HistoryRow(baselineId, "8.0.30")), cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static BootstrapOptions BuildBootstrapOptions(IConfiguration configuration, bool seedSampleData)
@@ -264,7 +353,7 @@ public static class ServiceCollectionExtensions
         return $"Data Source={Path.Combine(dataDirectory, "brassledger.db")}";
     }
 
-    private static async Task ApplySchemaUpgradesAsync(BrassLedgerDbContext dbContext, bool databaseCreated, CancellationToken cancellationToken)
+    private static async Task ApplySchemaUpgradesAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
     {
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE TABLE IF NOT EXISTS "BrassLedgerSchemaVersions" ("VersionId" text NOT NULL PRIMARY KEY, "AppliedAtUtc" text NOT NULL, "ProductVersion" text NOT NULL, "Description" text NOT NULL, "Provider" text NOT NULL);""",
@@ -316,9 +405,9 @@ public static class ServiceCollectionExtensions
         if (!applied.Contains(BaselineSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
             {
-                // Databases created before the version ledger traverse the compatibility bridge once.
-                // Fresh databases already match the EF model and skip that legacy-only path.
-                if (!databaseCreated) await EnsureLegacySchemaCompatibilityAsync(dbContext, cancellationToken);
+                // Only databases that existed before the EF baseline reach this
+                // compatibility path; fresh databases are migration-created.
+                await EnsureLegacySchemaCompatibilityAsync(dbContext, cancellationToken);
                 await EnsureCaseInsensitiveUserNameUniquenessAsync(dbContext, cancellationToken);
             }, cancellationToken);
 

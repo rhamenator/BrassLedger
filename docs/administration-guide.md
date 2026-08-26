@@ -86,9 +86,11 @@ The equivalent API is `GET` and antiforgery-protected `PUT /api/accounting/opera
 
 ## Database upgrades
 
-BrassLedger records every applied schema step in `BrassLedgerSchemaVersions`. A brand-new empty database is created from the current model and immediately receives the ordered baseline and subsequent version records. A database from a prerelease that predates the ledger traverses the legacy compatibility bridge exactly once, inside the baseline transaction, and is then governed by the same ordered migrations. Normal subsequent startup applies only missing versions; it does not replay the legacy compatibility script.
+BrassLedger now uses provider-specific EF Core migration assemblies as its primary schema-upgrade mechanism: `BrassLedger.Migrations.Sqlite` and `BrassLedger.Migrations.PostgreSql`. A new empty database is created by the applicable initial migration rather than `EnsureCreated`. Every later model change must have a reviewed migration in both assemblies and is recorded in `__EFMigrationsHistory`.
 
-Each migration and its ledger record commit in one database transaction. Startup stops before seeding or normal application access if a step fails, if a later version appears without its prerequisite, or if the database contains a version unknown to the running application. BrassLedger never attempts an automatic downgrade. Restore a verified backup or install a compatible newer application rather than deleting or editing version records manually.
+Prerelease databases created before this transition retain the older ordered `BrassLedgerSchemaVersions` ledger. On their first upgraded startup, BrassLedger validates and completes that ledger, verifies the resulting current schema, and records the applicable EF baseline without replaying the initial migration's table-creation operations. The compatibility path is therefore adoption-only; subsequent changes run through EF migrations. Do not delete either history table.
+
+Each compatibility step and EF migration is transactional. Startup stops before seeding or normal application access if a step fails, an ordered compatibility prerequisite is missing, the required EF baseline is absent, or either history contains a version unknown to the running application. BrassLedger never attempts an automatic downgrade. Restore a verified backup or install a compatible newer application rather than deleting or editing history records manually.
 
 Before upgrading a production installation:
 
@@ -103,7 +105,9 @@ Schema version `2026082509-named-user-sessions` introduces mandatory durable ses
 
 Schema version `2026082513-operational-account-roles` adds the nullable role column and a company-scoped unique index, then backfills the original starter chart by account number once. After that migration, account numbers are labels only: workflow routing follows the configured role.
 
-The automated infrastructure suite exercises fresh creation, pre-ledger adoption, an independently missing ordered migration, refusal of a future version, and business-data retention on SQLite. CI also provisions an isolated PostgreSQL database and runs the creation and incremental-migration scenario there. Maintainers can run the PostgreSQL test locally by setting `BRASSLEDGER_TEST_POSTGRES` to an isolated database whose name contains `brassledger_test`; the test deliberately recreates that database's `public` schema.
+The automated infrastructure suite exercises migration-created fresh databases, pre-EF baseline adoption, pre-ledger adoption, independently missing compatibility steps, refusal of future compatibility and EF versions, and business-data retention on SQLite. CI also provisions an isolated PostgreSQL database and runs fresh creation, pre-EF adoption, ordered compatibility upgrades, downgrade refusal, and data-retention checks there. Maintainers can run the PostgreSQL test locally by setting `BRASSLEDGER_TEST_POSTGRES` to an isolated database whose name contains `brassledger_test`; the test deliberately recreates that database's `public` schema.
+
+Maintainer commands and the required two-provider migration review procedure are in [database-migrations.md](database-migrations.md).
 
 ## Publishing
 

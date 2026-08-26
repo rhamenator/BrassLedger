@@ -3,6 +3,8 @@
   <Project Path="BrassLedger.Application/BrassLedger.Application.csproj" />
   <Project Path="BrassLedger.Domain/BrassLedger.Domain.csproj" />
   <Project Path="BrassLedger.Infrastructure/BrassLedger.Infrastructure.csproj" />
+  <Project Path="BrassLedger.Migrations.PostgreSql/BrassLedger.Migrations.PostgreSql.csproj" />
+  <Project Path="BrassLedger.Migrations.Sqlite/BrassLedger.Migrations.Sqlite.csproj" />
   <Project Path="BrassLedger.Web/BrassLedger.Web.csproj" />
   <Project Path="BrassLedger.Infrastructure.Tests/BrassLedger.Infrastructure.Tests.csproj" />
   <Project Path="BrassLedger.Api.Tests/BrassLedger.Api.Tests.csproj" />
