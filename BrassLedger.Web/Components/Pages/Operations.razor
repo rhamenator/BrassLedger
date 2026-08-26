@@ -51,6 +51,36 @@ else
             @if (CanManageSales)
             {
             <article class="panel">
+                <h2>Prepare sales quote</h2>
+                <p class="page-intro">Record an expiring, priced offer. Approval locks its commercial terms; conversion copies those exact lines into a draft sales order.</p>
+                <details class="panel-subsection">
+                <summary>Create quote draft</summary>
+                <EditForm Model="SalesQuoteForm" OnValidSubmit="SaveSalesQuoteAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Customer</label><InputSelect aria-label="Sales quote customer" class="field-input" @bind-Value="SalesQuoteForm.CustomerId"><option value="@Guid.Empty">Select customer</option>@foreach (var customer in Workspace.Receivables.Customers) { <option value="@customer.Id">@customer.CustomerNumber — @customer.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Quote number</label><InputText aria-label="Sales quote number" class="field-input" @bind-Value="SalesQuoteForm.QuoteNumber" /></div>
+                    <div class="field-group"><label class="field-label">Quote date</label><InputDate aria-label="Sales quote date" class="field-input" @bind-Value="SalesQuoteForm.QuotedOn" /></div>
+                    <div class="field-group"><label class="field-label">Expires</label><InputDate aria-label="Sales quote expiration date" class="field-input" @bind-Value="SalesQuoteForm.ExpiresOn" /></div>
+                    <div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Sales quote notes" class="field-input" @bind-Value="SalesQuoteForm.Notes" /></div>
+                    @for (var index = 0; index < SalesQuoteForm.Lines.Count; index++)
+                    {
+                        var lineIndex = index; var line = SalesQuoteForm.Lines[lineIndex];
+                        <fieldset class="panel-subsection"><legend>Quote line @(lineIndex + 1)</legend>
+                            <div class="field-group"><label class="field-label">Inventory item</label><InputSelect aria-label="@($"Sales quote line {lineIndex + 1} item")" class="field-input" @bind-Value="line.InventoryItemId"><option value="@Guid.Empty">Select item</option>@foreach (var item in Workspace.Operations.InventoryItems) { <option value="@item.Id">@item.Sku — @item.Description</option> }</InputSelect></div>
+                            <div class="field-group"><label class="field-label">Description</label><InputText aria-label="@($"Sales quote line {lineIndex + 1} description")" class="field-input" @bind-Value="line.Description" /></div>
+                            <div class="field-group"><label class="field-label">Quantity</label><InputNumber aria-label="@($"Sales quote line {lineIndex + 1} quantity")" class="field-input" @bind-Value="line.Quantity" /></div>
+                            <div class="field-group"><label class="field-label">Unit price</label><InputNumber aria-label="@($"Sales quote line {lineIndex + 1} unit price")" class="field-input" @bind-Value="line.UnitPrice" /></div>
+                            <div class="field-group"><label class="field-label">Discount</label><InputNumber aria-label="@($"Sales quote line {lineIndex + 1} discount")" class="field-input" @bind-Value="line.DiscountAmount" /></div>
+                            <div class="field-group"><label class="field-label">Tax</label><InputNumber aria-label="@($"Sales quote line {lineIndex + 1} tax")" class="field-input" @bind-Value="line.TaxAmount" /></div>
+                            <div class="field-group"><label class="field-label">Revenue account</label><InputSelect aria-label="@($"Sales quote line {lineIndex + 1} revenue account")" class="field-input" @bind-Value="line.RevenueAccountNumber"><option value="">Select revenue account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => account.Type == "Revenue" && !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                            @if (SalesQuoteForm.Lines.Count > 1) { <button class="action-secondary" type="button" @onclick="() => RemoveSalesQuoteLine(lineIndex)">Remove line</button> }
+                        </fieldset>
+                    }
+                    <button class="action-secondary" type="button" @onclick="AddSalesQuoteLine">Add quote line</button>
+                    <button class="action-primary" type="submit">Save quote draft</button>
+                </div></EditForm>
+                </details>
+            </article>
+            <article class="panel">
                 <h2>Prepare sales order</h2>
                 <p class="page-intro">Save a priced multi-line draft. Approval authorizes fulfillment but does not reserve or ship stock.</p>
                 <EditForm Model="SalesOrderForm" OnValidSubmit="SaveSalesOrderAsync"><div class="auth-form">
@@ -145,6 +175,33 @@ else
                     </tbody>
                 </table>
             </article>
+
+            <article class="panel">
+                <h2>Sales quotes</h2>
+                <p class="page-intro">Expired offers remain visible but cannot be converted. Withdrawals require a reason and converted quotes retain their exact order link.</p>
+                <table class="data-table">
+                    <thead><tr><th>Quote</th><th>Customer</th><th>Status</th><th>Valid through</th><th>Total</th><th>Action</th></tr></thead>
+                    <tbody>
+                        @foreach (var quote in Workspace.Operations.SalesQuotes ?? [])
+                        {
+                            <tr><td>@quote.QuoteNumber</td><td>@quote.CustomerName</td><td>@(quote.IsExpired ? "Expired" : quote.Status)</td><td>@quote.ExpiresOn.ToString("MMM d, yyyy")</td><td>@quote.TotalAmount.ToString("C")</td><td>
+                                @if (CanManageSales && quote.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => ApproveSalesQuoteAsync(quote)">Approve</button> }
+                                @if (CanManageSales && quote.Status == "Approved" && !quote.IsExpired) { <button class="action-secondary" type="button" @onclick="() => BeginQuoteConversion(quote)">Convert to order</button> }
+                                @if (CanManageSales && quote.Status is "Draft" or "Approved") { <button class="action-secondary" type="button" @onclick="() => BeginQuoteWithdrawal(quote)">Withdraw</button> }
+                            </td></tr>
+                        }
+                    </tbody>
+                </table>
+            </article>
+
+            @if (QuoteConversionForm is not null)
+            {
+                <article class="panel"><h2>Convert @QuoteConversionForm.QuoteNumber</h2><p class="page-intro">Conversion creates a draft order from the approved quote without reserving inventory.</p><EditForm Model="QuoteConversionForm" OnValidSubmit="ConvertSalesQuoteAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Order number</label><InputText aria-label="Converted sales order number" class="field-input" @bind-Value="QuoteConversionForm.OrderNumber" /></div><div class="field-group"><label class="field-label">Order date</label><InputDate aria-label="Converted sales order date" class="field-input" @bind-Value="QuoteConversionForm.OrderedOn" /></div><div class="field-group"><label class="field-label">Requested ship date</label><InputDate aria-label="Converted sales order requested ship date" class="field-input" @bind-Value="QuoteConversionForm.RequestedShipOn" /></div><div class="field-group"><label class="field-label">Order notes</label><InputText aria-label="Converted sales order notes" class="field-input" @bind-Value="QuoteConversionForm.Notes" /></div><button class="action-primary" type="submit">Create draft order</button><button class="action-secondary" type="button" @onclick="CancelQuoteConversion">Cancel</button></div></EditForm></article>
+            }
+            @if (QuoteWithdrawalForm is not null)
+            {
+                <article class="panel"><h2>Withdraw @QuoteWithdrawalForm.QuoteNumber</h2><EditForm Model="QuoteWithdrawalForm" OnValidSubmit="WithdrawSalesQuoteAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Sales quote withdrawal reason" class="field-input" @bind-Value="QuoteWithdrawalForm.Reason" /></div><button class="action-primary" type="submit">Withdraw quote</button><button class="action-secondary" type="button" @onclick="CancelQuoteWithdrawal">Cancel</button></div></EditForm></article>
+            }
 
             <article class="panel">
                 <h2>Sales orders</h2>
@@ -319,7 +376,10 @@ else
     private BusinessWorkspaceSnapshot? Workspace;
     private string? StatusMessage;
     private InventoryAdjustmentEditor AdjustmentForm { get; } = new();
+    private SalesQuoteEditor SalesQuoteForm { get; } = new();
     private SalesOrderEditor SalesOrderForm { get; } = new();
+    private SalesQuoteConversionEditor? QuoteConversionForm;
+    private SalesQuoteWithdrawalEditor? QuoteWithdrawalForm;
     private PurchaseOrderEditor PurchaseOrderForm { get; } = new();
     private SalesAllocationEditor? AllocationForm;
     private SalesShipmentEditor? ShipmentForm;
@@ -350,6 +410,30 @@ else
     private async Task RecordAdjustmentAsync()
     {
         var result = await TransactionService.RecordInventoryAdjustmentAsync(new RecordInventoryAdjustmentRequest(AdjustmentForm.InventoryItemId, AdjustmentForm.OccurredOn, AdjustmentForm.QuantityChange, AdjustmentForm.UnitCost, AdjustmentForm.Reference, AdjustmentForm.Description)); StatusMessage = result.Succeeded ? "Inventory adjustment posted." : result.ErrorMessage; if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+    private void AddSalesQuoteLine() => SalesQuoteForm.Lines.Add(new());
+    private void RemoveSalesQuoteLine(int index) => SalesQuoteForm.Lines.RemoveAt(index);
+    private async Task SaveSalesQuoteAsync()
+    {
+        var result = await TransactionService.SaveSalesQuoteAsync(new SaveSalesQuoteRequest(null, SalesQuoteForm.CustomerId, SalesQuoteForm.QuoteNumber, SalesQuoteForm.QuotedOn, SalesQuoteForm.ExpiresOn, SalesQuoteForm.Notes, SalesQuoteForm.Lines.Select(line => new SalesOrderLineRequest(line.InventoryItemId, line.Description, line.Quantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.RevenueAccountNumber)).ToArray()));
+        StatusMessage = result.Succeeded ? "Sales-quote draft saved." : result.ErrorMessage;
+        if (result.Succeeded) { SalesQuoteForm.Reset(); await ReloadAsync(); }
+    }
+    private async Task ApproveSalesQuoteAsync(SalesQuoteSnapshot quote)
+    {
+        var result = await TransactionService.ApproveSalesQuoteAsync(new ApproveSalesQuoteRequest(quote.Id, quote.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Sales quote {quote.QuoteNumber} approved." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync();
+    }
+    private void BeginQuoteConversion(SalesQuoteSnapshot quote) => QuoteConversionForm = new SalesQuoteConversionEditor(quote.Id, quote.QuoteNumber, quote.ConcurrencyToken, quote.QuotedOn, quote.ExpiresOn, quote.Notes);
+    private void CancelQuoteConversion() => QuoteConversionForm = null;
+    private async Task ConvertSalesQuoteAsync()
+    {
+        var form = QuoteConversionForm!; var result = await TransactionService.ConvertSalesQuoteAsync(new ConvertSalesQuoteRequest(form.SalesQuoteId, form.OrderNumber, form.OrderedOn, form.RequestedShipOn, form.Notes, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Quote {form.QuoteNumber} converted to draft sales order {form.OrderNumber}." : result.ErrorMessage; if (result.Succeeded) { QuoteConversionForm = null; await ReloadAsync(); }
+    }
+    private void BeginQuoteWithdrawal(SalesQuoteSnapshot quote) => QuoteWithdrawalForm = new SalesQuoteWithdrawalEditor(quote.Id, quote.QuoteNumber, quote.ConcurrencyToken);
+    private void CancelQuoteWithdrawal() => QuoteWithdrawalForm = null;
+    private async Task WithdrawSalesQuoteAsync()
+    {
+        var form = QuoteWithdrawalForm!; var result = await TransactionService.WithdrawSalesQuoteAsync(new WithdrawSalesQuoteRequest(form.SalesQuoteId, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Quote {form.QuoteNumber} withdrawn." : result.ErrorMessage; if (result.Succeeded) { QuoteWithdrawalForm = null; await ReloadAsync(); }
     }
     private void AddSalesOrderLine() => SalesOrderForm.Lines.Add(new());
     private void RemoveSalesOrderLine(int index) => SalesOrderForm.Lines.RemoveAt(index);
@@ -424,6 +508,9 @@ else
     }
     private async Task ReloadAsync() => Workspace = await WorkspaceService.GetWorkspaceAsync();
     private sealed class InventoryAdjustmentEditor { public Guid InventoryItemId { get; set; } public DateOnly OccurredOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal QuantityChange { get; set; } public decimal UnitCost { get; set; } public string Reference { get; set; } = $"INV-{DateTime.Today:yyyyMMdd}"; public string Description { get; set; } = "Inventory count adjustment"; }
+    private sealed class SalesQuoteEditor { public Guid CustomerId { get; set; } public string QuoteNumber { get; set; } = $"QUO-{DateTime.Today:yyyyMMdd}"; public DateOnly QuotedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly ExpiresOn { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); public string Notes { get; set; } = ""; public List<SalesOrderLineEditor> Lines { get; } = [new()]; public void Reset() { CustomerId = Guid.Empty; QuoteNumber = $"QUO-{DateTime.Now:yyyyMMddHHmm}"; QuotedOn = DateOnly.FromDateTime(DateTime.Today); ExpiresOn = QuotedOn.AddDays(30); Notes = ""; Lines.Clear(); Lines.Add(new()); } }
+    private sealed class SalesQuoteConversionEditor(Guid salesQuoteId, string quoteNumber, string concurrencyToken, DateOnly quotedOn, DateOnly expiresOn, string notes) { public Guid SalesQuoteId { get; } = salesQuoteId; public string QuoteNumber { get; } = quoteNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string OrderNumber { get; set; } = $"SO-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly OrderedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today) < quotedOn ? quotedOn : DateOnly.FromDateTime(DateTime.Today) > expiresOn ? expiresOn : DateOnly.FromDateTime(DateTime.Today); public DateOnly? RequestedShipOn { get; set; } public string Notes { get; set; } = notes; }
+    private sealed class SalesQuoteWithdrawalEditor(Guid salesQuoteId, string quoteNumber, string concurrencyToken) { public Guid SalesQuoteId { get; } = salesQuoteId; public string QuoteNumber { get; } = quoteNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = ""; }
     private sealed class SalesOrderEditor { public Guid CustomerId { get; set; } public string OrderNumber { get; set; } = $"SO-{DateTime.Today:yyyyMMdd}"; public DateOnly OrderedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? RequestedShipOn { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(3)); public string Notes { get; set; } = ""; public List<SalesOrderLineEditor> Lines { get; } = [new()]; public void Reset() { CustomerId = Guid.Empty; OrderNumber = $"SO-{DateTime.Now:yyyyMMddHHmm}"; OrderedOn = DateOnly.FromDateTime(DateTime.Today); RequestedShipOn = OrderedOn.AddDays(3); Notes = ""; Lines.Clear(); Lines.Add(new()); } }
     private sealed class SalesOrderLineEditor { public Guid InventoryItemId { get; set; } public string Description { get; set; } = "Inventory sale"; public decimal Quantity { get; set; } = 1m; public decimal UnitPrice { get; set; } public decimal DiscountAmount { get; set; } public decimal TaxAmount { get; set; } public string RevenueAccountNumber { get; set; } = ""; }
     private sealed class SalesAllocationEditor(Guid salesOrderId, string salesOrderNumber, string concurrencyToken, List<SalesAllocationLineEditor> lines) { public Guid SalesOrderId { get; } = salesOrderId; public string SalesOrderNumber { get; } = salesOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public List<SalesAllocationLineEditor> Lines { get; } = lines; }

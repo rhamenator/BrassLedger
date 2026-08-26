@@ -4511,6 +4511,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<DateOnly?>("RequestedShipOn")
                         .HasColumnType("date");
 
+                    b.Property<Guid?>("SalesQuoteId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
@@ -4522,6 +4525,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerId");
+
+                    b.HasIndex("SalesQuoteId")
+                        .IsUnique();
 
                     b.HasIndex("CompanyId", "OrderNumber")
                         .IsUnique();
@@ -4597,6 +4603,137 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsUnique();
 
                     b.ToTable("SalesOrderLines");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesQuote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ConvertedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ConvertedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("ExpiresOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PreparedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("QuoteNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly>("QuotedOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("WithdrawalReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("WithdrawnAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("WithdrawnByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("CompanyId", "QuoteNumber")
+                        .IsUnique();
+
+                    b.ToTable("SalesQuotes");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesQuoteLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("DiscountAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("LineTotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<Guid>("RevenueAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SalesQuoteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("TaxAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("RevenueAccountId");
+
+                    b.HasIndex("SalesQuoteId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("SalesQuoteLines");
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.SecurityEmailOutboxMessage", b =>
@@ -6126,6 +6263,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.SalesQuote", null)
+                        .WithMany()
+                        .HasForeignKey("SalesQuoteId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesOrderLine", b =>
@@ -6145,6 +6287,36 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.SalesOrder", null)
                         .WithMany()
                         .HasForeignKey("SalesOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesQuote", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesQuoteLine", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("RevenueAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.SalesQuote", null)
+                        .WithMany()
+                        .HasForeignKey("SalesQuoteId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

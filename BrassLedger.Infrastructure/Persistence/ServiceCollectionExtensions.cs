@@ -283,6 +283,10 @@ public static class ServiceCollectionExtensions
                 && await HasTableAsync(dbContext, "InventoryShipmentLines", cancellationToken)
                 && await HasColumnAsync(dbContext, "SalesOrders", "ConcurrencyToken", cancellationToken)
                 && await HasColumnAsync(dbContext, "SalesInvoices", "InventoryShipmentId", cancellationToken);
+        if (migrationId.EndsWith("_AddSalesQuotes", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "SalesQuotes", cancellationToken)
+                && await HasTableAsync(dbContext, "SalesQuoteLines", cancellationToken)
+                && await HasColumnAsync(dbContext, "SalesOrders", "SalesQuoteId", cancellationToken);
         return false;
     }
 

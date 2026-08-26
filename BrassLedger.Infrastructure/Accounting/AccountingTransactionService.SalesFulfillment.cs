@@ -43,6 +43,7 @@ public sealed partial class AccountingTransactionService
             order = await db.SalesOrders.SingleOrDefaultAsync(candidate => candidate.Id == request.Id.Value && candidate.CompanyId == companyId, cancellationToken) ?? new SalesOrder();
             if (order.Id == Guid.Empty) return TransactionResult.Failure("Sales order not found.");
             if (order.Status != "Draft") return TransactionResult.Failure("Only a draft sales order can be edited.");
+            if (order.SalesQuoteId.HasValue) return TransactionResult.Failure("A quote-derived sales order preserves its approved commercial terms and cannot be edited. Prepare and approve a replacement quote or a separate order for changed terms.");
             if (!string.Equals(order.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The sales order changed after it was opened. Refresh and review it again.");
             db.SalesOrderLines.RemoveRange(await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).ToListAsync(cancellationToken));
         }

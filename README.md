@@ -53,7 +53,7 @@ Module-by-module usage links:
 - QuickBooks and accounting interchange: [docs/accounting-interchange-guide.md](docs/accounting-interchange-guide.md)
 - Receivables: [docs/user-guide.md#receivables](docs/user-guide.md#receivables)
 - Payables: [docs/user-guide.md#payables](docs/user-guide.md#payables)
-- Operations: [docs/user-guide.md#operations](docs/user-guide.md#operations)
+- Operations, including controlled quote-to-order conversion: [docs/user-guide.md#operations](docs/user-guide.md#operations)
 - Purchasing and inventory receiving: [docs/purchasing-guide.md](docs/purchasing-guide.md)
 - Sales orders and inventory fulfillment: [docs/sales-fulfillment-guide.md](docs/sales-fulfillment-guide.md)
 - Payroll: [docs/user-guide.md#payroll](docs/user-guide.md#payroll)

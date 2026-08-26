@@ -167,6 +167,29 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task SalesQuoteApi_RequiresSalesAuthorityAndConvertsApprovedQuoteWithProvenance()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var sales = await CreateAuthenticatedClientAsync(isolatedFactory, "sales");
+        using var warehouse = await CreateAuthenticatedClientAsync(isolatedFactory, "warehouse");
+        var workspace = await sales.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var customer = workspace!.Receivables.Customers.First(); var item = workspace.Operations.InventoryItems.First(); var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var quoteNumber = $"QUO-API-{Guid.NewGuid():N}"; var request = new SaveSalesQuoteRequest(null, customer.Id, quoteNumber, today, today.AddDays(30), "API quote", [new SalesOrderLineRequest(item.Id, "Quoted inventory", 2m, 30m, 5m, 3m, "4000")]);
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync("/api/sales-quotes", request)).StatusCode);
+        var savedResponse = await sales.PostAsJsonAsync("/api/sales-quotes", request); Assert.Equal(HttpStatusCode.Created, savedResponse.StatusCode);
+        var saved = await savedResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var quote = Assert.Single((await sales.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesQuotes!, candidate => candidate.Id == saved!.Id); Assert.Equal(58m, quote.TotalAmount);
+        Assert.Equal(HttpStatusCode.BadRequest, (await sales.PostAsJsonAsync($"/api/sales-quotes/{Guid.NewGuid()}/approval", new ApproveSalesQuoteRequest(quote.Id, quote.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync($"/api/sales-quotes/{quote.Id}/approval", new ApproveSalesQuoteRequest(quote.Id, quote.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await sales.PostAsJsonAsync($"/api/sales-quotes/{quote.Id}/approval", new ApproveSalesQuoteRequest(quote.Id, quote.ConcurrencyToken))).StatusCode);
+        quote = Assert.Single((await sales.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesQuotes!, candidate => candidate.Id == quote.Id);
+        var orderNumber = $"SO-{quoteNumber}"; var conversion = new ConvertSalesQuoteRequest(quote.Id, orderNumber, today.AddDays(1), today.AddDays(4), "Accepted through API", quote.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.Created, (await sales.PostAsJsonAsync($"/api/sales-quotes/{quote.Id}/conversion", conversion)).StatusCode);
+        var operations = await sales.GetFromJsonAsync<OperationsWorkspace>("/api/operations"); quote = Assert.Single(operations!.SalesQuotes!, candidate => candidate.Id == quote.Id); var order = Assert.Single(operations.SalesOrders, candidate => candidate.OrderNumber == orderNumber);
+        Assert.Equal("Converted", quote.Status); Assert.Equal(order.Id, quote.ConvertedSalesOrderId); Assert.Equal(quote.TotalAmount, order.TotalAmount); Assert.Equal(quote.Lines.Single().Quantity, order.Lines!.Single().OrderedQuantity);
+    }
+
+    [Fact]
     public async Task ApiLogin_LocksOperatorAfterRepeatedFailures()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();

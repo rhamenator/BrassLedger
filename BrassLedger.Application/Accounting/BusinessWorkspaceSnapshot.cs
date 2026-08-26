@@ -147,7 +147,8 @@ public sealed record OperationsWorkspace(
     IReadOnlyList<SalesOrderSnapshot> SalesOrders,
     IReadOnlyList<PurchaseOrderSnapshot> PurchaseOrders,
     IReadOnlyList<InventoryReceiptSnapshot>? InventoryReceipts = null,
-    IReadOnlyList<InventoryShipmentSnapshot>? InventoryShipments = null);
+    IReadOnlyList<InventoryShipmentSnapshot>? InventoryShipments = null,
+    IReadOnlyList<SalesQuoteSnapshot>? SalesQuotes = null);
 
 public sealed record InventoryItemSnapshot(
     string Sku,
@@ -157,6 +158,23 @@ public sealed record InventoryItemSnapshot(
     decimal ReorderPoint,
     Guid Id = default,
     decimal UnitCost = 0m);
+
+public sealed record SalesQuoteSnapshot(
+    Guid Id,
+    Guid CustomerId,
+    string QuoteNumber,
+    string CustomerName,
+    DateOnly QuotedOn,
+    DateOnly ExpiresOn,
+    string Status,
+    bool IsExpired,
+    decimal TotalAmount,
+    string Notes,
+    Guid? ConvertedSalesOrderId,
+    string ConcurrencyToken,
+    IReadOnlyList<SalesQuoteLineSnapshot> Lines);
+
+public sealed record SalesQuoteLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber);
 
 public sealed record SalesOrderSnapshot(
     string OrderNumber,
@@ -169,7 +187,8 @@ public sealed record SalesOrderSnapshot(
     DateOnly? RequestedShipOn = null,
     string Notes = "",
     string ConcurrencyToken = "",
-    IReadOnlyList<SalesOrderLineSnapshot>? Lines = null);
+    IReadOnlyList<SalesOrderLineSnapshot>? Lines = null,
+    Guid? SalesQuoteId = null);
 
 public sealed record SalesOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal AllocatedQuantity, decimal ShippedQuantity, decimal ReturnedQuantity, decimal InvoicedQuantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber);
 public sealed record InventoryShipmentSnapshot(Guid Id, Guid SalesOrderId, string SalesOrderNumber, string ShipmentNumber, DateOnly ShippedOn, string Status, decimal TotalCost, Guid? SalesInvoiceId, string ConcurrencyToken, IReadOnlyList<InventoryShipmentLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId);

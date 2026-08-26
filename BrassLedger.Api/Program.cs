@@ -839,6 +839,29 @@ api.MapPost("/inventory-adjustments", async (RecordInventoryAdjustmentRequest re
     var result = await service.RecordInventoryAdjustmentAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["inventory"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
 
+api.MapPost("/sales-quotes", async (SaveSalesQuoteRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveSalesQuoteAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/sales-quotes/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesQuote"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
+api.MapPost("/sales-quotes/{salesQuoteId:guid}/approval", async (Guid salesQuoteId, ApproveSalesQuoteRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesQuoteId != salesQuoteId) return Results.BadRequest(new { error = "sales_quote_id_mismatch" });
+    var result = await service.ApproveSalesQuoteAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesQuote"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
+api.MapPost("/sales-quotes/{salesQuoteId:guid}/withdrawal", async (Guid salesQuoteId, WithdrawSalesQuoteRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesQuoteId != salesQuoteId) return Results.BadRequest(new { error = "sales_quote_id_mismatch" });
+    var result = await service.WithdrawSalesQuoteAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesQuote"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
+api.MapPost("/sales-quotes/{salesQuoteId:guid}/conversion", async (Guid salesQuoteId, ConvertSalesQuoteRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesQuoteId != salesQuoteId) return Results.BadRequest(new { error = "sales_quote_id_mismatch" });
+    var result = await service.ConvertSalesQuoteAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/sales-orders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesQuote"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
 api.MapPost("/sales-orders", async (SaveSalesOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveSalesOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/sales-orders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesOrder"] = [result.ErrorMessage] });

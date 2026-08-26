@@ -1,6 +1,12 @@
 # Sales orders and inventory fulfillment
 
-BrassLedger provides a controlled order-to-cash path for stocked inventory. A sales operator prepares and approves a priced, multi-line sales order. A warehouse operator separately reserves available stock and posts partial or complete shipments. A receivables operator creates the customer invoice from an exact posted shipment rather than re-keying quantities.
+BrassLedger provides a controlled quote-to-cash path for stocked inventory. A sales operator can prepare and approve an expiring, priced quote and convert it once into a draft sales order. Sales then approves the order, a warehouse operator separately reserves available stock and posts partial or complete shipments, and a receivables operator creates the customer invoice from an exact posted shipment rather than re-keying quantities.
+
+## Quotes
+
+A quote contains company-scoped customer, item, price, discount, tax, and revenue-account snapshots. It has a quote date, expiration date, notes, preparer, approver, lifecycle timestamps, and optimistic-concurrency token. Drafts can be edited. Approval locks the commercial terms. A draft or approved quote can be withdrawn only with a reason; a withdrawn or converted quote remains immutable and visible.
+
+An approved quote can be converted exactly once and only on or before its expiration date. Conversion creates a draft sales order with copied line terms and a unique database-enforced quote link. It does not approve the order, reserve inventory, move stock, or post a journal. If an item or revenue account became inactive after approval, conversion stops for review instead of silently substituting another record. `sales-quote.draft.saved`, `sales-quote.approved`, `sales-quote.withdrawn`, `sales-quote.converted`, and `sales-order.created-from-quote` audit events preserve the lifecycle.
 
 ## Workflow and authority
 
@@ -34,4 +40,4 @@ Older prerelease databases may contain sales-order headers with no authoritative
 
 ## Current boundary
 
-This workflow covers line-based sales orders, approval, reservations, partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Quotes, order amendments and cancellation, pick/pack documents, backorders, customer return authorization and credit/refund coordination, warehouses/bins/lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.
+This workflow covers line-based quotes, approval, withdrawal, expiration-aware one-time conversion, line-based sales orders, approval, reservations, partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Order amendments and cancellation, pick/pack documents, backorders, customer return authorization and credit/refund coordination, warehouses/bins/lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.

@@ -123,4 +123,13 @@ public sealed class WorkflowDataTests
         await using var receivablesSession = await _fixture.CreateSessionAsync(browserKind);
         await receivablesSession.SignInAsync("controller"); var receivables = new OperationsPage(receivablesSession); await receivables.OpenAsync(); await receivables.InvoiceShipmentAsync(shipmentNumber, invoiceNumber); await receivablesSession.AssertNoUiFailuresAsync("shipment invoicing");
     }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task SalesQuote_ApprovalAndConversion_CreateExactDraftOrder(BrowserKind browserKind)
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8]; var quoteNumber = $"QUO-E2E-{suffix}"; var orderNumber = $"SO-QUO-{suffix}";
+        await using var salesSession = await _fixture.CreateSessionAsync(browserKind);
+        await salesSession.SignInAsync("sales"); var sales = new OperationsPage(salesSession); await sales.OpenAsync(); await sales.PrepareApproveAndConvertSalesQuoteAsync(quoteNumber, orderNumber); await salesSession.AssertNoUiFailuresAsync("sales-quote approval and conversion");
+    }
 }

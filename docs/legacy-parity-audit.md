@@ -7,7 +7,7 @@ and a property-management cluster.
 
 BrassLedger already has modern, organization-neutral foundations for the core
 ledger, customers/invoices, vendors/bills, inventory, purchase-order lines,
-partial receiving, exact receipt-to-bill matching, line-based sales orders,
+partial receiving, exact receipt-to-bill matching, line-based sales quotes with controlled conversion, line-based sales orders,
 reservations, partial shipment, moving-average COGS, shipment invoicing, banking,
 payroll/tax administration, jobs, and printable output. The
 registration/module-purchase switches, global-state startup architecture,
@@ -16,7 +16,7 @@ explicit non-targets.
 
 ## Remaining parity work
 
-- quote lines and conversion, pick-pack documents, backorders, returns, warehouses/bins/lots/serials, landed costs, and FIFO layers (sales-order lines, reservation, partial shipment, moving-average COGS, and shipment-derived invoicing are implemented)
+- pick-pack documents, backorders, returns, warehouses/bins/lots/serials, landed costs, and FIFO layers (quote lines and conversion, sales-order lines, reservation, partial shipment, moving-average COGS, and shipment-derived invoicing are implemented)
 - purchase requisition documents, receipt/bill variance approval, supplier returns, and landed-cost allocation
 - payment application and bank reconciliation workflows rather than summaries
 - payroll earning/deduction lines, pay runs, liabilities, and posting

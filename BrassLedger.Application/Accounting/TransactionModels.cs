@@ -71,6 +71,10 @@ public sealed record SaveEmployeePayrollSetupRequest(Guid EmployeeId, string Fil
 public sealed record SaveEmployeeEmploymentDetailsRequest(Guid EmployeeId, string AddressLine1, string AddressLine2, string PostalCode, string ResidenceCounty, string ResidenceSchoolDistrict, string WorkCounty, string WorkSchoolDistrict, DateOnly? EmploymentStartedOn, DateOnly? EmploymentEndedOn, decimal HourlyRate, decimal OvertimeRate, bool DirectDepositEnabled, string BankAccountType, string SocialSecurityNumber = "", string BankRoutingNumber = "", string BankAccountNumber = "", bool ClearSocialSecurityNumber = false, bool ClearBankDetails = false, string ConcurrencyToken = "", DateOnly? DirectDepositAuthorizationOn = null, string DirectDepositAuthorizationReference = "", bool ClearDirectDepositAuthorization = false, string AddressCity = "", string AddressState = "");
 public sealed record RecordInventoryAdjustmentRequest(Guid InventoryItemId, DateOnly OccurredOn, decimal QuantityChange, decimal UnitCost, string Reference, string Description);
 public sealed record SalesOrderLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, string RevenueAccountNumber);
+public sealed record SaveSalesQuoteRequest(Guid? Id, Guid CustomerId, string QuoteNumber, DateOnly QuotedOn, DateOnly ExpiresOn, string Notes, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken = "");
+public sealed record ApproveSalesQuoteRequest(Guid SalesQuoteId, string ConcurrencyToken);
+public sealed record WithdrawSalesQuoteRequest(Guid SalesQuoteId, string Reason, string ConcurrencyToken);
+public sealed record ConvertSalesQuoteRequest(Guid SalesQuoteId, string OrderNumber, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, string ConcurrencyToken);
 public sealed record SaveSalesOrderRequest(Guid? Id, Guid CustomerId, string OrderNumber, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record ApproveSalesOrderRequest(Guid SalesOrderId, string ConcurrencyToken);
 public sealed record AllocateSalesOrderLineRequest(Guid SalesOrderLineId, decimal Quantity);
@@ -166,6 +170,10 @@ public interface IAccountingTransactionService
     Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveSalesQuoteAsync(SaveSalesQuoteRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ApproveSalesQuoteAsync(ApproveSalesQuoteRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> WithdrawSalesQuoteAsync(WithdrawSalesQuoteRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ConvertSalesQuoteAsync(ConvertSalesQuoteRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveSalesOrderAsync(SaveSalesOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApproveSalesOrderAsync(ApproveSalesOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> AllocateSalesOrderAsync(AllocateSalesOrderRequest request, CancellationToken cancellationToken = default);

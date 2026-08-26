@@ -84,6 +84,8 @@ public sealed class BrassLedgerDbContext(
     public DbSet<SubledgerAdjustment> SubledgerAdjustments => Set<SubledgerAdjustment>();
     public DbSet<SubledgerDocumentWorkflow> SubledgerDocumentWorkflows => Set<SubledgerDocumentWorkflow>();
     public DbSet<VendorBillLine> VendorBillLines => Set<VendorBillLine>();
+    public DbSet<SalesQuote> SalesQuotes => Set<SalesQuote>();
+    public DbSet<SalesQuoteLine> SalesQuoteLines => Set<SalesQuoteLine>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<SalesOrderLine> SalesOrderLines => Set<SalesOrderLine>();
     public DbSet<TaxProfile> TaxProfiles => Set<TaxProfile>();
@@ -145,6 +147,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<Vendor>().HasKey(x => x.Id);
         modelBuilder.Entity<VendorBill>().HasKey(x => x.Id);
         modelBuilder.Entity<InventoryItem>().HasKey(x => x.Id);
+        modelBuilder.Entity<SalesQuote>().HasKey(x => x.Id);
+        modelBuilder.Entity<SalesQuoteLine>().HasKey(x => x.Id);
         modelBuilder.Entity<SalesOrder>().HasKey(x => x.Id);
         modelBuilder.Entity<SalesOrderLine>().HasKey(x => x.Id);
         modelBuilder.Entity<PurchaseOrder>().HasKey(x => x.Id);
@@ -201,7 +205,12 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SalesInvoiceLine>().HasOne<SalesOrderLine>().WithMany().HasForeignKey(line => line.SalesOrderLineId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SalesInvoiceLine>().HasOne<InventoryShipmentLine>().WithMany().HasForeignKey(line => line.InventoryShipmentLineId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SalesInvoiceLine>().HasOne<InventoryItem>().WithMany().HasForeignKey(line => line.InventoryItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SalesQuote>().HasOne<Customer>().WithMany().HasForeignKey(quote => quote.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SalesQuoteLine>().HasOne<SalesQuote>().WithMany().HasForeignKey(line => line.SalesQuoteId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SalesQuoteLine>().HasOne<InventoryItem>().WithMany().HasForeignKey(line => line.InventoryItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SalesQuoteLine>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(line => line.RevenueAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SalesOrder>().HasOne<Customer>().WithMany().HasForeignKey(order => order.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SalesOrder>().HasOne<SalesQuote>().WithMany().HasForeignKey(order => order.SalesQuoteId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SalesOrderLine>().HasOne<SalesOrder>().WithMany().HasForeignKey(line => line.SalesOrderId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<SalesOrderLine>().HasOne<InventoryItem>().WithMany().HasForeignKey(line => line.InventoryItemId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SalesOrderLine>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(line => line.RevenueAccountId).OnDelete(DeleteBehavior.Restrict);
@@ -402,6 +411,12 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<InventoryTransaction>().Property(x => x.TotalCost));
         ConfigureMoney(modelBuilder.Entity<InventoryItem>().Property(x => x.QuantityOnHand));
         ConfigureMoney(modelBuilder.Entity<InventoryItem>().Property(x => x.ReorderPoint));
+        ConfigureMoney(modelBuilder.Entity<SalesQuote>().Property(x => x.TotalAmount));
+        ConfigureMoney(modelBuilder.Entity<SalesQuoteLine>().Property(x => x.Quantity), 18, 4);
+        ConfigureMoney(modelBuilder.Entity<SalesQuoteLine>().Property(x => x.UnitPrice));
+        ConfigureMoney(modelBuilder.Entity<SalesQuoteLine>().Property(x => x.DiscountAmount));
+        ConfigureMoney(modelBuilder.Entity<SalesQuoteLine>().Property(x => x.TaxAmount));
+        ConfigureMoney(modelBuilder.Entity<SalesQuoteLine>().Property(x => x.LineTotal));
         ConfigureMoney(modelBuilder.Entity<SalesOrder>().Property(x => x.TotalAmount));
         ConfigureMoney(modelBuilder.Entity<SalesOrderLine>().Property(x => x.OrderedQuantity), 18, 4);
         ConfigureMoney(modelBuilder.Entity<SalesOrderLine>().Property(x => x.AllocatedQuantity), 18, 4);
@@ -432,6 +447,7 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<BankAccount>().Property(x => x.CurrentBalance));
         ConfigureMoney(modelBuilder.Entity<BankAccount>().Property(x => x.UnreconciledAmount));
         modelBuilder.Entity<SalesInvoice>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<SalesQuote>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<SalesOrder>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<InventoryShipment>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<VendorBill>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
@@ -566,7 +582,10 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SubledgerAdjustment>().HasIndex(x => new { x.CompanyId, x.DocumentId });
         modelBuilder.Entity<SubledgerDocumentWorkflow>().HasIndex(x => new { x.CompanyId, x.DocumentType, x.DocumentNumber, x.IsRecurringTemplate }).IsUnique();
         modelBuilder.Entity<SubledgerDocumentWorkflow>().HasIndex(x => new { x.CompanyId, x.Status, x.NextOccurrenceDate });
+        modelBuilder.Entity<SalesQuote>().HasIndex(x => new { x.CompanyId, x.QuoteNumber }).IsUnique();
+        modelBuilder.Entity<SalesQuoteLine>().HasIndex(x => new { x.SalesQuoteId, x.Sequence }).IsUnique();
         modelBuilder.Entity<SalesOrder>().HasIndex(x => new { x.CompanyId, x.OrderNumber }).IsUnique();
+        modelBuilder.Entity<SalesOrder>().HasIndex(x => x.SalesQuoteId).IsUnique();
         modelBuilder.Entity<SalesOrderLine>().HasIndex(x => new { x.SalesOrderId, x.Sequence }).IsUnique();
         modelBuilder.Entity<InventoryShipment>().HasIndex(x => new { x.CompanyId, x.ShipmentNumber }).IsUnique();
         modelBuilder.Entity<InventoryShipment>().HasIndex(x => new { x.CompanyId, x.SalesOrderId, x.Status });

@@ -55,6 +55,32 @@ public sealed class OperationsPage
         await _session.Page.GetByText($"Sales order {orderNumber} approved.", new() { Exact = true }).WaitForAsync();
     }
 
+    public async Task PrepareApproveAndConvertSalesQuoteAsync(string quoteNumber, string orderNumber)
+    {
+        await _session.Page.GetByText("Create quote draft", new() { Exact = true }).ClickAsync();
+        await _session.Page.GetByLabel("Sales quote customer").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Sales quote number").FillAsync(quoteNumber);
+        await _session.Page.GetByLabel("Sales quote line 1 item").SelectOptionAsync(new SelectOptionValue { Label = "RM-220 — Steel Fastener Pack" });
+        await _session.Page.GetByLabel("Sales quote line 1 description").FillAsync("Browser-tested quoted fasteners");
+        await _session.Page.GetByLabel("Sales quote line 1 quantity").FillAsync("2");
+        await _session.Page.GetByLabel("Sales quote line 1 unit price").FillAsync("20");
+        await _session.Page.GetByLabel("Sales quote line 1 discount").FillAsync("1");
+        await _session.Page.GetByLabel("Sales quote line 1 tax").FillAsync("2");
+        await _session.Page.GetByLabel("Sales quote line 1 revenue account").SelectOptionAsync(new SelectOptionValue { Label = "4000 — Product Revenue" });
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save quote draft" }).ClickAsync();
+        await _session.Page.GetByText("Sales-quote draft saved.", new() { Exact = true }).WaitForAsync();
+        var quoteRow = _session.Page.Locator("tr").Filter(new() { HasTextString = quoteNumber });
+        await quoteRow.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
+        await _session.Page.GetByText($"Sales quote {quoteNumber} approved.", new() { Exact = true }).WaitForAsync();
+        quoteRow = _session.Page.Locator("tr").Filter(new() { HasTextString = quoteNumber });
+        await quoteRow.GetByRole(AriaRole.Button, new() { Name = "Convert to order" }).ClickAsync();
+        await _session.Page.GetByLabel("Converted sales order number").FillAsync(orderNumber);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Create draft order" }).ClickAsync();
+        await _session.Page.GetByText($"Quote {quoteNumber} converted to draft sales order {orderNumber}.", new() { Exact = true }).WaitForAsync();
+        quoteRow = _session.Page.Locator("tr").Filter(new() { HasTextString = quoteNumber }); Assert.Contains("Converted", await quoteRow.InnerTextAsync());
+        var orderRow = _session.Page.Locator("tr").Filter(new() { HasTextString = orderNumber }); Assert.Contains("Draft", await orderRow.InnerTextAsync()); Assert.Contains("$41.00", await orderRow.InnerTextAsync());
+    }
+
     public async Task AllocateAndShipSalesOrderAsync(string orderNumber, string shipmentNumber)
     {
         var row = _session.Page.Locator("tr").Filter(new() { HasTextString = orderNumber });
