@@ -754,6 +754,24 @@ api.MapPost("/integrations/quickbooks-online/sync", async (QuickBooksSyncRequest
     var result = await service.ImportAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["quickBooks"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageUsers);
+api.MapPost("/integrations/quickbooks-online/{connectionId:guid}/mappings/{entityType}/preview", async (Guid connectionId, string entityType, IQuickBooksOnlineSyncService service, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!await HasValidAntiforgeryTokenAsync(antiforgery, context)) return Results.BadRequest(new { error = "invalid_antiforgery_token" });
+    var result = await service.PreviewMappingsAsync(connectionId, entityType, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["quickBooks"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageUsers);
+api.MapPost("/integrations/quickbooks-online/mappings", async (SaveQuickBooksMappingRequest request, IQuickBooksOnlineSyncService service, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!await HasValidAntiforgeryTokenAsync(antiforgery, context)) return Results.BadRequest(new { error = "invalid_antiforgery_token" });
+    var result = await service.SaveMappingAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["quickBooks"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageUsers);
+api.MapPost("/integrations/quickbooks-online/mappings/remove", async (RemoveQuickBooksMappingRequest request, IQuickBooksOnlineSyncService service, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!await HasValidAntiforgeryTokenAsync(antiforgery, context)) return Results.BadRequest(new { error = "invalid_antiforgery_token" });
+    var result = await service.RemoveMappingAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["quickBooks"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageUsers);
 api.MapPost("/inventory-adjustments", async (RecordInventoryAdjustmentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.RecordInventoryAdjustmentAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["inventory"] = [result.ErrorMessage] });

@@ -33,6 +33,16 @@ In Administration, select accounts, customers, or vendors and choose **Preview i
 
 The first committed import creates stable links from the Intuit entity ID to the BrassLedger entity ID. A repeated identical snapshot is unchanged rather than duplicated. A remote-only change can update a linked master record; any local change since the previous synchronization prevents overwrite and becomes a visible conflict. If both systems changed the record, it also remains a conflict. QuickBooks Accounts Receivable and Accounts Payable accounts require explicit control-account mapping and are never created automatically. Inactive, malformed, unsupported, missing, or natural-key-colliding records are retained as issues rather than silently deleted or coerced. Every preview, rejected commit, provider failure, and successful commit has a durable company-scoped run record and business-audit event.
 
+### Explicit mappings
+
+Choose **Review mappings** for the selected connection and data type to link a QuickBooks account, customer, or vendor to a record that already exists in the active BrassLedger company. The review is a durable, same-operator preview of the exact provider snapshot. Saving a mapping re-fetches QuickBooks, verifies the SHA-256 snapshot is no more than 30 minutes old, checks the expected current link at both ends, and rejects stale, duplicate, cross-company, or cross-type selections. The operator must have both external-connection administration permission and the applicable ledger, receivables, or payables permission.
+
+Account targets must have the same BrassLedger account classification. An Intuit Accounts Receivable or Accounts Payable account can only map to the corresponding operational A/R or A/P control account; ordinary accounts cannot map to control accounts, and A/R cannot be mapped to another asset control such as inventory or vendor advances. The current posting configuration identifies the standard A/R and A/P controls as accounts `1100` and `2000`. Customer and vendor mappings cannot cross entity types. A local target already linked to a different Intuit record must be unlinked deliberately before it can be reused.
+
+Creating, replacing, or removing a mapping never edits or deletes either business record. Replacement and removal use a separate confirmation step. Successful changes are protected by optimistic concurrency, appear in synchronization history as mapping changes rather than imports, and create immutable business-audit events containing company-safe identifiers and the reviewed snapshot. Removing a link does not disconnect OAuth and does not delete the remote or local record. Run a new import preview after mapping to verify that the intended conflict is resolved.
+
+The equivalent API operations are antiforgery-protected `POST` requests under `/api/integrations/quickbooks-online`: `/{connectionId}/mappings/{entityType}/preview`, `/mappings`, and `/mappings/remove`. API clients must carry the preview run ID, exact snapshot hash, expected link endpoints, and explicit confirmation flags where applicable.
+
 The API import is intentionally operator-initiated; it is not an unattended background or two-way sync. It currently imports master data only. Imported transactional data continues to use the reviewed CSV/draft workflows described below.
 
 The Ledger page can export and import:
@@ -81,7 +91,6 @@ The following are not implemented and must not be represented as available:
 - QuickBooks Desktop IIF import or export;
 - products/services, classes, locations, taxable invoices, bills, payments, credit memos, journal entries, and opening balances through the API adapter;
 - outbound API synchronization, background synchronization, automatic conflict resolution, or two-way synchronization;
-- an administrator UI for explicitly mapping a pre-existing BrassLedger record or control account to an Intuit entity; and
 - file adapters for Xero, Sage, Wave, FreshBooks, or GnuCash.
 
 QuickBooks Desktop IIF is a tab-separated format with product/version-specific headers and important limitations. BrassLedger will not emit an IIF file until its supported record types have fixtures from Intuit's current import kit and independent import verification. See Intuit's [IIF overview](https://quickbooks.intuit.com/learn-support/en-us/help-article/list-management/iif-overview-import-kit-sample-files-headers/L5CZIpJne_US_en_US) and [IIF import/export guidance](https://quickbooks.intuit.com/learn-support/en-us/help-article/import-export-data-files/export-import-edit-iif-files/L56LT9Z0Q_US_en_US).

@@ -966,6 +966,42 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var syncRuns = await client.GetFromJsonAsync<QuickBooksSyncRunSnapshot[]>($"/api/integrations/quickbooks-online/sync-runs?connectionId={connected.Id}");
         Assert.Equal(2, syncRuns!.Length);
 
+        using var mappingPreviewRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/integrations/quickbooks-online/{connected.Id}/mappings/accounts/preview");
+        mappingPreviewRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        var mappingPreviewResponse = await client.SendAsync(mappingPreviewRequest);
+        Assert.Equal(HttpStatusCode.OK, mappingPreviewResponse.StatusCode);
+        var mappingWorkspace = await mappingPreviewResponse.Content.ReadFromJsonAsync<QuickBooksMappingWorkspace>();
+        Assert.True(mappingWorkspace!.Succeeded);
+        var mappedRemote = Assert.Single(mappingWorkspace.RemoteCandidates);
+        Assert.NotNull(mappedRemote.MappedLocalEntityId);
+
+        using var unconfirmedRemovalRequest = new HttpRequestMessage(HttpMethod.Post, "/api/integrations/quickbooks-online/mappings/remove")
+        {
+            Content = JsonContent.Create(new RemoveQuickBooksMappingRequest(connected.Id, "accounts", mappedRemote.ProviderEntityId, mappedRemote.MappedLocalEntityId!.Value))
+        };
+        unconfirmedRemovalRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(unconfirmedRemovalRequest)).StatusCode);
+        using var removalRequest = new HttpRequestMessage(HttpMethod.Post, "/api/integrations/quickbooks-online/mappings/remove")
+        {
+            Content = JsonContent.Create(new RemoveQuickBooksMappingRequest(connected.Id, "accounts", mappedRemote.ProviderEntityId, mappedRemote.MappedLocalEntityId.Value, true))
+        };
+        removalRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(removalRequest)).StatusCode);
+
+        using var refreshedMappingPreviewRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/integrations/quickbooks-online/{connected.Id}/mappings/accounts/preview");
+        refreshedMappingPreviewRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        var refreshedMappingPreviewResponse = await client.SendAsync(refreshedMappingPreviewRequest);
+        mappingWorkspace = await refreshedMappingPreviewResponse.Content.ReadFromJsonAsync<QuickBooksMappingWorkspace>();
+        var localTarget = Assert.Single(mappingWorkspace!.LocalCandidates, candidate => candidate.LocalEntityId == mappedRemote.MappedLocalEntityId.Value);
+        using var saveMappingRequest = new HttpRequestMessage(HttpMethod.Post, "/api/integrations/quickbooks-online/mappings")
+        {
+            Content = JsonContent.Create(new SaveQuickBooksMappingRequest(
+                connected.Id, "accounts", mappingWorkspace.PreviewRunId!.Value, mappingWorkspace.SnapshotSha256,
+                mappedRemote.ProviderEntityId, localTarget.LocalEntityId, null, localTarget.MappedProviderEntityId ?? string.Empty))
+        };
+        saveMappingRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(saveMappingRequest)).StatusCode);
+
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/integrations/quickbooks-online/callback?state={Uri.EscapeDataString(state)}&code=replay&realmId=24680")).StatusCode);
         using var validateRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/integrations/quickbooks-online/{connected.Id}/validate");
         validateRequest.Headers.Add("X-CSRF-TOKEN", antiforgery);

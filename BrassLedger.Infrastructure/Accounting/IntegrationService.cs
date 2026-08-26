@@ -12,7 +12,7 @@ public sealed class IntegrationService(IDbContextFactory<BrassLedgerDbContext> d
 {
     private static readonly IReadOnlyList<IntegrationProviderSnapshot> Catalog =
     [
-        new("quickbooks-online", "QuickBooks Online", "Accounting", "Secure OAuth connection, company validation, token rotation, revocation, and operator-run CSV interchange are implemented; transactional API synchronization is still being completed.", true, "OAuth connection and file interchange", "Protected OAuth lifecycle plus chart of accounts, customers, vendors, non-control general journals, and zero-tax invoice draft interchange via reviewed CSV", false),
+        new("quickbooks-online", "QuickBooks Online", "Accounting", "Secure OAuth, explicit mapping, and operator-controlled API import are implemented for accounts, customers, and vendors; transactional API synchronization is still being completed.", true, "Controlled master-data API import", "Protected OAuth lifecycle; snapshot-bound account, customer, and vendor API import and mapping; plus reviewed CSV lists, non-control journals, and zero-tax invoice draft interchange", true),
         new("plaid", "Plaid", "Banking", "Connection profile only; no transaction-feed adapter is deployed.", false),
         new("stripe", "Stripe", "Payments", "Connection profile only; no payment-event adapter is deployed.", false),
         new("square", "Square", "Payments", "Connection profile only; no point-of-sale adapter is deployed.", false),

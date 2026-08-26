@@ -21,6 +21,9 @@ public interface IQuickBooksOnlineSyncService
 {
     Task<QuickBooksSyncResult> ImportAsync(QuickBooksSyncRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<QuickBooksSyncRunSnapshot>> GetRecentRunsAsync(Guid? connectionId = null, int limit = 20, CancellationToken cancellationToken = default);
+    Task<QuickBooksMappingWorkspace> PreviewMappingsAsync(Guid connectionId, string entityType, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveMappingAsync(SaveQuickBooksMappingRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RemoveMappingAsync(RemoveQuickBooksMappingRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed record IntegrationProviderSnapshot(string Code, string Name, string Category, string Description, bool SupportsSandbox, string ImplementationStatus = "Profile only", string SupportedCapabilities = "Connection profile storage only", bool LiveSynchronizationAvailable = false);
@@ -46,3 +49,51 @@ public sealed record QuickBooksSyncResult(bool Succeeded, string ErrorMessage, G
     public static QuickBooksSyncResult Failure(string errorMessage, bool dryRun = true) => new(false, errorMessage, null, dryRun, 0, 0, 0, 0, 0, 0, string.Empty, []);
 }
 public sealed record QuickBooksSyncRunSnapshot(Guid Id, Guid ConnectionId, string EntityType, string Direction, bool IsDryRun, string Status, int FetchedCount, int CreatedCount, int UpdatedCount, int UnchangedCount, int ConflictCount, int RejectedCount, string SnapshotSha256, IReadOnlyList<QuickBooksSyncIssue> Issues, string? InitiatedBy, DateTimeOffset StartedAtUtc, DateTimeOffset CompletedAtUtc);
+public sealed record QuickBooksRemoteMappingCandidate(
+    string ProviderEntityId,
+    string Name,
+    string Number,
+    string Classification,
+    bool IsControlAccount,
+    string ControlAccountPurpose,
+    bool Active,
+    bool Eligible,
+    string EligibilityMessage,
+    Guid? MappedLocalEntityId);
+public sealed record QuickBooksLocalMappingCandidate(
+    Guid LocalEntityId,
+    string Number,
+    string Name,
+    string Classification,
+    bool IsControlAccount,
+    string ControlAccountPurpose,
+    string? MappedProviderEntityId);
+public sealed record QuickBooksMappingWorkspace(
+    bool Succeeded,
+    string ErrorMessage,
+    Guid ConnectionId,
+    string EntityType,
+    Guid? PreviewRunId,
+    string SnapshotSha256,
+    IReadOnlyList<QuickBooksRemoteMappingCandidate> RemoteCandidates,
+    IReadOnlyList<QuickBooksLocalMappingCandidate> LocalCandidates)
+{
+    public static QuickBooksMappingWorkspace Failure(Guid connectionId, string entityType, string errorMessage) =>
+        new(false, errorMessage, connectionId, entityType, null, string.Empty, [], []);
+}
+public sealed record SaveQuickBooksMappingRequest(
+    Guid ConnectionId,
+    string EntityType,
+    Guid PreviewRunId,
+    string ExpectedSnapshotSha256,
+    string ProviderEntityId,
+    Guid LocalEntityId,
+    Guid? ExpectedMappedLocalEntityId = null,
+    string ExpectedTargetProviderEntityId = "",
+    bool ConfirmReplace = false);
+public sealed record RemoveQuickBooksMappingRequest(
+    Guid ConnectionId,
+    string EntityType,
+    string ProviderEntityId,
+    Guid ExpectedLocalEntityId,
+    bool ConfirmRemoval = false);

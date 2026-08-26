@@ -328,6 +328,7 @@ else
                                             {
                                                 <button class="action-secondary" type="button" @onclick="() => RunQuickBooksSyncAsync(connection.Id, true)">Preview import</button>
                                                 <button class="action-primary" type="button" disabled="@(!HasCurrentQuickBooksPreview(connection.Id))" @onclick="() => RunQuickBooksSyncAsync(connection.Id, false)">Import previewed snapshot</button>
+                                                <button class="action-secondary" type="button" @onclick="() => PreviewQuickBooksMappingsAsync(connection.Id)">Review mappings</button>
                                             }
                                             <button class="action-secondary" type="button" @onclick="() => ReconnectQuickBooksAsync(connection)">Reconnect</button>
                                             @if (HasQuickBooksAuthorization(connection))
@@ -358,10 +359,71 @@ else
                             @if (LatestQuickBooksSync.Issues.Count > 0) { <ul class="warning-list">@foreach (var issue in LatestQuickBooksSync.Issues) { <li>@issue.Code — @issue.Message @if (!string.IsNullOrWhiteSpace(issue.ProviderEntityId)) { <span>(QuickBooks ID @issue.ProviderEntityId)</span> }</li> }</ul> }
                         </div>
                     }
+                    @if (QuickBooksMappingWorkspace is { Succeeded: true } mappingWorkspace && mappingWorkspace.EntityType == QuickBooksSyncEntity)
+                    {
+                        <section class="notice-panel" aria-labelledby="quickBooksMappingHeading">
+                            <h3 id="quickBooksMappingHeading">QuickBooks @DescribeEntityType(mappingWorkspace.EntityType) mappings</h3>
+                            <p>Mapping links existing records without changing or deleting either record. Each save rechecks the exact QuickBooks snapshot and mapping state shown here. Import again after resolving conflicts.</p>
+                            @if (mappingWorkspace.RemoteCandidates.Count == 0)
+                            {
+                                <p class="muted-copy">QuickBooks returned no @DescribeEntityType(mappingWorkspace.EntityType) records to map.</p>
+                            }
+                            else
+                            {
+                                <div class="table-scroll">
+                                    <table class="data-table">
+                                        <thead><tr><th>QuickBooks record</th><th>Class</th><th>Current mapping</th><th>BrassLedger target</th><th>Actions</th></tr></thead>
+                                        <tbody>
+                                        @foreach (var remote in mappingWorkspace.RemoteCandidates)
+                                        {
+                                            <tr>
+                                                <td><strong>@remote.Name</strong><br /><small>@remote.Number · ID @remote.ProviderEntityId</small>@if (!remote.Eligible) { <div class="auth-error" role="alert">@remote.EligibilityMessage</div> }</td>
+                                                <td>@remote.Classification@(remote.IsControlAccount ? $" · {DescribeControlPurpose(remote.ControlAccountPurpose)}" : string.Empty)</td>
+                                                <td>@DescribeCurrentMapping(remote)</td>
+                                                <td>
+                                                    <select class="field-input" aria-label="@($"BrassLedger target for {remote.Name}")" value="@QuickBooksMappingSelections.GetValueOrDefault(remote.ProviderEntityId)" @onchange="args => SelectQuickBooksMapping(remote.ProviderEntityId, args.Value)" disabled="@(!remote.Eligible)">
+                                                        <option value="@Guid.Empty">Select a local record</option>
+                                                        @foreach (var local in EligibleQuickBooksTargets(remote))
+                                                        {
+                                                            <option value="@local.LocalEntityId">@local.Number — @local.Name@(local.IsControlAccount ? $" ({DescribeControlPurpose(local.ControlAccountPurpose)})" : string.Empty)</option>
+                                                        }
+                                                    </select>
+                                                </td>
+                                                <td>
+                                                    @if (PendingQuickBooksMappingReplacementId == remote.ProviderEntityId)
+                                                    {
+                                                        <button class="action-danger" type="button" @onclick="() => SaveQuickBooksMappingAsync(remote, true)">Confirm replacement</button>
+                                                        <button class="action-secondary" type="button" @onclick="CancelQuickBooksMappingAction">Cancel</button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button class="action-primary" type="button" disabled="@(!remote.Eligible || QuickBooksMappingSelections.GetValueOrDefault(remote.ProviderEntityId) == Guid.Empty || remote.MappedLocalEntityId == QuickBooksMappingSelections.GetValueOrDefault(remote.ProviderEntityId))" @onclick="() => SaveQuickBooksMappingAsync(remote, false)">@(remote.MappedLocalEntityId.HasValue ? "Replace mapping" : "Save mapping")</button>
+                                                    }
+                                                    @if (remote.MappedLocalEntityId.HasValue)
+                                                    {
+                                                        @if (PendingQuickBooksMappingRemovalId == remote.ProviderEntityId)
+                                                        {
+                                                            <button class="action-danger" type="button" @onclick="() => RemoveQuickBooksMappingAsync(remote, true)">Confirm removal</button>
+                                                            <button class="action-secondary" type="button" @onclick="CancelQuickBooksMappingAction">Cancel</button>
+                                                        }
+                                                        else
+                                                        {
+                                                            <button class="action-secondary" type="button" @onclick="() => RemoveQuickBooksMappingAsync(remote, false)">Remove mapping</button>
+                                                        }
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </section>
+                    }
                     @if (QuickBooksSyncRuns.Count > 0)
                     {
                         <h3>Recent QuickBooks API synchronization runs</h3>
-                        <div class="table-scroll"><table class="data-table"><thead><tr><th>Completed</th><th>Entity</th><th>Mode</th><th>Status</th><th>Counts</th><th>Operator</th></tr></thead><tbody>@foreach (var run in QuickBooksSyncRuns) { <tr><td>@run.CompletedAtUtc.LocalDateTime</td><td>@run.EntityType</td><td>@(run.IsDryRun ? "Preview" : "Import")</td><td>@run.Status</td><td>@run.CreatedCount create · @run.UpdatedCount update · @run.ConflictCount conflict · @run.RejectedCount rejected</td><td>@(run.InitiatedBy ?? "Unknown")</td></tr> }</tbody></table></div>
+                        <div class="table-scroll"><table class="data-table"><thead><tr><th>Completed</th><th>Entity</th><th>Mode</th><th>Status</th><th>Counts</th><th>Operator</th></tr></thead><tbody>@foreach (var run in QuickBooksSyncRuns) { <tr><td>@run.CompletedAtUtc.LocalDateTime</td><td>@run.EntityType</td><td>@DescribeQuickBooksRun(run)</td><td>@run.Status</td><td>@run.CreatedCount create · @run.UpdatedCount update · @run.ConflictCount conflict · @run.RejectedCount rejected</td><td>@(run.InitiatedBy ?? "Unknown")</td></tr> }</tbody></table></div>
                     }
 
                     <details>
@@ -405,6 +467,10 @@ else
     private QuickBooksSyncResult? LatestQuickBooksSync { get; set; }
     private IReadOnlyList<QuickBooksSyncRunSnapshot> QuickBooksSyncRuns { get; set; } = [];
     private Dictionary<string, string> QuickBooksPreviewSnapshots { get; } = new(StringComparer.Ordinal);
+    private QuickBooksMappingWorkspace? QuickBooksMappingWorkspace { get; set; }
+    private Dictionary<string, Guid> QuickBooksMappingSelections { get; } = new(StringComparer.Ordinal);
+    private string? PendingQuickBooksMappingReplacementId { get; set; }
+    private string? PendingQuickBooksMappingRemovalId { get; set; }
     private BackupResult? LatestBackup { get; set; }
     private BackupVerificationResult? BackupVerification { get; set; }
     private BackupRecoveryRehearsalResult? RecoveryRehearsal { get; set; }
@@ -557,6 +623,108 @@ else
     private bool HasCurrentQuickBooksPreview(Guid connectionId) => QuickBooksPreviewSnapshots.ContainsKey(QuickBooksPreviewKey(connectionId));
     private string QuickBooksPreviewKey(Guid connectionId) => $"{connectionId:N}:{QuickBooksSyncEntity}";
     private static bool HasQuickBooksAuthorization(IntegrationConnectionSnapshot connection) => connection.Status is "Connected" or "ValidationFailed" or "ReauthorizationRequired" or "DisconnectPending";
+
+    private async Task PreviewQuickBooksMappingsAsync(Guid connectionId)
+    {
+        QuickBooksMappingWorkspace = await QuickBooksOnlineSyncService.PreviewMappingsAsync(connectionId, QuickBooksSyncEntity);
+        QuickBooksMappingSelections.Clear();
+        PendingQuickBooksMappingReplacementId = null;
+        PendingQuickBooksMappingRemovalId = null;
+        if (!QuickBooksMappingWorkspace.Succeeded)
+        {
+            StatusMessage = QuickBooksMappingWorkspace.ErrorMessage;
+            return;
+        }
+        foreach (var remote in QuickBooksMappingWorkspace.RemoteCandidates)
+            QuickBooksMappingSelections[remote.ProviderEntityId] = remote.MappedLocalEntityId ?? Guid.Empty;
+        StatusMessage = "Mapping review loaded. Saving a link will not change or delete either QuickBooks or BrassLedger records.";
+        QuickBooksSyncRuns = await QuickBooksOnlineSyncService.GetRecentRunsAsync(limit: 20);
+    }
+
+    private void SelectQuickBooksMapping(string providerEntityId, object? value)
+    {
+        QuickBooksMappingSelections[providerEntityId] = Guid.TryParse(value?.ToString(), out var localEntityId) ? localEntityId : Guid.Empty;
+        PendingQuickBooksMappingReplacementId = null;
+        PendingQuickBooksMappingRemovalId = null;
+    }
+
+    private IReadOnlyList<QuickBooksLocalMappingCandidate> EligibleQuickBooksTargets(QuickBooksRemoteMappingCandidate remote)
+    {
+        if (QuickBooksMappingWorkspace is null) return [];
+        return QuickBooksMappingWorkspace.LocalCandidates.Where(local =>
+            (QuickBooksMappingWorkspace.EntityType != "accounts" || (local.Classification == remote.Classification && local.IsControlAccount == remote.IsControlAccount && (!remote.IsControlAccount || local.ControlAccountPurpose == remote.ControlAccountPurpose)))
+            && (string.IsNullOrWhiteSpace(local.MappedProviderEntityId) || local.MappedProviderEntityId == remote.ProviderEntityId)).ToArray();
+    }
+
+    private string DescribeCurrentMapping(QuickBooksRemoteMappingCandidate remote)
+    {
+        if (!remote.MappedLocalEntityId.HasValue || QuickBooksMappingWorkspace is null) return "Not mapped";
+        var local = QuickBooksMappingWorkspace.LocalCandidates.FirstOrDefault(candidate => candidate.LocalEntityId == remote.MappedLocalEntityId.Value);
+        return local is null ? "Mapped local record is missing" : $"{local.Number} — {local.Name}";
+    }
+
+    private async Task SaveQuickBooksMappingAsync(QuickBooksRemoteMappingCandidate remote, bool confirmed)
+    {
+        if (QuickBooksMappingWorkspace is null || !QuickBooksMappingWorkspace.PreviewRunId.HasValue) return;
+        var localEntityId = QuickBooksMappingSelections.GetValueOrDefault(remote.ProviderEntityId);
+        var target = QuickBooksMappingWorkspace.LocalCandidates.FirstOrDefault(candidate => candidate.LocalEntityId == localEntityId);
+        if (target is null)
+        {
+            StatusMessage = "Select a compatible BrassLedger record before saving the mapping.";
+            return;
+        }
+        if (remote.MappedLocalEntityId.HasValue && remote.MappedLocalEntityId != localEntityId && !confirmed)
+        {
+            PendingQuickBooksMappingReplacementId = remote.ProviderEntityId;
+            PendingQuickBooksMappingRemovalId = null;
+            StatusMessage = "Confirm replacing this mapping. Neither the old nor new local record will be deleted or changed.";
+            return;
+        }
+        var result = await QuickBooksOnlineSyncService.SaveMappingAsync(new(
+            QuickBooksMappingWorkspace.ConnectionId, QuickBooksMappingWorkspace.EntityType, QuickBooksMappingWorkspace.PreviewRunId.Value,
+            QuickBooksMappingWorkspace.SnapshotSha256, remote.ProviderEntityId, localEntityId, remote.MappedLocalEntityId,
+            target.MappedProviderEntityId ?? string.Empty, confirmed));
+        if (!result.Succeeded)
+        {
+            StatusMessage = result.ErrorMessage;
+            return;
+        }
+        var completionMessage = remote.MappedLocalEntityId.HasValue ? "QuickBooks mapping replaced. No business record was changed or deleted." : "QuickBooks mapping saved. No business record was changed.";
+        await PreviewQuickBooksMappingsAsync(QuickBooksMappingWorkspace.ConnectionId);
+        StatusMessage = completionMessage;
+    }
+
+    private async Task RemoveQuickBooksMappingAsync(QuickBooksRemoteMappingCandidate remote, bool confirmed)
+    {
+        if (QuickBooksMappingWorkspace is null || !remote.MappedLocalEntityId.HasValue) return;
+        if (!confirmed)
+        {
+            PendingQuickBooksMappingRemovalId = remote.ProviderEntityId;
+            PendingQuickBooksMappingReplacementId = null;
+            StatusMessage = "Confirm removing only the link. Neither the QuickBooks nor BrassLedger record will be deleted.";
+            return;
+        }
+        var connectionId = QuickBooksMappingWorkspace.ConnectionId;
+        var result = await QuickBooksOnlineSyncService.RemoveMappingAsync(new(connectionId, QuickBooksMappingWorkspace.EntityType, remote.ProviderEntityId, remote.MappedLocalEntityId.Value, true));
+        if (!result.Succeeded)
+        {
+            StatusMessage = result.ErrorMessage;
+            return;
+        }
+        await PreviewQuickBooksMappingsAsync(connectionId);
+        StatusMessage = "QuickBooks mapping removed. Neither business record was deleted or changed.";
+    }
+
+    private void CancelQuickBooksMappingAction()
+    {
+        PendingQuickBooksMappingReplacementId = null;
+        PendingQuickBooksMappingRemovalId = null;
+        StatusMessage = "Mapping change cancelled.";
+    }
+
+    private static string DescribeEntityType(string entityType) => entityType switch { "accounts" => "account", "customers" => "customer", "vendors" => "vendor", _ => "record" };
+    private static string DescribeControlPurpose(string purpose) => purpose switch { "AccountsReceivable" => "A/R control", "AccountsPayable" => "A/P control", _ => "other control" };
+    private static string DescribeQuickBooksRun(QuickBooksSyncRunSnapshot run) => run.Direction == "Mapping" ? run.IsDryRun ? "Mapping review" : "Mapping change" : run.IsDryRun ? "Import preview" : "Import";
 
     private async Task DisconnectQuickBooksAsync(Guid connectionId)
     {

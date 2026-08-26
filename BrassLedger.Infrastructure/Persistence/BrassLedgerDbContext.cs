@@ -290,6 +290,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SecurityEmailOutboxMessage>().Property(x => x.Body).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<IntegrationConnection>().Property(x => x.CredentialsJson).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<IntegrationConnection>().Property(x => x.CredentialVersion).IsConcurrencyToken();
+        modelBuilder.Entity<ExternalEntityLink>().Property(x => x.LastSynchronizedAtUtc).IsConcurrencyToken();
         modelBuilder.Entity<AccessRole>().Property(x => x.Description).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Customer>().Property(x => x.Name).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Customer>().Property(x => x.Email).HasConversion(encryptedStringConverter);

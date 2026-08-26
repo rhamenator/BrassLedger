@@ -298,7 +298,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var integrations = scope.ServiceProvider.GetRequiredService<IIntegrationService>();
         var catalog = await integrations.GetCatalogAsync();
         var quickBooks = catalog.Single(provider => provider.Code == "quickbooks-online");
-        Assert.Equal("OAuth connection and file interchange", quickBooks.ImplementationStatus); Assert.False(quickBooks.LiveSynchronizationAvailable);
+        Assert.Equal("Controlled master-data API import", quickBooks.ImplementationStatus); Assert.True(quickBooks.LiveSynchronizationAvailable);
         Assert.True(quickBooks.SupportsSandbox);
         Assert.Contains("Protected OAuth lifecycle", quickBooks.SupportedCapabilities, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("zero-tax invoice draft interchange", quickBooks.SupportedCapabilities, StringComparison.OrdinalIgnoreCase);

@@ -568,6 +568,177 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         Assert.False((await sync.ImportAsync(new(connectionId, "accounts", true))).Succeeded);
     }
 
+    [Fact]
+    public async Task ExplicitMappings_AreSnapshotBoundClassificationSafeReplaceConfirmedAuditedAndNonDestructive()
+    {
+        var provider = new FakeQuickBooksOnlineClient
+        {
+            Entities =
+            {
+                ["accounts"] = [new("AR-REMOTE", "4", true, "QuickBooks receivables", "QBO-AR", string.Empty, "Accounts Receivable", "AccountsReceivable")],
+                ["customers"] =
+                [
+                    new("C-ONE", "2", true, "Remote customer one", string.Empty, "one@example.test", string.Empty, string.Empty),
+                    new("C-TWO", "1", true, "Remote customer two", string.Empty, "two@example.test", string.Empty, string.Empty)
+                ]
+            }
+        };
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        var connectionId = await ConnectAsync(scope.ServiceProvider);
+        var sync = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineSyncService>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+
+        Guid receivablesControlId;
+        Guid inventoryControlId;
+        Guid incompatibleExpenseId;
+        Guid customerOneId;
+        Guid customerTwoId;
+        Guid otherCompanyCustomerId;
+        string originalControlName;
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var receivablesControl = await db.Accounts.SingleAsync(account => account.CompanyId == actor.CompanyId && account.Number == "1100" && account.IsControlAccount);
+            var inventoryControl = await db.Accounts.SingleAsync(account => account.CompanyId == actor.CompanyId && account.Number == "1200" && account.IsControlAccount);
+            var incompatibleExpense = await db.Accounts.FirstAsync(account => account.CompanyId == actor.CompanyId && account.Type == AccountType.Expense && !account.IsControlAccount);
+            receivablesControlId = receivablesControl.Id;
+            inventoryControlId = inventoryControl.Id;
+            incompatibleExpenseId = incompatibleExpense.Id;
+            originalControlName = receivablesControl.Name;
+            var first = new Customer { Id = Guid.NewGuid(), CompanyId = actor.CompanyId, CustomerNumber = "MAP-C-1", Name = "Local customer one", Email = "local-one@example.test" };
+            var second = new Customer { Id = Guid.NewGuid(), CompanyId = actor.CompanyId, CustomerNumber = "MAP-C-2", Name = "Local customer two", Email = "local-two@example.test" };
+            customerOneId = first.Id;
+            customerTwoId = second.Id;
+            var otherCompany = new Company { Id = Guid.NewGuid(), Name = $"Mapping isolation {Guid.NewGuid():N}", LegalName = "Mapping isolation", BaseCurrency = "USD", FiscalYearStartMonth = 1 };
+            var otherCustomer = new Customer { Id = Guid.NewGuid(), CompanyId = otherCompany.Id, CustomerNumber = "OTHER-COMPANY", Name = "Other company customer", Email = "other@example.test" };
+            otherCompanyCustomerId = otherCustomer.Id;
+            db.Companies.Add(otherCompany);
+            db.Customers.AddRange(first, second, otherCustomer);
+            await db.SaveChangesAsync();
+        }
+
+        scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, actor.UserId.ToString()),
+                new Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, actor.CompanyId.ToString()),
+                new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)
+            ], "test"))
+        };
+        Assert.False((await sync.PreviewMappingsAsync(connectionId, "accounts")).Succeeded);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+
+        var accountWorkspace = await sync.PreviewMappingsAsync(connectionId, "accounts");
+        Assert.True(accountWorkspace.Succeeded, accountWorkspace.ErrorMessage);
+        Assert.NotNull(accountWorkspace.PreviewRunId);
+        var remoteAccount = Assert.Single(accountWorkspace.RemoteCandidates);
+        Assert.True(remoteAccount.Eligible);
+        Assert.Equal("Asset", remoteAccount.Classification);
+        var badClassification = await sync.SaveMappingAsync(new(
+            connectionId, "accounts", accountWorkspace.PreviewRunId!.Value, accountWorkspace.SnapshotSha256,
+            remoteAccount.ProviderEntityId, incompatibleExpenseId));
+        Assert.False(badClassification.Succeeded);
+        Assert.Contains("classifications do not match", badClassification.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var wrongControlPurpose = await sync.SaveMappingAsync(new(
+            connectionId, "accounts", accountWorkspace.PreviewRunId.Value, accountWorkspace.SnapshotSha256,
+            remoteAccount.ProviderEntityId, inventoryControlId));
+        Assert.False(wrongControlPurpose.Succeeded);
+        Assert.Contains("corresponding control-account", wrongControlPurpose.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var controlTarget = Assert.Single(accountWorkspace.LocalCandidates, candidate => candidate.LocalEntityId == receivablesControlId);
+        Assert.Equal("AccountsReceivable", controlTarget.ControlAccountPurpose);
+        var accountMapped = await sync.SaveMappingAsync(new(
+            connectionId, "accounts", accountWorkspace.PreviewRunId.Value, accountWorkspace.SnapshotSha256,
+            remoteAccount.ProviderEntityId, controlTarget.LocalEntityId, null, controlTarget.MappedProviderEntityId ?? string.Empty));
+        Assert.True(accountMapped.Succeeded, accountMapped.ErrorMessage);
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var unchangedControl = await db.Accounts.SingleAsync(account => account.Id == receivablesControlId);
+            Assert.Equal(originalControlName, unchangedControl.Name);
+            Assert.Equal("AR-REMOTE", (await db.ExternalEntityLinks.SingleAsync(link => link.Id == accountMapped.Id)).ProviderEntityId);
+        }
+        var importPreview = await sync.ImportAsync(new(connectionId, "accounts", true));
+        Assert.True(importPreview.Succeeded, importPreview.ErrorMessage);
+        Assert.Equal(1, importPreview.UnchangedCount);
+        Assert.DoesNotContain(importPreview.Issues, issue => issue.Code == "control_account_mapping_required");
+
+        var customerWorkspace = await sync.PreviewMappingsAsync(connectionId, "customers");
+        Assert.DoesNotContain(customerWorkspace.LocalCandidates, candidate => candidate.LocalEntityId == otherCompanyCustomerId);
+        var remoteOne = Assert.Single(customerWorkspace.RemoteCandidates, candidate => candidate.ProviderEntityId == "C-ONE");
+        var customerOneTarget = Assert.Single(customerWorkspace.LocalCandidates, candidate => candidate.LocalEntityId == customerOneId);
+        var crossCompanyMapping = await sync.SaveMappingAsync(new(
+            connectionId, "customers", customerWorkspace.PreviewRunId!.Value, customerWorkspace.SnapshotSha256,
+            remoteOne.ProviderEntityId, otherCompanyCustomerId));
+        Assert.False(crossCompanyMapping.Succeeded);
+        Assert.Contains("active company", crossCompanyMapping.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        provider.Entities["customers"][0] = provider.Entities["customers"][0] with { Name = "Changed after mapping preview", SyncToken = "3" };
+        var staleSnapshot = await sync.SaveMappingAsync(new(
+            connectionId, "customers", customerWorkspace.PreviewRunId.Value, customerWorkspace.SnapshotSha256,
+            remoteOne.ProviderEntityId, customerOneId, null, customerOneTarget.MappedProviderEntityId ?? string.Empty));
+        Assert.False(staleSnapshot.Succeeded);
+        Assert.Contains("changed after", staleSnapshot.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        provider.Entities["customers"][0] = provider.Entities["customers"][0] with { Name = "Remote customer one", SyncToken = "2" };
+        customerWorkspace = await sync.PreviewMappingsAsync(connectionId, "customers");
+        remoteOne = Assert.Single(customerWorkspace.RemoteCandidates, candidate => candidate.ProviderEntityId == "C-ONE");
+        customerOneTarget = Assert.Single(customerWorkspace.LocalCandidates, candidate => candidate.LocalEntityId == customerOneId);
+        var created = await sync.SaveMappingAsync(new(
+            connectionId, "customers", customerWorkspace.PreviewRunId!.Value, customerWorkspace.SnapshotSha256,
+            remoteOne.ProviderEntityId, customerOneId, null, customerOneTarget.MappedProviderEntityId ?? string.Empty));
+        Assert.True(created.Succeeded, created.ErrorMessage);
+
+        customerWorkspace = await sync.PreviewMappingsAsync(connectionId, "customers");
+        remoteOne = Assert.Single(customerWorkspace.RemoteCandidates, candidate => candidate.ProviderEntityId == "C-ONE");
+        var customerTwoTarget = Assert.Single(customerWorkspace.LocalCandidates, candidate => candidate.LocalEntityId == customerTwoId);
+        var unconfirmedReplace = await sync.SaveMappingAsync(new(
+            connectionId, "customers", customerWorkspace.PreviewRunId!.Value, customerWorkspace.SnapshotSha256,
+            remoteOne.ProviderEntityId, customerTwoId, remoteOne.MappedLocalEntityId, customerTwoTarget.MappedProviderEntityId ?? string.Empty));
+        Assert.False(unconfirmedReplace.Succeeded);
+        Assert.Contains("confirmation", unconfirmedReplace.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var replaced = await sync.SaveMappingAsync(new(
+            connectionId, "customers", customerWorkspace.PreviewRunId.Value, customerWorkspace.SnapshotSha256,
+            remoteOne.ProviderEntityId, customerTwoId, remoteOne.MappedLocalEntityId, customerTwoTarget.MappedProviderEntityId ?? string.Empty, true));
+        Assert.True(replaced.Succeeded, replaced.ErrorMessage);
+
+        customerWorkspace = await sync.PreviewMappingsAsync(connectionId, "customers");
+        var remoteTwo = Assert.Single(customerWorkspace.RemoteCandidates, candidate => candidate.ProviderEntityId == "C-TWO");
+        customerOneTarget = Assert.Single(customerWorkspace.LocalCandidates, candidate => candidate.LocalEntityId == customerOneId);
+        Assert.True((await sync.SaveMappingAsync(new(
+            connectionId, "customers", customerWorkspace.PreviewRunId!.Value, customerWorkspace.SnapshotSha256,
+            remoteTwo.ProviderEntityId, customerOneId, remoteTwo.MappedLocalEntityId, customerOneTarget.MappedProviderEntityId ?? string.Empty))).Succeeded);
+
+        customerWorkspace = await sync.PreviewMappingsAsync(connectionId, "customers");
+        remoteOne = Assert.Single(customerWorkspace.RemoteCandidates, candidate => candidate.ProviderEntityId == "C-ONE");
+        customerOneTarget = Assert.Single(customerWorkspace.LocalCandidates, candidate => candidate.LocalEntityId == customerOneId);
+        var occupiedTarget = await sync.SaveMappingAsync(new(
+            connectionId, "customers", customerWorkspace.PreviewRunId!.Value, customerWorkspace.SnapshotSha256,
+            remoteOne.ProviderEntityId, customerOneId, remoteOne.MappedLocalEntityId, customerOneTarget.MappedProviderEntityId ?? string.Empty, true));
+        Assert.False(occupiedTarget.Succeeded);
+        Assert.Contains("already mapped", occupiedTarget.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var noConfirmation = await sync.RemoveMappingAsync(new(connectionId, "customers", "C-ONE", customerTwoId));
+        Assert.False(noConfirmation.Succeeded);
+        var removed = await sync.RemoveMappingAsync(new(connectionId, "customers", "C-ONE", customerTwoId, true));
+        Assert.True(removed.Succeeded, removed.ErrorMessage);
+        var staleRemoval = await sync.RemoveMappingAsync(new(connectionId, "customers", "C-ONE", customerTwoId, true));
+        Assert.False(staleRemoval.Succeeded);
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            Assert.False(await db.ExternalEntityLinks.AnyAsync(link => link.IntegrationConnectionId == connectionId && link.ProviderEntityId == "C-ONE"));
+            var customers = await db.Customers.Where(customer => customer.Id == customerOneId || customer.Id == customerTwoId).OrderBy(customer => customer.CustomerNumber).ToArrayAsync();
+            Assert.Equal(["Local customer one", "Local customer two"], customers.Select(customer => customer.Name));
+            var audits = await db.BusinessAuditEntries.Where(entry => entry.CompanyId == actor.CompanyId).Select(entry => entry.Action).ToArrayAsync();
+            Assert.Contains("integration.quickbooks.mapping_previewed", audits);
+            Assert.Contains("integration.quickbooks.mapping_created", audits);
+            Assert.Contains("integration.quickbooks.mapping_replaced", audits);
+            Assert.Contains("integration.quickbooks.mapping_removed", audits);
+        }
+    }
+
     private ServiceProvider CreateServiceProvider(FakeQuickBooksOnlineClient provider)
     {
         Directory.CreateDirectory(_contentRootPath);
