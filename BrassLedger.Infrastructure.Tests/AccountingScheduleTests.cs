@@ -88,7 +88,9 @@ public sealed class AccountingScheduleTests : IDisposable
         Assert.True(schedule.Installments[0].ExpenseAmount > schedule.Installments[^1].ExpenseAmount);
         Assert.All(schedule.Installments, installment => Assert.Equal(installment.PrincipalAmount + installment.ExpenseAmount, installment.PaymentAmount));
 
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost, BrassLedgerPermissions.JournalReverse);
+        decimal startingBankBalance;
+        await using (var db = await factory.CreateDbContextAsync()) startingBankBalance = (await db.BankAccounts.SingleAsync(bank => bank.Id == accounts.PaymentBank)).CurrentBalance;
         Assert.True((await service.ApproveAccountingScheduleAsync(new(schedule.Id, schedule.ConcurrencyToken))).Succeeded);
         schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
         Assert.True((await service.PrepareAccountingScheduleInstallmentsAsync(new(schedule.Id, schedule.StartDate, schedule.ConcurrencyToken))).Succeeded);
@@ -100,9 +102,12 @@ public sealed class AccountingScheduleTests : IDisposable
         {
             var journal = await db.JournalEntries.SingleAsync(entry => entry.Id == paymentInstallment.JournalEntryId);
             Assert.Equal(accounts.PaymentBank, journal.BankAccountId);
+            Assert.Equal(startingBankBalance - paymentInstallment.PaymentAmount, (await db.BankAccounts.SingleAsync(bank => bank.Id == accounts.PaymentBank)).CurrentBalance);
         }
         var businessWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
         Assert.Contains(businessWorkspace.Treasury.ReconciliationCandidates ?? [], candidate => candidate.JournalEntryId == paymentInstallment.JournalEntryId && candidate.BankAccountId == accounts.PaymentBank);
+        Assert.True((await service.ReverseAccountingScheduleInstallmentAsync(new(paymentInstallment.Id, paymentInstallment.DueOn.AddDays(1), "Correct loan payment."))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) Assert.Equal(startingBankBalance, (await db.BankAccounts.SingleAsync(bank => bank.Id == accounts.PaymentBank)).CurrentBalance);
 
         var otherCompanyId = Guid.NewGuid();
         await using (var db = await factory.CreateDbContextAsync())
@@ -153,6 +158,83 @@ public sealed class AccountingScheduleTests : IDisposable
         Assert.Contains("no payment bank", invalid.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task FixedAssetDisposal_RecognizesGainUsesBankWorkflowAndReversesAuditably()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var actor = await GetActorAsync(factory);
+        var accounts = await AddScheduleAccountsAsync(factory, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost, BrassLedgerPermissions.JournalReverse);
+        var service = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var acquisition = await service.PostJournalEntryAsync(new(new DateOnly(2026, 4, 1), "FA-DISP-ACQ", "Record forklift acquisition", [new("1500", 1200m, 0m, "Forklift cost"), new("3000", 0m, 1200m, "Opening asset financing")]));
+        Assert.True(acquisition.Succeeded, acquisition.ErrorMessage);
+
+        var saved = await service.SaveAccountingScheduleAsync(new(null, "FA-DISP", "Forklift", "FixedAsset", new DateOnly(2026, 4, 30), 12, 1200m, 0m, 0m, accounts.FixedAsset, accounts.AccumulatedDepreciation, accounts.DepreciationExpense, null, "Disposal lifecycle."));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        var schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
+        Assert.True((await service.ApproveAccountingScheduleAsync(new(schedule.Id, schedule.ConcurrencyToken))).Succeeded);
+        schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
+        Assert.True((await service.PrepareAccountingScheduleInstallmentsAsync(new(schedule.Id, schedule.StartDate, schedule.ConcurrencyToken))).Succeeded);
+        schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
+        var depreciation = schedule.Installments[0];
+        Assert.True((await service.ApproveJournalEntryAsync(depreciation.JournalEntryId!.Value)).Succeeded);
+        Assert.True((await service.PostApprovedJournalEntryAsync(depreciation.JournalEntryId.Value)).Succeeded);
+
+        schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
+        decimal bankBalanceBeforeDisposal;
+        await using (var db = await factory.CreateDbContextAsync()) bankBalanceBeforeDisposal = (await db.BankAccounts.SingleAsync(bank => bank.Id == accounts.PaymentBank)).CurrentBalance;
+        var disposal = await service.PrepareFixedAssetDisposalAsync(new(schedule.Id, new DateOnly(2026, 5, 15), 1200m, accounts.PaymentBank, accounts.DisposalGain, accounts.DisposalLoss, "Sell forklift", schedule.ConcurrencyToken));
+        Assert.True(disposal.Succeeded, disposal.ErrorMessage);
+        var disposalId = disposal.Id!.Value;
+        schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
+        Assert.Equal("DisposalPending", schedule.Status);
+        Assert.Equal(disposalId, schedule.DisposalJournalEntryId);
+        Assert.False((await service.PrepareAccountingScheduleInstallmentsAsync(new(schedule.Id, new DateOnly(2026, 6, 30), schedule.ConcurrencyToken))).Succeeded);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var entry = await db.JournalEntries.SingleAsync(candidate => candidate.Id == disposalId);
+            var lines = await db.JournalEntryLines.Where(line => line.JournalEntryId == disposalId).ToArrayAsync();
+            Assert.Equal(accounts.PaymentBank, entry.BankAccountId);
+            Assert.Equal(1300m, lines.Sum(line => line.Debit));
+            Assert.Equal(1300m, lines.Sum(line => line.Credit));
+            Assert.Contains(lines, line => line.AccountId == accounts.AccumulatedDepreciation && line.Debit == 100m);
+            Assert.Contains(lines, line => line.AccountId == accounts.FixedAsset && line.Credit == 1200m);
+            Assert.Contains(lines, line => line.AccountId == accounts.DisposalGain && line.Credit == 100m);
+        }
+        var editAttempt = await service.SaveJournalEntryDraftAsync(new(disposalId, new DateOnly(2026, 5, 15), "ALTER", "Alter disposal", [new("1000", 1m, 0m, "Cash"), new("4400", 0m, 1m, "Gain")]));
+        Assert.False(editAttempt.Succeeded);
+        Assert.Contains("originating workflow", editAttempt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        Assert.True((await service.ApproveJournalEntryAsync(disposalId)).Succeeded);
+        Assert.True((await service.PostApprovedJournalEntryAsync(disposalId)).Succeeded);
+        schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
+        Assert.Equal("Disposed", schedule.Status);
+        decimal bankBalanceAfterDisposal;
+        await using (var db = await factory.CreateDbContextAsync()) bankBalanceAfterDisposal = (await db.BankAccounts.SingleAsync(bank => bank.Id == accounts.PaymentBank)).CurrentBalance;
+        Assert.Equal(bankBalanceBeforeDisposal + 1200m, bankBalanceAfterDisposal);
+        var businessWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        Assert.Contains(businessWorkspace.Treasury.ReconciliationCandidates ?? [], candidate => candidate.JournalEntryId == disposalId && candidate.BankAccountId == accounts.PaymentBank && candidate.SignedAmount == 1200m);
+
+        var reversed = await service.ReverseFixedAssetDisposalAsync(new(schedule.Id, new DateOnly(2026, 5, 16), "Sale was cancelled.", schedule.ConcurrencyToken));
+        Assert.True(reversed.Succeeded, reversed.ErrorMessage);
+        schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
+        Assert.Equal("DisposalReversed", schedule.Status);
+        await using (var db = await factory.CreateDbContextAsync()) Assert.Equal(bankBalanceBeforeDisposal, (await db.BankAccounts.SingleAsync(bank => bank.Id == accounts.PaymentBank)).CurrentBalance);
+        var retirement = await service.PrepareFixedAssetDisposalAsync(new(schedule.Id, new DateOnly(2026, 5, 17), 0m, null, accounts.DisposalGain, accounts.DisposalLoss, "Retire forklift without proceeds", schedule.ConcurrencyToken));
+        Assert.True(retirement.Succeeded, retirement.ErrorMessage);
+        await using var verified = await factory.CreateDbContextAsync();
+        Assert.Contains(await verified.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "accounting-schedule.disposal.reversed" && audit.EntityId == schedule.Id);
+        var retirementEntry = await verified.JournalEntries.SingleAsync(entry => entry.Id == retirement.Id);
+        var retirementLines = await verified.JournalEntryLines.Where(line => line.JournalEntryId == retirement.Id).ToArrayAsync();
+        Assert.Null(retirementEntry.BankAccountId);
+        Assert.Contains(retirementLines, line => line.AccountId == accounts.DisposalLoss && line.Debit == 1100m);
+        Assert.DoesNotContain(retirementLines, line => line.AccountId == accounts.DisposalGain);
+    }
+
     private ServiceProvider CreateServiceProvider()
     {
         var services = new ServiceCollection();
@@ -171,8 +253,8 @@ public sealed class AccountingScheduleTests : IDisposable
     {
         await using var db = await factory.CreateDbContextAsync();
         var cashAccountId = await db.Accounts.Where(account => account.CompanyId == companyId && account.OperationalRole == AccountingAccountRoles.OperatingCash).Select(account => account.Id).SingleAsync();
-        var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && new[] { "1400", "1500", "1590", "2500", "6200", "6250", "6400" }.Contains(account.Number)).ToDictionaryAsync(account => account.Number, account => account.Id);
-        return new ScheduleAccounts(accounts["1400"], accounts["1500"], accounts["1590"], accounts["6200"], accounts["6400"], accounts["2500"], accounts["6250"], await db.BankAccounts.Where(bank => bank.CompanyId == companyId && bank.LedgerAccountId == cashAccountId).Select(bank => bank.Id).SingleAsync());
+        var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && new[] { "1400", "1500", "1590", "2500", "4400", "6200", "6250", "6400", "6500" }.Contains(account.Number)).ToDictionaryAsync(account => account.Number, account => account.Id);
+        return new ScheduleAccounts(accounts["1400"], accounts["1500"], accounts["1590"], accounts["6200"], accounts["6400"], accounts["2500"], accounts["6250"], accounts["4400"], accounts["6500"], await db.BankAccounts.Where(bank => bank.CompanyId == companyId && bank.LedgerAccountId == cashAccountId).Select(bank => bank.Id).SingleAsync());
     }
 
     private static void SetContext(IServiceProvider services, Guid userId, Guid companyId, params string[] permissions)
@@ -182,7 +264,7 @@ public sealed class AccountingScheduleTests : IDisposable
         services.GetRequiredService<IHttpContextAccessor>().HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "test")) };
     }
 
-    private sealed record ScheduleAccounts(Guid PrepaidAsset, Guid FixedAsset, Guid AccumulatedDepreciation, Guid DepreciationExpense, Guid PrepaidExpense, Guid LoanLiability, Guid InterestExpense, Guid PaymentBank);
+    private sealed record ScheduleAccounts(Guid PrepaidAsset, Guid FixedAsset, Guid AccumulatedDepreciation, Guid DepreciationExpense, Guid PrepaidExpense, Guid LoanLiability, Guid InterestExpense, Guid DisposalGain, Guid DisposalLoss, Guid PaymentBank);
 
     public void Dispose()
     {

@@ -48,6 +48,8 @@ public sealed record AccountingScheduleSnapshot(
     Guid BalanceAccountId,
     Guid ExpenseAccountId,
     Guid? PaymentBankAccountId,
+    Guid? DisposalJournalEntryId,
+    string DisposalJournalStatus,
     string Notes,
     string ConcurrencyToken,
     IReadOnlyList<AccountingScheduleInstallmentSnapshot> Installments);
@@ -60,3 +62,5 @@ public sealed record AccountingScheduleWorkspace(
 public sealed record ApproveAccountingScheduleRequest(Guid ScheduleId, string ConcurrencyToken);
 public sealed record PrepareAccountingScheduleInstallmentsRequest(Guid ScheduleId, DateOnly ThroughDate, string ConcurrencyToken);
 public sealed record ReverseAccountingScheduleInstallmentRequest(Guid InstallmentId, DateOnly ReversalDate, string Reason);
+public sealed record PrepareFixedAssetDisposalRequest(Guid ScheduleId, DateOnly DisposalDate, decimal ProceedsAmount, Guid? ProceedsBankAccountId, Guid? GainAccountId, Guid? LossAccountId, string Description, string ConcurrencyToken);
+public sealed record ReverseFixedAssetDisposalRequest(Guid ScheduleId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);

@@ -244,6 +244,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("DisposalJournalEntryId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("ExpenseAccountId")
                         .HasColumnType("TEXT");
 
@@ -296,6 +299,8 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BalanceAccountId");
+
+                    b.HasIndex("DisposalJournalEntryId");
 
                     b.HasIndex("ExpenseAccountId");
 
@@ -5136,6 +5141,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasForeignKey("BalanceAccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("DisposalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
                         .WithMany()

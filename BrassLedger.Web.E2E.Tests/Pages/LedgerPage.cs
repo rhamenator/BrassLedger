@@ -68,12 +68,13 @@ public sealed class LedgerPage
         await _session.Page.GetByLabel("Transfer memo").FillAsync("E2E cash movement");
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post bank transfer" }).ClickAsync();
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Bank transfer posted.");
-        var transferRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = transferReference });
+        var treasuryActivity = _session.Page.Locator("section.panel").Filter(new() { HasText = "Transfers and reconciliation adjustments" }).First;
+        var transferRow = treasuryActivity.Locator("tbody tr").Filter(new() { HasText = transferReference });
         await Assertions.Expect(transferRow).ToContainTextAsync("Posted");
         await _session.Page.GetByLabel("Transfer reversal reason").FillAsync("E2E transfer correction");
         await transferRow.GetByRole(AriaRole.Button, new() { Name = "Reverse" }).ClickAsync();
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Bank transfer reversed.");
-        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = transferReference })).ToContainTextAsync("Reversed");
+        await Assertions.Expect(treasuryActivity.Locator("tbody tr").Filter(new() { HasText = transferReference })).ToContainTextAsync("Reversed");
 
         var adjustmentReference = $"ADJ-E2E-{suffix}";
         await _session.Page.GetByLabel("Adjustment bank account").SelectOptionAsync(new SelectOptionValue { Index = 1 });
@@ -83,11 +84,82 @@ public sealed class LedgerPage
         await _session.Page.GetByLabel("Bank adjustment description").FillAsync("E2E statement correction");
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post reconciliation adjustment" }).ClickAsync();
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Reconciliation adjustment posted.");
-        var adjustmentRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference });
+        var adjustmentRow = treasuryActivity.Locator("tbody tr").Filter(new() { HasText = adjustmentReference });
         await Assertions.Expect(adjustmentRow).ToContainTextAsync("Posted");
         await _session.Page.GetByLabel("Adjustment reversal reason").FillAsync("E2E adjustment correction");
         await adjustmentRow.GetByRole(AriaRole.Button, new() { Name = "Reverse" }).ClickAsync();
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Reconciliation adjustment reversed.");
-        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference })).ToContainTextAsync("Reversed");
+        await Assertions.Expect(treasuryActivity.Locator("tbody tr").Filter(new() { HasText = adjustmentReference })).ToContainTextAsync("Reversed");
+    }
+
+    public async Task CreateDepreciateDisposeAndReverseAssetAsync(string suffix)
+    {
+        var scheduleNumber = $"FA-E2E-{suffix}";
+        var acquisitionReference = $"ACQ-{suffix}";
+        await _session.Page.GetByLabel("Journal entry date").FillAsync("2026-08-01");
+        await _session.Page.GetByLabel("Journal entry reference").FillAsync(acquisitionReference);
+        await _session.Page.GetByLabel("Journal entry description").FillAsync("Record E2E asset acquisition");
+        await _session.Page.GetByLabel("Journal entry account").Nth(0).SelectOptionAsync("1500");
+        await _session.Page.GetByLabel("Journal entry debit").Nth(0).FillAsync("1200");
+        await _session.Page.GetByLabel("Journal entry line description").Nth(0).FillAsync("Asset cost");
+        await _session.Page.GetByLabel("Journal entry account").Nth(1).SelectOptionAsync("3000");
+        await _session.Page.GetByLabel("Journal entry credit").Nth(1).FillAsync("1200");
+        await _session.Page.GetByLabel("Journal entry line description").Nth(1).FillAsync("Opening financing");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save draft", Exact = true }).ClickAsync();
+        var recentEntries = _session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" });
+        var acquisitionRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
+        await acquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        acquisitionRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
+        await acquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+
+        await _session.Page.GetByLabel("Accounting schedule number").FillAsync(scheduleNumber);
+        await _session.Page.GetByLabel("Accounting schedule name").FillAsync("E2E test asset");
+        await _session.Page.GetByLabel("Accounting schedule first posting date").FillAsync("2026-08-31");
+        await _session.Page.GetByLabel("Accounting schedule period count").FillAsync("12");
+        await _session.Page.GetByLabel("Accounting schedule original amount").FillAsync("1200");
+        await _session.Page.GetByLabel("Fixed asset residual value").FillAsync("0");
+        await _session.Page.GetByLabel("Fixed asset account").SelectOptionAsync(new SelectOptionValue { Label = "1500 — Fixed Assets" });
+        await _session.Page.GetByLabel("Accounting schedule balance account").SelectOptionAsync(new SelectOptionValue { Label = "1590 — Accumulated Depreciation" });
+        await _session.Page.GetByLabel("Accounting schedule expense account").SelectOptionAsync(new SelectOptionValue { Label = "6200 — Depreciation Expense" });
+        await _session.Page.GetByLabel("Accounting schedule notes").FillAsync("Browser lifecycle test");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save schedule draft" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Accounting schedule draft saved");
+
+        var scheduleRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = scheduleNumber }).First;
+        await scheduleRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Accounting schedule approved");
+        await _session.Page.GetByLabel("Prepare schedule installments through").FillAsync("2026-08-31");
+        scheduleRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = scheduleNumber }).First;
+        await scheduleRow.GetByRole(AriaRole.Button, new() { Name = "Prepare due drafts" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("journal review queue");
+
+        var depreciationRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = "E2E test asset installment 1" }).First;
+        await depreciationRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        depreciationRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = "E2E test asset installment 1" }).First;
+        await depreciationRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Approved journal entry posted");
+
+        scheduleRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = scheduleNumber }).First;
+        await scheduleRow.GetByRole(AriaRole.Button, new() { Name = "Dispose / retire" }).ClickAsync();
+        await _session.Page.GetByLabel("Fixed asset disposal date").FillAsync("2026-09-15");
+        await _session.Page.GetByLabel("Fixed asset disposal proceeds").FillAsync("1300");
+        await _session.Page.GetByLabel("Fixed asset disposal bank account").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Fixed asset disposal gain account").SelectOptionAsync(new SelectOptionValue { Label = "4400 — Gain on Asset Disposal" });
+        await _session.Page.GetByLabel("Fixed asset disposal loss account").SelectOptionAsync(new SelectOptionValue { Label = "6500 — Loss on Asset Disposal" });
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Prepare disposal draft" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("disposal draft was added");
+
+        var disposalRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = "Dispose or retire E2E test asset" }).First;
+        await disposalRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        disposalRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = "Dispose or retire E2E test asset" }).First;
+        await disposalRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        scheduleRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = scheduleNumber }).First;
+        await Assertions.Expect(scheduleRow).ToContainTextAsync("Disposed");
+
+        await _session.Page.GetByLabel("Schedule reversal date").FillAsync("2026-09-16");
+        await _session.Page.GetByLabel("Schedule reversal reason").FillAsync("E2E disposal correction");
+        await scheduleRow.GetByRole(AriaRole.Button, new() { Name = "Reverse disposal" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("asset disposal was reversed");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = scheduleNumber }).First).ToContainTextAsync("Disposal reversed");
     }
 }

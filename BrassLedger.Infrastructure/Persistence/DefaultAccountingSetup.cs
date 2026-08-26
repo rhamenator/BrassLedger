@@ -24,11 +24,13 @@ internal static class DefaultAccountingSetup
         Account(companyId, "3000", "Owner Equity", AccountType.Equity, role: AccountingAccountRoles.OwnerEquity),
         Account(companyId, "4000", "Product Revenue", AccountType.Revenue, role: AccountingAccountRoles.DefaultRevenue),
         Account(companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue, role: AccountingAccountRoles.ForeignExchangeGain),
+        Account(companyId, "4400", "Gain on Asset Disposal", AccountType.Revenue),
         Account(companyId, "5100", "Cost of Goods Sold", AccountType.Expense, role: AccountingAccountRoles.CostOfGoodsSold),
         Account(companyId, "6100", "Payroll Expense", AccountType.Expense, role: AccountingAccountRoles.PayrollExpense),
         Account(companyId, "6200", "Depreciation Expense", AccountType.Expense),
         Account(companyId, "6250", "Interest Expense", AccountType.Expense),
         Account(companyId, "6400", "Prepaid Amortization Expense", AccountType.Expense),
+        Account(companyId, "6500", "Loss on Asset Disposal", AccountType.Expense),
         Account(companyId, "6300", "Foreign Exchange Loss", AccountType.Expense, role: AccountingAccountRoles.ForeignExchangeLoss)
     ];
 
@@ -72,6 +74,8 @@ internal static class DefaultAccountingSetup
                 await EnsureAccountAsync(dbContext, companyId, "6200", "Depreciation Expense", AccountType.Expense, cancellationToken);
                 await EnsureAccountAsync(dbContext, companyId, "6250", "Interest Expense", AccountType.Expense, cancellationToken);
                 await EnsureAccountAsync(dbContext, companyId, "6400", "Prepaid Amortization Expense", AccountType.Expense, cancellationToken);
+                await EnsureAccountAsync(dbContext, companyId, "4400", "Gain on Asset Disposal", AccountType.Revenue, cancellationToken);
+                await EnsureAccountAsync(dbContext, companyId, "6500", "Loss on Asset Disposal", AccountType.Expense, cancellationToken);
             }
 
             var operatingCash = await EnsureOperationalRolesAsync(dbContext, companyId, cancellationToken);

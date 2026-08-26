@@ -201,6 +201,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<AccountingSchedule>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(schedule => schedule.BalanceAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<AccountingSchedule>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(schedule => schedule.ExpenseAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<AccountingSchedule>().HasOne<BankAccount>().WithMany().HasForeignKey(schedule => schedule.PaymentBankAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AccountingSchedule>().HasOne<JournalEntry>().WithMany().HasForeignKey(schedule => schedule.DisposalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankStatementTransaction>().HasOne<BankAccount>().WithMany().HasForeignKey(transaction => transaction.BankAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankStatementTransaction>().HasOne<BankStatementImportBatch>().WithMany().HasForeignKey(transaction => transaction.ImportBatchId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankStatementTransaction>().HasOne<JournalEntry>().WithMany().HasForeignKey(transaction => transaction.MatchedJournalEntryId).OnDelete(DeleteBehavior.Restrict);

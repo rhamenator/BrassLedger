@@ -22,6 +22,8 @@ New companies receive starter non-control accounts for prepaid expenses, fixed a
 4. Approve and post those journal drafts. Closed-period and control-account protections are applied again at approval and posting.
 5. If a posted installment is wrong, reverse it through the schedule. BrassLedger creates an equal-and-opposite journal and retains the original schedule, journal, and audit records. A completed bank reconciliation must be reopened before a payment included in it can be reversed.
 
+For a fixed asset, **Dispose / retire** calculates book value from original cost less posted, unreversed schedule depreciation through the disposal date. The resulting draft removes asset cost and accumulated depreciation, records optional bank proceeds, and posts the difference to the selected gain or loss account. Prepared depreciation drafts must be resolved first, and depreciation posted after the disposal date must be reversed. A disposal in review or posted prevents additional depreciation drafts. A posted disposal can be reversed through the schedule; reconciled proceeds require reopening the reconciliation first.
+
 Draft schedule edits use optimistic concurrency. Schedule numbers are unique within a company, and every read and mutation is company-scoped and permission-checked.
 
 ## Calculation and posting rules
@@ -36,6 +38,6 @@ The first posting date anchors every due date. For example, a January 31 monthly
 
 ## Current boundaries
 
-The schedule workflow supports monthly straight-line depreciation/amortization and monthly fixed-payment loans. Acquisition, asset disposal, impairment, accelerated or tax depreciation, irregular loan payments, rate changes, early payoff, and partial-period conventions require their own authorized transaction or a replacement schedule and must not be represented as automated by this workflow. Add those calculation methods as explicit, tested methods rather than changing the meaning of an already approved schedule.
+The schedule workflow supports monthly straight-line depreciation/amortization, monthly fixed-payment loans, and fixed-asset disposal or retirement using posted book depreciation. Acquisition, impairment, accelerated or tax depreciation, like-kind exchanges, trade-ins, irregular loan payments, rate changes, early payoff, and partial-period conventions require their own authorized transaction or a replacement schedule and must not be represented as automated by this workflow. Add those calculation methods as explicit, tested methods rather than changing the meaning of an already approved schedule.
 
 Before live use, reconcile the generated schedule to the executed loan agreement or accounting policy and obtain the organization's required accounting and tax review.

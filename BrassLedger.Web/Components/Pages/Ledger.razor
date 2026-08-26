@@ -102,10 +102,30 @@ else
                     <div class="hero-actions"><button class="action-primary" type="submit">Save schedule draft</button>@if (ScheduleForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelAccountingScheduleEdit">Cancel edit</button> }</div>
                 </EditForm>
             </AuthorizeView>
+            @if (DisposalForm.ScheduleId != Guid.Empty)
+            {
+                <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="assetDisposalAuthorization">
+                    <EditForm Model="DisposalForm" OnValidSubmit="PrepareFixedAssetDisposalAsync">
+                        <div class="auth-form">
+                            <h3>Dispose or retire @DisposalForm.ScheduleNumber</h3>
+                            <p class="muted-copy">The draft removes original asset cost and posted accumulated depreciation, records any bank proceeds, and recognizes the calculated gain or loss. Review and post it through the normal journal queue.</p>
+                            <div class="content-grid">
+                                <div class="field-group"><label class="field-label">Disposal date</label><InputDate aria-label="Fixed asset disposal date" class="field-input" @bind-Value="DisposalForm.DisposalDate" /></div>
+                                <div class="field-group"><label class="field-label">Proceeds</label><InputNumber aria-label="Fixed asset disposal proceeds" class="field-input" @bind-Value="DisposalForm.ProceedsAmount" /></div>
+                                <div class="field-group"><label class="field-label">Proceeds bank account</label><InputSelect aria-label="Fixed asset disposal bank account" class="field-input" @bind-Value="DisposalForm.ProceedsBankAccountId"><option value="@Guid.Empty">None — retirement without proceeds</option>@foreach (var bank in ScheduleWorkspace.BankAccounts) { <option value="@bank.Id">@bank.Name — @bank.LedgerAccountNumber (@bank.AccountNumberMasked)</option> }</InputSelect></div>
+                                <div class="field-group"><label class="field-label">Gain account</label><InputSelect aria-label="Fixed asset disposal gain account" class="field-input" @bind-Value="DisposalForm.GainAccountId"><option value="@Guid.Empty">Select revenue account if needed</option>@foreach (var account in ScheduleAccounts("Revenue")) { <option value="@account.Id">@account.Number — @account.Name</option> }</InputSelect></div>
+                                <div class="field-group"><label class="field-label">Loss account</label><InputSelect aria-label="Fixed asset disposal loss account" class="field-input" @bind-Value="DisposalForm.LossAccountId"><option value="@Guid.Empty">Select expense account if needed</option>@foreach (var account in ScheduleAccounts("Expense")) { <option value="@account.Id">@account.Number — @account.Name</option> }</InputSelect></div>
+                                <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Fixed asset disposal description" class="field-input" @bind-Value="DisposalForm.Description" /></div>
+                            </div>
+                            <div class="hero-actions"><button class="action-primary" type="submit">Prepare disposal draft</button><button class="action-secondary" type="button" @onclick="CancelFixedAssetDisposal">Cancel</button></div>
+                        </div>
+                    </EditForm>
+                </AuthorizeView>
+            }
             <div class="content-grid">
                 <div class="field-group"><label class="field-label">Prepare installments due through</label><InputDate aria-label="Prepare schedule installments through" class="field-input" @bind-Value="ScheduleThroughDate" /></div>
-                <div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Schedule installment reversal date" class="field-input" @bind-Value="ScheduleReversalDate" /></div>
-                <div class="field-group"><label class="field-label">Reversal reason</label><InputText aria-label="Schedule installment reversal reason" class="field-input" @bind-Value="ScheduleReversalReason" /></div>
+                <div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Schedule reversal date" class="field-input" @bind-Value="ScheduleReversalDate" /></div>
+                <div class="field-group"><label class="field-label">Reversal reason</label><InputText aria-label="Schedule reversal reason" class="field-input" @bind-Value="ScheduleReversalReason" /></div>
             </div>
             <div class="table-scroll"><table class="data-table"><thead><tr><th>Schedule</th><th>Type / method</th><th>Amount</th><th>Status</th><th>Installments</th><th>Actions</th></tr></thead><tbody>
             @if (ScheduleWorkspace.Schedules.Count == 0)
@@ -114,7 +134,7 @@ else
             }
             @foreach (var schedule in ScheduleWorkspace.Schedules)
             {
-                <tr><td>@schedule.ScheduleNumber<br /><small>@schedule.Name</small></td><td>@schedule.ScheduleType<br /><small>@schedule.CalculationMethod</small></td><td>@schedule.OriginalAmount.ToString("C")<br /><small>@schedule.PeriodCount months</small></td><td>@schedule.Status</td><td>@schedule.Installments.Count(installment => installment.JournalStatus == "Posted") posted · @schedule.Installments.Count(installment => installment.JournalStatus == "Draft" || installment.JournalStatus == "Approved") in review · @schedule.Installments.Count(installment => installment.JournalStatus == "Scheduled") scheduled<br /><small>Next @schedule.Installments.FirstOrDefault(installment => installment.JournalStatus == "Scheduled")?.DueOn</small></td><td><div class="hero-actions">@if (schedule.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => EditAccountingSchedule(schedule)">Edit</button></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-primary" type="button" @onclick="() => ApproveAccountingScheduleAsync(schedule)">Approve</button></AuthorizeView> } else if (schedule.Status != "Completed") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => PrepareAccountingScheduleAsync(schedule)">Prepare due drafts</button></AuthorizeView> }</div></td></tr>
+                <tr><td>@schedule.ScheduleNumber<br /><small>@schedule.Name</small></td><td>@schedule.ScheduleType<br /><small>@schedule.CalculationMethod</small></td><td>@schedule.OriginalAmount.ToString("C")<br /><small>@schedule.PeriodCount months</small></td><td>@DisplayScheduleStatus(schedule.Status)</td><td>@schedule.Installments.Count(installment => installment.JournalStatus == "Posted") posted · @schedule.Installments.Count(installment => installment.JournalStatus == "Draft" || installment.JournalStatus == "Approved") in review · @schedule.Installments.Count(installment => installment.JournalStatus == "Scheduled") scheduled<br /><small>Next @schedule.Installments.FirstOrDefault(installment => installment.JournalStatus == "Scheduled")?.DueOn</small></td><td><div class="hero-actions">@if (schedule.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => EditAccountingSchedule(schedule)">Edit</button></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-primary" type="button" @onclick="() => ApproveAccountingScheduleAsync(schedule)">Approve</button></AuthorizeView> } else if (schedule.Status is not "Completed" and not "Disposed" and not "DisposalPending") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => PrepareAccountingScheduleAsync(schedule)">Prepare due drafts</button></AuthorizeView> } @if (schedule.ScheduleType == "FixedAsset" && schedule.Status is ("Approved" or "Completed" or "DisposalReversed")) { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => BeginFixedAssetDisposal(schedule)">Dispose / retire</button></AuthorizeView> } @if (schedule.Status == "Disposed") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><button class="action-secondary" type="button" @onclick="() => ReverseFixedAssetDisposalAsync(schedule)">Reverse disposal</button></AuthorizeView> }</div></td></tr>
                 @foreach (var installment in schedule.Installments.Where(installment => installment.JournalEntryId.HasValue).TakeLast(12))
                 {
                     <tr class="sub-row"><td colspan="2">Installment @installment.Sequence · @installment.DueOn</td><td>@(installment.PaymentAmount > 0 ? installment.PaymentAmount : installment.ExpenseAmount).ToString("C")</td><td>@installment.JournalStatus</td><td>Principal @installment.PrincipalAmount.ToString("C") · expense @installment.ExpenseAmount.ToString("C")</td><td>@if (installment.JournalStatus == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><button class="action-secondary" type="button" @onclick="() => ReverseAccountingScheduleInstallmentAsync(installment)">Reverse</button></AuthorizeView> }</td></tr>
@@ -190,7 +210,7 @@ else
                         @foreach (var entry in Workspace.GeneralLedger.RecentEntries)
                         {
                             <tr>
-                                <td>@entry.EntryNumber</td>
+                                <td>@entry.EntryNumber<br /><small>@entry.Reference</small></td>
                                 <td>@entry.PostedOn.ToString("MMM d, yyyy")</td>
                                 <td>@entry.SourceModule</td>
                                 <td>@entry.Status</td>
@@ -363,6 +383,7 @@ else
     private BankAdjustmentReversalEditor AdjustmentReversalForm { get; } = new();
     private ReopenEditor ReopenForm { get; } = new();
     private AccountingScheduleEditor ScheduleForm { get; } = new();
+    private FixedAssetDisposalEditor DisposalForm { get; } = new();
     private DateOnly ScheduleThroughDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
     private DateOnly ScheduleReversalDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
     private string ScheduleReversalReason { get; set; } = string.Empty;
@@ -404,6 +425,7 @@ else
     }
 
     private IEnumerable<AccountingScheduleAccountSnapshot> ScheduleAccounts(string accountType) => ScheduleWorkspace.Accounts.Where(account => account.IsActive && !account.IsControlAccount && account.AccountType == accountType);
+    private static string DisplayScheduleStatus(string status) => status switch { "DisposalPending" => "Disposal pending", "DisposalReversed" => "Disposal reversed", _ => status };
 
     private async Task SaveAccountingScheduleAsync()
     {
@@ -433,6 +455,33 @@ else
     {
         var result = await TransactionService.ReverseAccountingScheduleInstallmentAsync(new(installment.Id, ScheduleReversalDate, ScheduleReversalReason));
         StatusMessage = result.Succeeded ? "Schedule installment reversed with audit history retained." : result.ErrorMessage;
+        if (result.Succeeded) { ScheduleReversalReason = string.Empty; ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    }
+
+    private void BeginFixedAssetDisposal(AccountingScheduleSnapshot schedule)
+    {
+        DisposalForm.Load(schedule,
+            ScheduleWorkspace.Accounts.FirstOrDefault(account => account.Number == "4400" && account.AccountType == "Revenue")?.Id ?? Guid.Empty,
+            ScheduleWorkspace.Accounts.FirstOrDefault(account => account.Number == "6500" && account.AccountType == "Expense")?.Id ?? Guid.Empty);
+    }
+
+    private void CancelFixedAssetDisposal() => DisposalForm.Reset();
+
+    private async Task PrepareFixedAssetDisposalAsync()
+    {
+        var result = await TransactionService.PrepareFixedAssetDisposalAsync(new(DisposalForm.ScheduleId, DisposalForm.DisposalDate, DisposalForm.ProceedsAmount,
+            DisposalForm.ProceedsBankAccountId == Guid.Empty ? null : DisposalForm.ProceedsBankAccountId,
+            DisposalForm.GainAccountId == Guid.Empty ? null : DisposalForm.GainAccountId,
+            DisposalForm.LossAccountId == Guid.Empty ? null : DisposalForm.LossAccountId,
+            DisposalForm.Description, DisposalForm.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "The fixed-asset disposal draft was added to the journal review queue." : result.ErrorMessage;
+        if (result.Succeeded) { DisposalForm.Reset(); ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    }
+
+    private async Task ReverseFixedAssetDisposalAsync(AccountingScheduleSnapshot schedule)
+    {
+        var result = await TransactionService.ReverseFixedAssetDisposalAsync(new(schedule.Id, ScheduleReversalDate, ScheduleReversalReason, schedule.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "The asset disposal was reversed with its original journal and schedule history retained." : result.ErrorMessage;
         if (result.Succeeded) { ScheduleReversalReason = string.Empty; ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     }
 
@@ -532,5 +581,19 @@ else
         public string ConcurrencyToken { get; set; } = string.Empty;
         public void Load(AccountingScheduleSnapshot schedule) { Id = schedule.Id; Number = schedule.ScheduleNumber; Name = schedule.Name; Type = schedule.ScheduleType; StartDate = schedule.StartDate; PeriodCount = schedule.PeriodCount; OriginalAmount = schedule.OriginalAmount; ResidualAmount = schedule.ResidualAmount; AnnualInterestRate = schedule.AnnualInterestRate; RelatedAssetAccountId = schedule.RelatedAssetAccountId ?? Guid.Empty; BalanceAccountId = schedule.BalanceAccountId; ExpenseAccountId = schedule.ExpenseAccountId; PaymentBankAccountId = schedule.PaymentBankAccountId ?? Guid.Empty; Notes = schedule.Notes; ConcurrencyToken = schedule.ConcurrencyToken; }
         public void Reset() { Id = null; Number = string.Empty; Name = string.Empty; Type = "FixedAsset"; StartDate = DateOnly.FromDateTime(DateTime.Today); PeriodCount = 12; OriginalAmount = 0m; ResidualAmount = 0m; AnnualInterestRate = 0m; RelatedAssetAccountId = Guid.Empty; BalanceAccountId = Guid.Empty; ExpenseAccountId = Guid.Empty; PaymentBankAccountId = Guid.Empty; Notes = string.Empty; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class FixedAssetDisposalEditor
+    {
+        public Guid ScheduleId { get; set; }
+        public string ScheduleNumber { get; set; } = string.Empty;
+        public DateOnly DisposalDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public decimal ProceedsAmount { get; set; }
+        public Guid ProceedsBankAccountId { get; set; }
+        public Guid GainAccountId { get; set; }
+        public Guid LossAccountId { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(AccountingScheduleSnapshot schedule, Guid gainAccountId, Guid lossAccountId) { ScheduleId = schedule.Id; ScheduleNumber = schedule.ScheduleNumber; DisposalDate = DateOnly.FromDateTime(DateTime.Today); ProceedsAmount = 0m; ProceedsBankAccountId = Guid.Empty; GainAccountId = gainAccountId; LossAccountId = lossAccountId; Description = $"Dispose or retire {schedule.Name}"; ConcurrencyToken = schedule.ConcurrencyToken; }
+        public void Reset() { ScheduleId = Guid.Empty; ScheduleNumber = string.Empty; DisposalDate = DateOnly.FromDateTime(DateTime.Today); ProceedsAmount = 0m; ProceedsBankAccountId = Guid.Empty; GainAccountId = Guid.Empty; LossAccountId = Guid.Empty; Description = string.Empty; ConcurrencyToken = string.Empty; }
     }
 }

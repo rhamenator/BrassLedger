@@ -23,4 +23,16 @@ public sealed class BankingWorkflowTests
         await ledger.ImportStatementAndReverseBankingEntriesAsync(browserKind.ToString());
         await session.AssertNoUiFailuresAsync("banking workflow");
     }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task Ledger_ReviewsPostsDisposesAndReversesFixedAsset(BrowserKind browserKind)
+    {
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync();
+        var ledger = new LedgerPage(session);
+        await ledger.OpenAsync();
+        await ledger.CreateDepreciateDisposeAndReverseAssetAsync(Guid.NewGuid().ToString("N")[..8]);
+        await session.AssertNoUiFailuresAsync("fixed-asset schedule workflow");
+    }
 }

@@ -99,6 +99,8 @@ public interface IAccountingTransactionService
     Task<TransactionResult> ApproveAccountingScheduleAsync(ApproveAccountingScheduleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> PrepareAccountingScheduleInstallmentsAsync(PrepareAccountingScheduleInstallmentsRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReverseAccountingScheduleInstallmentAsync(ReverseAccountingScheduleInstallmentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> PrepareFixedAssetDisposalAsync(PrepareFixedAssetDisposalRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseFixedAssetDisposalAsync(ReverseFixedAssetDisposalRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> CreateVendorBillAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApplyInvoicePaymentAsync(ApplyInvoicePaymentRequest request, CancellationToken cancellationToken = default);

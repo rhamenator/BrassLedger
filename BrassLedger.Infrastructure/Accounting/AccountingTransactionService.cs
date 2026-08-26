@@ -40,6 +40,7 @@ public sealed class AccountingTransactionService(
             if (existing is null) return TransactionResult.Failure("Journal draft not found.");
             entry = existing;
             if (!entry.Status.Equals("Draft", StringComparison.OrdinalIgnoreCase)) return TransactionResult.Failure("Only journal drafts can be edited.");
+            if (entry.SourceDocumentId.HasValue || !entry.SourceModule.Equals("General Ledger", StringComparison.OrdinalIgnoreCase)) return TransactionResult.Failure("Edit a source-workflow journal through its originating workflow.");
             db.JournalEntryLines.RemoveRange(await db.JournalEntryLines.Where(line => line.JournalEntryId == entry.Id).ToListAsync(cancellationToken));
         }
         else
@@ -119,6 +120,8 @@ public sealed class AccountingTransactionService(
             var account = accounts.Single(candidate => candidate.Id == line.AccountId);
             account.CurrentBalance += account.Type is AccountType.Asset or AccountType.Expense ? line.Debit - line.Credit : line.Credit - line.Debit;
         }
+        var bankError = await ApplyBankJournalMovementAsync(db, companyId, entry, lines, cancellationToken);
+        if (bankError is not null) return TransactionResult.Failure(bankError);
         var userId = ResolveUserId();
         entry.EntryNumber = $"JE-{entry.PostedOn:yyyyMMdd}-{Guid.NewGuid():N}"[..20];
         entry.Status = "Posted";
@@ -203,7 +206,8 @@ public sealed class AccountingTransactionService(
         var schedules = await db.AccountingSchedules.AsNoTracking().Where(schedule => schedule.CompanyId == companyId).OrderBy(schedule => schedule.ScheduleNumber).ToListAsync(cancellationToken);
         var scheduleIds = schedules.Select(schedule => schedule.Id).ToArray();
         var installments = await db.AccountingScheduleInstallments.AsNoTracking().Where(installment => scheduleIds.Contains(installment.AccountingScheduleId)).OrderBy(installment => installment.Sequence).ToListAsync(cancellationToken);
-        var journalIds = installments.Where(installment => installment.JournalEntryId.HasValue).Select(installment => installment.JournalEntryId!.Value).Distinct().ToArray();
+        var journalIds = installments.Where(installment => installment.JournalEntryId.HasValue).Select(installment => installment.JournalEntryId!.Value)
+            .Concat(schedules.Where(schedule => schedule.DisposalJournalEntryId.HasValue).Select(schedule => schedule.DisposalJournalEntryId!.Value)).Distinct().ToArray();
         var journals = await db.JournalEntries.AsNoTracking().Where(entry => journalIds.Contains(entry.Id)).ToDictionaryAsync(entry => entry.Id, cancellationToken);
         var snapshots = schedules.Select(schedule =>
         {
@@ -212,8 +216,17 @@ public sealed class AccountingTransactionService(
                 var journal = installment.JournalEntryId.HasValue ? journals.GetValueOrDefault(installment.JournalEntryId.Value) : null;
                 return new AccountingScheduleInstallmentSnapshot(installment.Id, installment.Sequence, installment.DueOn, installment.PrincipalAmount, installment.ExpenseAmount, installment.PaymentAmount, installment.JournalEntryId, journal?.Status ?? "Scheduled", journal?.ReversedByJournalEntryId);
             }).ToArray();
-            var status = schedule.Status == "Approved" && scheduleInstallments.Length > 0 && scheduleInstallments.All(installment => installment.JournalStatus == "Posted") ? "Completed" : schedule.Status;
-            return new AccountingScheduleSnapshot(schedule.Id, schedule.ScheduleNumber, schedule.Name, schedule.ScheduleType, schedule.CalculationMethod, status, schedule.StartDate, schedule.PeriodCount, schedule.OriginalAmount, schedule.ResidualAmount, schedule.AnnualInterestRate, schedule.RelatedAssetAccountId, schedule.BalanceAccountId, schedule.ExpenseAccountId, schedule.PaymentBankAccountId, schedule.Notes, schedule.ConcurrencyToken, scheduleInstallments);
+            var disposalJournal = schedule.DisposalJournalEntryId.HasValue ? journals.GetValueOrDefault(schedule.DisposalJournalEntryId.Value) : null;
+            var disposalStatus = disposalJournal?.Status ?? string.Empty;
+            var status = disposalStatus switch
+            {
+                "Posted" => "Disposed",
+                "Draft" or "Approved" => "DisposalPending",
+                "Reversed" => "DisposalReversed",
+                _ when schedule.Status == "Approved" && scheduleInstallments.Length > 0 && scheduleInstallments.All(installment => installment.JournalStatus == "Posted") => "Completed",
+                _ => schedule.Status
+            };
+            return new AccountingScheduleSnapshot(schedule.Id, schedule.ScheduleNumber, schedule.Name, schedule.ScheduleType, schedule.CalculationMethod, status, schedule.StartDate, schedule.PeriodCount, schedule.OriginalAmount, schedule.ResidualAmount, schedule.AnnualInterestRate, schedule.RelatedAssetAccountId, schedule.BalanceAccountId, schedule.ExpenseAccountId, schedule.PaymentBankAccountId, schedule.DisposalJournalEntryId, disposalStatus, schedule.Notes, schedule.ConcurrencyToken, scheduleInstallments);
         }).ToArray();
         var accountNumbers = accounts.ToDictionary(account => account.Id, account => account.Number);
         return new(
@@ -317,6 +330,11 @@ public sealed class AccountingTransactionService(
         var schedule = await db.AccountingSchedules.SingleOrDefaultAsync(candidate => candidate.Id == request.ScheduleId && candidate.CompanyId == companyId, cancellationToken);
         if (schedule is null || schedule.Status != "Approved") return TransactionResult.Failure("Only an approved accounting schedule can generate journal drafts.");
         if (!string.Equals(schedule.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The accounting schedule changed after it was displayed. Reload it before preparing journals.");
+        if (schedule.DisposalJournalEntryId.HasValue)
+        {
+            var disposalStatus = await db.JournalEntries.Where(entry => entry.Id == schedule.DisposalJournalEntryId.Value && entry.CompanyId == companyId).Select(entry => entry.Status).SingleOrDefaultAsync(cancellationToken);
+            if (disposalStatus is not null and not "Reversed") return TransactionResult.Failure("No additional installments can be prepared while an asset disposal is in review or posted.");
+        }
         var installments = await db.AccountingScheduleInstallments.Where(installment => installment.AccountingScheduleId == schedule.Id && installment.DueOn <= request.ThroughDate && installment.JournalEntryId == null).OrderBy(installment => installment.Sequence).ToListAsync(cancellationToken);
         if (installments.Count == 0) return TransactionResult.Failure("No unprepared installments are due through that date.");
         var paymentBank = schedule.PaymentBankAccountId.HasValue
@@ -358,13 +376,145 @@ public sealed class AccountingTransactionService(
         if (request.ReversalDate < original.PostedOn) return TransactionResult.Failure("A reversal cannot precede the original posting date.");
         if (await IsInCompletedReconciliationAsync(db, original.Id, cancellationToken)) return TransactionResult.Failure("A reconciled schedule journal cannot be reversed until the reconciliation is reopened.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var result = await PostInverseAsync(db, companyId, original.Id, request.ReversalDate, $"REV-{original.Reference}", request.Reason.Trim(), installment.Id, "AccountingScheduleInstallmentReversal", null, cancellationToken, "Accounting Schedules");
+        var result = await PostInverseAsync(db, companyId, original.Id, request.ReversalDate, $"REV-{original.Reference}", request.Reason.Trim(), installment.Id, "AccountingScheduleInstallmentReversal", original.BankAccountId, cancellationToken, "Accounting Schedules");
         if (!result.Succeeded) return result;
+        var reversal = await db.JournalEntries.SingleAsync(entry => entry.Id == result.Id, cancellationToken);
+        var reversalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == result.Id).ToListAsync(cancellationToken);
+        var bankError = await ApplyBankJournalMovementAsync(db, companyId, reversal, reversalLines, cancellationToken);
+        if (bankError is not null) return TransactionResult.Failure(bankError);
         var schedule = await db.AccountingSchedules.SingleAsync(candidate => candidate.Id == installment.AccountingScheduleId, cancellationToken);
         schedule.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddAccountingScheduleAudit(db, companyId, "accounting-schedule.installment.reversed", schedule, new { installment.Id, originalJournalEntryId = original.Id, reversalJournalEntryId = result.Id, request.ReversalDate, reason = request.Reason.Trim() });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The accounting schedule changed while its installment was being reversed. Reload and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    public async Task<TransactionResult> PrepareFixedAssetDisposalAsync(PrepareFixedAssetDisposalRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.JournalPrepare)) return TransactionResult.Failure("You are not authorized to prepare fixed-asset disposals.");
+        var description = (request.Description ?? string.Empty).Trim();
+        if (description.Length is < 1 or > 500) return TransactionResult.Failure("A disposal description from 1 through 500 characters is required.");
+        if (request.ProceedsAmount is < 0m or > 9999999999999999.99m) return TransactionResult.Failure("Disposal proceeds must be within the supported non-negative currency range.");
+        var proceeds = RoundCurrency(request.ProceedsAmount);
+        if (proceeds == 0m && request.ProceedsBankAccountId.HasValue) return TransactionResult.Failure("Do not select a proceeds bank account for a retirement with no proceeds.");
+        if (proceeds > 0m && !request.ProceedsBankAccountId.HasValue) return TransactionResult.Failure("Select the bank account receiving disposal proceeds.");
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var schedule = await db.AccountingSchedules.SingleOrDefaultAsync(candidate => candidate.Id == request.ScheduleId && candidate.CompanyId == companyId, cancellationToken);
+        if (schedule is null || schedule.ScheduleType != "FixedAsset" || schedule.Status != "Approved") return TransactionResult.Failure("Only an approved fixed-asset schedule can be disposed or retired.");
+        if (!string.Equals(schedule.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The accounting schedule changed after it was displayed. Reload it before preparing the disposal.");
+        if (request.DisposalDate < schedule.StartDate) return TransactionResult.Failure("The disposal date cannot precede the asset's first depreciation date.");
+        if (await IsClosedPeriodAsync(db, companyId, request.DisposalDate, cancellationToken)) return TransactionResult.Failure("The disposal date is in a closed accounting period.");
+        if (schedule.DisposalJournalEntryId.HasValue)
+        {
+            var priorStatus = await db.JournalEntries.Where(entry => entry.Id == schedule.DisposalJournalEntryId.Value && entry.CompanyId == companyId).Select(entry => entry.Status).SingleOrDefaultAsync(cancellationToken);
+            if (priorStatus is not null and not "Reversed") return TransactionResult.Failure("This asset already has a disposal journal in review or posted.");
+        }
+
+        var installments = await db.AccountingScheduleInstallments.Where(installment => installment.AccountingScheduleId == schedule.Id).ToListAsync(cancellationToken);
+        var installmentJournalIds = installments.Where(installment => installment.JournalEntryId.HasValue).Select(installment => installment.JournalEntryId!.Value).ToArray();
+        var installmentJournals = await db.JournalEntries.Where(entry => installmentJournalIds.Contains(entry.Id)).ToDictionaryAsync(entry => entry.Id, cancellationToken);
+        if (installmentJournals.Count != installmentJournalIds.Distinct().Count()) return TransactionResult.Failure("One or more depreciation journals are unavailable; the disposal cannot be calculated safely.");
+        if (installments.Any(installment => installment.JournalEntryId.HasValue && installmentJournals.GetValueOrDefault(installment.JournalEntryId.Value)?.Status is "Draft" or "Approved"))
+            return TransactionResult.Failure("Approve, post, or remove every prepared depreciation journal before disposing the asset.");
+        if (installments.Any(installment => installment.DueOn > request.DisposalDate && installment.JournalEntryId.HasValue && installmentJournals.GetValueOrDefault(installment.JournalEntryId.Value)?.Status == "Posted"))
+            return TransactionResult.Failure("Reverse depreciation posted after the disposal date before disposing the asset.");
+
+        var accumulatedDepreciation = RoundCurrency(installments.Where(installment => installment.DueOn <= request.DisposalDate && installment.JournalEntryId.HasValue && installmentJournals.GetValueOrDefault(installment.JournalEntryId.Value)?.Status == "Posted").Sum(installment => installment.PrincipalAmount));
+        var bookValue = RoundCurrency(schedule.OriginalAmount - accumulatedDepreciation);
+        var gain = Math.Max(0m, RoundCurrency(proceeds - bookValue));
+        var loss = Math.Max(0m, RoundCurrency(bookValue - proceeds));
+        var proceedsBank = request.ProceedsBankAccountId.HasValue ? await db.BankAccounts.SingleOrDefaultAsync(bank => bank.Id == request.ProceedsBankAccountId.Value && bank.CompanyId == companyId, cancellationToken) : null;
+
+        var accountIds = new[] { schedule.RelatedAssetAccountId, schedule.BalanceAccountId, proceedsBank?.LedgerAccountId, gain > 0m ? request.GainAccountId : null, loss > 0m ? request.LossAccountId : null }
+            .Where(id => id.HasValue && id.Value != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
+        if (!schedule.RelatedAssetAccountId.HasValue || !accounts.TryGetValue(schedule.RelatedAssetAccountId.Value, out var assetAccount) || assetAccount.Type != AccountType.Asset
+            || !accounts.TryGetValue(schedule.BalanceAccountId, out var accumulatedAccount) || accumulatedAccount.Type != AccountType.Asset)
+            return TransactionResult.Failure("The asset cost or accumulated-depreciation account is no longer available for disposal.");
+        if (assetAccount.CurrentBalance < schedule.OriginalAmount) return TransactionResult.Failure("The asset cost account does not contain enough recorded cost for this disposal. Record or correct the acquisition first.");
+        if (accumulatedAccount.CurrentBalance > -accumulatedDepreciation) return TransactionResult.Failure("The accumulated-depreciation account does not contain the posted schedule depreciation required for this disposal.");
+        if (proceeds > 0m && (proceedsBank is null || !accounts.TryGetValue(proceedsBank.LedgerAccountId, out var cashAccount) || cashAccount.Type != AccountType.Asset))
+            return TransactionResult.Failure("The proceeds bank account must map to an active non-control asset account.");
+        if (gain > 0m && (!request.GainAccountId.HasValue || !accounts.TryGetValue(request.GainAccountId.Value, out var gainAccount) || gainAccount.Type != AccountType.Revenue))
+            return TransactionResult.Failure("Select an active non-control revenue account for the disposal gain.");
+        if (loss > 0m && (!request.LossAccountId.HasValue || !accounts.TryGetValue(request.LossAccountId.Value, out var lossAccount) || lossAccount.Type != AccountType.Expense))
+            return TransactionResult.Failure("Select an active non-control expense account for the disposal loss.");
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var entry = new JournalEntry
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            BankAccountId = proceedsBank?.Id,
+            SourceDocumentId = schedule.Id,
+            SourceDocumentType = "AccountingScheduleDisposal",
+            EntryNumber = $"DRAFT-{Guid.NewGuid():N}"[..20],
+            PostedOn = request.DisposalDate,
+            SourceModule = "Fixed Assets",
+            Reference = $"{schedule.ScheduleNumber}-DISP",
+            Description = description,
+            Status = "Draft",
+            IsPosted = false,
+            CreatedByUserId = ResolveUserId(),
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            ConcurrencyToken = Guid.NewGuid().ToString("N")
+        };
+        var lines = new List<JournalEntryLine>();
+        void AddLine(Guid accountId, decimal debit, decimal credit, string lineDescription)
+        {
+            if (debit == 0m && credit == 0m) return;
+            lines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = accountId, Debit = debit, Credit = credit, Description = lineDescription });
+        }
+        AddLine(accumulatedAccount.Id, accumulatedDepreciation, 0m, "Remove accumulated depreciation");
+        if (proceeds > 0m) AddLine(proceedsBank!.LedgerAccountId, proceeds, 0m, "Asset disposal proceeds");
+        if (loss > 0m) AddLine(request.LossAccountId!.Value, loss, 0m, "Loss on asset disposal");
+        AddLine(assetAccount.Id, 0m, schedule.OriginalAmount, "Remove asset cost");
+        if (gain > 0m) AddLine(request.GainAccountId!.Value, 0m, gain, "Gain on asset disposal");
+        entry.TotalAmount = lines.Sum(line => line.Debit);
+        if (lines.Count < 2 || entry.TotalAmount != lines.Sum(line => line.Credit)) return TransactionResult.Failure("The calculated disposal journal is not balanced.");
+
+        db.JournalEntries.Add(entry);
+        db.JournalEntryLines.AddRange(lines);
+        schedule.DisposalJournalEntryId = entry.Id;
+        schedule.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddJournalAudit(db, companyId, ResolveUserId(), "journal.draft.saved", entry, new { scheduleId = schedule.Id, accumulatedDepreciation, bookValue, proceeds, gain, loss });
+        AddAccountingScheduleAudit(db, companyId, "accounting-schedule.disposal.prepared", schedule, new { entry.Id, request.DisposalDate, accumulatedDepreciation, bookValue, proceeds, gain, loss });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The accounting schedule changed while its disposal was being prepared. Reload and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The asset disposal could not be saved safely. Reload and verify its accounts before trying again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(entry.Id);
+    }
+
+    public async Task<TransactionResult> ReverseFixedAssetDisposalAsync(ReverseFixedAssetDisposalRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.JournalReverse)) return TransactionResult.Failure("You are not authorized to reverse fixed-asset disposals.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A disposal reversal reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var schedule = await db.AccountingSchedules.SingleOrDefaultAsync(candidate => candidate.Id == request.ScheduleId && candidate.CompanyId == companyId, cancellationToken);
+        if (schedule?.DisposalJournalEntryId is null) return TransactionResult.Failure("This fixed-asset schedule has no disposal journal to reverse.");
+        if (!string.Equals(schedule.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The accounting schedule changed after it was displayed. Reload it before reversing the disposal.");
+        var original = await db.JournalEntries.SingleOrDefaultAsync(entry => entry.Id == schedule.DisposalJournalEntryId && entry.CompanyId == companyId, cancellationToken);
+        if (original is null || !original.IsPosted || original.Status != "Posted" || original.ReversedByJournalEntryId.HasValue) return TransactionResult.Failure("Only an unreversed posted asset disposal can be reversed.");
+        if (request.ReversalDate < original.PostedOn) return TransactionResult.Failure("A reversal cannot precede the disposal date.");
+        if (await IsInCompletedReconciliationAsync(db, original.Id, cancellationToken)) return TransactionResult.Failure("A reconciled disposal cannot be reversed until the reconciliation is reopened.");
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var result = await PostInverseAsync(db, companyId, original.Id, request.ReversalDate, $"REV-{original.Reference}", request.Reason.Trim(), schedule.Id, "AccountingScheduleDisposalReversal", original.BankAccountId, cancellationToken, "Fixed Assets");
+        if (!result.Succeeded) return result;
+        var reversal = await db.JournalEntries.SingleAsync(entry => entry.Id == result.Id, cancellationToken);
+        var reversalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == result.Id).ToListAsync(cancellationToken);
+        var bankError = await ApplyBankJournalMovementAsync(db, companyId, reversal, reversalLines, cancellationToken);
+        if (bankError is not null) return TransactionResult.Failure(bankError);
+        schedule.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAccountingScheduleAudit(db, companyId, "accounting-schedule.disposal.reversed", schedule, new { originalJournalEntryId = original.Id, reversalJournalEntryId = result.Id, request.ReversalDate, reason = request.Reason.Trim() });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The accounting schedule changed while its disposal was being reversed. Reload and try again."); }
         await transaction.CommitAsync(cancellationToken);
         return result;
     }
@@ -2875,6 +3025,20 @@ public sealed class AccountingTransactionService(
     }
 
     private void AddBankAudit(BrassLedgerDbContext db, Guid companyId, string action, Guid entityId, object details) => db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = "Banking", EntityId = entityId, DetailJson = System.Text.Json.JsonSerializer.Serialize(details), OccurredAtUtc = DateTimeOffset.UtcNow });
+
+    private async Task<string?> ApplyBankJournalMovementAsync(BrassLedgerDbContext db, Guid companyId, JournalEntry entry, IReadOnlyList<JournalEntryLine> lines, CancellationToken cancellationToken)
+    {
+        if (!entry.BankAccountId.HasValue) return null;
+        var bank = await db.BankAccounts.SingleOrDefaultAsync(candidate => candidate.Id == entry.BankAccountId.Value && candidate.CompanyId == companyId, cancellationToken);
+        if (bank is null) return "The journal's bank account is no longer available.";
+        var movement = RoundCurrency(lines.Where(line => line.AccountId == bank.LedgerAccountId).Sum(line => line.Debit - line.Credit));
+        if (movement == 0m) return "A bank-linked journal must contain a nonzero line for the bank's mapped ledger account.";
+        bank.CurrentBalance = RoundCurrency(bank.CurrentBalance + movement);
+        bank.UnreconciledAmount = RoundCurrency(bank.UnreconciledAmount + decimal.Abs(movement));
+        bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddBankAudit(db, companyId, "bank-journal.balance-updated", bank.Id, new { entry.Id, entry.Reference, movement, bank.CurrentBalance, bank.UnreconciledAmount });
+        return null;
+    }
 
     private static Task<bool> IsInCompletedReconciliationAsync(BrassLedgerDbContext db, Guid journalEntryId, CancellationToken cancellationToken) =>
         db.BankReconciliationItems.AnyAsync(

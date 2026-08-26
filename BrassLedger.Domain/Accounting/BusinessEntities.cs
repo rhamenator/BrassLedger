@@ -668,6 +668,7 @@ public sealed class AccountingSchedule
     public Guid BalanceAccountId { get; set; }
     public Guid ExpenseAccountId { get; set; }
     public Guid? PaymentBankAccountId { get; set; }
+    public Guid? DisposalJournalEntryId { get; set; }
     public string Notes { get; set; } = string.Empty;
     public Guid? PreparedByUserId { get; set; }
     public DateTimeOffset PreparedAtUtc { get; set; }
