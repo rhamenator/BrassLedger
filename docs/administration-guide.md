@@ -53,6 +53,8 @@ The implementation follows [RFC 6238](https://datatracker.ietf.org/doc/html/rfc6
 
 Company access is validated against the operator's active, company-specific membership on every cookie validation. A role in one company does not grant that role in another company, and disabling a membership invalidates a cookie issued for that company.
 
+Every authenticated state-changing API request (`POST`, `PUT`, `PATCH`, or `DELETE`) also requires an antiforgery request token from `GET /api/antiforgery/token`, obtained through the same authenticated cookie session and sent in the `X-CSRF-TOKEN` header. This applies uniformly to accounting, payroll, administration, integrations, file imports, sign-out, company switching, and authenticated email-security actions. Anonymous sign-in, MFA-challenge, recovery, and one-time action endpoints instead use credential validation, short-lived challenge or action tokens where applicable, and dedicated rate limits because no authenticated browser authority is being exercised.
+
 ### Invitations, verified email, and password recovery
 
 Authorized user managers invite operators from **Administration**. An invitation creates an inactive account and inactive membership, then queues a one-use link through configured security email. The recipient verifies the address and chooses the password; BrassLedger no longer exposes an administrator-selected-password account-creation path. Existing operators use **Account security** to verify their current address. Replacing an address requires password reauthentication, invalidates existing sessions, and requires verification of the new address. Only an active account with a verified address is eligible for password recovery.

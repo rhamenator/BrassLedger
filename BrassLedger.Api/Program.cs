@@ -30,7 +30,19 @@ app.UseAntiforgery();
 app.UseAuthorization();
 app.MapBrassLedgerAuthenticationEndpoints();
 
-var api = app.MapGroup("/api").RequireAuthorization(BrassLedgerAuthorizationPolicies.ViewWorkspace);
+var api = app.MapGroup("/api")
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.ViewWorkspace)
+    .WithMetadata(new Microsoft.AspNetCore.Antiforgery.RequireAntiforgeryTokenAttribute(true))
+    .AddEndpointFilter(async (invocationContext, next) =>
+    {
+        var request = invocationContext.HttpContext.Request;
+        if (HttpMethods.IsPost(request.Method) || HttpMethods.IsPut(request.Method) || HttpMethods.IsPatch(request.Method) || HttpMethods.IsDelete(request.Method))
+        {
+            var antiforgery = invocationContext.HttpContext.RequestServices.GetRequiredService<Microsoft.AspNetCore.Antiforgery.IAntiforgery>();
+            if (!await HasValidAntiforgeryTokenAsync(antiforgery, invocationContext.HttpContext)) return Results.BadRequest(new { error = "invalid_antiforgery_token" });
+        }
+        return await next(invocationContext);
+    });
 
 api.MapGet("/antiforgery/token", (Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context) =>
 {
@@ -862,6 +874,8 @@ static string Csv(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
 
 static async Task<bool> HasValidAntiforgeryTokenAsync(Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context)
 {
+    var validationFeature = context.Features.Get<Microsoft.AspNetCore.Antiforgery.IAntiforgeryValidationFeature>();
+    if (validationFeature is not null) return validationFeature.IsValid;
     try
     {
         await antiforgery.ValidateRequestAsync(context);

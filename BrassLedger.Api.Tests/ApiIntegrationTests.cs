@@ -7,8 +7,12 @@ using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Accounting;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
@@ -65,6 +69,31 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains(workspace.Modules, module => module.Code == "J" && module.Status == "Live foundation");
         Assert.Contains(workspace.Reporting.Reports, report => report.Code == "RDL-GL-TRIAL");
         Assert.Contains(workspace.Taxes.Profiles, profile => profile.Jurisdiction == "Federal" && profile.TaxType == "FUTA");
+    }
+
+    [Fact]
+    public async Task UnsafeApiRoutes_RequireAntiforgeryAndRejectMissingTokensBeforeMutation()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        var unsafeMethods = new HashSet<string>([HttpMethods.Post, HttpMethods.Put, HttpMethods.Patch, HttpMethods.Delete], StringComparer.OrdinalIgnoreCase);
+        var unprotectedRoutes = isolatedFactory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/').StartsWith("api/", StringComparison.OrdinalIgnoreCase) == true)
+            .Where(endpoint => endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Any(unsafeMethods.Contains) == true)
+            .Where(endpoint => endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null)
+            .Where(endpoint => endpoint.Metadata.GetMetadata<IAntiforgeryMetadata>()?.RequiresValidation != true)
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .OrderBy(route => route, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Empty(unprotectedRoutes);
+
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
+        var request = new PostJournalEntryRequest(new DateOnly(2026, 8, 26), "CSRF-REJECT", "Must not post", [new("1000", 1m, 0m, "Cash"), new("4000", 0m, 1m, "Revenue")]);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/journal-entries", request)).StatusCode);
+        Assert.DoesNotContain((await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.GeneralLedger.RecentEntries, entry => entry.Reference == request.Reference);
+
+        client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", await GetAntiforgeryTokenAsync(client));
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/journal-entries", request)).StatusCode);
     }
 
     [Fact]
@@ -168,7 +197,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     public async Task ChangePassword_RejectsInvalidCurrentPassword_AndMissingAntiforgeryToken()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
-        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
         using var missingTokenContent = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["currentPassword"] = BrassLedgerAuthenticationDefaults.SeededPassword,
@@ -228,6 +257,10 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     public async Task Logout_RevokesCurrentNamedSessionAndRecordsCompanyAudit()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
+        using var missingTokenClient = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
+        Assert.Equal(HttpStatusCode.BadRequest, (await missingTokenClient.PostAsync("/api/auth/logout", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await missingTokenClient.GetAsync("/api/dashboard")).StatusCode);
+
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
 
         var response = await client.PostAsync("/api/auth/logout", null);
@@ -238,7 +271,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         var user = await db.Users.SingleAsync(candidate => candidate.UserName == "controller");
-        var session = Assert.Single(await db.UserSessions.Where(candidate => candidate.UserId == user.Id).ToListAsync());
+        var session = Assert.Single(await db.UserSessions.Where(candidate => candidate.UserId == user.Id && candidate.RevokedAtUtc != null).ToListAsync());
         Assert.NotNull(session.RevokedAtUtc);
         Assert.Contains(await db.AuthenticationAuditEntries.Where(entry => entry.UserId == user.Id).ToListAsync(),
             entry => entry.EventType == "logout" && entry.CompanyId == user.CompanyId && entry.Succeeded);
@@ -799,7 +832,6 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var token = await client.GetFromJsonAsync<Dictionary<string, string>>("/api/antiforgery/token");
         Assert.NotNull(token);
         using var form = new MultipartFormDataContent();
-        form.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
         form.Add(new StringContent("Display Name,Company Name,Email,Customer Number\r\n\"QuickBooks\nImport Co\",QuickBooks Import Co,import@example.test,QBO-IMPORT-1"), "file", "quickbooks-customers.csv");
         var preview = await client.PostAsync("/api/interchange/quickbooks-online/customers?dryRun=true", form);
         Assert.True(preview.StatusCode == HttpStatusCode.OK, await preview.Content.ReadAsStringAsync());
@@ -808,7 +840,6 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var previewWorkspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         Assert.DoesNotContain(previewWorkspace!.Receivables.Customers, customer => customer.CustomerNumber == "QBO-IMPORT-1");
         using var importForm = new MultipartFormDataContent();
-        importForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
         importForm.Add(new StringContent("Display Name,Company Name,Email,Customer Number\r\n\"QuickBooks\nImport Co\",QuickBooks Import Co,import@example.test,QBO-IMPORT-1"), "file", "quickbooks-customers.csv");
         var import = await client.PostAsync("/api/interchange/quickbooks-online/customers", importForm);
         Assert.True(import.StatusCode == HttpStatusCode.OK, await import.Content.ReadAsStringAsync());
@@ -826,17 +857,14 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains("quickbooks-customers.csv", importAudit.DetailJson);
 
         using var journalForm = new MultipartFormDataContent();
-        journalForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
         journalForm.Add(new StringContent("Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue"), "file", "quickbooks-journals.csv");
         var journalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", journalForm);
         Assert.True(journalImport.StatusCode == HttpStatusCode.OK, await journalImport.Content.ReadAsStringAsync());
         using var duplicateJournalForm = new MultipartFormDataContent();
-        duplicateJournalForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
         duplicateJournalForm.Add(new StringContent("Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue"), "file", "quickbooks-journals-retry.csv");
         var duplicateJournalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", duplicateJournalForm);
         Assert.Equal(HttpStatusCode.BadRequest, duplicateJournalImport.StatusCode);
         using var malformedForm = new MultipartFormDataContent();
-        malformedForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
         malformedForm.Add(new StringContent("Display Name,Customer Number\r\n\"unterminated,QBO-BAD-1"), "file", "malformed-customers.csv");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/interchange/quickbooks-online/customers?dryRun=true", malformedForm)).StatusCode);
         var journalExport = await client.GetStringAsync("/api/interchange/quickbooks-online/journal-entries.csv");
@@ -862,7 +890,6 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var receivablesBefore = beforeInvoiceImport!.Receivables.OpenBalance;
         const string invoiceCsv = "Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Item Description,Quantity,Rate,Income Account\r\nQBO-INV-1,C-1003,2026-05-10,2026-06-09,50.00,Imported service,2,25.00,Product Revenue\r\nQBO-INV-1,C-1003,2026-05-10,2026-06-09,25.00,Imported materials,1,25.00,4000";
         using var invoicePreviewForm = new MultipartFormDataContent();
-        invoicePreviewForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
         invoicePreviewForm.Add(new StringContent(invoiceCsv), "file", "quickbooks-invoices.csv");
         var invoicePreview = await client.PostAsync("/api/interchange/quickbooks-online/invoices?dryRun=true", invoicePreviewForm);
         Assert.True(invoicePreview.StatusCode == HttpStatusCode.OK, await invoicePreview.Content.ReadAsStringAsync());
@@ -871,7 +898,6 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(receivablesBefore, afterInvoicePreview.Receivables.OpenBalance);
 
         using var invoiceImportForm = new MultipartFormDataContent();
-        invoiceImportForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
         invoiceImportForm.Add(new StringContent(invoiceCsv), "file", "quickbooks-invoices.csv");
         var invoiceImport = await client.PostAsync("/api/interchange/quickbooks-online/invoices", invoiceImportForm);
         Assert.True(invoiceImport.StatusCode == HttpStatusCode.OK, await invoiceImport.Content.ReadAsStringAsync());
@@ -890,7 +916,6 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(receivablesBefore + 75m, afterInvoicePost!.Receivables.OpenBalance);
         Assert.Contains(afterInvoicePost.Receivables.Invoices, invoice => invoice.InvoiceNumber == "QBO-INV-1" && invoice.TotalAmount == 75m);
         using var taxableInvoiceForm = new MultipartFormDataContent();
-        taxableInvoiceForm.Headers.Add("X-CSRF-TOKEN", token!["requestToken"]);
         taxableInvoiceForm.Add(new StringContent("Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Tax Amount\r\nQBO-TAX-1,C-1003,2026-05-10,2026-06-09,50.00,3.00"), "file", "taxable-quickbooks-invoices.csv");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/interchange/quickbooks-online/invoices?dryRun=true", taxableInvoiceForm)).StatusCode);
         var invoiceBatches = await client.GetFromJsonAsync<AccountingInterchangeBatchSnapshot[]>("/api/interchange/batches");
@@ -924,6 +949,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         }
 
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var missingTokenClient = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
         var workspaceResponse = await client.GetAsync("/api/accounting/operational-account-roles");
         Assert.Equal(HttpStatusCode.OK, workspaceResponse.StatusCode);
         var workspace = await workspaceResponse.Content.ReadFromJsonAsync<AccountingAccountRoleWorkspace>();
@@ -931,7 +957,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(expectedCurrentId, Assert.Single(workspace.Roles, role => role.Code == AccountingAccountRoles.DefaultRevenue).AccountId);
 
         var request = new AssignAccountingAccountRoleRequest(AccountingAccountRoles.DefaultRevenue, replacementId, expectedCurrentId, true);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync("/api/accounting/operational-account-roles", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await missingTokenClient.PutAsJsonAsync("/api/accounting/operational-account-roles", request)).StatusCode);
         var antiforgery = await GetAntiforgeryTokenAsync(client);
         using var unconfirmedRequest = new HttpRequestMessage(HttpMethod.Put, "/api/accounting/operational-account-roles")
         {
@@ -985,11 +1011,12 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         }
 
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var missingTokenClient = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
         var acquisition = await client.PostAsJsonAsync("/api/journal-entries", new PostJournalEntryRequest(new DateOnly(2026, 1, 1), "API-FA-ACQ", "Record API equipment", [new("1501", 400m, 0m, "Equipment cost"), new("3000", 0m, 400m, "Opening financing")]));
         Assert.Equal(HttpStatusCode.Created, acquisition.StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/accounting-schedules")).StatusCode);
         var save = new SaveAccountingScheduleRequest(null, "API-FA-1", "API equipment", "FixedAsset", new DateOnly(2026, 1, 31), 4, 400m, 0m, 0m, assetId, accumulatedId, expenseId, null, "API lifecycle");
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync("/api/accounting-schedules", save)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await missingTokenClient.PutAsJsonAsync("/api/accounting-schedules", save)).StatusCode);
         var token = await GetAntiforgeryTokenAsync(client);
         using var saveRequest = new HttpRequestMessage(HttpMethod.Put, "/api/accounting-schedules") { Content = JsonContent.Create(save) };
         saveRequest.Headers.Add("X-CSRF-TOKEN", token);
@@ -1017,7 +1044,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         workspace = Assert.IsType<AccountingScheduleWorkspace>(await client.GetFromJsonAsync<AccountingScheduleWorkspace>("/api/accounting-schedules"));
         schedule = workspace.Schedules.Single(candidate => candidate.Id == saved.Id);
         var disposal = new PrepareFixedAssetDisposalRequest(schedule.Id, new DateOnly(2026, 2, 15), 400m, bankId, gainId, lossId, "API disposal", schedule.ConcurrencyToken);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/accounting-schedules/prepare-disposal", disposal)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await missingTokenClient.PostAsJsonAsync("/api/accounting-schedules/prepare-disposal", disposal)).StatusCode);
         using var disposalRequest = new HttpRequestMessage(HttpMethod.Post, "/api/accounting-schedules/prepare-disposal") { Content = JsonContent.Create(disposal) };
         disposalRequest.Headers.Add("X-CSRF-TOKEN", token);
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(disposalRequest)).StatusCode);
@@ -1031,7 +1058,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         schedule = workspace.Schedules.Single(candidate => candidate.Id == saved.Id);
         Assert.Equal("Disposed", schedule.Status);
         var reversal = new ReverseFixedAssetDisposalRequest(schedule.Id, new DateOnly(2026, 2, 16), "Correct API disposal", schedule.ConcurrencyToken);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/accounting-schedules/reverse-disposal", reversal)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await missingTokenClient.PostAsJsonAsync("/api/accounting-schedules/reverse-disposal", reversal)).StatusCode);
         using var reversalRequest = new HttpRequestMessage(HttpMethod.Post, "/api/accounting-schedules/reverse-disposal") { Content = JsonContent.Create(reversal) };
         reversalRequest.Headers.Add("X-CSRF-TOKEN", token);
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(reversalRequest)).StatusCode);
@@ -1055,7 +1082,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             await permissionDb.SaveChangesAsync();
         }
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
-        var missingToken = await client.PostAsJsonAsync("/api/integrations/quickbooks-online/connect", new BeginQuickBooksAuthorizationRequest(null, "API books", "Sandbox"));
+        using var missingTokenClient = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
+        var missingToken = await missingTokenClient.PostAsJsonAsync("/api/integrations/quickbooks-online/connect", new BeginQuickBooksAuthorizationRequest(null, "API books", "Sandbox"));
         Assert.Equal(HttpStatusCode.BadRequest, missingToken.StatusCode);
 
         var antiforgery = await GetAntiforgeryTokenAsync(client);
@@ -1159,7 +1187,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.disconnected" && audit.EntityId == connected.Id);
     }
 
-    private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null, string userName = "controller")
+    private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null, string userName = "controller", bool includeAntiforgery = true)
     {
         var testFactory = factory ?? _factory;
         var client = testFactory.CreateClient(new WebApplicationFactoryClientOptions
@@ -1174,6 +1202,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        if (includeAntiforgery) client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", await GetAntiforgeryTokenAsync(client));
         return client;
     }
 

@@ -23,8 +23,8 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         Delegate disableMfaHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, IAntiforgery, Task<IResult>>)HandleDisableMfaAsync;
         Delegate apiLoginHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, Task<IResult>>)HandleApiLoginAsync;
         Delegate apiMfaHandler = (Func<HttpContext, IUserAuthenticationService, IUserSessionService, Task<IResult>>)HandleApiMfaAsync;
-        Delegate apiLogoutHandler = (Func<HttpContext, IUserSessionService, Task<IResult>>)HandleApiLogoutAsync;
-        Delegate switchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, Task<IResult>>)HandleSwitchCompanyAsync;
+        Delegate apiLogoutHandler = (Func<HttpContext, IUserSessionService, IAntiforgery, Task<IResult>>)HandleApiLogoutAsync;
+        Delegate switchCompanyHandler = (Func<HttpContext, IUserAuthenticationService, IAntiforgery, Task<IResult>>)HandleSwitchCompanyAsync;
         Delegate passwordResetRequestHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandlePasswordResetRequestAsync;
         Delegate accountActionStartHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleAccountActionStartAsync;
         Delegate accountActionCompleteHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandleAccountActionCompleteAsync;
@@ -33,9 +33,9 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         Delegate emailVerificationCompleteHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandleEmailVerificationCompleteAsync;
         Delegate apiPasswordResetRequestHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiPasswordResetRequestAsync;
         Delegate apiAccountActionCompleteHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiAccountActionCompleteAsync;
-        Delegate apiEmailVerificationRequestHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiEmailVerificationRequestAsync;
+        Delegate apiEmailVerificationRequestHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandleApiEmailVerificationRequestAsync;
         Delegate apiEmailVerificationCompleteHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiEmailVerificationCompleteAsync;
-        Delegate apiEmailChangeHandler = (Func<HttpContext, IAccountActionService, Task<IResult>>)HandleApiEmailChangeAsync;
+        Delegate apiEmailChangeHandler = (Func<HttpContext, IAccountActionService, IAntiforgery, Task<IResult>>)HandleApiEmailChangeAsync;
 
         endpoints.MapPost("/account/login", formLoginHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/account/logout", formLogoutHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
@@ -54,14 +54,14 @@ public static class AuthenticationEndpointRouteBuilderExtensions
 
         endpoints.MapPost("/api/auth/login", apiLoginHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
         endpoints.MapPost("/api/auth/mfa", apiMfaHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.LoginRateLimitPolicy);
-        endpoints.MapPost("/api/auth/logout", apiLogoutHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
+        endpoints.MapPost("/api/auth/logout", apiLogoutHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity).WithMetadata(new RequireAntiforgeryTokenAttribute(true));
         endpoints.MapGet("/api/auth/me", (ClaimsPrincipal principal) => Results.Ok(ToResponse(principal))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity);
-        endpoints.MapPost("/api/auth/active-company", switchCompanyHandler).RequireAuthorization();
+        endpoints.MapPost("/api/auth/active-company", switchCompanyHandler).RequireAuthorization().WithMetadata(new RequireAntiforgeryTokenAttribute(true));
         endpoints.MapPost("/api/auth/password-reset/request", apiPasswordResetRequestHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
         endpoints.MapPost("/api/auth/account-action", apiAccountActionCompleteHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
-        endpoints.MapPost("/api/auth/email-verification/request", apiEmailVerificationRequestHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity).RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/api/auth/email-verification/request", apiEmailVerificationRequestHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity).RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy).WithMetadata(new RequireAntiforgeryTokenAttribute(true));
         endpoints.MapPost("/api/auth/email-verification/complete", apiEmailVerificationCompleteHandler).AllowAnonymous().RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
-        endpoints.MapPost("/api/auth/email/change", apiEmailChangeHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity).RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy);
+        endpoints.MapPost("/api/auth/email/change", apiEmailChangeHandler).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountSecurity).RequireRateLimiting(BrassLedgerAuthenticationDefaults.AccountRecoveryRateLimitPolicy).WithMetadata(new RequireAntiforgeryTokenAttribute(true));
 
         return endpoints;
     }
@@ -201,8 +201,9 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         return Results.LocalRedirect("/login?status=email-change-verification-sent");
     }
 
-    private static async Task<IResult> HandleApiEmailVerificationRequestAsync(HttpContext context, IAccountActionService accountActionService)
+    private static async Task<IResult> HandleApiEmailVerificationRequestAsync(HttpContext context, IAccountActionService accountActionService, IAntiforgery antiforgery)
     {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Results.Unauthorized();
         ApplyNoStoreHeaders(context.Response);
         var result = await accountActionService.RequestEmailVerificationAsync(
@@ -228,8 +229,9 @@ public static class AuthenticationEndpointRouteBuilderExtensions
             : Results.BadRequest(new { Error = "invalid_or_expired_action" });
     }
 
-    private static async Task<IResult> HandleApiEmailChangeAsync(HttpContext context, IAccountActionService accountActionService)
+    private static async Task<IResult> HandleApiEmailChangeAsync(HttpContext context, IAccountActionService accountActionService, IAntiforgery antiforgery)
     {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Results.Unauthorized();
         ApplyNoStoreHeaders(context.Response);
         var request = await context.Request.ReadFromJsonAsync<EmailChangeRequest>(cancellationToken: context.RequestAborted);
@@ -541,8 +543,9 @@ public static class AuthenticationEndpointRouteBuilderExtensions
         return Results.LocalRedirect(user.MfaEnrollmentRequired ? "/account/security?status=mfa-required" : returnUrl);
     }
 
-    private static async Task<IResult> HandleApiLogoutAsync(HttpContext context, IUserSessionService sessionService)
+    private static async Task<IResult> HandleApiLogoutAsync(HttpContext context, IUserSessionService sessionService, IAntiforgery antiforgery)
     {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
             && Guid.TryParse(context.User.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId))
             await sessionService.RevokeCurrentAsync(userId, TryGetCompanyId(context.User), sessionId, context.Connection.RemoteIpAddress?.ToString() ?? string.Empty, context.Request.Headers.UserAgent.ToString(), context.RequestAborted);
@@ -552,12 +555,15 @@ public static class AuthenticationEndpointRouteBuilderExtensions
 
     private static async Task<bool> IsAntiforgeryRequestValidAsync(HttpContext context, IAntiforgery antiforgery)
     {
+        var validationFeature = context.Features.Get<IAntiforgeryValidationFeature>();
+        if (validationFeature is not null) return validationFeature.IsValid;
         try { await antiforgery.ValidateRequestAsync(context); return true; }
         catch (AntiforgeryValidationException) { return false; }
     }
 
-    private static async Task<IResult> HandleSwitchCompanyAsync(HttpContext context, IUserAuthenticationService authenticationService)
+    private static async Task<IResult> HandleSwitchCompanyAsync(HttpContext context, IUserAuthenticationService authenticationService, IAntiforgery antiforgery)
     {
+        if (!await IsAntiforgeryRequestValidAsync(context, antiforgery)) return Results.BadRequest();
         var request = await context.Request.ReadFromJsonAsync<SwitchCompanyRequest>(cancellationToken: context.RequestAborted);
         var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (request is null || !Guid.TryParse(userId, out var parsedUserId) || request.CompanyId == Guid.Empty) return Results.BadRequest();
