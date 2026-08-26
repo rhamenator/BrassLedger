@@ -160,7 +160,8 @@ public sealed record OperationsWorkspace(
     IReadOnlyList<PurchaseRequisitionSnapshot>? PurchaseRequisitions = null,
     IReadOnlyList<SupplierReturnAuthorizationSnapshot>? SupplierReturnAuthorizations = null,
     IReadOnlyList<SupplierReturnShipmentSnapshot>? SupplierReturnShipments = null,
-    IReadOnlyList<LandedCostAllocationSnapshot>? LandedCostAllocations = null);
+    IReadOnlyList<LandedCostAllocationSnapshot>? LandedCostAllocations = null,
+    IReadOnlyList<PurchaseInvoiceMatchSnapshot>? PurchaseInvoiceMatches = null);
 
 public sealed record InventoryItemSnapshot(
     string Sku,
@@ -228,12 +229,14 @@ public sealed record PurchaseRequisitionLineSnapshot(Guid Id, int Sequence, Guid
 public sealed record SupplierReturnAuthorizationSnapshot(Guid Id, Guid InventoryReceiptId, string ReceiptNumber, Guid PurchaseOrderId, string PurchaseOrderNumber, Guid VendorId, string VendorName, string ReturnNumber, DateOnly AuthorizedOn, string Reason, string Status, string CancellationReason, string ConcurrencyToken, IReadOnlyList<SupplierReturnAuthorizationLineSnapshot> Lines);
 public sealed record SupplierReturnAuthorizationLineSnapshot(Guid Id, Guid InventoryReceiptLineId, Guid PurchaseOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal AuthorizedQuantity, decimal ShippedQuantity, decimal UnitCost, decimal ReceiptUnitCost);
 public sealed record SupplierReturnShipmentSnapshot(Guid Id, Guid SupplierReturnAuthorizationId, string ReturnNumber, Guid? SourceVendorBillId, string SourceVendorBillNumber, Guid VendorId, string VendorName, string ShipmentNumber, DateOnly ShippedOn, string Status, decimal TotalAmount, decimal VendorCreditAmount, bool CreatesVendorCredit, decimal SourceAppliedAmount, decimal AppliedAmount, decimal RefundedAmount, decimal AvailableAmount, Guid WarehouseId, Guid BinId, string Location, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<SupplierReturnShipmentLineSnapshot> Lines, IReadOnlyList<SupplierReturnCreditApplicationSnapshot> Applications, IReadOnlyList<SupplierReturnCreditRefundSnapshot> Refunds);
-public sealed record SupplierReturnShipmentLineSnapshot(Guid Id, Guid SupplierReturnAuthorizationLineId, Guid InventoryReceiptLineId, Guid PurchaseOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal TotalAmount, decimal VendorCreditUnitCost, decimal VendorCreditAmount);
+public sealed record SupplierReturnShipmentLineSnapshot(Guid Id, Guid SupplierReturnAuthorizationLineId, Guid InventoryReceiptLineId, Guid PurchaseOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal TotalAmount, decimal InvoicedQuantity, decimal GrniReductionAmount, decimal VendorCreditUnitCost, decimal VendorCreditAmount);
 public sealed record SupplierReturnCreditApplicationSnapshot(Guid Id, Guid VendorBillId, string VendorBillNumber, DateOnly AppliedOn, decimal Amount, string Status, string ConcurrencyToken);
 public sealed record SupplierReturnCreditRefundSnapshot(Guid Id, Guid BankAccountId, string BankAccountName, string Reference, DateOnly RefundDate, decimal Amount, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken);
 public sealed record LandedCostAllocationSnapshot(Guid Id, Guid InventoryReceiptId, string ReceiptNumber, Guid VendorId, string VendorName, Guid? VendorBillId, string AllocationNumber, string BillNumber, DateOnly BillDate, DateOnly DueDate, string AllocationMethod, string Description, string Status, decimal TotalAmount, string DecisionReason, string CancellationReason, Guid? JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<LandedCostChargeSnapshot> Charges, IReadOnlyList<LandedCostAllocationLineSnapshot> Lines);
 public sealed record LandedCostChargeSnapshot(Guid Id, int Sequence, string ChargeType, string Description, decimal Amount);
 public sealed record LandedCostAllocationLineSnapshot(Guid Id, Guid InventoryReceiptLineId, Guid InventoryItemId, string Sku, int Sequence, decimal BasisQuantity, decimal BasisAmount, decimal AllocatedAmount, decimal PriorQuantityOnHand, decimal PriorUnitCost, decimal ResultingUnitCost);
+public sealed record PurchaseInvoiceMatchSnapshot(Guid Id, Guid InventoryReceiptId, string ReceiptNumber, Guid PurchaseOrderId, string PurchaseOrderNumber, Guid VendorId, string VendorName, Guid? VendorBillId, string BillNumber, DateOnly BillDate, DateOnly DueDate, string Description, string Status, decimal InvoiceAmount, decimal AccrualAmount, decimal PriceVarianceAmount, decimal QuantityVarianceQuantity, decimal QuantityVarianceAmount, string DecisionReason, string CancellationReason, Guid? JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<PurchaseInvoiceMatchLineSnapshot> Lines);
+public sealed record PurchaseInvoiceMatchLineSnapshot(Guid Id, Guid InventoryReceiptLineId, Guid PurchaseOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal AvailableQuantity, decimal InvoiceQuantity, decimal MatchedQuantity, decimal QuantityVarianceQuantity, decimal ReceiptUnitCost, decimal InvoiceUnitCost, decimal AccrualAmount, decimal InvoiceAmount, decimal PriceVarianceAmount, decimal QuantityVarianceAmount);
 
 public sealed record PurchaseOrderSnapshot(
     string OrderNumber,
@@ -249,8 +252,9 @@ public sealed record PurchaseOrderSnapshot(
     IReadOnlyList<PurchaseOrderLineSnapshot>? Lines = null);
 
 public sealed record PurchaseOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal UnitCost, decimal ReceivedQuantity, decimal InvoicedQuantity, decimal LineTotal, decimal ReturnedQuantity = 0m, decimal CreditedQuantity = 0m);
-public sealed record InventoryReceiptSnapshot(Guid Id, Guid PurchaseOrderId, string PurchaseOrderNumber, string ReceiptNumber, DateOnly ReceivedOn, string Status, decimal TotalAmount, Guid? VendorBillId, string ConcurrencyToken, IReadOnlyList<InventoryReceiptLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId, Guid? WarehouseId = null, Guid? BinId = null, string Location = "");
+public sealed record InventoryReceiptSnapshot(Guid Id, Guid PurchaseOrderId, string PurchaseOrderNumber, string ReceiptNumber, DateOnly ReceivedOn, string Status, decimal TotalAmount, Guid? VendorBillId, string ConcurrencyToken, IReadOnlyList<InventoryReceiptLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId, Guid? WarehouseId = null, Guid? BinId = null, string Location = "", IReadOnlyList<MatchedVendorBillSnapshot>? VendorBills = null);
 public sealed record InventoryReceiptLineSnapshot(Guid Id, Guid PurchaseOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal LineTotal, decimal ReturnedQuantity = 0m);
+public sealed record MatchedVendorBillSnapshot(Guid Id, string BillNumber, decimal TotalAmount, decimal BalanceDue, string Status);
 
 public sealed record TreasuryWorkspace(
     decimal CashOnHand,

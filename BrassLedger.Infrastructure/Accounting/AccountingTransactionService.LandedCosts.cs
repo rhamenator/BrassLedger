@@ -400,9 +400,8 @@ public sealed partial class AccountingTransactionService
         var receipt = await db.InventoryReceipts.SingleAsync(
             item => item.Id == allocation.InventoryReceiptId && item.CompanyId == companyId,
             cancellationToken);
-        if (receipt.Status != "Posted"
-            || !string.Equals(receipt.ConcurrencyToken, allocation.SourceReceiptConcurrencyToken, StringComparison.Ordinal))
-            return TransactionResult.Failure("The source receipt changed after this allocation was prepared. Return it to draft and review the allocation again.");
+        if (receipt.Status != "Posted")
+            return TransactionResult.Failure("The source receipt is no longer posted. Return the allocation to draft and review it again.");
         if (await db.VendorBills.AnyAsync(
                 item => item.CompanyId == companyId && item.BillNumber == allocation.BillNumber,
                 cancellationToken))

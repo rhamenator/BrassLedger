@@ -1067,14 +1067,42 @@ api.MapPost("/purchase-orders/{purchaseOrderId:guid}/receipts", async (Guid purc
     var result = await service.ReceivePurchaseOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-receipts/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["receipt"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
 
-api.MapPost("/inventory-receipts/{inventoryReceiptId:guid}/vendor-bill", async (Guid inventoryReceiptId, MatchPurchaseOrderReceiptBillRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+api.MapPost("/purchase-invoice-matches", async (SavePurchaseInvoiceMatchRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
-    if (request.InventoryReceiptId != inventoryReceiptId) return Results.BadRequest(new { error = "inventory_receipt_id_mismatch" });
-    var result = await service.MatchPurchaseOrderReceiptBillAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/payables/bills/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["receiptBill"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy =>
+    var result = await service.SavePurchaseInvoiceMatchAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/purchase-invoice-matches/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseInvoiceMatch"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/purchase-invoice-matches/{purchaseInvoiceMatchId:guid}/submission", async (Guid purchaseInvoiceMatchId, SubmitPurchaseInvoiceMatchRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseInvoiceMatchId != purchaseInvoiceMatchId) return Results.BadRequest(new { error = "purchase_invoice_match_id_mismatch" });
+    var result = await service.SubmitPurchaseInvoiceMatchAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseInvoiceMatch"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/purchase-invoice-matches/{purchaseInvoiceMatchId:guid}/decision", async (Guid purchaseInvoiceMatchId, DecidePurchaseInvoiceMatchRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseInvoiceMatchId != purchaseInvoiceMatchId) return Results.BadRequest(new { error = "purchase_invoice_match_id_mismatch" });
+    var result = await service.DecidePurchaseInvoiceMatchAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseInvoiceMatch"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/purchase-invoice-matches/{purchaseInvoiceMatchId:guid}/cancellation", async (Guid purchaseInvoiceMatchId, CancelPurchaseInvoiceMatchRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseInvoiceMatchId != purchaseInvoiceMatchId) return Results.BadRequest(new { error = "purchase_invoice_match_id_mismatch" });
+    var result = await service.CancelPurchaseInvoiceMatchAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseInvoiceMatch"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/purchase-invoice-matches/{purchaseInvoiceMatchId:guid}/posting", async (Guid purchaseInvoiceMatchId, PostPurchaseInvoiceMatchRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseInvoiceMatchId != purchaseInvoiceMatchId) return Results.BadRequest(new { error = "purchase_invoice_match_id_mismatch" });
+    var result = await service.PostPurchaseInvoiceMatchAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseInvoiceMatch"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/purchase-invoice-matches/{purchaseInvoiceMatchId:guid}/reversal", async (Guid purchaseInvoiceMatchId, ReversePurchaseInvoiceMatchRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.PurchaseInvoiceMatchId != purchaseInvoiceMatchId) return Results.BadRequest(new { error = "purchase_invoice_match_id_mismatch" });
+    var result = await service.ReversePurchaseInvoiceMatchAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseInvoiceMatch"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments).RequireAuthorization(policy =>
 {
     policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage);
-    policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage);
 });
 
 api.MapPost("/inventory-receipts/{inventoryReceiptId:guid}/vendor-bill/void", async (Guid inventoryReceiptId, UnmatchPurchaseOrderReceiptBillRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>

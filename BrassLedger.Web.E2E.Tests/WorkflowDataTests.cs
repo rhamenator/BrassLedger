@@ -122,15 +122,15 @@ public sealed class WorkflowDataTests
         var purchasing = new OperationsPage(purchasingSession);
         await purchasing.OpenAsync();
         await purchasing.ApproveAndConvertPurchaseRequisitionAsync(requisitionNumber, orderNumber);
-        await purchasing.ApproveReceiveAndMatchAsync(orderNumber, receiptNumber, billNumber);
+        await purchasing.ApproveAndReceiveAsync(orderNumber, receiptNumber);
         await using (var payablesPreparationSession = await _fixture.CreateSessionAsync(browserKind))
         {
-            await payablesPreparationSession.SignInAsync("controller"); var payablesPreparation = new OperationsPage(payablesPreparationSession); await payablesPreparation.OpenAsync(); await payablesPreparation.PrepareLandedCostAsync(receiptNumber, landedCostNumber, landedCostBillNumber); await payablesPreparationSession.AssertNoUiFailuresAsync("landed-cost preparation and submission");
+            await payablesPreparationSession.SignInAsync("controller"); var payablesPreparation = new OperationsPage(payablesPreparationSession); await payablesPreparation.OpenAsync(); await payablesPreparation.PreparePurchaseInvoiceAsync(receiptNumber, billNumber); await payablesPreparation.PrepareLandedCostAsync(receiptNumber, landedCostNumber, landedCostBillNumber); await payablesPreparationSession.AssertNoUiFailuresAsync("supplier-invoice and landed-cost preparation and submission");
         }
-        await purchasing.OpenAsync(); await purchasing.ApproveLandedCostAsync(landedCostNumber);
+        await purchasing.OpenAsync(); await purchasing.ApprovePurchaseInvoiceAsync(billNumber); await purchasing.ApproveLandedCostAsync(landedCostNumber);
         await using (var payablesPostingSession = await _fixture.CreateSessionAsync(browserKind))
         {
-            await payablesPostingSession.SignInAsync("controller"); var payablesPosting = new OperationsPage(payablesPostingSession); await payablesPosting.OpenAsync(); await payablesPosting.PostLandedCostAsync(landedCostNumber); await payablesPostingSession.AssertNoUiFailuresAsync("landed-cost posting");
+            await payablesPostingSession.SignInAsync("controller"); var payablesPosting = new OperationsPage(payablesPostingSession); await payablesPosting.OpenAsync(); await payablesPosting.PostPurchaseInvoiceAsync(billNumber); await payablesPosting.PostLandedCostAsync(landedCostNumber); await payablesPostingSession.AssertNoUiFailuresAsync("supplier-invoice and landed-cost posting");
         }
         await purchasing.OpenAsync();
         await purchasing.AuthorizeAndShipSupplierReturnAsync(receiptNumber, returnNumber, returnShipmentNumber);

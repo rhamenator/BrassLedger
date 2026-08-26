@@ -254,7 +254,7 @@ public sealed class OperationsPage
         await _session.Page.GetByLabel("Customer return credit number").FillAsync(creditNumber); await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post return credit" }).ClickAsync(); await _session.Page.GetByText($"Customer return credit {creditNumber} posted.", new() { Exact = true }).WaitForAsync(); var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer return credits" }).Locator("tr").Filter(new() { HasTextString = creditNumber }); await Assertions.Expect(row).ToContainTextAsync("Posted"); await Assertions.Expect(row).ToContainTextAsync("$0.00");
     }
 
-    public async Task ApproveReceiveAndMatchAsync(string orderNumber, string receiptNumber, string billNumber)
+    public async Task ApproveAndReceiveAsync(string orderNumber, string receiptNumber)
     {
         var orderRow = _session.Page.Locator("tr").Filter(new() { HasTextString = orderNumber });
         await orderRow.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
@@ -264,13 +264,35 @@ public sealed class OperationsPage
         await _session.Page.GetByLabel("Inventory receipt number").FillAsync(receiptNumber);
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post inventory receipt" }).ClickAsync();
         await _session.Page.GetByText("Inventory receipt posted.", new() { Exact = true }).WaitForAsync();
-        var receiptRow = _session.Page.Locator("tr").Filter(new() { HasTextString = receiptNumber });
-        await receiptRow.GetByRole(AriaRole.Button, new() { Name = "Create matched bill" }).ClickAsync();
+    }
+
+    public async Task PreparePurchaseInvoiceAsync(string receiptNumber, string billNumber)
+    {
+        var receiptRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory receipts" }).Locator("tr").Filter(new() { HasTextString = receiptNumber });
+        await receiptRow.GetByRole(AriaRole.Button, new() { Name = "Prepare supplier invoice" }).ClickAsync();
         await _session.Page.GetByLabel("Matched vendor bill number").FillAsync(billNumber);
-        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post matched vendor bill" }).ClickAsync();
-        await _session.Page.GetByText("Vendor bill matched and posted.", new() { Exact = true }).WaitForAsync();
-        receiptRow = _session.Page.Locator("tr").Filter(new() { HasTextString = receiptNumber });
-        Assert.Contains("Matched", await receiptRow.InnerTextAsync());
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save invoice match draft" }).ClickAsync();
+        await _session.Page.GetByText("Supplier invoice match saved as a draft.", new() { Exact = true }).WaitForAsync();
+        var matchRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Supplier invoice matches" }).Locator("tr").Filter(new() { HasTextString = billNumber });
+        await matchRow.GetByRole(AriaRole.Button, new() { Name = "Submit" }).ClickAsync();
+        await _session.Page.GetByText($"Supplier invoice {billNumber} submitted to Purchasing.", new() { Exact = true }).WaitForAsync();
+    }
+
+    public async Task ApprovePurchaseInvoiceAsync(string billNumber)
+    {
+        var matchRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Supplier invoice matches" }).Locator("tr").Filter(new() { HasTextString = billNumber });
+        await matchRow.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
+        await _session.Page.GetByLabel("Invoice match action reason").FillAsync("Receipt and supplier invoice reviewed in browser workflow");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Confirm" }).ClickAsync();
+        await _session.Page.GetByText($"Supplier invoice {billNumber} approved.", new() { Exact = true }).WaitForAsync();
+    }
+
+    public async Task PostPurchaseInvoiceAsync(string billNumber)
+    {
+        var matchRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Supplier invoice matches" }).Locator("tr").Filter(new() { HasTextString = billNumber });
+        await matchRow.GetByRole(AriaRole.Button, new() { Name = "Post invoice" }).ClickAsync();
+        await _session.Page.GetByText($"Supplier invoice {billNumber} posted to accounts payable.", new() { Exact = true }).WaitForAsync();
+        await Assertions.Expect(matchRow).ToContainTextAsync("Posted");
     }
 
     public async Task AuthorizeAndShipSupplierReturnAsync(string receiptNumber, string returnNumber, string shipmentNumber)

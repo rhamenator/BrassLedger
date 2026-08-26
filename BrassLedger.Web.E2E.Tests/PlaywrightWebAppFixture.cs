@@ -13,7 +13,8 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
     private readonly ConcurrentQueue<string> _logs = new();
     private readonly string _solutionRoot;
     private readonly string _projectRoot;
-    private readonly string _projectPath;
+    private readonly string _applicationPath;
+    private readonly string _buildConfiguration;
     private readonly string _dataRootPath;
     private readonly string _sqliteConnectionString;
     private readonly List<Task> _logPumpTasks = new();
@@ -25,7 +26,9 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
     {
         _solutionRoot = ResolveSolutionRoot();
         _projectRoot = Path.Combine(_solutionRoot, "BrassLedger.Web");
-        _projectPath = Path.Combine(_solutionRoot, "BrassLedger.Web", "BrassLedger.Web.csproj");
+        _buildConfiguration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
+            ?? throw new InvalidOperationException("Could not determine the E2E test build configuration.");
+        _applicationPath = Path.Combine(_projectRoot, "bin", _buildConfiguration, "net8.0", "BrassLedger.Web.dll");
         _dataRootPath = Path.Combine(Path.GetTempPath(), "BrassLedger.Web.E2E.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dataRootPath);
         _sqliteConnectionString = $"Data Source={Path.Combine(_dataRootPath, "brassledger.e2e.db")}";
@@ -148,11 +151,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             CreateNoWindow = true
         };
 
-        startInfo.ArgumentList.Add("run");
-        startInfo.ArgumentList.Add("--project");
-        startInfo.ArgumentList.Add(_projectPath);
-        startInfo.ArgumentList.Add("--no-launch-profile");
-        startInfo.ArgumentList.Add("--");
+        startInfo.ArgumentList.Add(_applicationPath);
         startInfo.ArgumentList.Add("--urls");
         startInfo.ArgumentList.Add("http://127.0.0.1:0");
 

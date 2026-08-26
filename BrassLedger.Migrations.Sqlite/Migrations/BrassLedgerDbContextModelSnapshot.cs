@@ -5471,6 +5471,231 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("ProjectJobs");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseInvoiceMatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("AccrualAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("BillDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BillNumber")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CancellationReason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CancelledByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DecidedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionReason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("DueDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InventoryReceiptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("InvoiceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("PostedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PostedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PreparedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("PriceVarianceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PurchaseOrderId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("QuantityVarianceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("QuantityVarianceQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("ReversalDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReversalReason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ReversedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReversedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceReceiptConcurrencyToken")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("SubmittedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SubmittedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("VendorBillId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("VendorId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryReceiptId");
+
+                    b.HasIndex("JournalEntryId");
+
+                    b.HasIndex("PurchaseOrderId");
+
+                    b.HasIndex("ReversalJournalEntryId");
+
+                    b.HasIndex("VendorBillId");
+
+                    b.HasIndex("VendorId");
+
+                    b.HasIndex("CompanyId", "BillNumber")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "InventoryReceiptId", "Status");
+
+                    b.ToTable("PurchaseInvoiceMatches");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseInvoiceMatchLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("AccrualAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("AvailableQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InventoryReceiptLineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("InvoiceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("InvoiceQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("InvoiceUnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("MatchedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("PriceVarianceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PurchaseInvoiceMatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PurchaseOrderLineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("QuantityVarianceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("QuantityVarianceQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ReceiptUnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("InventoryReceiptLineId");
+
+                    b.HasIndex("PurchaseOrderLineId");
+
+                    b.HasIndex("PurchaseInvoiceMatchId", "InventoryReceiptLineId")
+                        .IsUnique();
+
+                    b.HasIndex("PurchaseInvoiceMatchId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("PurchaseInvoiceMatchLines");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseOrder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7013,10 +7238,18 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("GrniReductionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("InventoryItemId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("InventoryReceiptLineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("InvoicedQuantity")
+                        .HasPrecision(18, 4)
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("PriorQuantityOnHand")
@@ -7673,8 +7906,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("InventoryReceiptId")
-                        .IsUnique();
+                    b.HasIndex("InventoryReceiptId");
 
                     b.HasIndex("PurchaseOrderId");
 
@@ -7688,6 +7920,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("AccrualAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
@@ -7708,8 +7944,28 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("MatchedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("PriceVarianceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("QuantityVarianceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("QuantityVarianceQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ReceiptUnitCost")
+                        .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Sequence")
@@ -8671,6 +8927,75 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .WithMany()
                         .HasForeignKey("PayrollRunId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseInvoiceMatch", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.PurchaseOrder", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.VendorBill", null)
+                        .WithMany()
+                        .HasForeignKey("VendorBillId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Vendor", null)
+                        .WithMany()
+                        .HasForeignKey("VendorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseInvoiceMatchLine", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryReceiptLine", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryReceiptLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.PurchaseInvoiceMatch", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseInvoiceMatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.PurchaseOrderLine", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseOrder", b =>

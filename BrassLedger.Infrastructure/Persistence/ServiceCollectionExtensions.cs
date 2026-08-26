@@ -338,6 +338,13 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "SupplierReturnShipments", "VendorCreditAmount", cancellationToken)
                 && await HasColumnAsync(dbContext, "SupplierReturnShipmentLines", "VendorCreditUnitCost", cancellationToken)
                 && await HasColumnAsync(dbContext, "SupplierReturnShipmentLines", "VendorCreditAmount", cancellationToken);
+        if (migrationId.EndsWith("_AddControlledPurchaseInvoiceMatching", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "PurchaseInvoiceMatches", cancellationToken)
+                && await HasTableAsync(dbContext, "PurchaseInvoiceMatchLines", cancellationToken)
+                && await HasColumnAsync(dbContext, "VendorBillLines", "MatchedQuantity", cancellationToken)
+                && await HasColumnAsync(dbContext, "VendorBillLines", "AccrualAmount", cancellationToken)
+                && await HasColumnAsync(dbContext, "SupplierReturnShipmentLines", "InvoicedQuantity", cancellationToken)
+                && await HasColumnAsync(dbContext, "SupplierReturnShipmentLines", "GrniReductionAmount", cancellationToken);
         return false;
     }
 

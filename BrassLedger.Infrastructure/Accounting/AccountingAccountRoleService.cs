@@ -127,7 +127,14 @@ public sealed class AccountingAccountRoleService(
         {
             AccountingAccountRoles.AccountsReceivable => await db.SalesInvoices.AnyAsync(invoice => invoice.CompanyId == companyId && invoice.BalanceDue != 0m && invoice.Status != "Voided", cancellationToken),
             AccountingAccountRoles.AccountsPayable => await db.VendorBills.AnyAsync(bill => bill.CompanyId == companyId && bill.BalanceDue != 0m && bill.Status != "Voided", cancellationToken),
-            AccountingAccountRoles.GoodsReceivedNotInvoiced => await db.InventoryReceipts.AnyAsync(receipt => receipt.CompanyId == companyId && receipt.Status == "Posted" && !db.VendorBills.Any(bill => bill.InventoryReceiptId == receipt.Id), cancellationToken),
+            AccountingAccountRoles.GoodsReceivedNotInvoiced =>
+                await db.InventoryReceiptLines.AnyAsync(line =>
+                    db.InventoryReceipts.Any(receipt => receipt.Id == line.InventoryReceiptId && receipt.CompanyId == companyId && receipt.Status == "Posted")
+                    && line.Quantity - line.ReturnedQuantity > db.VendorBillLines
+                        .Where(billLine => billLine.InventoryReceiptLineId == line.Id
+                            && db.VendorBills.Any(bill => bill.Id == billLine.VendorBillId && bill.CompanyId == companyId && bill.Status != "Voided"))
+                        .Sum(billLine => billLine.MatchedQuantity), cancellationToken)
+                || await db.PurchaseInvoiceMatches.AnyAsync(match => match.CompanyId == companyId && (match.Status == "Draft" || match.Status == "Submitted" || match.Status == "Approved"), cancellationToken),
             AccountingAccountRoles.InventoryAsset => await db.InventoryItems.AnyAsync(item => item.CompanyId == companyId && item.QuantityOnHand != 0m, cancellationToken),
             AccountingAccountRoles.VendorAdvances => await db.SubledgerPayments.AnyAsync(payment => payment.CompanyId == companyId && payment.Direction == "VendorDisbursement" && payment.UnappliedAmount != 0m && payment.Status == "Posted", cancellationToken),
             AccountingAccountRoles.CustomerDeposits => await db.SubledgerPayments.AnyAsync(payment => payment.CompanyId == companyId && payment.Direction == "CustomerReceipt" && payment.UnappliedAmount != 0m && payment.Status == "Posted", cancellationToken),

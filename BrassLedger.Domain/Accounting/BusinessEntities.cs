@@ -543,6 +543,12 @@ public sealed class VendorBillLine
     public decimal DiscountAmount { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal LineTotal { get; set; }
+    public decimal MatchedQuantity { get; set; }
+    public decimal QuantityVarianceQuantity { get; set; }
+    public decimal ReceiptUnitCost { get; set; }
+    public decimal AccrualAmount { get; set; }
+    public decimal PriceVarianceAmount { get; set; }
+    public decimal QuantityVarianceAmount { get; set; }
 }
 
 public sealed class SubledgerPayment
@@ -1179,6 +1185,66 @@ public sealed class InventoryReceiptLine
     public decimal ResultingUnitCost { get; set; }
 }
 
+public sealed class PurchaseInvoiceMatch
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid InventoryReceiptId { get; set; }
+    public Guid PurchaseOrderId { get; set; }
+    public Guid VendorId { get; set; }
+    public Guid? VendorBillId { get; set; }
+    public string BillNumber { get; set; } = string.Empty;
+    public DateOnly BillDate { get; set; }
+    public DateOnly DueDate { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
+    public decimal InvoiceAmount { get; set; }
+    public decimal AccrualAmount { get; set; }
+    public decimal PriceVarianceAmount { get; set; }
+    public decimal QuantityVarianceQuantity { get; set; }
+    public decimal QuantityVarianceAmount { get; set; }
+    public string SourceReceiptConcurrencyToken { get; set; } = string.Empty;
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? SubmittedByUserId { get; set; }
+    public DateTimeOffset? SubmittedAtUtc { get; set; }
+    public Guid? DecidedByUserId { get; set; }
+    public DateTimeOffset? DecidedAtUtc { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
+    public Guid? PostedByUserId { get; set; }
+    public DateTimeOffset? PostedAtUtc { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class PurchaseInvoiceMatchLine
+{
+    public Guid Id { get; set; }
+    public Guid PurchaseInvoiceMatchId { get; set; }
+    public Guid InventoryReceiptLineId { get; set; }
+    public Guid PurchaseOrderLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public int Sequence { get; set; }
+    public decimal AvailableQuantity { get; set; }
+    public decimal InvoiceQuantity { get; set; }
+    public decimal MatchedQuantity { get; set; }
+    public decimal QuantityVarianceQuantity { get; set; }
+    public decimal ReceiptUnitCost { get; set; }
+    public decimal InvoiceUnitCost { get; set; }
+    public decimal AccrualAmount { get; set; }
+    public decimal InvoiceAmount { get; set; }
+    public decimal PriceVarianceAmount { get; set; }
+    public decimal QuantityVarianceAmount { get; set; }
+}
+
 public sealed class SupplierReturnAuthorization
 {
     public Guid Id { get; set; }
@@ -1252,6 +1318,8 @@ public sealed class SupplierReturnShipmentLine
     public decimal Quantity { get; set; }
     public decimal UnitCost { get; set; }
     public decimal TotalAmount { get; set; }
+    public decimal InvoicedQuantity { get; set; }
+    public decimal GrniReductionAmount { get; set; }
     public decimal VendorCreditUnitCost { get; set; }
     public decimal VendorCreditAmount { get; set; }
     public decimal PriorQuantityOnHand { get; set; }

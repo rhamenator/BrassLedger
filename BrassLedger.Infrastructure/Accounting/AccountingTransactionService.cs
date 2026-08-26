@@ -1044,6 +1044,7 @@ public sealed partial class AccountingTransactionService(
         {
             var bill = await db.VendorBills.SingleOrDefaultAsync(item => item.Id == request.DocumentId && item.CompanyId == companyId, cancellationToken);
             if (bill is null) return TransactionResult.Failure("Vendor bill not found.");
+            if (await db.PurchaseInvoiceMatches.AnyAsync(item => item.CompanyId == companyId && item.VendorBillId == bill.Id && item.Status == "Posted", cancellationToken)) return TransactionResult.Failure("Reverse this bill from its supplier invoice match so GRNI, variance, and purchase-order history remain synchronized.");
             if (bill.InventoryReceiptId.HasValue) return TransactionResult.Failure("Void this matched bill from its inventory receipt so purchase-order and GRNI history remain synchronized.");
             if (await db.LandedCostAllocations.AnyAsync(item => item.CompanyId == companyId && item.VendorBillId == bill.Id && item.Status == "Posted", cancellationToken)) return TransactionResult.Failure("Reverse this bill from its landed-cost allocation so inventory valuation remains synchronized.");
             if (bill.Status == "Voided" || bill.BalanceDue != bill.TotalAmount) return TransactionResult.Failure("Only a fully open, unadjusted bill can be voided.");

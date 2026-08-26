@@ -526,15 +526,16 @@ else
 
         <section class="panel">
             <h2>Inventory receipts and invoice matching</h2>
-            <p class="page-intro">Matching is exact: the vendor bill uses the quantities and costs accepted on the receipt. Void an unapplied matched bill before reversing its receipt.</p>
+            <p class="page-intro">Payables may enter partial supplier invoices and the supplier's actual quantities and prices. The system clears only received quantities from GRNI and identifies price and quantity variances for Purchasing review before posting.</p>
             <table class="data-table" aria-label="Inventory receipts"><thead><tr><th>Receipt</th><th>Purchase order</th><th>Location</th><th>Date</th><th>Status</th><th>Total</th><th>Invoice</th><th>Action</th></tr></thead><tbody>
                 @foreach (var receipt in Workspace.Operations.InventoryReceipts ?? [])
                 {
-                    <tr><td>@receipt.ReceiptNumber</td><td>@receipt.PurchaseOrderNumber</td><td>@receipt.Location</td><td>@receipt.ReceivedOn.ToString("MMM d, yyyy")</td><td>@receipt.Status</td><td>@receipt.TotalAmount.ToString("C")</td><td>@(receipt.VendorBillId.HasValue ? "Matched" : "Unmatched")</td><td>
+                    <tr><td>@receipt.ReceiptNumber</td><td>@receipt.PurchaseOrderNumber</td><td>@receipt.Location</td><td>@receipt.ReceivedOn.ToString("MMM d, yyyy")</td><td>@receipt.Status</td><td>@receipt.TotalAmount.ToString("C")</td><td>@if ((receipt.VendorBills ?? []).Count == 0) { <span>No linked bills</span> } else { @foreach (var bill in receipt.VendorBills ?? []) { <div>@bill.BillNumber — @bill.TotalAmount.ToString("C") (@bill.Status)</div> } }</td><td>
                         @if (CanManagePurchasing && receipt.Status == "Posted" && AvailableSupplierReturnLines(receipt).Count > 0) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturn(receipt)">Return to supplier</button> }
                         @if (CanManagePayables && receipt.Status == "Posted") { <button class="action-secondary" type="button" @onclick="() => BeginLandedCost(receipt)">Allocate landed cost</button> }
-                        @if (CanManagePurchasing && receipt.Status == "Posted" && !receipt.VendorBillId.HasValue) { @if (CanMatchReceiptBills) { <button class="action-secondary" type="button" @onclick="() => BeginBillMatch(receipt)">Create matched bill</button> }<button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, false)">Reverse receipt</button> }
-                        @if (CanMatchReceiptBills && receipt.Status == "Posted" && receipt.VendorBillId.HasValue) { <button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, true)">Void matched bill</button> }
+                        @if (CanManagePayables && CanPreparePurchaseInvoice(receipt)) { <button class="action-secondary" type="button" @onclick="() => BeginBillMatch(receipt)">Prepare supplier invoice</button> }
+                        @if (CanManagePurchasing && CanReversePurchaseReceipt(receipt)) { <button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, false)">Reverse receipt</button> }
+                        @if (CanMatchReceiptBills && IsLegacyMatchedReceipt(receipt)) { <button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, true)">Void legacy matched bill</button> }
                     </td></tr>
                 }
             </tbody></table>
@@ -626,16 +627,36 @@ else
             <div class="table-scroll"><table class="data-table" aria-label="Supplier return shipments"><thead><tr><th>Shipment</th><th>Return</th><th>Vendor</th><th>Location</th><th>Accounting</th><th>Inventory removed</th><th>Vendor credit</th><th>Applied</th><th>Refunded</th><th>Available</th><th>Status</th><th>Action</th></tr></thead><tbody>@foreach (var shipment in Workspace.Operations.SupplierReturnShipments ?? []) { <tr><td>@shipment.ShipmentNumber</td><td>@shipment.ReturnNumber</td><td>@shipment.VendorName</td><td>@shipment.Location</td><td>@(shipment.CreatesVendorCredit ? $"Vendor credit ({shipment.SourceVendorBillNumber})" : "GRNI reduction")</td><td>@shipment.TotalAmount.ToString("C")</td><td>@shipment.VendorCreditAmount.ToString("C")</td><td>@shipment.AppliedAmount.ToString("C")</td><td>@shipment.RefundedAmount.ToString("C")</td><td>@shipment.AvailableAmount.ToString("C")</td><td>@shipment.Status</td><td>@if (CanManagePayables && shipment.Status == "Posted" && shipment.CreatesVendorCredit && shipment.AvailableAmount > 0m) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnCreditSettlement(shipment)">Apply or refund</button> } @foreach (var application in shipment.Applications.Where(item => item.Status == "Posted")) { @if (CanReverseTransactions) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnApplicationReversal(application, shipment.ShipmentNumber)">Reverse @application.VendorBillNumber application</button> } } @foreach (var refund in shipment.Refunds.Where(item => item.Status == "Posted")) { @if (CanReverseTransactions) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnRefundReversal(refund, shipment.ShipmentNumber)">Reverse refund @refund.Reference</button> } } @if (CanReverseTransactions && CanManagePurchasing && shipment.Status == "Posted" && shipment.AppliedAmount == shipment.SourceAppliedAmount && shipment.RefundedAmount == 0m && shipment.Applications.All(item => item.Status != "Posted")) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturnShipmentReversal(shipment)">Reverse shipment</button> }</td></tr> }</tbody></table></div>
         </section>
 
-        @if (CanMatchReceiptBills && BillMatchForm is not null)
+        @if (CanManagePayables && BillMatchForm is not null)
         {
-            <section class="panel"><h2>Create bill for receipt @BillMatchForm.ReceiptNumber</h2><EditForm Model="BillMatchForm" OnValidSubmit="MatchBillAsync"><div class="auth-form">
+            <section class="panel"><h2>@(BillMatchForm.Id.HasValue ? "Edit" : "Prepare") supplier invoice for receipt @BillMatchForm.ReceiptNumber</h2><p class="page-intro">Enter the invoice exactly as received. Quantities up to the retained, uninvoiced receipt quantity clear GRNI; excess quantity is shown as a quantity variance. Differences between receipt and invoice prices are shown as price variance.</p><EditForm Model="BillMatchForm" OnValidSubmit="MatchBillAsync"><div class="auth-form">
                 <div class="field-group"><label class="field-label">Vendor bill number</label><InputText aria-label="Matched vendor bill number" class="field-input" @bind-Value="BillMatchForm.BillNumber" /></div>
                 <div class="field-group"><label class="field-label">Bill date</label><InputDate aria-label="Matched vendor bill date" class="field-input" @bind-Value="BillMatchForm.BillDate" /></div>
                 <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Matched vendor bill due date" class="field-input" @bind-Value="BillMatchForm.DueDate" /></div>
                 <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Matched vendor bill description" class="field-input" @bind-Value="BillMatchForm.Description" /></div>
-                <button class="action-primary" type="submit">Post matched vendor bill</button><button class="action-secondary" type="button" @onclick="CancelBillMatch">Cancel</button>
+                @foreach (var line in BillMatchForm.Lines) { <fieldset class="field-group"><legend>@line.Sku</legend><p class="page-intro">Available received quantity: @line.AvailableQuantity at @line.ReceiptUnitCost.ToString("C")</p><label class="field-label">Invoice quantity</label><InputNumber aria-label="@($"Invoice {line.Sku} quantity")" class="field-input" @bind-Value="line.Quantity" /><label class="field-label">Invoice unit cost</label><InputNumber aria-label="@($"Invoice {line.Sku} unit cost")" class="field-input" @bind-Value="line.UnitCost" />@if (line.Quantity > line.AvailableQuantity) { <p class="validation-message">Quantity variance: @(line.Quantity - line.AvailableQuantity)</p> }</fieldset> }
+                <button class="action-primary" type="submit">Save invoice match draft</button><button class="action-secondary" type="button" @onclick="CancelBillMatch">Cancel</button>
             </div></EditForm></section>
         }
+
+        @if (InvoiceMatchDecisionForm is not null)
+        {
+            <section class="panel"><h2>@InvoiceMatchDecisionForm.Title</h2><EditForm Model="InvoiceMatchDecisionForm" OnValidSubmit="CompleteInvoiceMatchDecisionAsync"><div class="auth-form">@if (InvoiceMatchDecisionForm.NeedsDate) { <div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Invoice match reversal date" class="field-input" @bind-Value="InvoiceMatchDecisionForm.ActionDate" /></div> }<div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Invoice match action reason" class="field-input" @bind-Value="InvoiceMatchDecisionForm.Reason" /></div><button class="action-primary" type="submit">Confirm</button><button class="action-secondary" type="button" @onclick="CancelInvoiceMatchDecision">Cancel</button></div></EditForm></section>
+        }
+
+        <section class="panel"><h2>Supplier invoice match review</h2><p class="page-intro">Preparation, Purchasing approval, and posting are separate actions. Positive variance increases expense; negative variance is favorable. Reversal preserves the original invoice, match, and journal evidence.</p><div class="table-scroll"><table class="data-table" aria-label="Supplier invoice matches"><thead><tr><th>Bill</th><th>Receipt</th><th>Invoice</th><th>GRNI cleared</th><th>Price variance</th><th>Quantity variance</th><th>Status</th><th>Review</th><th>Action</th></tr></thead><tbody>
+            @foreach (var match in Workspace.Operations.PurchaseInvoiceMatches ?? [])
+            {
+                <tr><td>@match.BillNumber</td><td>@match.ReceiptNumber</td><td>@match.InvoiceAmount.ToString("C")</td><td>@match.AccrualAmount.ToString("C")</td><td>@match.PriceVarianceAmount.ToString("C")</td><td>@match.QuantityVarianceQuantity units / @match.QuantityVarianceAmount.ToString("C")</td><td>@match.Status</td><td>@match.DecisionReason @match.CancellationReason</td><td>
+                    @if (CanManagePayables && match.Status is "Draft" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => EditInvoiceMatch(match)">Edit</button> }
+                    @if (CanManagePayables && match.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => SubmitInvoiceMatchAsync(match)">Submit</button> }
+                    @if (CanManagePurchasing && match.Status == "Submitted") { <button class="action-secondary" type="button" @onclick='() => BeginInvoiceMatchDecision(match, "Approve")'>Approve</button><button class="action-secondary" type="button" @onclick='() => BeginInvoiceMatchDecision(match, "Reject")'>Reject</button> }
+                    @if (CanManagePayables && match.Status == "Approved") { <button class="action-primary" type="button" @onclick="() => PostInvoiceMatchAsync(match)">Post invoice</button> }
+                    @if (CanManagePayables && match.Status is "Draft" or "Submitted" or "Approved" or "Rejected") { <button class="action-secondary" type="button" @onclick='() => BeginInvoiceMatchDecision(match, "Cancel")'>Cancel</button> }
+                    @if (CanManagePurchasing && CanReverseTransactions && match.Status == "Posted") { <button class="action-secondary" type="button" @onclick='() => BeginInvoiceMatchDecision(match, "Reverse")'>Reverse</button> }
+                </td></tr>
+            }
+        </tbody></table></div></section>
 
         @if (CorrectionForm is not null)
         {
@@ -684,6 +705,7 @@ else
     private CustomerReturnReversalEditor? ReturnReversalForm;
     private ReceiptEditor? ReceiptForm;
     private BillMatchEditor? BillMatchForm;
+    private InvoiceMatchDecisionEditor? InvoiceMatchDecisionForm;
     private PurchaseCorrectionEditor? CorrectionForm;
     private SupplierReturnAuthorizationEditor? SupplierReturnAuthorizationForm;
     private SupplierReturnShipmentEditor? SupplierReturnShipmentForm;
@@ -1067,12 +1089,49 @@ else
     {
         var result = await TransactionService.PostLandedCostAllocationAsync(new(allocation.Id, allocation.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Landed-cost allocation {allocation.AllocationNumber} posted to inventory and accounts payable." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync();
     }
-    private void BeginBillMatch(InventoryReceiptSnapshot receipt) => BillMatchForm = new BillMatchEditor(receipt.Id, receipt.ReceiptNumber, receipt.ConcurrencyToken);
+    private IReadOnlyList<PurchaseInvoiceMatchSnapshot> InvoiceMatchesForReceipt(Guid receiptId) => (Workspace?.Operations.PurchaseInvoiceMatches ?? []).Where(match => match.InventoryReceiptId == receiptId).ToArray();
+    private IReadOnlyList<MatchedVendorBillSnapshot> ActiveReceiptBills(InventoryReceiptSnapshot receipt) => (receipt.VendorBills ?? []).Where(bill => bill.Status != "Voided").ToArray();
+    private bool IsLegacyMatchedReceipt(InventoryReceiptSnapshot receipt) => ActiveReceiptBills(receipt).Count == 1 && InvoiceMatchesForReceipt(receipt.Id).Count == 0;
+    private bool CanPreparePurchaseInvoice(InventoryReceiptSnapshot receipt)
+    {
+        if (receipt.Status != "Posted" || IsLegacyMatchedReceipt(receipt)) return false;
+        var reservedLines = InvoiceMatchesForReceipt(receipt.Id).Where(match => match.Status is "Draft" or "Submitted" or "Approved" or "Posted").SelectMany(match => match.Lines);
+        return receipt.Lines.Any(line => line.Quantity - line.ReturnedQuantity - reservedLines.Where(matchLine => matchLine.InventoryReceiptLineId == line.Id).Sum(matchLine => matchLine.MatchedQuantity) > 0m);
+    }
+    private bool CanReversePurchaseReceipt(InventoryReceiptSnapshot receipt) => receipt.Status == "Posted" && ActiveReceiptBills(receipt).Count == 0 && !InvoiceMatchesForReceipt(receipt.Id).Any(match => match.Status is not ("Cancelled" or "Reversed"));
+    private void BeginBillMatch(InventoryReceiptSnapshot receipt)
+    {
+        var reservedLines = InvoiceMatchesForReceipt(receipt.Id).Where(match => match.Status is "Draft" or "Submitted" or "Approved" or "Posted").SelectMany(match => match.Lines);
+        var lines = receipt.Lines.Select(line => new BillMatchLineEditor(line.Id, line.Sku, Math.Max(0m, line.Quantity - line.ReturnedQuantity - reservedLines.Where(matchLine => matchLine.InventoryReceiptLineId == line.Id).Sum(matchLine => matchLine.MatchedQuantity)), line.UnitCost)).Where(line => line.AvailableQuantity > 0m).ToList();
+        BillMatchForm = BillMatchEditor.Create(receipt, lines);
+    }
+    private void EditInvoiceMatch(PurchaseInvoiceMatchSnapshot match)
+    {
+        var receipt = (Workspace?.Operations.InventoryReceipts ?? []).Single(item => item.Id == match.InventoryReceiptId);
+        BillMatchForm = BillMatchEditor.Edit(match, receipt);
+    }
     private void CancelBillMatch() => BillMatchForm = null;
     private async Task MatchBillAsync()
     {
-        var form = BillMatchForm!; var result = await TransactionService.MatchPurchaseOrderReceiptBillAsync(new MatchPurchaseOrderReceiptBillRequest(form.InventoryReceiptId, form.BillNumber, form.BillDate, form.DueDate, form.Description, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Vendor bill matched and posted." : result.ErrorMessage; if (result.Succeeded) { BillMatchForm = null; await ReloadAsync(); }
+        var form = BillMatchForm!; var result = await TransactionService.SavePurchaseInvoiceMatchAsync(new SavePurchaseInvoiceMatchRequest(form.Id, form.InventoryReceiptId, form.BillNumber, form.BillDate, form.DueDate, form.Description, form.Lines.Where(line => line.Quantity > 0m).Select(line => new PurchaseInvoiceMatchLineRequest(line.InventoryReceiptLineId, line.Quantity, line.UnitCost)).ToArray(), form.ReceiptConcurrencyToken, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Supplier invoice match saved as a draft." : result.ErrorMessage; if (result.Succeeded) { BillMatchForm = null; await ReloadAsync(); }
     }
+    private async Task SubmitInvoiceMatchAsync(PurchaseInvoiceMatchSnapshot match) { var result = await TransactionService.SubmitPurchaseInvoiceMatchAsync(new(match.Id, match.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Supplier invoice {match.BillNumber} submitted to Purchasing." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync(); }
+    private void BeginInvoiceMatchDecision(PurchaseInvoiceMatchSnapshot match, string action) => InvoiceMatchDecisionForm = new(match.Id, match.BillNumber, match.BillDate, match.ConcurrencyToken, action);
+    private void CancelInvoiceMatchDecision() => InvoiceMatchDecisionForm = null;
+    private async Task CompleteInvoiceMatchDecisionAsync()
+    {
+        var form = InvoiceMatchDecisionForm!;
+        var result = form.Action switch
+        {
+            "Approve" => await TransactionService.DecidePurchaseInvoiceMatchAsync(new(form.PurchaseInvoiceMatchId, true, form.Reason, form.ConcurrencyToken)),
+            "Reject" => await TransactionService.DecidePurchaseInvoiceMatchAsync(new(form.PurchaseInvoiceMatchId, false, form.Reason, form.ConcurrencyToken)),
+            "Cancel" => await TransactionService.CancelPurchaseInvoiceMatchAsync(new(form.PurchaseInvoiceMatchId, form.Reason, form.ConcurrencyToken)),
+            _ => await TransactionService.ReversePurchaseInvoiceMatchAsync(new(form.PurchaseInvoiceMatchId, form.ActionDate, form.Reason, form.ConcurrencyToken))
+        };
+        StatusMessage = result.Succeeded ? $"Supplier invoice {form.BillNumber} {form.PastTense}." : result.ErrorMessage;
+        if (result.Succeeded) { InvoiceMatchDecisionForm = null; await ReloadAsync(); }
+    }
+    private async Task PostInvoiceMatchAsync(PurchaseInvoiceMatchSnapshot match) { var result = await TransactionService.PostPurchaseInvoiceMatchAsync(new(match.Id, match.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Supplier invoice {match.BillNumber} posted to accounts payable." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync(); }
     private void BeginCorrection(InventoryReceiptSnapshot receipt, bool voidBill) => CorrectionForm = new PurchaseCorrectionEditor(receipt.Id, receipt.ReceiptNumber, receipt.ConcurrencyToken, voidBill);
     private void CancelCorrection() => CorrectionForm = null;
     private async Task ExecuteCorrectionAsync()
@@ -1253,6 +1312,14 @@ else
         public LandedCostDecisionEditor(Guid landedCostAllocationId, string allocationNumber, DateOnly billDate, string concurrencyToken, string action) { LandedCostAllocationId = landedCostAllocationId; AllocationNumber = allocationNumber; ConcurrencyToken = concurrencyToken; Action = action; var today = DateOnly.FromDateTime(DateTime.Today); ActionDate = today < billDate ? billDate : today; }
         public Guid LandedCostAllocationId { get; } public string AllocationNumber { get; } public string ConcurrencyToken { get; } public string Action { get; } public bool NeedsDate => Action == "Reverse"; public string Title => $"{Action} landed-cost allocation {AllocationNumber}"; public string PastTense => Action switch { "Approve" => "approved", "Reject" => "rejected", "Cancel" => "cancelled", _ => "reversed" }; public DateOnly ActionDate { get; set; } public string Reason { get; set; } = "";
     }
-    private sealed class BillMatchEditor(Guid inventoryReceiptId, string receiptNumber, string concurrencyToken) { public Guid InventoryReceiptId { get; } = inventoryReceiptId; public string ReceiptNumber { get; } = receiptNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string BillNumber { get; set; } = $"BILL-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly BillDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); public string Description { get; set; } = "Inventory receipt vendor bill"; }
+    private sealed class BillMatchEditor
+    {
+        private BillMatchEditor(Guid inventoryReceiptId, string receiptNumber, string receiptConcurrencyToken, List<BillMatchLineEditor> lines) { InventoryReceiptId = inventoryReceiptId; ReceiptNumber = receiptNumber; ReceiptConcurrencyToken = receiptConcurrencyToken; Lines = lines; }
+        public static BillMatchEditor Create(InventoryReceiptSnapshot receipt, List<BillMatchLineEditor> lines) { var billDate = DateOnly.FromDateTime(DateTime.Today) < receipt.ReceivedOn ? receipt.ReceivedOn : DateOnly.FromDateTime(DateTime.Today); return new(receipt.Id, receipt.ReceiptNumber, receipt.ConcurrencyToken, lines) { BillDate = billDate, DueDate = billDate.AddDays(30) }; }
+        public static BillMatchEditor Edit(PurchaseInvoiceMatchSnapshot match, InventoryReceiptSnapshot receipt) => new(receipt.Id, receipt.ReceiptNumber, receipt.ConcurrencyToken, match.Lines.Select(line => new BillMatchLineEditor(line.InventoryReceiptLineId, line.Sku, line.AvailableQuantity, line.ReceiptUnitCost) { Quantity = line.InvoiceQuantity, UnitCost = line.InvoiceUnitCost }).ToList()) { Id = match.Id, BillNumber = match.BillNumber, BillDate = match.BillDate, DueDate = match.DueDate, Description = match.Description, ConcurrencyToken = match.ConcurrencyToken };
+        public Guid? Id { get; set; } public Guid InventoryReceiptId { get; } public string ReceiptNumber { get; } public string ReceiptConcurrencyToken { get; } public string ConcurrencyToken { get; set; } = ""; public string BillNumber { get; set; } = $"BILL-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly BillDate { get; set; } public DateOnly DueDate { get; set; } public string Description { get; set; } = "Supplier invoice matched to inventory receipt"; public List<BillMatchLineEditor> Lines { get; }
+    }
+    private sealed class BillMatchLineEditor(Guid inventoryReceiptLineId, string sku, decimal availableQuantity, decimal receiptUnitCost) { public Guid InventoryReceiptLineId { get; } = inventoryReceiptLineId; public string Sku { get; } = sku; public decimal AvailableQuantity { get; } = availableQuantity; public decimal ReceiptUnitCost { get; } = receiptUnitCost; public decimal Quantity { get; set; } = availableQuantity; public decimal UnitCost { get; set; } = receiptUnitCost; }
+    private sealed class InvoiceMatchDecisionEditor(Guid purchaseInvoiceMatchId, string billNumber, DateOnly billDate, string concurrencyToken, string action) { public Guid PurchaseInvoiceMatchId { get; } = purchaseInvoiceMatchId; public string BillNumber { get; } = billNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Action { get; } = action; public bool NeedsDate => Action == "Reverse"; public string Title => $"{Action} supplier invoice {BillNumber}"; public string PastTense => Action switch { "Approve" => "approved", "Reject" => "rejected", "Cancel" => "cancelled", _ => "reversed" }; public DateOnly ActionDate { get; set; } = DateOnly.FromDateTime(DateTime.Today) < billDate ? billDate : DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = ""; }
     private sealed class PurchaseCorrectionEditor(Guid inventoryReceiptId, string receiptNumber, string concurrencyToken, bool voidBill) { public Guid InventoryReceiptId { get; } = inventoryReceiptId; public string ReceiptNumber { get; } = receiptNumber; public string ConcurrencyToken { get; } = concurrencyToken; public bool VoidBill { get; } = voidBill; public DateOnly CorrectionDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = ""; }
 }
