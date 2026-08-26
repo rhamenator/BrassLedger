@@ -69,6 +69,8 @@ public sealed class BrassLedgerDbContext(
     public DbSet<LabelTemplate> LabelTemplates => Set<LabelTemplate>();
     public DbSet<ProjectJob> ProjectJobs => Set<ProjectJob>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+    public DbSet<AccountingSchedule> AccountingSchedules => Set<AccountingSchedule>();
+    public DbSet<AccountingScheduleInstallment> AccountingScheduleInstallments => Set<AccountingScheduleInstallment>();
     public DbSet<ReportCatalogItem> ReportCatalogItems => Set<ReportCatalogItem>();
     public DbSet<SalesInvoice> SalesInvoices => Set<SalesInvoice>();
     public DbSet<SalesInvoiceLine> SalesInvoiceLines => Set<SalesInvoiceLine>();
@@ -108,6 +110,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<ConsolidationGroup>().HasKey(x => x.Id);
         modelBuilder.Entity<ConsolidationGroupCompany>().HasKey(x => x.Id);
         modelBuilder.Entity<AccountingPeriod>().HasKey(x => x.Id);
+        modelBuilder.Entity<AccountingSchedule>().HasKey(x => x.Id);
+        modelBuilder.Entity<AccountingScheduleInstallment>().HasKey(x => x.Id);
         modelBuilder.Entity<BusinessAuditEntry>().HasKey(x => x.Id);
         modelBuilder.Entity<AccountingInterchangeBatch>().HasKey(x => x.Id);
         modelBuilder.Entity<IntegrationConnection>().HasKey(x => x.Id);
@@ -191,6 +195,12 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SubledgerAdjustment>().HasOne<BankAccount>().WithMany().HasForeignKey(adjustment => adjustment.BankAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SubledgerAdjustment>().HasOne<SubledgerPayment>().WithMany().HasForeignKey(adjustment => adjustment.PaymentId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankStatementImportBatch>().HasOne<BankAccount>().WithMany().HasForeignKey(batch => batch.BankAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AccountingScheduleInstallment>().HasOne<AccountingSchedule>().WithMany().HasForeignKey(installment => installment.AccountingScheduleId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<AccountingScheduleInstallment>().HasOne<JournalEntry>().WithMany().HasForeignKey(installment => installment.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AccountingSchedule>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(schedule => schedule.RelatedAssetAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AccountingSchedule>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(schedule => schedule.BalanceAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AccountingSchedule>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(schedule => schedule.ExpenseAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AccountingSchedule>().HasOne<BankAccount>().WithMany().HasForeignKey(schedule => schedule.PaymentBankAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankStatementTransaction>().HasOne<BankAccount>().WithMany().HasForeignKey(transaction => transaction.BankAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankStatementTransaction>().HasOne<BankStatementImportBatch>().WithMany().HasForeignKey(transaction => transaction.ImportBatchId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankStatementTransaction>().HasOne<JournalEntry>().WithMany().HasForeignKey(transaction => transaction.MatchedJournalEntryId).OnDelete(DeleteBehavior.Restrict);
@@ -334,6 +344,12 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.Amount));
         ConfigureMoney(modelBuilder.Entity<BankStatementImportBatch>().Property(x => x.DebitTotal));
         ConfigureMoney(modelBuilder.Entity<BankStatementImportBatch>().Property(x => x.CreditTotal));
+        ConfigureMoney(modelBuilder.Entity<AccountingSchedule>().Property(x => x.OriginalAmount));
+        ConfigureMoney(modelBuilder.Entity<AccountingSchedule>().Property(x => x.ResidualAmount));
+        ConfigureMoney(modelBuilder.Entity<AccountingSchedule>().Property(x => x.AnnualInterestRate), 9, 6);
+        ConfigureMoney(modelBuilder.Entity<AccountingScheduleInstallment>().Property(x => x.PrincipalAmount));
+        ConfigureMoney(modelBuilder.Entity<AccountingScheduleInstallment>().Property(x => x.ExpenseAmount));
+        ConfigureMoney(modelBuilder.Entity<AccountingScheduleInstallment>().Property(x => x.PaymentAmount));
         ConfigureMoney(modelBuilder.Entity<BankStatementTransaction>().Property(x => x.Amount));
         ConfigureMoney(modelBuilder.Entity<BankTransfer>().Property(x => x.Amount));
         ConfigureMoney(modelBuilder.Entity<BankReconciliation>().Property(x => x.OpeningBalance));
@@ -360,6 +376,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<BankStatementTransaction>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<BankTransfer>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<BankTransfer>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<AccountingSchedule>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         ConfigureMoney(modelBuilder.Entity<BankAccount>().Property(x => x.LastReconciledBalance));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.MonthlyBasePay));
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.AdditionalWithholding));
@@ -524,6 +541,9 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<BankStatementTransaction>().HasIndex(x => new { x.CompanyId, x.BankAccountId, x.ExternalId }).IsUnique();
         modelBuilder.Entity<BankStatementTransaction>().HasIndex(x => new { x.CompanyId, x.BankAccountId, x.Status, x.TransactionDate });
         modelBuilder.Entity<BankTransfer>().HasIndex(x => new { x.CompanyId, x.Reference }).IsUnique();
+        modelBuilder.Entity<AccountingSchedule>().HasIndex(x => new { x.CompanyId, x.ScheduleNumber }).IsUnique();
+        modelBuilder.Entity<AccountingScheduleInstallment>().HasIndex(x => new { x.AccountingScheduleId, x.Sequence }).IsUnique();
+        modelBuilder.Entity<AccountingScheduleInstallment>().HasIndex(x => x.JournalEntryId).IsUnique();
         modelBuilder.Entity<TaxRuleSet>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique();
         modelBuilder.Entity<TaxContentPackage>().HasIndex(x => new { x.CompanyId, x.PackageCode, x.Version }).IsUnique();
         modelBuilder.Entity<TaxSourceCapture>().HasIndex(x => new { x.CompanyId, x.CapturedAtUtc });

@@ -218,6 +218,143 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.ToTable("AccountingPeriods");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.AccountingSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AnnualInterestRate")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BalanceAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CalculationMethod")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ExpenseAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("OriginalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("PaymentBankAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("PeriodCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PreparedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RelatedAssetAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("ResidualAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("ScheduleNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ScheduleType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BalanceAccountId");
+
+                    b.HasIndex("ExpenseAccountId");
+
+                    b.HasIndex("PaymentBankAccountId");
+
+                    b.HasIndex("RelatedAssetAccountId");
+
+                    b.HasIndex("CompanyId", "ScheduleNumber")
+                        .IsUnique();
+
+                    b.ToTable("AccountingSchedules");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.AccountingScheduleInstallment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountingScheduleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("DueOn")
+                        .HasColumnType("date");
+
+                    b.Property<decimal>("ExpenseAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("PaymentAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("PrincipalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JournalEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("AccountingScheduleId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("AccountingScheduleInstallments");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.AppUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4995,6 +5132,45 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsUnique();
 
                     b.ToTable("VendorBillLines");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.AccountingSchedule", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("BalanceAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ExpenseAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.BankAccount", null)
+                        .WithMany()
+                        .HasForeignKey("PaymentBankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("RelatedAssetAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.AccountingScheduleInstallment", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.AccountingSchedule", null)
+                        .WithMany()
+                        .HasForeignKey("AccountingScheduleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.BankStatementImportBatch", b =>

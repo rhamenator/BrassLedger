@@ -13,15 +13,22 @@ internal static class DefaultAccountingSetup
         Account(companyId, "1100", "Accounts Receivable", AccountType.Asset, true, AccountingAccountRoles.AccountsReceivable),
         Account(companyId, "1200", "Inventory Asset", AccountType.Asset, true, AccountingAccountRoles.InventoryAsset),
         Account(companyId, "1300", "Vendor Advances", AccountType.Asset, true, AccountingAccountRoles.VendorAdvances),
+        Account(companyId, "1400", "Prepaid Expenses", AccountType.Asset),
+        Account(companyId, "1500", "Fixed Assets", AccountType.Asset),
+        Account(companyId, "1590", "Accumulated Depreciation", AccountType.Asset),
         Account(companyId, "2000", "Accounts Payable", AccountType.Liability, true, AccountingAccountRoles.AccountsPayable),
         Account(companyId, "2100", "Sales Tax Payable", AccountType.Liability, true, AccountingAccountRoles.SalesTaxPayable),
         Account(companyId, "2150", "Customer Deposits", AccountType.Liability, true, AccountingAccountRoles.CustomerDeposits),
         Account(companyId, "2200", "Payroll Liabilities", AccountType.Liability, true, AccountingAccountRoles.PayrollLiabilities),
+        Account(companyId, "2500", "Loans Payable", AccountType.Liability),
         Account(companyId, "3000", "Owner Equity", AccountType.Equity, role: AccountingAccountRoles.OwnerEquity),
         Account(companyId, "4000", "Product Revenue", AccountType.Revenue, role: AccountingAccountRoles.DefaultRevenue),
         Account(companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue, role: AccountingAccountRoles.ForeignExchangeGain),
         Account(companyId, "5100", "Cost of Goods Sold", AccountType.Expense, role: AccountingAccountRoles.CostOfGoodsSold),
         Account(companyId, "6100", "Payroll Expense", AccountType.Expense, role: AccountingAccountRoles.PayrollExpense),
+        Account(companyId, "6200", "Depreciation Expense", AccountType.Expense),
+        Account(companyId, "6250", "Interest Expense", AccountType.Expense),
+        Account(companyId, "6400", "Prepaid Amortization Expense", AccountType.Expense),
         Account(companyId, "6300", "Foreign Exchange Loss", AccountType.Expense, role: AccountingAccountRoles.ForeignExchangeLoss)
     ];
 
@@ -58,6 +65,13 @@ internal static class DefaultAccountingSetup
                 await EnsureRoleAccountAsync(dbContext, companyId, "2150", "Customer Deposits", AccountType.Liability, true, AccountingAccountRoles.CustomerDeposits, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue, false, AccountingAccountRoles.ForeignExchangeGain, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "6300", "Foreign Exchange Loss", AccountType.Expense, false, AccountingAccountRoles.ForeignExchangeLoss, cancellationToken);
+                await EnsureAccountAsync(dbContext, companyId, "1400", "Prepaid Expenses", AccountType.Asset, cancellationToken);
+                await EnsureAccountAsync(dbContext, companyId, "1500", "Fixed Assets", AccountType.Asset, cancellationToken);
+                await EnsureAccountAsync(dbContext, companyId, "1590", "Accumulated Depreciation", AccountType.Asset, cancellationToken);
+                await EnsureAccountAsync(dbContext, companyId, "2500", "Loans Payable", AccountType.Liability, cancellationToken);
+                await EnsureAccountAsync(dbContext, companyId, "6200", "Depreciation Expense", AccountType.Expense, cancellationToken);
+                await EnsureAccountAsync(dbContext, companyId, "6250", "Interest Expense", AccountType.Expense, cancellationToken);
+                await EnsureAccountAsync(dbContext, companyId, "6400", "Prepaid Amortization Expense", AccountType.Expense, cancellationToken);
             }
 
             var operatingCash = await EnsureOperationalRolesAsync(dbContext, companyId, cancellationToken);
@@ -92,6 +106,12 @@ internal static class DefaultAccountingSetup
     {
         if (await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && (account.OperationalRole == role || account.Number == number), cancellationToken)) return;
         await dbContext.Accounts.AddAsync(Account(companyId, number, name, type, isControlAccount, role), cancellationToken);
+    }
+
+    private static async Task EnsureAccountAsync(BrassLedgerDbContext dbContext, Guid companyId, string number, string name, AccountType type, CancellationToken cancellationToken)
+    {
+        if (await dbContext.Accounts.AnyAsync(account => account.CompanyId == companyId && account.Number == number, cancellationToken)) return;
+        await dbContext.Accounts.AddAsync(Account(companyId, number, name, type), cancellationToken);
     }
 
     private static GeneralLedgerAccount Account(Guid companyId, string number, string name, AccountType type, bool isControlAccount = false, string? role = null) => new()

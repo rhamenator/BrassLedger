@@ -194,6 +194,181 @@ public sealed class AccountingTransactionService(
         return lastResult!;
     }
 
+    public async Task<AccountingScheduleWorkspace> GetAccountingScheduleWorkspaceAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var accounts = await db.Accounts.AsNoTracking().Where(account => account.CompanyId == companyId).OrderBy(account => account.Number).ToListAsync(cancellationToken);
+        var bankAccounts = await db.BankAccounts.AsNoTracking().Where(account => account.CompanyId == companyId).OrderBy(account => account.Name).ToListAsync(cancellationToken);
+        var schedules = await db.AccountingSchedules.AsNoTracking().Where(schedule => schedule.CompanyId == companyId).OrderBy(schedule => schedule.ScheduleNumber).ToListAsync(cancellationToken);
+        var scheduleIds = schedules.Select(schedule => schedule.Id).ToArray();
+        var installments = await db.AccountingScheduleInstallments.AsNoTracking().Where(installment => scheduleIds.Contains(installment.AccountingScheduleId)).OrderBy(installment => installment.Sequence).ToListAsync(cancellationToken);
+        var journalIds = installments.Where(installment => installment.JournalEntryId.HasValue).Select(installment => installment.JournalEntryId!.Value).Distinct().ToArray();
+        var journals = await db.JournalEntries.AsNoTracking().Where(entry => journalIds.Contains(entry.Id)).ToDictionaryAsync(entry => entry.Id, cancellationToken);
+        var snapshots = schedules.Select(schedule =>
+        {
+            var scheduleInstallments = installments.Where(installment => installment.AccountingScheduleId == schedule.Id).Select(installment =>
+            {
+                var journal = installment.JournalEntryId.HasValue ? journals.GetValueOrDefault(installment.JournalEntryId.Value) : null;
+                return new AccountingScheduleInstallmentSnapshot(installment.Id, installment.Sequence, installment.DueOn, installment.PrincipalAmount, installment.ExpenseAmount, installment.PaymentAmount, installment.JournalEntryId, journal?.Status ?? "Scheduled", journal?.ReversedByJournalEntryId);
+            }).ToArray();
+            var status = schedule.Status == "Approved" && scheduleInstallments.Length > 0 && scheduleInstallments.All(installment => installment.JournalStatus == "Posted") ? "Completed" : schedule.Status;
+            return new AccountingScheduleSnapshot(schedule.Id, schedule.ScheduleNumber, schedule.Name, schedule.ScheduleType, schedule.CalculationMethod, status, schedule.StartDate, schedule.PeriodCount, schedule.OriginalAmount, schedule.ResidualAmount, schedule.AnnualInterestRate, schedule.RelatedAssetAccountId, schedule.BalanceAccountId, schedule.ExpenseAccountId, schedule.PaymentBankAccountId, schedule.Notes, schedule.ConcurrencyToken, scheduleInstallments);
+        }).ToArray();
+        var accountNumbers = accounts.ToDictionary(account => account.Id, account => account.Number);
+        return new(
+            snapshots,
+            accounts.Select(account => new AccountingScheduleAccountSnapshot(account.Id, account.Number, account.Name, account.Type.ToString(), account.IsControlAccount, account.IsActive)).ToArray(),
+            bankAccounts.Where(bank => accountNumbers.ContainsKey(bank.LedgerAccountId)).Select(bank => new AccountingScheduleBankAccountSnapshot(bank.Id, bank.Name, bank.AccountNumberMasked, bank.LedgerAccountId, accountNumbers[bank.LedgerAccountId])).ToArray());
+    }
+
+    public async Task<TransactionResult> SaveAccountingScheduleAsync(SaveAccountingScheduleRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.JournalPrepare)) return TransactionResult.Failure("You are not authorized to prepare accounting schedules.");
+        var type = NormalizeAccountingScheduleType(request.ScheduleType);
+        if (type is null) return TransactionResult.Failure("Schedule type must be FixedAsset, Prepaid, or Loan.");
+        if (string.IsNullOrWhiteSpace(request.ScheduleNumber) || string.IsNullOrWhiteSpace(request.Name)) return TransactionResult.Failure("A schedule number and name are required.");
+        var scheduleNumber = request.ScheduleNumber.Trim().ToUpperInvariant();
+        var scheduleName = request.Name.Trim();
+        var notes = (request.Notes ?? string.Empty).Trim();
+        if (scheduleNumber.Length > 50 || scheduleName.Length > 200 || notes.Length > 4000) return TransactionResult.Failure("Schedule numbers are limited to 50 characters, names to 200, and notes to 4,000.");
+        if (request.StartDate > new DateOnly(9949, 12, 31)) return TransactionResult.Failure("The first posting date is too late to generate the requested schedule safely.");
+        if (request.PeriodCount is < 1 or > 600 || request.OriginalAmount <= 0 || request.ResidualAmount < 0 || request.ResidualAmount >= request.OriginalAmount) return TransactionResult.Failure("Provide 1 to 600 periods, a positive original amount, and a residual amount below the original amount.");
+        if (request.OriginalAmount > 9999999999999999.99m || request.ResidualAmount > 9999999999999999.99m) return TransactionResult.Failure("Schedule amounts exceed the supported 18-digit currency range.");
+        if (RoundCurrency(request.OriginalAmount - request.ResidualAmount) < request.PeriodCount * 0.01m) return TransactionResult.Failure("The amount allocated across the schedule must be at least one cent per period.");
+        if (request.AnnualInterestRate is < 0 or > 100 || (type != "Loan" && request.AnnualInterestRate != 0)) return TransactionResult.Failure("Only loan schedules may have an annual interest rate, from 0 through 100 percent.");
+        if (type != "FixedAsset" && request.ResidualAmount != 0) return TransactionResult.Failure("Only a fixed-asset schedule may retain a residual value.");
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var paymentBank = request.PaymentBankAccountId.HasValue
+            ? await db.BankAccounts.SingleOrDefaultAsync(bank => bank.Id == request.PaymentBankAccountId.Value && bank.CompanyId == companyId, cancellationToken)
+            : null;
+        var requestedAccountIds = new[] { request.RelatedAssetAccountId, request.BalanceAccountId, request.ExpenseAccountId, paymentBank?.LedgerAccountId }.Where(id => id.HasValue && id.Value != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && requestedAccountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
+        var accountError = ValidateAccountingScheduleAccounts(type, request, accounts, paymentBank);
+        if (accountError is not null) return TransactionResult.Failure(accountError);
+        if (await db.AccountingSchedules.AnyAsync(schedule => schedule.CompanyId == companyId && schedule.ScheduleNumber == scheduleNumber && schedule.Id != request.Id, cancellationToken)) return TransactionResult.Failure("That accounting schedule number already exists.");
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        AccountingSchedule schedule;
+        if (request.Id.HasValue)
+        {
+            var existing = await db.AccountingSchedules.SingleOrDefaultAsync(candidate => candidate.Id == request.Id && candidate.CompanyId == companyId, cancellationToken);
+            if (existing is null) return TransactionResult.Failure("Accounting schedule not found.");
+            schedule = existing;
+            if (schedule.Status != "Draft") return TransactionResult.Failure("Only a draft accounting schedule can be edited.");
+            if (!string.Equals(schedule.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The accounting schedule changed after it was displayed. Reload it before saving.");
+            db.AccountingScheduleInstallments.RemoveRange(await db.AccountingScheduleInstallments.Where(installment => installment.AccountingScheduleId == schedule.Id).ToListAsync(cancellationToken));
+        }
+        else
+        {
+            schedule = new AccountingSchedule { Id = Guid.NewGuid(), CompanyId = companyId, Status = "Draft", PreparedByUserId = ResolveUserId(), PreparedAtUtc = DateTimeOffset.UtcNow };
+            db.AccountingSchedules.Add(schedule);
+        }
+
+        schedule.ScheduleNumber = scheduleNumber;
+        schedule.Name = scheduleName;
+        schedule.ScheduleType = type;
+        schedule.CalculationMethod = type == "Loan" ? "EffectiveInterest" : "StraightLine";
+        schedule.StartDate = request.StartDate;
+        schedule.PeriodCount = request.PeriodCount;
+        schedule.OriginalAmount = RoundCurrency(request.OriginalAmount);
+        schedule.ResidualAmount = RoundCurrency(request.ResidualAmount);
+        schedule.AnnualInterestRate = decimal.Round(request.AnnualInterestRate, 6, MidpointRounding.AwayFromZero);
+        schedule.RelatedAssetAccountId = request.RelatedAssetAccountId;
+        schedule.BalanceAccountId = request.BalanceAccountId;
+        schedule.ExpenseAccountId = request.ExpenseAccountId;
+        schedule.PaymentBankAccountId = request.PaymentBankAccountId;
+        schedule.Notes = notes;
+        schedule.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        db.AccountingScheduleInstallments.AddRange(BuildAccountingScheduleInstallments(schedule));
+        AddAccountingScheduleAudit(db, companyId, "accounting-schedule.draft.saved", schedule, new { schedule.ScheduleType, schedule.PeriodCount, schedule.OriginalAmount, schedule.ResidualAmount, schedule.AnnualInterestRate });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The accounting schedule changed concurrently or its number is already in use. Reload and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(schedule.Id);
+    }
+
+    public async Task<TransactionResult> ApproveAccountingScheduleAsync(ApproveAccountingScheduleRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.JournalApprove)) return TransactionResult.Failure("You are not authorized to approve accounting schedules.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var schedule = await db.AccountingSchedules.SingleOrDefaultAsync(candidate => candidate.Id == request.ScheduleId && candidate.CompanyId == companyId, cancellationToken);
+        if (schedule is null || schedule.Status != "Draft") return TransactionResult.Failure("Only a draft accounting schedule can be approved.");
+        if (!string.Equals(schedule.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The accounting schedule changed after it was displayed. Reload it before approval.");
+        if (!await db.AccountingScheduleInstallments.AnyAsync(installment => installment.AccountingScheduleId == schedule.Id, cancellationToken)) return TransactionResult.Failure("The accounting schedule has no installments.");
+        schedule.Status = "Approved";
+        schedule.ApprovedByUserId = ResolveUserId();
+        schedule.ApprovedAtUtc = DateTimeOffset.UtcNow;
+        schedule.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAccountingScheduleAudit(db, companyId, "accounting-schedule.approved", schedule, new { schedule.ApprovedAtUtc });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The accounting schedule changed during approval. Reload and try again."); }
+        return TransactionResult.Success(schedule.Id);
+    }
+
+    public async Task<TransactionResult> PrepareAccountingScheduleInstallmentsAsync(PrepareAccountingScheduleInstallmentsRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.JournalPrepare)) return TransactionResult.Failure("You are not authorized to prepare schedule journals.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var schedule = await db.AccountingSchedules.SingleOrDefaultAsync(candidate => candidate.Id == request.ScheduleId && candidate.CompanyId == companyId, cancellationToken);
+        if (schedule is null || schedule.Status != "Approved") return TransactionResult.Failure("Only an approved accounting schedule can generate journal drafts.");
+        if (!string.Equals(schedule.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The accounting schedule changed after it was displayed. Reload it before preparing journals.");
+        var installments = await db.AccountingScheduleInstallments.Where(installment => installment.AccountingScheduleId == schedule.Id && installment.DueOn <= request.ThroughDate && installment.JournalEntryId == null).OrderBy(installment => installment.Sequence).ToListAsync(cancellationToken);
+        if (installments.Count == 0) return TransactionResult.Failure("No unprepared installments are due through that date.");
+        var paymentBank = schedule.PaymentBankAccountId.HasValue
+            ? await db.BankAccounts.SingleOrDefaultAsync(bank => bank.Id == schedule.PaymentBankAccountId.Value && bank.CompanyId == companyId, cancellationToken)
+            : null;
+        if (schedule.ScheduleType == "Loan" && paymentBank is null) return TransactionResult.Failure("The loan payment bank account is no longer available.");
+        var accountIds = new[] { schedule.BalanceAccountId, schedule.ExpenseAccountId, paymentBank?.LedgerAccountId }.Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+        var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
+        if (accounts.Count != accountIds.Length) return TransactionResult.Failure("One or more schedule posting accounts are inactive, unavailable, or configured as control accounts.");
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        foreach (var installment in installments)
+        {
+            var entry = CreateAccountingScheduleJournalDraft(schedule, installment, ResolveUserId(), paymentBank?.Id);
+            db.JournalEntries.Add(entry);
+            installment.JournalEntryId = entry.Id;
+            db.JournalEntryLines.AddRange(BuildAccountingScheduleJournalLines(entry.Id, schedule, installment, accounts, paymentBank?.LedgerAccountId));
+            AddJournalAudit(db, companyId, ResolveUserId(), "journal.draft.saved", entry, new { scheduleId = schedule.Id, installmentId = installment.Id, installment.Sequence });
+        }
+        schedule.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAccountingScheduleAudit(db, companyId, "accounting-schedule.journals.prepared", schedule, new { throughDate = request.ThroughDate, installmentCount = installments.Count });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The accounting schedule changed while its journals were being prepared. Reload and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("One or more schedule installments were prepared concurrently. Reload before preparing more journals."); }
+        await transaction.CommitAsync(cancellationToken);
+        return TransactionResult.Success(schedule.Id);
+    }
+
+    public async Task<TransactionResult> ReverseAccountingScheduleInstallmentAsync(ReverseAccountingScheduleInstallmentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.JournalReverse)) return TransactionResult.Failure("You are not authorized to reverse accounting schedule postings.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A reversal reason is required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var installment = await db.AccountingScheduleInstallments.SingleOrDefaultAsync(candidate => candidate.Id == request.InstallmentId && db.AccountingSchedules.Any(schedule => schedule.Id == candidate.AccountingScheduleId && schedule.CompanyId == companyId), cancellationToken);
+        if (installment?.JournalEntryId is null) return TransactionResult.Failure("The schedule installment has no posted journal to reverse.");
+        var original = await db.JournalEntries.SingleOrDefaultAsync(entry => entry.Id == installment.JournalEntryId && entry.CompanyId == companyId, cancellationToken);
+        if (original is null || !original.IsPosted || original.Status != "Posted" || original.ReversedByJournalEntryId.HasValue) return TransactionResult.Failure("Only an unreversed posted schedule installment can be reversed.");
+        if (request.ReversalDate < original.PostedOn) return TransactionResult.Failure("A reversal cannot precede the original posting date.");
+        if (await IsInCompletedReconciliationAsync(db, original.Id, cancellationToken)) return TransactionResult.Failure("A reconciled schedule journal cannot be reversed until the reconciliation is reopened.");
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var result = await PostInverseAsync(db, companyId, original.Id, request.ReversalDate, $"REV-{original.Reference}", request.Reason.Trim(), installment.Id, "AccountingScheduleInstallmentReversal", null, cancellationToken, "Accounting Schedules");
+        if (!result.Succeeded) return result;
+        var schedule = await db.AccountingSchedules.SingleAsync(candidate => candidate.Id == installment.AccountingScheduleId, cancellationToken);
+        schedule.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAccountingScheduleAudit(db, companyId, "accounting-schedule.installment.reversed", schedule, new { installment.Id, originalJournalEntryId = original.Id, reversalJournalEntryId = result.Id, request.ReversalDate, reason = request.Reason.Trim() });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The accounting schedule changed while its installment was being reversed. Reload and try again."); }
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
     public async Task<TransactionResult> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.ReceivablesManage)) return TransactionResult.Failure("You are not authorized to post invoices.");
@@ -2281,6 +2456,128 @@ public sealed class AccountingTransactionService(
         accountReference.StartsWith(OperationalRoleReferencePrefix, StringComparison.Ordinal)
             ? accountReference[OperationalRoleReferencePrefix.Length..]
             : null;
+
+    private static string? NormalizeAccountingScheduleType(string value) => (value ?? string.Empty).Trim().ToUpperInvariant() switch
+    {
+        "FIXEDASSET" or "FIXED ASSET" => "FixedAsset",
+        "PREPAID" => "Prepaid",
+        "LOAN" => "Loan",
+        _ => null
+    };
+
+    private static string? ValidateAccountingScheduleAccounts(string type, SaveAccountingScheduleRequest request, IReadOnlyDictionary<Guid, GeneralLedgerAccount> accounts, BankAccount? paymentBank)
+    {
+        var requiredIds = new[] { request.BalanceAccountId, request.ExpenseAccountId };
+        if (requiredIds.Any(id => id == Guid.Empty) || requiredIds.Distinct().Count() != requiredIds.Length) return "Balance and expense accounts are required and must be different.";
+        if (accounts.Values.Any(account => account.IsControlAccount)) return "Accounting schedules cannot post directly to control accounts.";
+        if (!accounts.TryGetValue(request.BalanceAccountId, out var balance) || !accounts.TryGetValue(request.ExpenseAccountId, out var expense) || expense.Type != AccountType.Expense) return "Select active company accounts with an expense account for schedule expense.";
+        if (type == "FixedAsset")
+        {
+            if (!request.RelatedAssetAccountId.HasValue || request.PaymentBankAccountId.HasValue || !accounts.TryGetValue(request.RelatedAssetAccountId.Value, out var asset) || asset.Type != AccountType.Asset || balance.Type != AccountType.Asset || asset.Id == balance.Id)
+                return "A fixed-asset schedule requires different active asset and accumulated-depreciation accounts, plus an expense account, and no payment bank account.";
+        }
+        else if (type == "Prepaid")
+        {
+            if (request.RelatedAssetAccountId.HasValue || request.PaymentBankAccountId.HasValue || balance.Type != AccountType.Asset)
+                return "A prepaid schedule requires an active prepaid-asset balance account and expense account only.";
+        }
+        else
+        {
+            if (request.RelatedAssetAccountId.HasValue || !request.PaymentBankAccountId.HasValue || paymentBank is null || !accounts.TryGetValue(paymentBank.LedgerAccountId, out var payment) || balance.Type != AccountType.Liability || payment.Type != AccountType.Asset || payment.Id == balance.Id || payment.Id == expense.Id)
+                return "A loan schedule requires an active non-control liability account, interest-expense account, and company bank account mapped to a different active asset account.";
+        }
+        return null;
+    }
+
+    private static IReadOnlyList<AccountingScheduleInstallment> BuildAccountingScheduleInstallments(AccountingSchedule schedule)
+    {
+        var installments = new List<AccountingScheduleInstallment>(schedule.PeriodCount);
+        if (schedule.ScheduleType is "FixedAsset" or "Prepaid")
+        {
+            var total = schedule.OriginalAmount - schedule.ResidualAmount;
+            var allocated = 0m;
+            for (var index = 0; index < schedule.PeriodCount; index++)
+            {
+                var principal = index == schedule.PeriodCount - 1 ? total - allocated : RoundCurrency(total / schedule.PeriodCount);
+                allocated += principal;
+                installments.Add(new AccountingScheduleInstallment { Id = Guid.NewGuid(), AccountingScheduleId = schedule.Id, Sequence = index + 1, DueOn = schedule.StartDate.AddMonths(index), PrincipalAmount = principal, ExpenseAmount = principal, PaymentAmount = 0m });
+            }
+            return installments;
+        }
+
+        var remaining = schedule.OriginalAmount;
+        var monthlyRate = schedule.AnnualInterestRate / 1200m;
+        var regularPayment = monthlyRate == 0m
+            ? RoundCurrency(schedule.OriginalAmount / schedule.PeriodCount)
+            : RoundCurrency(schedule.OriginalAmount * monthlyRate / (1m - (decimal)Math.Pow(1d + (double)monthlyRate, -schedule.PeriodCount)));
+        for (var index = 0; index < schedule.PeriodCount; index++)
+        {
+            var interest = RoundCurrency(remaining * monthlyRate);
+            var principal = index == schedule.PeriodCount - 1 ? remaining : Math.Min(remaining, Math.Max(0m, regularPayment - interest));
+            principal = RoundCurrency(principal);
+            remaining = RoundCurrency(remaining - principal);
+            installments.Add(new AccountingScheduleInstallment { Id = Guid.NewGuid(), AccountingScheduleId = schedule.Id, Sequence = index + 1, DueOn = schedule.StartDate.AddMonths(index), PrincipalAmount = principal, ExpenseAmount = interest, PaymentAmount = principal + interest });
+        }
+        return installments;
+    }
+
+    private static JournalEntry CreateAccountingScheduleJournalDraft(AccountingSchedule schedule, AccountingScheduleInstallment installment, Guid? userId, Guid? paymentBankAccountId)
+    {
+        var debitTotal = schedule.ScheduleType == "Loan" ? installment.PrincipalAmount + installment.ExpenseAmount : installment.ExpenseAmount;
+        var now = DateTimeOffset.UtcNow;
+        return new JournalEntry
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = schedule.CompanyId,
+            BankAccountId = paymentBankAccountId,
+            SourceDocumentId = installment.Id,
+            SourceDocumentType = "AccountingScheduleInstallment",
+            EntryNumber = $"DRAFT-{Guid.NewGuid():N}"[..20],
+            PostedOn = installment.DueOn,
+            SourceModule = "Accounting Schedules",
+            Reference = $"{schedule.ScheduleNumber}-{installment.Sequence:000}",
+            Description = $"{schedule.Name} installment {installment.Sequence} of {schedule.PeriodCount}",
+            TotalAmount = debitTotal,
+            Status = "Draft",
+            IsPosted = false,
+            CreatedByUserId = userId,
+            CreatedAtUtc = now,
+            ConcurrencyToken = Guid.NewGuid().ToString("N")
+        };
+    }
+
+    private static IReadOnlyList<JournalEntryLine> BuildAccountingScheduleJournalLines(Guid journalEntryId, AccountingSchedule schedule, AccountingScheduleInstallment installment, IReadOnlyDictionary<Guid, GeneralLedgerAccount> accounts, Guid? paymentLedgerAccountId)
+    {
+        var lines = new List<JournalEntryLine>();
+        void Add(Guid accountId, decimal debit, decimal credit, string description) => lines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = journalEntryId, AccountId = accounts[accountId].Id, Debit = debit, Credit = credit, Description = description });
+        if (schedule.ScheduleType == "Loan")
+        {
+            Add(schedule.BalanceAccountId, installment.PrincipalAmount, 0m, "Loan principal reduction");
+            if (installment.ExpenseAmount > 0m) Add(schedule.ExpenseAccountId, installment.ExpenseAmount, 0m, "Loan interest expense");
+            Add(paymentLedgerAccountId!.Value, 0m, installment.PaymentAmount, "Loan payment");
+        }
+        else
+        {
+            Add(schedule.ExpenseAccountId, installment.ExpenseAmount, 0m, schedule.ScheduleType == "FixedAsset" ? "Depreciation expense" : "Prepaid amortization expense");
+            Add(schedule.BalanceAccountId, 0m, installment.PrincipalAmount, schedule.ScheduleType == "FixedAsset" ? "Accumulated depreciation" : "Reduce prepaid asset");
+        }
+        return lines;
+    }
+
+    private void AddAccountingScheduleAudit(BrassLedgerDbContext db, Guid companyId, string action, AccountingSchedule schedule, object details)
+    {
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            UserId = ResolveUserId(),
+            Action = action,
+            EntityType = nameof(AccountingSchedule),
+            EntityId = schedule.Id,
+            DetailJson = JsonSerializer.Serialize(details),
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        });
+    }
 
     private static Task<string?> ResolveOperationalAccountNumberAsync(BrassLedgerDbContext db, Guid companyId, string roleCode, CancellationToken cancellationToken) =>
         db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && account.OperationalRole == roleCode).Select(account => account.Number).SingleOrDefaultAsync(cancellationToken);

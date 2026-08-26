@@ -21,8 +21,7 @@ else
                 <h1>Core accounting balances and posting history.</h1>
             </div>
             <p class="page-intro">
-                This is the first real accounting slice: chart of accounts, posted journal entries, and treasury balances
-                live in a database-backed model instead of a static assessment.
+                Review company balances, prepare controlled journal activity, manage accounting schedules, and trace posted amounts through their source workflows.
             </p>
         </header>
 
@@ -78,6 +77,50 @@ else
             </Authorized>
             <NotAuthorized><p class="muted-copy">Your role can review the ledger but cannot prepare journal drafts.</p></NotAuthorized>
             </AuthorizeView>
+        </section>
+
+        <section class="panel">
+            <h2>Fixed assets, prepaids, and loans</h2>
+            <p class="page-intro">Create a reviewed monthly schedule, approve it, and generate only the installments due through a selected date. Generated entries enter the normal journal approval queue; balances do not change until posting. Record the acquisition, prepaid purchase, or loan proceeds separately. Reversals retain both the original schedule and journal evidence.</p>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="schedulePreparationAuthorization">
+                <EditForm Model="ScheduleForm" OnValidSubmit="SaveAccountingScheduleAsync">
+                    <div class="content-grid">
+                        <div class="field-group"><label class="field-label">Schedule number</label><InputText aria-label="Accounting schedule number" class="field-input" @bind-Value="ScheduleForm.Number" /></div>
+                        <div class="field-group"><label class="field-label">Name</label><InputText aria-label="Accounting schedule name" class="field-input" @bind-Value="ScheduleForm.Name" /></div>
+                        <div class="field-group"><label class="field-label">Type</label><InputSelect aria-label="Accounting schedule type" class="field-input" @bind-Value="ScheduleForm.Type"><option value="FixedAsset">Fixed asset depreciation</option><option value="Prepaid">Prepaid amortization</option><option value="Loan">Loan amortization</option></InputSelect></div>
+                        <div class="field-group"><label class="field-label">First posting date</label><InputDate aria-label="Accounting schedule first posting date" class="field-input" @bind-Value="ScheduleForm.StartDate" /></div>
+                        <div class="field-group"><label class="field-label">Monthly periods</label><InputNumber aria-label="Accounting schedule period count" class="field-input" @bind-Value="ScheduleForm.PeriodCount" /></div>
+                        <div class="field-group"><label class="field-label">Original amount</label><InputNumber aria-label="Accounting schedule original amount" class="field-input" @bind-Value="ScheduleForm.OriginalAmount" /></div>
+                        @if (ScheduleForm.Type == "FixedAsset") { <div class="field-group"><label class="field-label">Residual value</label><InputNumber aria-label="Fixed asset residual value" class="field-input" @bind-Value="ScheduleForm.ResidualAmount" /></div> }
+                        @if (ScheduleForm.Type == "Loan") { <div class="field-group"><label class="field-label">Annual interest %</label><InputNumber aria-label="Loan annual interest rate" class="field-input" @bind-Value="ScheduleForm.AnnualInterestRate" /></div> }
+                        @if (ScheduleForm.Type == "FixedAsset") { <div class="field-group"><label class="field-label">Fixed-asset account</label><InputSelect aria-label="Fixed asset account" class="field-input" @bind-Value="ScheduleForm.RelatedAssetAccountId"><option value="@Guid.Empty">Select asset account</option>@foreach (var account in ScheduleAccounts("Asset")) { <option value="@account.Id">@account.Number — @account.Name</option> }</InputSelect></div> }
+                        <div class="field-group"><label class="field-label">@(ScheduleForm.Type == "FixedAsset" ? "Accumulated depreciation" : ScheduleForm.Type == "Loan" ? "Loan liability" : "Prepaid asset")</label><InputSelect aria-label="Accounting schedule balance account" class="field-input" @bind-Value="ScheduleForm.BalanceAccountId"><option value="@Guid.Empty">Select balance account</option>@foreach (var account in ScheduleAccounts(ScheduleForm.Type == "Loan" ? "Liability" : "Asset")) { <option value="@account.Id">@account.Number — @account.Name</option> }</InputSelect></div>
+                        <div class="field-group"><label class="field-label">@(ScheduleForm.Type == "Loan" ? "Interest expense" : "Expense account")</label><InputSelect aria-label="Accounting schedule expense account" class="field-input" @bind-Value="ScheduleForm.ExpenseAccountId"><option value="@Guid.Empty">Select expense account</option>@foreach (var account in ScheduleAccounts("Expense")) { <option value="@account.Id">@account.Number — @account.Name</option> }</InputSelect></div>
+                        @if (ScheduleForm.Type == "Loan") { <div class="field-group"><label class="field-label">Payment bank account</label><InputSelect aria-label="Loan payment bank account" class="field-input" @bind-Value="ScheduleForm.PaymentBankAccountId"><option value="@Guid.Empty">Select bank account</option>@foreach (var bank in ScheduleWorkspace.BankAccounts) { <option value="@bank.Id">@bank.Name — @bank.LedgerAccountNumber (@bank.AccountNumberMasked)</option> }</InputSelect></div> }
+                        <div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Accounting schedule notes" class="field-input" @bind-Value="ScheduleForm.Notes" /></div>
+                    </div>
+                    <div class="hero-actions"><button class="action-primary" type="submit">Save schedule draft</button>@if (ScheduleForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelAccountingScheduleEdit">Cancel edit</button> }</div>
+                </EditForm>
+            </AuthorizeView>
+            <div class="content-grid">
+                <div class="field-group"><label class="field-label">Prepare installments due through</label><InputDate aria-label="Prepare schedule installments through" class="field-input" @bind-Value="ScheduleThroughDate" /></div>
+                <div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Schedule installment reversal date" class="field-input" @bind-Value="ScheduleReversalDate" /></div>
+                <div class="field-group"><label class="field-label">Reversal reason</label><InputText aria-label="Schedule installment reversal reason" class="field-input" @bind-Value="ScheduleReversalReason" /></div>
+            </div>
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>Schedule</th><th>Type / method</th><th>Amount</th><th>Status</th><th>Installments</th><th>Actions</th></tr></thead><tbody>
+            @if (ScheduleWorkspace.Schedules.Count == 0)
+            {
+                <tr><td colspan="6">No accounting schedules have been created for this company.</td></tr>
+            }
+            @foreach (var schedule in ScheduleWorkspace.Schedules)
+            {
+                <tr><td>@schedule.ScheduleNumber<br /><small>@schedule.Name</small></td><td>@schedule.ScheduleType<br /><small>@schedule.CalculationMethod</small></td><td>@schedule.OriginalAmount.ToString("C")<br /><small>@schedule.PeriodCount months</small></td><td>@schedule.Status</td><td>@schedule.Installments.Count(installment => installment.JournalStatus == "Posted") posted · @schedule.Installments.Count(installment => installment.JournalStatus == "Draft" || installment.JournalStatus == "Approved") in review · @schedule.Installments.Count(installment => installment.JournalStatus == "Scheduled") scheduled<br /><small>Next @schedule.Installments.FirstOrDefault(installment => installment.JournalStatus == "Scheduled")?.DueOn</small></td><td><div class="hero-actions">@if (schedule.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => EditAccountingSchedule(schedule)">Edit</button></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-primary" type="button" @onclick="() => ApproveAccountingScheduleAsync(schedule)">Approve</button></AuthorizeView> } else if (schedule.Status != "Completed") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => PrepareAccountingScheduleAsync(schedule)">Prepare due drafts</button></AuthorizeView> }</div></td></tr>
+                @foreach (var installment in schedule.Installments.Where(installment => installment.JournalEntryId.HasValue).TakeLast(12))
+                {
+                    <tr class="sub-row"><td colspan="2">Installment @installment.Sequence · @installment.DueOn</td><td>@(installment.PaymentAmount > 0 ? installment.PaymentAmount : installment.ExpenseAmount).ToString("C")</td><td>@installment.JournalStatus</td><td>Principal @installment.PrincipalAmount.ToString("C") · expense @installment.ExpenseAmount.ToString("C")</td><td>@if (installment.JournalStatus == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><button class="action-secondary" type="button" @onclick="() => ReverseAccountingScheduleInstallmentAsync(installment)">Reverse</button></AuthorizeView> }</td></tr>
+                }
+            }
+            </tbody></table></div>
         </section>
 
         <section class="panel">
@@ -303,6 +346,7 @@ else
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private AccountingScheduleWorkspace ScheduleWorkspace { get; set; } = new([], [], []);
     private IReadOnlyList<AccountingInterchangeBatchSnapshot> InterchangeBatches = [];
     private string? StatusMessage;
     private JournalEditor JournalForm { get; } = new();
@@ -318,10 +362,15 @@ else
     private BankAdjustmentEditor BankAdjustmentForm { get; } = new();
     private BankAdjustmentReversalEditor AdjustmentReversalForm { get; } = new();
     private ReopenEditor ReopenForm { get; } = new();
+    private AccountingScheduleEditor ScheduleForm { get; } = new();
+    private DateOnly ScheduleThroughDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly ScheduleReversalDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+    private string ScheduleReversalReason { get; set; } = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync();
         InterchangeBatches = await InterchangeService.GetRecentBatchesAsync();
     }
 
@@ -337,14 +386,14 @@ else
     {
         var result = await TransactionService.ApproveJournalEntryAsync(journalEntryId);
         StatusMessage = result.Succeeded ? "Journal entry approved and ready to post." : result.ErrorMessage;
-        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+        if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync(); }
     }
 
     private async Task PostApprovedJournalAsync(Guid journalEntryId)
     {
         var result = await TransactionService.PostApprovedJournalEntryAsync(journalEntryId);
         StatusMessage = result.Succeeded ? "Approved journal entry posted." : result.ErrorMessage;
-        if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+        if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync(); }
     }
 
     private async Task ReverseJournalAsync()
@@ -352,6 +401,39 @@ else
         var result = await TransactionService.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(ReversalForm.JournalEntryId, ReversalForm.ReversalDate, ReversalForm.Reason));
         StatusMessage = result.Succeeded ? "Reversal posted with the original entry retained in the audit trail." : result.ErrorMessage;
         if (result.Succeeded) { ReversalForm.Reset(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    }
+
+    private IEnumerable<AccountingScheduleAccountSnapshot> ScheduleAccounts(string accountType) => ScheduleWorkspace.Accounts.Where(account => account.IsActive && !account.IsControlAccount && account.AccountType == accountType);
+
+    private async Task SaveAccountingScheduleAsync()
+    {
+        var result = await TransactionService.SaveAccountingScheduleAsync(new(ScheduleForm.Id, ScheduleForm.Number, ScheduleForm.Name, ScheduleForm.Type, ScheduleForm.StartDate, ScheduleForm.PeriodCount, ScheduleForm.OriginalAmount, ScheduleForm.Type == "FixedAsset" ? ScheduleForm.ResidualAmount : 0m, ScheduleForm.Type == "Loan" ? ScheduleForm.AnnualInterestRate : 0m, ScheduleForm.Type == "FixedAsset" && ScheduleForm.RelatedAssetAccountId != Guid.Empty ? ScheduleForm.RelatedAssetAccountId : null, ScheduleForm.BalanceAccountId, ScheduleForm.ExpenseAccountId, ScheduleForm.Type == "Loan" && ScheduleForm.PaymentBankAccountId != Guid.Empty ? ScheduleForm.PaymentBankAccountId : null, ScheduleForm.Notes, ScheduleForm.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Accounting schedule draft saved for review." : result.ErrorMessage;
+        if (result.Succeeded) { ScheduleForm.Reset(); ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync(); }
+    }
+
+    private void EditAccountingSchedule(AccountingScheduleSnapshot schedule) => ScheduleForm.Load(schedule);
+    private void CancelAccountingScheduleEdit() => ScheduleForm.Reset();
+
+    private async Task ApproveAccountingScheduleAsync(AccountingScheduleSnapshot schedule)
+    {
+        var result = await TransactionService.ApproveAccountingScheduleAsync(new(schedule.Id, schedule.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Accounting schedule approved." : result.ErrorMessage;
+        if (result.Succeeded) ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync();
+    }
+
+    private async Task PrepareAccountingScheduleAsync(AccountingScheduleSnapshot schedule)
+    {
+        var result = await TransactionService.PrepareAccountingScheduleInstallmentsAsync(new(schedule.Id, ScheduleThroughDate, schedule.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Due schedule installments were added to the journal review queue." : result.ErrorMessage;
+        if (result.Succeeded) { ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    }
+
+    private async Task ReverseAccountingScheduleInstallmentAsync(AccountingScheduleInstallmentSnapshot installment)
+    {
+        var result = await TransactionService.ReverseAccountingScheduleInstallmentAsync(new(installment.Id, ScheduleReversalDate, ScheduleReversalReason));
+        StatusMessage = result.Succeeded ? "Schedule installment reversed with audit history retained." : result.ErrorMessage;
+        if (result.Succeeded) { ScheduleReversalReason = string.Empty; ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     }
 
     private async Task ReconcileAsync()
@@ -431,4 +513,24 @@ else
     private sealed class BankAdjustmentEditor { public Guid BankId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string OffsetAccount { get; set; } = string.Empty; public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public void Reset() { BankId = Guid.Empty; Amount = 0; OffsetAccount = string.Empty; Reference = string.Empty; Description = string.Empty; } }
     private sealed class BankAdjustmentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; }
     private sealed class ReopenEditor { public string Reason { get; set; } = string.Empty; }
+    private sealed class AccountingScheduleEditor
+    {
+        public Guid? Id { get; set; }
+        public string Number { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Type { get; set; } = "FixedAsset";
+        public DateOnly StartDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public int PeriodCount { get; set; } = 12;
+        public decimal OriginalAmount { get; set; }
+        public decimal ResidualAmount { get; set; }
+        public decimal AnnualInterestRate { get; set; }
+        public Guid RelatedAssetAccountId { get; set; }
+        public Guid BalanceAccountId { get; set; }
+        public Guid ExpenseAccountId { get; set; }
+        public Guid PaymentBankAccountId { get; set; }
+        public string Notes { get; set; } = string.Empty;
+        public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(AccountingScheduleSnapshot schedule) { Id = schedule.Id; Number = schedule.ScheduleNumber; Name = schedule.Name; Type = schedule.ScheduleType; StartDate = schedule.StartDate; PeriodCount = schedule.PeriodCount; OriginalAmount = schedule.OriginalAmount; ResidualAmount = schedule.ResidualAmount; AnnualInterestRate = schedule.AnnualInterestRate; RelatedAssetAccountId = schedule.RelatedAssetAccountId ?? Guid.Empty; BalanceAccountId = schedule.BalanceAccountId; ExpenseAccountId = schedule.ExpenseAccountId; PaymentBankAccountId = schedule.PaymentBankAccountId ?? Guid.Empty; Notes = schedule.Notes; ConcurrencyToken = schedule.ConcurrencyToken; }
+        public void Reset() { Id = null; Number = string.Empty; Name = string.Empty; Type = "FixedAsset"; StartDate = DateOnly.FromDateTime(DateTime.Today); PeriodCount = 12; OriginalAmount = 0m; ResidualAmount = 0m; AnnualInterestRate = 0m; RelatedAssetAccountId = Guid.Empty; BalanceAccountId = Guid.Empty; ExpenseAccountId = Guid.Empty; PaymentBankAccountId = Guid.Empty; Notes = string.Empty; ConcurrencyToken = string.Empty; }
+    }
 }

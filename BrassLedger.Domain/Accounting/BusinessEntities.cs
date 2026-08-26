@@ -650,6 +650,44 @@ public sealed class PurchaseOrder
     public decimal TotalAmount { get; set; }
 }
 
+public sealed class AccountingSchedule
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string ScheduleNumber { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string ScheduleType { get; set; } = string.Empty;
+    public string CalculationMethod { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
+    public DateOnly StartDate { get; set; }
+    public int PeriodCount { get; set; }
+    public decimal OriginalAmount { get; set; }
+    public decimal ResidualAmount { get; set; }
+    public decimal AnnualInterestRate { get; set; }
+    public Guid? RelatedAssetAccountId { get; set; }
+    public Guid BalanceAccountId { get; set; }
+    public Guid ExpenseAccountId { get; set; }
+    public Guid? PaymentBankAccountId { get; set; }
+    public string Notes { get; set; } = string.Empty;
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class AccountingScheduleInstallment
+{
+    public Guid Id { get; set; }
+    public Guid AccountingScheduleId { get; set; }
+    public int Sequence { get; set; }
+    public DateOnly DueOn { get; set; }
+    public decimal PrincipalAmount { get; set; }
+    public decimal ExpenseAmount { get; set; }
+    public decimal PaymentAmount { get; set; }
+    public Guid? JournalEntryId { get; set; }
+}
+
 public sealed class BankAccount
 {
     public Guid Id { get; set; }

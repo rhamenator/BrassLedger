@@ -169,6 +169,33 @@ api.MapPost("/journal-entries/reverse", async (ReverseJournalEntryRequest reques
     return result.Succeeded ? Results.Created($"/api/journal-entries/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger, BrassLedgerAuthorizationPolicies.ReverseJournals);
 
+api.MapGet("/accounting-schedules", async (IAccountingTransactionService service, CancellationToken cancellationToken) => Results.Ok(await service.GetAccountingScheduleWorkspaceAsync(cancellationToken)))
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+api.MapPut("/accounting-schedules", async (SaveAccountingScheduleRequest request, IAccountingTransactionService service, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!await HasValidAntiforgeryTokenAsync(antiforgery, context)) return Results.BadRequest(new { error = "invalid_antiforgery_token" });
+    var result = await service.SaveAccountingScheduleAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["accountingSchedule"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareJournals);
+api.MapPost("/accounting-schedules/approve", async (ApproveAccountingScheduleRequest request, IAccountingTransactionService service, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!await HasValidAntiforgeryTokenAsync(antiforgery, context)) return Results.BadRequest(new { error = "invalid_antiforgery_token" });
+    var result = await service.ApproveAccountingScheduleAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["accountingSchedule"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApproveJournals);
+api.MapPost("/accounting-schedules/prepare-installments", async (PrepareAccountingScheduleInstallmentsRequest request, IAccountingTransactionService service, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!await HasValidAntiforgeryTokenAsync(antiforgery, context)) return Results.BadRequest(new { error = "invalid_antiforgery_token" });
+    var result = await service.PrepareAccountingScheduleInstallmentsAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["accountingSchedule"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareJournals);
+api.MapPost("/accounting-schedules/reverse-installment", async (ReverseAccountingScheduleInstallmentRequest request, IAccountingTransactionService service, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!await HasValidAntiforgeryTokenAsync(antiforgery, context)) return Results.BadRequest(new { error = "invalid_antiforgery_token" });
+    var result = await service.ReverseAccountingScheduleInstallmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["accountingSchedule"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger, BrassLedgerAuthorizationPolicies.ReverseJournals);
+
 api.MapPost("/invoices", async (CreateInvoiceRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.CreateInvoiceAsync(request, cancellationToken);

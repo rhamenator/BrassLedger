@@ -84,6 +84,10 @@ Every change has a separate confirmation step, optimistic concurrency protection
 
 The equivalent API is `GET` and antiforgery-protected `PUT /api/accounting/operational-account-roles`. The caller needs both user-administration and ledger-management authority and must submit the displayed current account ID plus explicit confirmation. A stale request is rejected rather than overwriting a later administrator's choice.
 
+## Accounting schedules
+
+Fixed assets, prepaids, and loans use reviewed schedules and the normal journal approval queue. Loan payments select a configured bank account so their posted journals remain available to bank matching and reconciliation. The opening acquisition, prepaid purchase, or loan proceeds are separate transactions and must not be duplicated by the schedule. See the [accounting schedules guide](accounting-schedules-guide.md) for calculation, posting, reversal, account, and current-scope details.
+
 ## Database upgrades
 
 BrassLedger now uses provider-specific EF Core migration assemblies as its primary schema-upgrade mechanism: `BrassLedger.Migrations.Sqlite` and `BrassLedger.Migrations.PostgreSql`. A new empty database is created by the applicable initial migration rather than `EnsureCreated`. Every later model change must have a reviewed migration in both assemblies and is recorded in `__EFMigrationsHistory`.

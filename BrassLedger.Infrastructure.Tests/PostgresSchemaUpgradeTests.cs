@@ -56,12 +56,15 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
             Assert.Equal(13L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
             Assert.Equal(13L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\" WHERE \"Description\" LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826014843_InitialCurrentSchema';"));
+            Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826025706_AddAccountingSchedules';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"Accounts\" WHERE \"Number\" = '1100' AND \"OperationalRole\" = 'AccountsReceivable';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"Companies\" WHERE \"Name\" = 'Brass Ledger Manufacturing';"));
             await using var command = connection.CreateCommand();
             command.CommandText = """
                 DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082513-%' OR "VersionId" LIKE '2026082512-%' OR "VersionId" LIKE '2026082511-%' OR "VersionId" LIKE '2026082510-%' OR "VersionId" LIKE '2026082509-%' OR "VersionId" LIKE '2026082508-%' OR "VersionId" LIKE '2026082507-%' OR "VersionId" LIKE '2026082506-%' OR "VersionId" LIKE '2026082505-%' OR "VersionId" LIKE '2026082504-%' OR "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
                 DROP TABLE "__EFMigrationsHistory";
+                DROP TABLE "AccountingScheduleInstallments";
+                DROP TABLE "AccountingSchedules";
                 ALTER TABLE "Accounts" DROP COLUMN "OperationalRole";
                 ALTER TABLE "PayrollEarningLines" DROP COLUMN "W2ReportingJson";
                 DROP TABLE "MfaRecoveryCodes";
@@ -87,6 +90,8 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
         await verified.OpenAsync();
         Assert.Equal(13L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826014843_InitialCurrentSchema';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826025706_AddAccountingSchedules';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'AccountingSchedules';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'PayrollEarningLines' AND column_name = 'W2ReportingJson';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'AccountingInterchangeBatches';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'MfaRecoveryCodes';"));

@@ -73,6 +73,7 @@ Specialized documentation:
 - Tax-facing output: [docs/reporting-guide.md#tax-facing-output](docs/reporting-guide.md#tax-facing-output)
 - Operations documents and labels: [docs/reporting-guide.md#operations-documents-and-labels](docs/reporting-guide.md#operations-documents-and-labels)
 - Administrative data handling: [docs/administration-guide.md#data-handling](docs/administration-guide.md#data-handling)
+- Fixed assets, prepaids, and loans: [docs/accounting-schedules-guide.md](docs/accounting-schedules-guide.md)
 - Administrative publishing guidance: [docs/administration-guide.md#publishing](docs/administration-guide.md#publishing)
 - Updated WinBiz/newproj parity boundary: [docs/legacy-parity-audit.md](docs/legacy-parity-audit.md)
 

@@ -959,6 +959,56 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task AccountingScheduleApi_RequiresAuthorityAntiforgeryAndPreservesReviewWorkflow()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        Guid assetId;
+        Guid accumulatedId;
+        Guid expenseId;
+        await using (var setupScope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var factory = setupScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var companyId = await db.Companies.Select(company => company.Id).FirstAsync();
+            assetId = Guid.NewGuid(); accumulatedId = Guid.NewGuid(); expenseId = Guid.NewGuid();
+            db.Accounts.AddRange(
+                new GeneralLedgerAccount { Id = assetId, CompanyId = companyId, Number = "1501", Name = "API fixed assets", Type = AccountType.Asset, IsActive = true },
+                new GeneralLedgerAccount { Id = accumulatedId, CompanyId = companyId, Number = "1591", Name = "API accumulated depreciation", Type = AccountType.Asset, IsActive = true },
+                new GeneralLedgerAccount { Id = expenseId, CompanyId = companyId, Number = "6201", Name = "API depreciation expense", Type = AccountType.Expense, IsActive = true });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/accounting-schedules")).StatusCode);
+        var save = new SaveAccountingScheduleRequest(null, "API-FA-1", "API equipment", "FixedAsset", new DateOnly(2026, 1, 31), 4, 400m, 0m, 0m, assetId, accumulatedId, expenseId, null, "API lifecycle");
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync("/api/accounting-schedules", save)).StatusCode);
+        var token = await GetAntiforgeryTokenAsync(client);
+        using var saveRequest = new HttpRequestMessage(HttpMethod.Put, "/api/accounting-schedules") { Content = JsonContent.Create(save) };
+        saveRequest.Headers.Add("X-CSRF-TOKEN", token);
+        var saveResponse = await client.SendAsync(saveRequest);
+        Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
+        var saved = Assert.IsType<TransactionResult>(await saveResponse.Content.ReadFromJsonAsync<TransactionResult>());
+        var workspace = Assert.IsType<AccountingScheduleWorkspace>(await client.GetFromJsonAsync<AccountingScheduleWorkspace>("/api/accounting-schedules"));
+        var schedule = Assert.Single(workspace.Schedules, candidate => candidate.Id == saved.Id);
+        Assert.Equal("Draft", schedule.Status);
+        Assert.Equal(400m, schedule.Installments.Sum(installment => installment.ExpenseAmount));
+
+        using var approveRequest = new HttpRequestMessage(HttpMethod.Post, "/api/accounting-schedules/approve") { Content = JsonContent.Create(new ApproveAccountingScheduleRequest(schedule.Id, schedule.ConcurrencyToken)) };
+        approveRequest.Headers.Add("X-CSRF-TOKEN", token);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(approveRequest)).StatusCode);
+        workspace = Assert.IsType<AccountingScheduleWorkspace>(await client.GetFromJsonAsync<AccountingScheduleWorkspace>("/api/accounting-schedules"));
+        schedule = Assert.Single(workspace.Schedules, candidate => candidate.Id == saved.Id);
+        using var prepareRequest = new HttpRequestMessage(HttpMethod.Post, "/api/accounting-schedules/prepare-installments") { Content = JsonContent.Create(new PrepareAccountingScheduleInstallmentsRequest(schedule.Id, schedule.StartDate, schedule.ConcurrencyToken)) };
+        prepareRequest.Headers.Add("X-CSRF-TOKEN", token);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(prepareRequest)).StatusCode);
+        workspace = Assert.IsType<AccountingScheduleWorkspace>(await client.GetFromJsonAsync<AccountingScheduleWorkspace>("/api/accounting-schedules"));
+        Assert.Contains(workspace.Schedules.Single(candidate => candidate.Id == saved.Id).Installments, installment => installment.JournalStatus == "Draft");
+
+        using var operations = await CreateAuthenticatedClientAsync(isolatedFactory, "operations");
+        Assert.Equal(HttpStatusCode.Forbidden, (await operations.GetAsync("/api/accounting-schedules")).StatusCode);
+    }
+
+    [Fact]
     public async Task QuickBooksOAuthApi_RequiresAntiforgeryAndCompletesAuditedConnectionLifecycle()
     {
         using var isolatedFactory = new BrassLedgerApiFactory(configureSecurityEmail: false, configureQuickBooks: true);

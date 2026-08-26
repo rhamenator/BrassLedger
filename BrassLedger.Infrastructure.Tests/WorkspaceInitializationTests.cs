@@ -63,8 +63,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
-        Assert.Equal("20260826014829_InitialCurrentSchema", await ReadScalarAsync(connection, "SELECT MigrationId FROM __EFMigrationsHistory;"));
+        Assert.Equal("2", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
     }
@@ -82,6 +84,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
             command.CommandText = """
                 DROP TABLE "BrassLedgerSchemaVersions";
                 DROP TABLE "__EFMigrationsHistory";
+                DROP TABLE "AccountingScheduleInstallments";
+                DROP TABLE "AccountingSchedules";
                 ALTER TABLE "PayrollTimeEntries" DROP COLUMN "W2ReportingJson";
                 """;
             await command.ExecuteNonQueryAsync();
@@ -92,7 +96,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("20260826014829_InitialCurrentSchema", await ReadScalarAsync(verified, "SELECT MigrationId FROM __EFMigrationsHistory;"));
+        Assert.Equal("2", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -304,7 +309,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await using var db = await factory.CreateDbContextAsync();
             var migrator = db.Database.GetService<IMigrator>();
             var exception = await Assert.ThrowsAsync<NotSupportedException>(() => migrator.MigrateAsync("0"));
-            Assert.Contains("would delete business data", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("could delete", exception.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("prohibited", exception.Message, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -312,7 +317,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
-        Assert.Equal("20260826014829_InitialCurrentSchema", await ReadScalarAsync(verified, "SELECT MigrationId FROM __EFMigrationsHistory;"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
     }
 
     [Fact]
@@ -1222,7 +1229,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using (var setupDb = await dbContextFactory.CreateDbContextAsync())
         {
             var companyId = await setupDb.Companies.Select(company => company.Id).SingleAsync();
-            setupDb.Accounts.Add(new GeneralLedgerAccount { Id = Guid.NewGuid(), CompanyId = companyId, Number = "6200", Name = "Office Expense", Type = AccountType.Expense, IsActive = true });
+            setupDb.Accounts.Add(new GeneralLedgerAccount { Id = Guid.NewGuid(), CompanyId = companyId, Number = "6210", Name = "Office Expense", Type = AccountType.Expense, IsActive = true });
             await setupDb.SaveChangesAsync();
         }
 
@@ -1233,7 +1240,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             vendor.Id, "B-LINES-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 9999m, "invalid-summary-account", "Itemized bill",
             [
                 new VendorBillLineRequest("Materials", 2m, 25m, 5m, 3m, "5100"),
-                new VendorBillLineRequest("Supplies", 1m, 40m, 0m, 2m, "6200")
+                new VendorBillLineRequest("Supplies", 1m, 40m, 0m, 2m, "6210")
             ]));
 
         Assert.True(result.Succeeded, result.ErrorMessage);
@@ -1248,7 +1255,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
                               where entry.SourceDocumentId == bill.Id
                               select new { account.Number, line.Debit, line.Credit }).ToListAsync();
         Assert.Contains(postings, line => line.Number == "5100" && line.Debit == 48m);
-        Assert.Contains(postings, line => line.Number == "6200" && line.Debit == 42m);
+        Assert.Contains(postings, line => line.Number == "6210" && line.Debit == 42m);
         Assert.Contains(postings, line => line.Number == "2000" && line.Credit == 90m);
         Assert.Equal(postings.Sum(line => line.Debit), postings.Sum(line => line.Credit));
         var snapshot = await workspaceService.GetWorkspaceAsync();
