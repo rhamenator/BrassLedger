@@ -915,7 +915,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var customer = before.Receivables.Customers.First();
         var bank = before.Treasury.BankAccounts.First();
 
-        var invoiceResult = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(
+        var invoiceResult = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(
             customer.Id, "INV-TEST-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "Test invoice"));
         Assert.True(invoiceResult.Succeeded, invoiceResult.ErrorMessage);
 
@@ -943,8 +943,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var initial = await workspaceService.GetWorkspaceAsync();
         var customer = initial.Receivables.Customers.First();
         var bank = initial.Treasury.BankAccounts.First();
-        var first = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-PAY-MULTI-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "First payment invoice"));
-        var second = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-PAY-MULTI-2", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 50m, 0m, "4000", "Second payment invoice"));
+        var first = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(customer.Id, "INV-PAY-MULTI-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "First payment invoice"));
+        var second = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(customer.Id, "INV-PAY-MULTI-2", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 50m, 0m, "4000", "Second payment invoice"));
         Assert.True(first.Succeeded, first.ErrorMessage);
         Assert.True(second.Succeeded, second.ErrorMessage);
         var beforePayment = await workspaceService.GetWorkspaceAsync();
@@ -1007,8 +1007,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var initial = await workspaceService.GetWorkspaceAsync();
         var vendor = initial.Payables.Vendors.First();
         var bank = initial.Treasury.BankAccounts.First();
-        var first = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(vendor.Id, "B-PAY-MULTI-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 40m, "5100", "First payment bill"));
-        var second = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(vendor.Id, "B-PAY-MULTI-2", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 60m, "5100", "Second payment bill"));
+        var first = await PostVendorBillThroughWorkflowAsync(transactions, new CreateVendorBillRequest(vendor.Id, "B-PAY-MULTI-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 40m, "5100", "First payment bill"));
+        var second = await PostVendorBillThroughWorkflowAsync(transactions, new CreateVendorBillRequest(vendor.Id, "B-PAY-MULTI-2", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 60m, "5100", "Second payment bill"));
         Assert.True(first.Succeeded, first.ErrorMessage);
         Assert.True(second.Succeeded, second.ErrorMessage);
         var beforePayment = await workspaceService.GetWorkspaceAsync();
@@ -1093,9 +1093,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
             };
         }
 
-        ActAs(BrassLedgerPermissions.ReceivablesManage);
-        var invoice = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customerId, "INV-PAY-SOD-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 25m, 0m, "4000", "Payment authority test"));
+        ActAs(BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.SubledgerApprove, BrassLedgerPermissions.SubledgerPost);
+        var invoice = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(customerId, "INV-PAY-SOD-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 25m, 0m, "4000", "Payment authority test"));
         Assert.True(invoice.Succeeded, invoice.ErrorMessage);
+        ActAs(BrassLedgerPermissions.ReceivablesManage);
         var receipt = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customerId, bankId, new DateOnly(2026, 5, 2), 25m, "DEP-PAY-SOD-1", "ACH", [new PaymentDocumentApplicationRequest(invoice.Id!.Value, 25m)]));
         Assert.True(receipt.Succeeded, receipt.ErrorMessage);
         Assert.False((await transactions.RecordVendorPaymentAsync(new RecordVendorPaymentRequest(vendorId, bankId, new DateOnly(2026, 5, 2), 1m, "CHK-PAY-SOD-1", "Check", []))).Succeeded);
@@ -1117,7 +1118,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var before = await workspaceService.GetWorkspaceAsync();
         var customer = before.Receivables.Customers.First();
         var bank = before.Treasury.BankAccounts.First();
-        var invoice = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-ADJ-1", new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 30), 100m, 0m, "4000", "Adjustment test"));
+        var invoice = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(customer.Id, "INV-ADJ-1", new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 30), 100m, 0m, "4000", "Adjustment test"));
         Assert.True(invoice.Succeeded, invoice.ErrorMessage);
 
         var credit = await transactions.RecordCustomerAdjustmentAsync(new RecordCustomerAdjustmentRequest(invoice.Id!.Value, new DateOnly(2026, 6, 2), 20m, "CM-ADJ-1", "4000", "Price concession"));
@@ -1157,8 +1158,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var before = await workspaceService.GetWorkspaceAsync();
         var customer = before.Receivables.Customers.First();
         var vendor = before.Payables.Vendors.First();
-        var invoice = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-VOID-1", new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), 80m, 4m, "4000", "Void invoice"));
-        var bill = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(vendor.Id, "B-VOID-1", new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), 60m, "5100", "Void bill"));
+        var invoice = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(customer.Id, "INV-VOID-1", new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), 80m, 4m, "4000", "Void invoice"));
+        var bill = await PostVendorBillThroughWorkflowAsync(transactions, new CreateVendorBillRequest(vendor.Id, "B-VOID-1", new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), 60m, "5100", "Void bill"));
         Assert.True(invoice.Succeeded, invoice.ErrorMessage); Assert.True(bill.Succeeded, bill.ErrorMessage);
         var vendorCredit = await transactions.RecordVendorCreditAsync(new RecordVendorCreditRequest(bill.Id!.Value, new DateOnly(2026, 7, 2), 10m, "VC-VOID-1", "5100", "Vendor allowance"));
         Assert.True(vendorCredit.Succeeded, vendorCredit.ErrorMessage);
@@ -1333,6 +1334,18 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public void AccountingTransactionContract_DoesNotExposeDirectInvoiceOrVendorBillPosting()
+    {
+        var methodNames = typeof(IAccountingTransactionService).GetMethods().Select(method => method.Name).ToArray();
+        Assert.DoesNotContain("CreateInvoiceAsync", methodNames);
+        Assert.DoesNotContain("CreateVendorBillAsync", methodNames);
+        Assert.Contains("SaveInvoiceDraftAsync", methodNames);
+        Assert.Contains("SaveVendorBillDraftAsync", methodNames);
+        Assert.Contains("ApproveSubledgerDocumentAsync", methodNames);
+        Assert.Contains("PostApprovedSubledgerDocumentAsync", methodNames);
+    }
+
+    [Fact]
     public async Task TransactionService_PostsInvoiceTaxToSalesTaxPayable_NotRevenue()
     {
         using var services = CreateServiceProvider();
@@ -1342,7 +1355,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
         var customer = workspace.Receivables.Customers.First();
 
-        var result = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(
+        var result = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(
             customer.Id, "INV-TAX-TEST-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 8m, "4000", "Tax posting test"));
         Assert.True(result.Succeeded, result.ErrorMessage);
 
@@ -1375,7 +1388,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
         var customer = (await workspaceService.GetWorkspaceAsync()).Receivables.Customers.First();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
-        var result = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(
+        var result = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(
             customer.Id, "INV-LINES-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 9999m, 9999m, "invalid-summary-account", "Itemized invoice",
             [
                 new SalesInvoiceLineRequest("Equipment", 2m, 50m, 5m, 7m, "4000"),
@@ -1423,7 +1436,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
         var vendor = (await workspaceService.GetWorkspaceAsync()).Payables.Vendors.First();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
-        var result = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(
+        var result = await PostVendorBillThroughWorkflowAsync(transactions, new CreateVendorBillRequest(
             vendor.Id, "B-LINES-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 9999m, "invalid-summary-account", "Itemized bill",
             [
                 new VendorBillLineRequest("Materials", 2m, 25m, 5m, 3m, "5100"),
@@ -1517,7 +1530,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
 
-        var result = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(
+        var result = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(
             workspace.Receivables.Customers.First().Id, "INV-BAD-LINE", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 0m, 0m, "4000", "Invalid line",
             [new SalesInvoiceLineRequest("Over-discounted", 1m, 10m, 11m, 0m, "4000")]));
 
@@ -1538,7 +1551,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var customer = workspace.Receivables.Customers.First();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
 
-        var result = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-CREDIT-TEST-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), customer.CreditLimit, 1m, "4000", "Credit limit test"));
+        var result = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(customer.Id, "INV-CREDIT-TEST-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), customer.CreditLimit, 1m, "4000", "Credit limit test"));
 
         Assert.False(result.Succeeded);
         Assert.Contains("credit limit", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
@@ -1679,7 +1692,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var workspace = await workspaceService.GetWorkspaceAsync();
         var customer = workspace.Receivables.Customers.First();
         var payrollBank = workspace.Treasury.BankAccounts.Single(bank => bank.LedgerAccountNumber == "1010");
-        var invoice = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-BANK-MAP-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "Bank mapping"));
+        var invoice = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(customer.Id, "INV-BANK-MAP-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "Bank mapping"));
         Assert.True(invoice.Succeeded, invoice.ErrorMessage);
         var payment = await transactions.ApplyInvoicePaymentAsync(new ApplyInvoicePaymentRequest(invoice.Id!.Value, payrollBank.Id, new DateOnly(2026, 5, 2), 100m, "DEP-BANK-MAP-1"));
         Assert.True(payment.Succeeded, payment.ErrorMessage);
@@ -2377,7 +2390,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         string shipmentToken; Guid shipmentLineId; await using (var db = await factory.CreateDbContextAsync()) { var shipment = await db.InventoryShipments.SingleAsync(x => x.Id == shipmentResult.Id); shipmentToken = shipment.ConcurrencyToken; shipmentLineId = await db.InventoryShipmentLines.Where(x => x.InventoryShipmentId == shipment.Id).Select(x => x.Id).SingleAsync(); }
         var invoiceResult = await transactions.InvoiceInventoryShipmentAsync(new(shipmentResult.Id!.Value, "INV-RETURN-1", new DateOnly(2026, 8, 3), new DateOnly(2026, 9, 2), "Original sale", shipmentToken)); Assert.True(invoiceResult.Succeeded, invoiceResult.ErrorMessage);
         Assert.True((await transactions.ApplyInvoicePaymentAsync(new(invoiceResult.Id!.Value, bankId, new DateOnly(2026, 8, 4), 198m, "PAY-RETURN-1"))).Succeeded);
-        var otherInvoice = await transactions.CreateInvoiceAsync(new(customerId, "INV-RETURN-OTHER", new DateOnly(2026, 8, 5), new DateOnly(2026, 9, 4), 50m, 0m, "4000", "Later sale")); Assert.True(otherInvoice.Succeeded, otherInvoice.ErrorMessage);
+        var otherInvoice = await PostInvoiceThroughWorkflowAsync(transactions, new(customerId, "INV-RETURN-OTHER", new DateOnly(2026, 8, 5), new DateOnly(2026, 9, 4), 50m, 0m, "4000", "Later sale")); Assert.True(otherInvoice.Succeeded, otherInvoice.ErrorMessage);
 
         await using (var db = await factory.CreateDbContextAsync()) shipmentToken = await db.InventoryShipments.Where(x => x.Id == shipmentResult.Id).Select(x => x.ConcurrencyToken).SingleAsync();
         var authorizationResult = await transactions.AuthorizeCustomerReturnAsync(new(shipmentResult.Id.Value, "RMA-RETURN-1", new DateOnly(2026, 8, 6), "Customer changed requirements", [new(shipmentLineId, 1m)], shipmentToken)); Assert.True(authorizationResult.Succeeded, authorizationResult.ErrorMessage);
@@ -3590,7 +3603,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var operatingBank = before.Treasury.BankAccounts.First();
         var payrollBank = before.Treasury.BankAccounts.Last();
 
-        var billResult = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(
+        var billResult = await PostVendorBillThroughWorkflowAsync(transactions, new CreateVendorBillRequest(
             vendor.Id, "B-TEST-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, "5100", "Workflow bill"));
         Assert.True(billResult.Succeeded, billResult.ErrorMessage);
         var paymentResult = await transactions.ApplyBillPaymentAsync(new ApplyBillPaymentRequest(
@@ -3646,7 +3659,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
         var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>(); var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
         var before = await workspaceService.GetWorkspaceAsync(); var customer = before.Receivables.Customers.First(); var fromBank = before.Treasury.BankAccounts.First(); var toBank = before.Treasury.BankAccounts.Last();
-        var invoice = await transactions.CreateInvoiceAsync(new CreateInvoiceRequest(customer.Id, "INV-BANK-WF-1", new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31), 100m, 0m, "4000", "Bank match"));
+        var invoice = await PostInvoiceThroughWorkflowAsync(transactions, new CreateInvoiceRequest(customer.Id, "INV-BANK-WF-1", new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31), 100m, 0m, "4000", "Bank match"));
         var payment = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customer.Id, fromBank.Id, new DateOnly(2026, 8, 2), 100m, "DEP-BANK-WF-1", "ACH", [new PaymentDocumentApplicationRequest(invoice.Id!.Value, 100m)])); Assert.True(payment.Succeeded, payment.ErrorMessage);
         const string csv = "ExternalId,Date,Amount,Type,Payee,Memo,Reference\nFIT-100,2026-08-02,100.00,CREDIT,Customer,Invoice receipt,DEP-BANK-WF-1\nFIT-BAD,not-a-date,0,OTHER,,,";
         var dryRun = await transactions.ImportBankStatementAsync(new ImportBankStatementRequest(fromBank.Id, "statement.csv", "CSV", csv, true)); Assert.True(dryRun.Succeeded, dryRun.ErrorMessage); Assert.Equal(1, dryRun.ImportedCount); Assert.Equal(1, dryRun.RejectedCount);
@@ -3739,7 +3752,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var invoice = initial.Receivables.Invoices.First();
         var invoicePayment = await transactions.ApplyInvoicePaymentAsync(new ApplyInvoicePaymentRequest(invoice.Id, bank.Id, new DateOnly(2026, 4, 1), 100m, "DEP-CLEARED"));
         Assert.True(invoicePayment.Succeeded, invoicePayment.ErrorMessage);
-        var bill = await transactions.CreateVendorBillAsync(new CreateVendorBillRequest(initial.Payables.Vendors.First().Id, "B-REC-1", new DateOnly(2026, 4, 1), new DateOnly(2026, 4, 30), 40m, "5100", "Reconciliation test bill"));
+        var bill = await PostVendorBillThroughWorkflowAsync(transactions, new CreateVendorBillRequest(initial.Payables.Vendors.First().Id, "B-REC-1", new DateOnly(2026, 4, 1), new DateOnly(2026, 4, 30), 40m, "5100", "Reconciliation test bill"));
         Assert.True(bill.Succeeded, bill.ErrorMessage);
         var billPayment = await transactions.ApplyBillPaymentAsync(new ApplyBillPaymentRequest(bill.Id!.Value, bank.Id, new DateOnly(2026, 4, 2), 40m, "CHK-OUTSTANDING"));
         Assert.True(billPayment.Succeeded, billPayment.ErrorMessage);
@@ -3997,6 +4010,22 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var dueDates = await verifiedDb.PayrollLiabilities.Join(verifiedDb.PayrollRuns, liability => liability.PayrollRunId, run => run.Id, (liability, run) => new { run.Reference, liability.DueDate }).Where(item => item.Reference == "PR-DEP-Q3-END" || item.Reference == "PR-DEP-Q4-START").ToDictionaryAsync(item => item.Reference, item => item.DueDate);
         Assert.Equal(new DateOnly(2026, 10, 7), dueDates["PR-DEP-Q3-END"]); Assert.Equal(new DateOnly(2026, 10, 7), dueDates["PR-DEP-Q4-START"]);
         Assert.False(Assert.Single((await schedules.GetAsync()).Summaries).NextDayRuleTriggered);
+    }
+
+    private static async Task<TransactionResult> PostInvoiceThroughWorkflowAsync(IAccountingTransactionService transactions, CreateInvoiceRequest request)
+    {
+        var draft = await transactions.SaveInvoiceDraftAsync(request);
+        if (!draft.Succeeded) return draft;
+        var approval = await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value);
+        return approval.Succeeded ? await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value) : approval;
+    }
+
+    private static async Task<TransactionResult> PostVendorBillThroughWorkflowAsync(IAccountingTransactionService transactions, CreateVendorBillRequest request)
+    {
+        var draft = await transactions.SaveVendorBillDraftAsync(request);
+        if (!draft.Succeeded) return draft;
+        var approval = await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value);
+        return approval.Succeeded ? await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value) : approval;
     }
 
     private static void AddFederalLiability(BrassLedgerDbContext db, Employee employee, DateOnly payDate, string reference, decimal amount)

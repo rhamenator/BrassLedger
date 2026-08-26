@@ -519,20 +519,6 @@ public sealed partial class AccountingTransactionService(
         return result;
     }
 
-    public async Task<TransactionResult> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default)
-    {
-        if (!HasPermission(BrassLedgerPermissions.ReceivablesManage)) return TransactionResult.Failure("You are not authorized to post invoices.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        TransactionResult result;
-        try { result = await CreateInvoiceCoreAsync(db, companyId, request, cancellationToken); }
-        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The invoice or an affected balance changed while it was posting. The entire posting was rolled back; refresh and try again."); }
-        catch (DbUpdateException) { return TransactionResult.Failure("The invoice could not be posted atomically. The entire posting was rolled back; refresh and try again."); }
-        if (result.Succeeded) await transaction.CommitAsync(cancellationToken);
-        return result;
-    }
-
     private async Task<TransactionResult> CreateInvoiceCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateInvoiceRequest request, CancellationToken cancellationToken)
     {
         var requestedLines = request.Lines?.ToArray() ?? [];
@@ -582,20 +568,6 @@ public sealed partial class AccountingTransactionService(
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException) { return TransactionResult.Failure("Invoice number already exists or was posted concurrently. Refresh and try again."); }
         return TransactionResult.Success(invoice.Id);
-    }
-
-    public async Task<TransactionResult> CreateVendorBillAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default)
-    {
-        if (!HasPermission(BrassLedgerPermissions.PayablesManage)) return TransactionResult.Failure("You are not authorized to post vendor bills.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        TransactionResult result;
-        try { result = await CreateVendorBillCoreAsync(db, companyId, request, cancellationToken); }
-        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The bill or an affected balance changed while it was posting. The entire posting was rolled back; refresh and try again."); }
-        catch (DbUpdateException) { return TransactionResult.Failure("The bill could not be posted atomically. The entire posting was rolled back; refresh and try again."); }
-        if (result.Succeeded) await transaction.CommitAsync(cancellationToken);
-        return result;
     }
 
     private async Task<TransactionResult> CreateVendorBillCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateVendorBillRequest request, CancellationToken cancellationToken)

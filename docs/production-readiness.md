@@ -29,7 +29,7 @@ The browser test host launches the already-built web assembly directly. This avo
 
 ### Controlled receivables and payables posting
 
-Customer invoices and ordinary vendor bills enter through draft, approval, and posting workflows; the API no longer exposes direct posting routes that bypass review. Built-in Receivables and Payables Preparer, Approver, and Poster roles permit least-privilege assignments. A preparer cannot approve the same document, and its approver cannot post it.
+Customer invoices and ordinary vendor bills enter through draft, approval, and posting workflows; neither the HTTP API nor the public accounting application-service contract exposes a direct ordinary posting operation that bypasses review. Integrations and future server-side components therefore have to create drafts. Built-in Receivables and Payables Preparer, Approver, and Poster roles permit least-privilege assignments. A preparer cannot approve the same document, and its approver cannot post it.
 
 Posting the journal, account and subledger balances, source invoice or bill, workflow state, and audit evidence is one database transaction. A forced source-document insertion failure proves that the earlier journal and balance changes roll back and the workflow remains approved for correction or retry. Repeating a completed request returns the original source-document ID without posting again; concurrent attempts produce exactly one source document and one journal entry. These controls are covered by infrastructure and API authorization regressions on 2026-08-26.
 

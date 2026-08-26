@@ -171,13 +171,9 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         workspace = await purchasing.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"); var sourceBill = Assert.Single(workspace!.Payables.Bills, candidate => candidate.BillNumber == $"BILL-SR-{suffix}");
         Assert.Equal(HttpStatusCode.Created, (await controller.PostAsJsonAsync("/api/vendor-payments", new RecordVendorPaymentRequest(vendor.Id, bank.Id, date.AddDays(3), 34m, $"PAY-SR-{suffix}", "ACH", [new PaymentDocumentApplicationRequest(sourceBill.Id, 34m)]))).StatusCode);
         Guid targetBillId;
-        await using (var setupScope = isolatedFactory.Services.CreateAsyncScope())
-        {
-            var setupTransactions = setupScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
-            var targetBill = await setupTransactions.CreateVendorBillAsync(new(vendor.Id, $"TARGET-SR-{suffix}", date.AddDays(3), date.AddDays(33), 25m, "5100", "Credit application target"));
-            Assert.True(targetBill.Succeeded, targetBill.ErrorMessage);
-            targetBillId = targetBill.Id!.Value;
-        }
+        var targetBill = await PostVendorBillThroughWorkflowAsync(isolatedFactory.Services, new(vendor.Id, $"TARGET-SR-{suffix}", date.AddDays(3), date.AddDays(33), 25m, "5100", "Credit application target"));
+        Assert.True(targetBill.Succeeded, targetBill.ErrorMessage);
+        targetBillId = targetBill.Id!.Value;
 
         receipt = Assert.Single((await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.InventoryReceipts!, candidate => candidate.Id == receipt.Id); var authorizationRequest = new AuthorizeSupplierReturnRequest(receipt.Id, $"SRA-{suffix}", date.AddDays(4), "Damaged inventory", [new(receiptLine.Id, 1m)], receipt.ConcurrencyToken);
         Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync($"/api/inventory-receipts/{receipt.Id}/supplier-returns", authorizationRequest)).StatusCode);
@@ -840,17 +836,16 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var customer = before!.Receivables.Customers.First();
         var bank = before.Treasury.BankAccounts.First();
 
-        async Task<Guid> CreateInvoiceAsync(string number, decimal amount)
+        async Task<Guid> PostInvoiceForPaymentSetupAsync(string number, decimal amount)
         {
-            await using var setupScope = isolatedFactory.Services.CreateAsyncScope();
-            var result = await setupScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().CreateInvoiceAsync(new(
+            var result = await PostInvoiceThroughWorkflowAsync(isolatedFactory.Services, new(
                 customer.Id, number, new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), amount, 0m, "4000", "Payment API workflow"));
             Assert.True(result.Succeeded, result.ErrorMessage);
             return result.Id!.Value;
         }
 
-        var firstInvoiceId = await CreateInvoiceAsync("INV-API-PAY-1", 40m);
-        var secondInvoiceId = await CreateInvoiceAsync("INV-API-PAY-2", 35m);
+        var firstInvoiceId = await PostInvoiceForPaymentSetupAsync("INV-API-PAY-1", 40m);
+        var secondInvoiceId = await PostInvoiceForPaymentSetupAsync("INV-API-PAY-2", 35m);
         var paymentResponse = await client.PostAsJsonAsync("/api/customer-payments", new RecordCustomerPaymentRequest(
             customer.Id, bank.Id, new DateOnly(2026, 5, 2), 90m, "DEP-API-PAY-1", "ACH",
             [new PaymentDocumentApplicationRequest(firstInvoiceId, 40m), new PaymentDocumentApplicationRequest(secondInvoiceId, 35m)]));
@@ -1509,6 +1504,26 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             GrantedAtUtc = DateTimeOffset.UtcNow
         });
         await db.SaveChangesAsync();
+    }
+
+    private static async Task<TransactionResult> PostInvoiceThroughWorkflowAsync(IServiceProvider services, CreateInvoiceRequest request)
+    {
+        await using var scope = services.CreateAsyncScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var draft = await transactions.SaveInvoiceDraftAsync(request);
+        if (!draft.Succeeded) return draft;
+        var approval = await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value);
+        return approval.Succeeded ? await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value) : approval;
+    }
+
+    private static async Task<TransactionResult> PostVendorBillThroughWorkflowAsync(IServiceProvider services, CreateVendorBillRequest request)
+    {
+        await using var scope = services.CreateAsyncScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var draft = await transactions.SaveVendorBillDraftAsync(request);
+        if (!draft.Succeeded) return draft;
+        var approval = await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value);
+        return approval.Succeeded ? await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value) : approval;
     }
 
     private static async Task<string> GetAntiforgeryTokenAsync(HttpClient client)
