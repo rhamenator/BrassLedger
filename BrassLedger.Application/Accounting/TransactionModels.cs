@@ -64,6 +64,10 @@ public sealed record SaveProjectJobRequest(
     string ConcurrencyToken = "");
 public sealed record CloseProjectJobRequest(Guid ProjectJobId, DateOnly ClosedOn, string Reason, string ConcurrencyToken);
 public sealed record ReopenProjectJobRequest(Guid ProjectJobId, string Reason, string ConcurrencyToken);
+public sealed record SaveProjectChangeOrderDraftRequest(Guid? Id, Guid ProjectJobId, string ChangeOrderNumber, string Description, string Reason, DateOnly RequestedOn, DateOnly EffectiveOn, decimal ContractAmountChange, decimal BudgetAmountChange, string ConcurrencyToken = "");
+public sealed record SubmitProjectChangeOrderRequest(Guid ProjectChangeOrderId, string ConcurrencyToken);
+public sealed record DecideProjectChangeOrderRequest(Guid ProjectChangeOrderId, bool Approve, string Reason, string ConcurrencyToken);
+public sealed record CancelProjectChangeOrderRequest(Guid ProjectChangeOrderId, string Reason, string ConcurrencyToken);
 public sealed record EmployeePayrollInput(Guid EmployeeId, decimal GrossPay, IReadOnlyList<PayrollEarningInput>? Earnings = null, IReadOnlyList<PayrollDeductionInput>? Deductions = null);
 public sealed record PostEmployeePayrollRunRequest(Guid BankAccountId, DateOnly PayDate, string Reference, IReadOnlyList<EmployeePayrollInput> Employees, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null, string RunType = "Regular", IReadOnlyList<Guid>? ApprovedTimecardIds = null, Guid? Id = null, string ConcurrencyToken = "");
 public sealed record PayrollTaxEstimate(string ObligationCode, string JurisdictionCode, string JurisdictionName, string TaxType, decimal TaxableWages, decimal YearToDateTaxableWagesBefore, decimal EmployeeAmount, decimal EmployerAmount, Guid? TaxRuleSetId, Guid? TaxContentPackageId, string ContentVersion, string Source, string CalculationTraceJson);
@@ -234,6 +238,10 @@ public interface IAccountingTransactionService
     Task<TransactionResult> SaveProjectJobAsync(SaveProjectJobRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> CloseProjectJobAsync(CloseProjectJobRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReopenProjectJobAsync(ReopenProjectJobRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveProjectChangeOrderDraftAsync(SaveProjectChangeOrderDraftRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SubmitProjectChangeOrderAsync(SubmitProjectChangeOrderRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> DecideProjectChangeOrderAsync(DecideProjectChangeOrderRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CancelProjectChangeOrderAsync(CancelProjectChangeOrderRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveInventoryWarehouseAsync(SaveInventoryWarehouseRequest request, CancellationToken cancellationToken = default);

@@ -27,6 +27,9 @@ public static class BrassLedgerAuthorizationPolicies
     public const string ManagePayrollSensitiveData = "ManagePayrollSensitiveData";
     public const string MaintainEmployeePayrollSetup = "MaintainEmployeePayrollSetup";
     public const string ManageProjects = "ManageProjects";
+    public const string AccessProjects = "AccessProjects";
+    public const string PrepareProjectChangeOrders = "PrepareProjectChangeOrders";
+    public const string ApproveProjectChangeOrders = "ApproveProjectChangeOrders";
     public const string ManageReporting = "ManageReporting";
     public const string ManagePublishing = "ManagePublishing";
     public const string ManageUsers = "ManageUsers";

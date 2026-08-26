@@ -366,7 +366,8 @@ public sealed record ProjectsWorkspace(
     IReadOnlyList<ProjectJobSnapshot> Jobs,
     decimal Revenue = 0,
     decimal Commitments = 0,
-    IReadOnlyList<ProjectLedgerLineSnapshot>? LedgerLines = null);
+    IReadOnlyList<ProjectLedgerLineSnapshot>? LedgerLines = null,
+    IReadOnlyList<ProjectChangeOrderSnapshot>? ChangeOrders = null);
 
 public sealed record ProjectJobSnapshot(
     string JobNumber,
@@ -401,6 +402,30 @@ public sealed record ProjectLedgerLineSnapshot(
     decimal Cost,
     decimal Revenue,
     Guid JournalEntryId);
+
+public sealed record ProjectChangeOrderSnapshot(
+    Guid Id,
+    Guid ProjectJobId,
+    string ProjectJobNumber,
+    string ChangeOrderNumber,
+    string Description,
+    string Reason,
+    DateOnly RequestedOn,
+    DateOnly EffectiveOn,
+    decimal ContractAmountChange,
+    decimal BudgetAmountChange,
+    string Status,
+    decimal? ContractAmountBefore,
+    decimal? ContractAmountAfter,
+    decimal? BudgetAmountBefore,
+    decimal? BudgetAmountAfter,
+    DateTimeOffset PreparedAtUtc,
+    DateTimeOffset? SubmittedAtUtc,
+    DateTimeOffset? DecidedAtUtc,
+    string DecisionReason,
+    DateTimeOffset? CancelledAtUtc,
+    string CancellationReason,
+    string ConcurrencyToken);
 
 public sealed record ReportingWorkspace(
     int ReportCount,

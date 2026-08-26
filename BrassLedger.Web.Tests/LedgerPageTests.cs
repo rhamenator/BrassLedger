@@ -23,7 +23,10 @@ public sealed class LedgerPageTests : TestContext
             BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments,
             BrassLedgerAuthorizationPolicies.PostSubledgerDocuments,
             BrassLedgerAuthorizationPolicies.ManageOperations,
-            BrassLedgerAuthorizationPolicies.ManageProjects);
+            BrassLedgerAuthorizationPolicies.ManageProjects,
+            BrassLedgerAuthorizationPolicies.AccessProjects,
+            BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders,
+            BrassLedgerAuthorizationPolicies.ApproveProjectChangeOrders);
         Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(TestWorkspaceData.CreateWorkspace()));
         Services.AddSingleton<IAccountingTransactionService>(new StubAccountingTransactionService());
         Services.AddSingleton<IAccountingInterchangeService>(new StubAccountingInterchangeService());
@@ -104,6 +107,9 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("select[aria-label='Project billing method']"));
         Assert.NotNull(cut.Find("input[aria-label='Project retainage percent']"));
         Assert.NotNull(cut.Find("table[aria-label='Project portfolio']"));
+        Assert.NotNull(cut.Find("select[aria-label='Change order project']"));
+        Assert.NotNull(cut.Find("input[aria-label='Change order number']"));
+        Assert.Contains("Project change orders", cut.Markup);
         Assert.Contains("Gross margin", cut.Markup);
         cut.FindAll("button").First(button => button.TextContent.Contains("JOB-5007", StringComparison.Ordinal)).Click();
         Assert.Contains("JOB-5007 ledger", cut.Markup);
@@ -187,6 +193,10 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> SaveProjectJobAsync(SaveProjectJobRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> CloseProjectJobAsync(CloseProjectJobRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectJobId));
     public Task<TransactionResult> ReopenProjectJobAsync(ReopenProjectJobRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectJobId));
+    public Task<TransactionResult> SaveProjectChangeOrderDraftAsync(SaveProjectChangeOrderDraftRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> SubmitProjectChangeOrderAsync(SubmitProjectChangeOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectChangeOrderId));
+    public Task<TransactionResult> DecideProjectChangeOrderAsync(DecideProjectChangeOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectChangeOrderId));
+    public Task<TransactionResult> CancelProjectChangeOrderAsync(CancelProjectChangeOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectChangeOrderId));
     public Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> SaveInventoryWarehouseAsync(SaveInventoryWarehouseRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));

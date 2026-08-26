@@ -5510,6 +5510,124 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.ToTable("PayrollTimecards");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectChangeOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("BudgetAmountAfter")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal?>("BudgetAmountBefore")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("BudgetAmountChange")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("CancellationReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CancelledByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ChangeOrderNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("ContractAmountAfter")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal?>("ContractAmountBefore")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("ContractAmountChange")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTimeOffset?>("DecidedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DecisionReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateOnly>("EffectiveOn")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PreparedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateOnly>("RequestedOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTimeOffset?>("SubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SubmittedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SubmittedProjectConcurrencyToken")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectJobId");
+
+                    b.HasIndex("CompanyId", "ProjectJobId", "ChangeOrderNumber")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "Status", "EffectiveOn");
+
+                    b.ToTable("ProjectChangeOrders");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9125,6 +9243,15 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .WithMany()
                         .HasForeignKey("PayrollRunId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectChangeOrder", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectJob", b =>

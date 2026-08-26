@@ -380,6 +380,11 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "SalesOrderLines", "ProjectJobId", cancellationToken)
                 && await HasColumnAsync(dbContext, "PurchaseOrderLines", "ProjectJobId", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_JournalEntryLines_ProjectJobId_JournalEntryId", cancellationToken);
+        if (migrationId.EndsWith("_AddControlledProjectChangeOrders", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "ProjectChangeOrders", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectChangeOrders", "SubmittedProjectConcurrencyToken", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectChangeOrders", "ContractAmountAfter", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ProjectChangeOrders_CompanyId_ProjectJobId_ChangeOrderNumber", cancellationToken);
         return false;
     }
 

@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("21", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("22", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -85,6 +85,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826172628_AddControlledJournalReview';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826181954_AddControlledPayrollReview';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826192156_AddProjectLedgerDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826210012_AddControlledProjectChangeOrders';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectChangeOrders';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -115,7 +117,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("21", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("22", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -136,6 +138,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826172628_AddControlledJournalReview';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826181954_AddControlledPayrollReview';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826192156_AddProjectLedgerDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826210012_AddControlledProjectChangeOrders';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -692,6 +695,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains(roles, role => role.Name == "Payroll Preparer");
         Assert.Contains(roles, role => role.Name == "Payroll Approver");
         Assert.Contains(roles, role => role.Name == "Payroll Poster");
+        Assert.Contains(roles, role => role.Name == "Project Change Order Preparer" && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderPrepare, StringComparison.Ordinal));
+        Assert.Contains(roles, role => role.Name == "Project Change Order Approver" && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderApprove, StringComparison.Ordinal));
+        Assert.Contains(roles, role => role.Name == "Controller" && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderPrepare, StringComparison.Ordinal) && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderApprove, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -4384,6 +4390,162 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Contains(await db.BusinessAuditEntries.Where(entry => entry.EntityId == project.Id).ToListAsync(), entry => entry.Action == "project.closed");
             Assert.Contains(await db.BusinessAuditEntries.Where(entry => entry.EntityId == project.Id).ToListAsync(), entry => entry.Action == "project.reopened");
         }
+    }
+
+    [Fact]
+    public async Task ProjectChangeOrders_RequireIndependentApprovalAndAtomicallyReviseAuthorizedTotals()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; Guid projectId; Guid customerId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            projectId = await db.ProjectJobs.Where(project => project.Status == "Active").Select(project => project.Id).FirstAsync();
+            customerId = await db.ProjectJobs.Where(project => project.Id == projectId).Select(project => project.CustomerId!.Value).SingleAsync();
+        }
+        var preparerId = Guid.NewGuid(); var approverId = Guid.NewGuid();
+        void SetUser(Guid userId, Guid selectedCompanyId, params string[] permissions)
+        {
+            var claims = new List<System.Security.Claims.Claim>
+            {
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, selectedCompanyId.ToString())
+            };
+            claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+
+        ProjectJob project;
+        await using (var db = await factory.CreateDbContextAsync()) project = await db.ProjectJobs.SingleAsync(candidate => candidate.Id == projectId);
+        var startingContract = project.ContractAmount; var startingBudget = project.BudgetAmount;
+        SetUser(preparerId, companyId, BrassLedgerPermissions.ProjectChangeOrderPrepare, BrassLedgerPermissions.ProjectChangeOrderApprove, BrassLedgerPermissions.ProjectsManage);
+        var saved = await transactions.SaveProjectChangeOrderDraftAsync(new(null, projectId, "CO-TEST-001", "Expanded customer scope", "Customer authorized added work", new DateOnly(2026, 8, 26), new DateOnly(2026, 9, 1), 1_250.125m, 700.125m));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        ProjectChangeOrder changeOrder;
+        await using (var db = await factory.CreateDbContextAsync()) changeOrder = await db.ProjectChangeOrders.SingleAsync(candidate => candidate.Id == saved.Id);
+        Assert.Equal(1_250.13m, changeOrder.ContractAmountChange);
+        var submitted = await transactions.SubmitProjectChangeOrderAsync(new(changeOrder.Id, changeOrder.ConcurrencyToken));
+        Assert.True(submitted.Succeeded, submitted.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) changeOrder = await db.ProjectChangeOrders.SingleAsync(candidate => candidate.Id == saved.Id);
+
+        var selfApproval = await transactions.DecideProjectChangeOrderAsync(new(changeOrder.Id, true, "Cannot approve my own work", changeOrder.ConcurrencyToken));
+        Assert.False(selfApproval.Succeeded);
+        Assert.Contains("preparer", selfApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var directRevision = await transactions.SaveProjectJobAsync(new(project.Id, project.JobNumber, project.Name, customerId, project.StartDate!.Value, project.ExpectedEndDate, project.BillingMethod, project.ContractAmount + 1m, project.BudgetAmount, project.RetainagePercent, project.ConcurrencyToken));
+        Assert.False(directRevision.Succeeded);
+        Assert.Contains("change order", directRevision.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        SetUser(approverId, Guid.NewGuid(), BrassLedgerPermissions.ProjectChangeOrderApprove);
+        var foreignDecision = await transactions.DecideProjectChangeOrderAsync(new(changeOrder.Id, true, "Wrong company must not see it", changeOrder.ConcurrencyToken));
+        Assert.False(foreignDecision.Succeeded);
+        Assert.Contains("not found", foreignDecision.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetUser(approverId, companyId, BrassLedgerPermissions.ProjectChangeOrderApprove);
+        var approved = await transactions.DecideProjectChangeOrderAsync(new(changeOrder.Id, true, "Customer authorization independently verified", changeOrder.ConcurrencyToken));
+        Assert.True(approved.Succeeded, approved.ErrorMessage);
+
+        var workspace = await workspaceService.GetWorkspaceAsync();
+        var projectSnapshot = workspace.Projects.Jobs.Single(candidate => candidate.Id == projectId);
+        var changeSnapshot = Assert.Single(workspace.Projects.ChangeOrders!, candidate => candidate.Id == changeOrder.Id);
+        Assert.Equal(startingContract + 1_250.13m, projectSnapshot.ContractAmount);
+        Assert.Equal(startingBudget + 700.13m, projectSnapshot.BudgetAmount);
+        Assert.Equal("Approved", changeSnapshot.Status);
+        Assert.Equal(startingContract, changeSnapshot.ContractAmountBefore);
+        Assert.Equal(startingContract + 1_250.13m, changeSnapshot.ContractAmountAfter);
+
+        SetUser(preparerId, companyId, BrassLedgerPermissions.ProjectChangeOrderPrepare);
+        var cancelApproved = await transactions.CancelProjectChangeOrderAsync(new(changeOrder.Id, "Approved history must remain immutable", changeSnapshot.ConcurrencyToken));
+        Assert.False(cancelApproved.Succeeded);
+        var reduction = await transactions.SaveProjectChangeOrderDraftAsync(new(null, projectId, "CO-TEST-002", "Reduce approved scope", "Customer removed part of the added work", new DateOnly(2026, 9, 2), new DateOnly(2026, 9, 3), -250.13m, -100.13m));
+        Assert.True(reduction.Succeeded, reduction.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) changeOrder = await db.ProjectChangeOrders.SingleAsync(candidate => candidate.Id == reduction.Id);
+        Assert.True((await transactions.SubmitProjectChangeOrderAsync(new(changeOrder.Id, changeOrder.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) changeOrder = await db.ProjectChangeOrders.SingleAsync(candidate => candidate.Id == reduction.Id);
+        SetUser(approverId, companyId, BrassLedgerPermissions.ProjectChangeOrderApprove);
+        Assert.True((await transactions.DecideProjectChangeOrderAsync(new(changeOrder.Id, true, "Reduction independently verified", changeOrder.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var reducedProject = await db.ProjectJobs.SingleAsync(candidate => candidate.Id == projectId);
+            Assert.Equal(startingContract + 1_000m, reducedProject.ContractAmount);
+            Assert.Equal(startingBudget + 600m, reducedProject.BudgetAmount);
+        }
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal("Approved", (await db.ProjectChangeOrders.SingleAsync(candidate => candidate.Id == saved.Id)).Status);
+            Assert.Contains(await db.BusinessAuditEntries.Where(entry => entry.EntityId == saved.Id).ToListAsync(), entry => entry.Action == "project-change-order.created");
+            Assert.Contains(await db.BusinessAuditEntries.Where(entry => entry.EntityId == saved.Id).ToListAsync(), entry => entry.Action == "project-change-order.submitted");
+            Assert.Contains(await db.BusinessAuditEntries.Where(entry => entry.EntityId == saved.Id).ToListAsync(), entry => entry.Action == "project-change-order.approved");
+        }
+    }
+
+    [Fact]
+    public async Task ProjectChangeOrders_BlockCloseSupportRejectedCorrectionAndDetectStaleProjectReview()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; Guid customerId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            customerId = await db.Customers.Select(customer => customer.Id).FirstAsync();
+        }
+        var preparerId = Guid.NewGuid(); var approverId = Guid.NewGuid();
+        void SetUser(Guid userId, params string[] permissions)
+        {
+            var claims = permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)).ToList();
+            claims.Add(new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()));
+            claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+
+        SetUser(preparerId, BrassLedgerPermissions.ProjectsManage);
+        var unauthorized = await transactions.SaveProjectChangeOrderDraftAsync(new(null, Guid.NewGuid(), "CO-NO", "Unauthorized", "Must fail before lookup", new DateOnly(2026, 8, 26), new DateOnly(2026, 8, 26), 1m, 0m));
+        Assert.False(unauthorized.Succeeded);
+        Assert.Contains("not authorized", unauthorized.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var projectResult = await transactions.SaveProjectJobAsync(new(null, "JOB-CO-LIFECYCLE", "Change-order lifecycle", customerId, new DateOnly(2026, 8, 1), null, "FixedPrice", 10_000m, 6_000m, 0m));
+        Assert.True(projectResult.Succeeded, projectResult.ErrorMessage);
+        SetUser(preparerId, BrassLedgerPermissions.ProjectsManage, BrassLedgerPermissions.ProjectChangeOrderPrepare);
+        var oversized = await transactions.SaveProjectChangeOrderDraftAsync(new(null, projectResult.Id!.Value, "CO-TOO-LARGE", "Out-of-range amount", "Must fail before persistence", new DateOnly(2026, 8, 26), new DateOnly(2026, 8, 26), 10_000_000_000_000_000m, 0m));
+        Assert.False(oversized.Succeeded);
+        Assert.Contains("18-digit", oversized.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var saved = await transactions.SaveProjectChangeOrderDraftAsync(new(null, projectResult.Id!.Value, "CO-002", "Lifecycle test", "Document revised scope", new DateOnly(2026, 8, 26), new DateOnly(2026, 9, 1), 500m, 250m));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        ProjectJob project; ProjectChangeOrder changeOrder;
+        await using (var db = await factory.CreateDbContextAsync()) { project = await db.ProjectJobs.SingleAsync(candidate => candidate.Id == projectResult.Id); changeOrder = await db.ProjectChangeOrders.SingleAsync(candidate => candidate.Id == saved.Id); }
+        var closeBlocked = await transactions.CloseProjectJobAsync(new(project.Id, new DateOnly(2026, 9, 30), "Cannot close with unresolved scope", project.ConcurrencyToken));
+        Assert.False(closeBlocked.Succeeded);
+        Assert.Contains("open", closeBlocked.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await transactions.SubmitProjectChangeOrderAsync(new(changeOrder.Id, changeOrder.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) { project = await db.ProjectJobs.SingleAsync(candidate => candidate.Id == project.Id); changeOrder = await db.ProjectChangeOrders.SingleAsync(candidate => candidate.Id == changeOrder.Id); }
+        var renamed = await transactions.SaveProjectJobAsync(new(project.Id, project.JobNumber, "Change-order lifecycle renamed", customerId, project.StartDate!.Value, project.ExpectedEndDate, project.BillingMethod, project.ContractAmount, project.BudgetAmount, project.RetainagePercent, project.ConcurrencyToken));
+        Assert.True(renamed.Succeeded, renamed.ErrorMessage);
+        SetUser(approverId, BrassLedgerPermissions.ProjectChangeOrderApprove);
+        var staleApproval = await transactions.DecideProjectChangeOrderAsync(new(changeOrder.Id, true, "Project changed after submission", changeOrder.ConcurrencyToken));
+        Assert.False(staleApproval.Succeeded);
+        Assert.Contains("project changed", staleApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var rejected = await transactions.DecideProjectChangeOrderAsync(new(changeOrder.Id, false, "Return the stale proposal for correction", changeOrder.ConcurrencyToken));
+        Assert.True(rejected.Succeeded, rejected.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) changeOrder = await db.ProjectChangeOrders.SingleAsync(candidate => candidate.Id == changeOrder.Id);
+        SetUser(preparerId, BrassLedgerPermissions.ProjectChangeOrderPrepare, BrassLedgerPermissions.ProjectsManage);
+        var staleCorrection = await transactions.SaveProjectChangeOrderDraftAsync(new(changeOrder.Id, changeOrder.ProjectJobId, changeOrder.ChangeOrderNumber, changeOrder.Description, changeOrder.Reason, changeOrder.RequestedOn, changeOrder.EffectiveOn, 450m, 225m, "stale"));
+        Assert.False(staleCorrection.Succeeded);
+        var corrected = await transactions.SaveProjectChangeOrderDraftAsync(new(changeOrder.Id, changeOrder.ProjectJobId, changeOrder.ChangeOrderNumber, "Lifecycle test corrected", "Updated after independent review", changeOrder.RequestedOn, changeOrder.EffectiveOn, 450m, 225m, changeOrder.ConcurrencyToken));
+        Assert.True(corrected.Succeeded, corrected.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) changeOrder = await db.ProjectChangeOrders.SingleAsync(candidate => candidate.Id == changeOrder.Id);
+        var cancelled = await transactions.CancelProjectChangeOrderAsync(new(changeOrder.Id, "Customer withdrew the added scope", changeOrder.ConcurrencyToken));
+        Assert.True(cancelled.Succeeded, cancelled.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) project = await db.ProjectJobs.SingleAsync(candidate => candidate.Id == project.Id);
+        var closed = await transactions.CloseProjectJobAsync(new(project.Id, new DateOnly(2026, 9, 30), "No remaining activity", project.ConcurrencyToken));
+        Assert.True(closed.Succeeded, closed.ErrorMessage);
     }
 
     private static async Task<TransactionResult> PostInvoiceThroughWorkflowAsync(IAccountingTransactionService transactions, CreateInvoiceRequest request)

@@ -167,6 +167,41 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         }
     }
 
+    public async Task CreateProjectChangeOrderUsersAsync()
+    {
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        foreach (var (userName, roleName) in new[]
+        {
+            ("e2e-project-preparer", "Project Change Order Preparer"),
+            ("e2e-project-approver", "Project Change Order Approver")
+        })
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT OR IGNORE INTO "Users" (
+                    "Id", "CompanyId", "UserName", "DisplayName", "Email", "EmailLookupHash", "EmailConfirmedAtUtc",
+                    "PasswordHash", "SecurityStamp", "Role", "IsActive", "FailedSignInCount", "LastFailedSignInUtc",
+                    "LockoutEndUtc", "LastSuccessfulSignInUtc", "LastPasswordChangedUtc", "MfaEnabled", "MfaSecret",
+                    "MfaEnrolledAtUtc", "MfaLastAcceptedTimeStep", "MfaFailedAttemptCount", "MfaLockoutEndUtc")
+                SELECT $userId, "CompanyId", $userName, $userName, "Email", NULL, "EmailConfirmedAtUtc",
+                       "PasswordHash", $securityStamp, $roleName, 1, 0, NULL,
+                       NULL, NULL, "LastPasswordChangedUtc", 0, "MfaSecret", NULL, NULL, 0, NULL
+                FROM "Users" WHERE "UserName" = 'controller';
+                INSERT OR IGNORE INTO "CompanyMemberships" ("Id", "UserId", "CompanyId", "Role", "IsOwner", "IsActive", "GrantedAtUtc")
+                SELECT $membershipId, "Id", "CompanyId", $roleName, 0, 1, $grantedAtUtc
+                FROM "Users" WHERE "UserName" = $userName;
+                """;
+            command.Parameters.AddWithValue("$userId", Guid.NewGuid().ToString().ToUpperInvariant());
+            command.Parameters.AddWithValue("$userName", userName);
+            command.Parameters.AddWithValue("$roleName", roleName);
+            command.Parameters.AddWithValue("$securityStamp", Guid.NewGuid().ToString("N"));
+            command.Parameters.AddWithValue("$membershipId", Guid.NewGuid().ToString().ToUpperInvariant());
+            command.Parameters.AddWithValue("$grantedAtUtc", DateTimeOffset.UtcNow.ToString("O"));
+            await command.ExecuteNonQueryAsync();
+        }
+    }
+
     public async Task RemoveQuickBooksAdministratorAsync()
     {
         await using var connection = new SqliteConnection(_sqliteConnectionString);

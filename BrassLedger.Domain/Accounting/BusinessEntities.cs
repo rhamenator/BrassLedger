@@ -1615,6 +1615,37 @@ public sealed class ProjectJob
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
+public sealed class ProjectChangeOrder
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ProjectJobId { get; set; }
+    public string ChangeOrderNumber { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public DateOnly RequestedOn { get; set; }
+    public DateOnly EffectiveOn { get; set; }
+    public decimal ContractAmountChange { get; set; }
+    public decimal BudgetAmountChange { get; set; }
+    public decimal? ContractAmountBefore { get; set; }
+    public decimal? ContractAmountAfter { get; set; }
+    public decimal? BudgetAmountBefore { get; set; }
+    public decimal? BudgetAmountAfter { get; set; }
+    public string Status { get; set; } = "Draft";
+    public Guid PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? SubmittedByUserId { get; set; }
+    public DateTimeOffset? SubmittedAtUtc { get; set; }
+    public string SubmittedProjectConcurrencyToken { get; set; } = string.Empty;
+    public Guid? DecidedByUserId { get; set; }
+    public DateTimeOffset? DecidedAtUtc { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
 public sealed class TaxProfile
 {
     public Guid Id { get; set; }

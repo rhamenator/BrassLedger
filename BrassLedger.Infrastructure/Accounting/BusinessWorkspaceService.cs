@@ -141,6 +141,7 @@ public sealed class BusinessWorkspaceService(
         var payrollLiabilityEmployeeLineIds = payrollLiabilities.Select(liability => liability.PayrollRunEmployeeLineId).Distinct().ToArray();
         var payrollLiabilityEmployeeLines = payrollLiabilityEmployeeLineIds.Length == 0 ? [] : await dbContext.PayrollRunEmployeeLines.AsNoTracking().Where(line => payrollLiabilityEmployeeLineIds.Contains(line.Id)).ToListAsync(cancellationToken);
         var projectJobs = await dbContext.ProjectJobs.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.JobNumber).ToListAsync(cancellationToken);
+        var projectChangeOrders = await dbContext.ProjectChangeOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.EffectiveOn).ThenBy(x => x.ChangeOrderNumber).ToListAsync(cancellationToken);
         var projectLedgerQuery =
             from line in dbContext.JournalEntryLines.AsNoTracking()
             join entry in dbContext.JournalEntries.AsNoTracking() on line.JournalEntryId equals entry.Id
@@ -497,7 +498,8 @@ public sealed class BusinessWorkspaceService(
                 Jobs: projectJobs.Select(x => new ProjectJobSnapshot(x.JobNumber, x.Name, x.CustomerId.HasValue ? customerNames.GetValueOrDefault(x.CustomerId.Value, x.CustomerName) : x.CustomerName, x.Status, x.BudgetAmount, projectActualCost.GetValueOrDefault(x.Id), x.Id, x.CustomerId, x.StartDate, x.ExpectedEndDate, x.ClosedOn, x.BillingMethod, x.ContractAmount, x.RetainagePercent, projectRevenue.GetValueOrDefault(x.Id), projectCommitments.GetValueOrDefault(x.Id), x.ConcurrencyToken)).ToArray(),
                 Revenue: projectRevenue.Values.Sum(),
                 Commitments: projectCommitments.Values.Sum(),
-                LedgerLines: projectLedgerRows.Select(row => new ProjectLedgerLineSnapshot(row.LineId, row.ProjectJobId, row.PostedOn, row.Reference, row.SourceModule, row.AccountNumber, row.AccountName, row.LineDescription, row.Debit, row.Credit, row.AccountType == AccountType.Expense ? row.Debit - row.Credit : 0m, row.AccountType == AccountType.Revenue ? row.Credit - row.Debit : 0m, row.EntryId)).ToArray()),
+                LedgerLines: projectLedgerRows.Select(row => new ProjectLedgerLineSnapshot(row.LineId, row.ProjectJobId, row.PostedOn, row.Reference, row.SourceModule, row.AccountNumber, row.AccountName, row.LineDescription, row.Debit, row.Credit, row.AccountType == AccountType.Expense ? row.Debit - row.Credit : 0m, row.AccountType == AccountType.Revenue ? row.Credit - row.Debit : 0m, row.EntryId)).ToArray(),
+                ChangeOrders: projectChangeOrders.Select(change => new ProjectChangeOrderSnapshot(change.Id, change.ProjectJobId, projectById.GetValueOrDefault(change.ProjectJobId)?.JobNumber ?? "Unavailable", change.ChangeOrderNumber, change.Description, change.Reason, change.RequestedOn, change.EffectiveOn, change.ContractAmountChange, change.BudgetAmountChange, change.Status, change.ContractAmountBefore, change.ContractAmountAfter, change.BudgetAmountBefore, change.BudgetAmountAfter, change.PreparedAtUtc, change.SubmittedAtUtc, change.DecidedAtUtc, change.DecisionReason, change.CancelledAtUtc, change.CancellationReason, change.ConcurrencyToken)).ToArray()),
             Reporting: new ReportingWorkspace(
                 ReportCount: reports.Count,
                 LabelCount: labels.Count,

@@ -26,6 +26,8 @@ public static class BrassLedgerPermissions
     public const string PayrollReverse = "payroll.reverse";
     public const string PayrollSensitiveData = "payroll.sensitive-data";
     public const string ProjectsManage = "projects.manage";
+    public const string ProjectChangeOrderPrepare = "projects.change-orders.prepare";
+    public const string ProjectChangeOrderApprove = "projects.change-orders.approve";
     public const string ReportingManage = "reporting.manage";
     public const string TaxManage = "tax.manage";
     public const string PublishManage = "publish.manage";
@@ -58,6 +60,8 @@ public static class BrassLedgerPermissions
         new(PayrollReverse, "Payroll reversal", "Create auditable reversals of posted payroll runs."),
         new(PayrollSensitiveData, "Payroll sensitive data", "View and maintain protected employee tax and banking fields."),
         new(ProjectsManage, "Projects", "Review and manage project accounting."),
+        new(ProjectChangeOrderPrepare, "Project change-order preparation", "Prepare, correct, submit, and cancel project change orders."),
+        new(ProjectChangeOrderApprove, "Project change-order approval", "Approve or reject independently prepared project change orders."),
         new(ReportingManage, "Reporting", "Run operational reports, forms, and labels."),
         new(TaxManage, "Taxes", "Maintain tax profiles and tax-facing workflows."),
         new(PublishManage, "Publishing", "Prepare packaged outputs and release artifacts."),

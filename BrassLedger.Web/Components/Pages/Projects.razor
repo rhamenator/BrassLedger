@@ -1,5 +1,5 @@
 @page "/projects"
-@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageProjects)]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.AccessProjects)]
 @inject IBusinessWorkspaceService WorkspaceService
 @inject IAccountingTransactionService TransactionService
 
@@ -29,7 +29,7 @@ else
             <article class="stat-card accent-coral"><span class="stat-value">@Workspace.Projects.Commitments.ToString("C0")</span><span class="stat-label">Open commitments</span></article>
         </section>
 
-        <section class="panel">
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized Context="projectAuthorization"><section class="panel">
             <h2>@(ProjectForm.Id.HasValue ? $"Edit {ProjectForm.JobNumber}" : "Add a project")</h2>
             <EditForm Model="ProjectForm" OnValidSubmit="SaveProjectAsync"><div class="auth-form">
                 <div class="field-group"><label class="field-label">Project number</label><InputText aria-label="Project number" class="field-input" placeholder="For example, JOB-1001" @bind-Value="ProjectForm.JobNumber" /></div>
@@ -44,9 +44,9 @@ else
                 <button class="action-primary" type="submit">@(ProjectForm.Id.HasValue ? "Save project changes" : "Create project")</button>
                 @if (ProjectForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelEdit">Cancel edit</button> }
             </div></EditForm>
-        </section>
+        </section></Authorized></AuthorizeView>
 
-        @if (ProjectDecisionForm is not null)
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized Context="projectDecisionAuthorization">@if (ProjectDecisionForm is not null)
         {
             <section class="panel">
                 <h2>@(ProjectDecisionForm.Reopen ? $"Reopen {ProjectDecisionForm.JobNumber}" : $"Close {ProjectDecisionForm.JobNumber}")</h2>
@@ -55,6 +55,49 @@ else
                     <div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Project status change reason" class="field-input" @bind-Value="ProjectDecisionForm.Reason" /></div>
                     <button class="action-primary" type="submit">@(ProjectDecisionForm.Reopen ? "Reopen project" : "Close project")</button>
                     <button class="action-secondary" type="button" @onclick="CancelDecision">Cancel</button>
+                </div></EditForm>
+            </section>
+        }</Authorized></AuthorizeView>
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders"><Authorized Context="changeOrderAuthorization">
+            <section class="panel">
+                <h2>@(ChangeOrderForm.Id.HasValue ? $"Correct {ChangeOrderForm.ChangeOrderNumber}" : "Prepare a project change order")</h2>
+                <p class="page-intro">Approved changes revise the authorized contract and budget atomically. Correct rejected changes in place; reverse an approved change with a new negative change order.</p>
+                <EditForm Model="ChangeOrderForm" OnValidSubmit="SaveChangeOrderAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Project</label><InputSelect aria-label="Change order project" class="field-input" @bind-Value="ChangeOrderForm.ProjectJobId" disabled="@ChangeOrderForm.Id.HasValue"><option value="@Guid.Empty">Select project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status == "Active")) { <option value="@project.Id">@project.JobNumber — @project.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Change-order number</label><InputText aria-label="Change order number" class="field-input" @bind-Value="ChangeOrderForm.ChangeOrderNumber" /></div>
+                    <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Change order description" class="field-input" @bind-Value="ChangeOrderForm.Description" /></div>
+                    <div class="field-group"><label class="field-label">Business reason</label><InputText aria-label="Change order reason" class="field-input" @bind-Value="ChangeOrderForm.Reason" /></div>
+                    <div class="field-group"><label class="field-label">Requested date</label><InputDate aria-label="Change order requested date" class="field-input" @bind-Value="ChangeOrderForm.RequestedOn" /></div>
+                    <div class="field-group"><label class="field-label">Effective date</label><InputDate aria-label="Change order effective date" class="field-input" @bind-Value="ChangeOrderForm.EffectiveOn" /></div>
+                    <div class="field-group"><label class="field-label">Contract change</label><InputNumber aria-label="Change order contract amount" class="field-input" @bind-Value="ChangeOrderForm.ContractAmountChange" /></div>
+                    <div class="field-group"><label class="field-label">Budget change</label><InputNumber aria-label="Change order budget amount" class="field-input" @bind-Value="ChangeOrderForm.BudgetAmountChange" /></div>
+                    <button class="action-primary" type="submit">@(ChangeOrderForm.Id.HasValue ? "Save corrected draft" : "Save change-order draft")</button>
+                    @if (ChangeOrderForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelChangeOrderEdit">Cancel edit</button> }
+                </div></EditForm>
+            </section>
+        </Authorized></AuthorizeView>
+
+        @if (ChangeOrderDecisionForm is not null)
+        {
+            <section class="panel">
+                <h2>@(ChangeOrderDecisionForm.Approve ? "Approve" : "Reject") @ChangeOrderDecisionForm.ChangeOrderNumber</h2>
+                <EditForm Model="ChangeOrderDecisionForm" OnValidSubmit="CompleteChangeOrderDecisionAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Decision reason</label><InputText aria-label="Change order decision reason" class="field-input" @bind-Value="ChangeOrderDecisionForm.Reason" /></div>
+                    <button class="action-primary" type="submit">@(ChangeOrderDecisionForm.Approve ? "Approve change order" : "Reject change order")</button>
+                    <button class="action-secondary" type="button" @onclick="() => ChangeOrderDecisionForm = null">Cancel</button>
+                </div></EditForm>
+            </section>
+        }
+
+        @if (ChangeOrderCancellationForm is not null)
+        {
+            <section class="panel">
+                <h2>Cancel @ChangeOrderCancellationForm.ChangeOrderNumber</h2>
+                <EditForm Model="ChangeOrderCancellationForm" OnValidSubmit="CompleteChangeOrderCancellationAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Cancellation reason</label><InputText aria-label="Change order cancellation reason" class="field-input" @bind-Value="ChangeOrderCancellationForm.Reason" /></div>
+                    <button class="action-primary" type="submit">Cancel change order</button>
+                    <button class="action-secondary" type="button" @onclick="() => ChangeOrderCancellationForm = null">Keep change order</button>
                 </div></EditForm>
             </section>
         }
@@ -69,8 +112,34 @@ else
             {
                 <div class="table-scroll"><table class="data-table project-portfolio-table" aria-label="Project portfolio">
                     <thead><tr><th>Project</th><th>Customer</th><th>Status</th><th>Method</th><th>Contract</th><th>Budget</th><th>Cost</th><th>Commitments</th><th>Revenue</th><th>Gross margin</th><th>Action</th></tr></thead>
-                    <tbody>@foreach (var job in Workspace.Projects.Jobs) { <tr><td><button class="table-link" type="button" @onclick="() => SelectProject(job.Id)">@job.JobNumber — @job.Name</button></td><td>@job.CustomerName</td><td>@job.Status</td><td>@BillingMethodLabel(job.BillingMethod)</td><td>@job.ContractAmount.ToString("C")</td><td>@job.BudgetAmount.ToString("C")</td><td>@job.ActualCost.ToString("C")</td><td>@job.Commitments.ToString("C")</td><td>@job.Revenue.ToString("C")</td><td>@((job.Revenue - job.ActualCost).ToString("C"))</td><td><button class="action-secondary" type="button" @onclick="() => EditProject(job)">Edit</button> @if (job.Status == "Closed") { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, true)">Reopen</button> } else { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, false)">Close</button> }</td></tr> }</tbody>
+                    <tbody>@foreach (var job in Workspace.Projects.Jobs) { <tr><td><button class="table-link" type="button" @onclick="() => SelectProject(job.Id)">@job.JobNumber — @job.Name</button></td><td>@job.CustomerName</td><td>@job.Status</td><td>@BillingMethodLabel(job.BillingMethod)</td><td>@job.ContractAmount.ToString("C")</td><td>@job.BudgetAmount.ToString("C")</td><td>@job.ActualCost.ToString("C")</td><td>@job.Commitments.ToString("C")</td><td>@job.Revenue.ToString("C")</td><td>@((job.Revenue - job.ActualCost).ToString("C"))</td><td><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized><button class="action-secondary" type="button" @onclick="() => EditProject(job)">Edit</button> @if (job.Status == "Closed") { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, true)">Reopen</button> } else { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, false)">Close</button> }</Authorized><NotAuthorized>View only</NotAuthorized></AuthorizeView></td></tr> }</tbody>
                 </table></div>
+            }
+        </section>
+
+        <section class="panel">
+            <h2>Project change orders</h2>
+            @if ((Workspace.Projects.ChangeOrders ?? []).Count == 0)
+            {
+                <p class="empty-state">No project change orders have been prepared.</p>
+            }
+            else
+            {
+                <div class="table-scroll"><table class="data-table" aria-label="Project change orders"><thead><tr><th>Project</th><th>Change order</th><th>Effective</th><th>Description</th><th>Contract change</th><th>Budget change</th><th>Status</th><th>Authorized result</th><th>Action</th></tr></thead><tbody>
+                @foreach (var changeOrder in Workspace.Projects.ChangeOrders ?? [])
+                {
+                    <tr><td>@changeOrder.ProjectJobNumber</td><td>@changeOrder.ChangeOrderNumber</td><td>@changeOrder.EffectiveOn</td><td>@changeOrder.Description</td><td>@SignedCurrency(changeOrder.ContractAmountChange)</td><td>@SignedCurrency(changeOrder.BudgetAmountChange)</td><td>@changeOrder.Status</td><td>@if (changeOrder.Status == "Approved") { <span>Contract @changeOrder.ContractAmountAfter?.ToString("C"); budget @changeOrder.BudgetAmountAfter?.ToString("C")</span> } else if (changeOrder.Status == "Rejected") { <span>@changeOrder.DecisionReason</span> } else if (changeOrder.Status == "Cancelled") { <span>@changeOrder.CancellationReason</span> } else { <span>Pending</span> }</td><td>
+                        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders"><Authorized>
+                            @if (changeOrder.Status is "Draft" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => EditChangeOrder(changeOrder)">Edit</button> }
+                            @if (changeOrder.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => SubmitChangeOrderAsync(changeOrder)">Submit</button> }
+                            @if (changeOrder.Status is "Draft" or "Submitted" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => BeginChangeOrderCancellation(changeOrder)">Cancel</button> }
+                        </Authorized></AuthorizeView>
+                        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveProjectChangeOrders"><Authorized>
+                            @if (changeOrder.Status == "Submitted") { <button class="action-secondary" type="button" @onclick="() => BeginChangeOrderDecision(changeOrder, true)">Approve</button> <button class="action-secondary" type="button" @onclick="() => BeginChangeOrderDecision(changeOrder, false)">Reject</button> }
+                        </Authorized></AuthorizeView>
+                    </td></tr>
+                }
+                </tbody></table></div>
             }
         </section>
 
@@ -91,6 +160,9 @@ else
     private BusinessWorkspaceSnapshot? Workspace;
     private ProjectEditor ProjectForm { get; } = new();
     private ProjectDecisionEditor? ProjectDecisionForm;
+    private ChangeOrderEditor ChangeOrderForm { get; } = new();
+    private ChangeOrderDecisionEditor? ChangeOrderDecisionForm;
+    private ChangeOrderCancellationEditor? ChangeOrderCancellationForm;
     private Guid? SelectedProjectId;
     private string StatusMessage = string.Empty;
     private ProjectJobSnapshot? SelectedProject => Workspace?.Projects.Jobs.SingleOrDefault(project => project.Id == SelectedProjectId);
@@ -105,6 +177,15 @@ else
     private void CancelDecision() => ProjectDecisionForm = null;
     private async Task CompleteProjectDecisionAsync() { var form = ProjectDecisionForm!; var result = form.Reopen ? await TransactionService.ReopenProjectJobAsync(new(form.ProjectJobId, form.Reason, form.ConcurrencyToken)) : await TransactionService.CloseProjectJobAsync(new(form.ProjectJobId, form.ClosedOn, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project {form.JobNumber} {(form.Reopen ? "reopened" : "closed")}." : result.ErrorMessage; if (result.Succeeded) { ProjectDecisionForm = null; await ReloadAsync(); } }
     private static string BillingMethodLabel(string method) => method switch { "FixedPrice" => "Fixed price", "TimeAndMaterials" => "Time and materials", "CostPlus" => "Cost plus", "Internal" => "Internal", _ => method };
+    private static string SignedCurrency(decimal amount) => $"{(amount > 0 ? "+" : string.Empty)}{amount:C}";
+    private async Task SaveChangeOrderAsync() { var form = ChangeOrderForm; var result = await TransactionService.SaveProjectChangeOrderDraftAsync(new(form.Id, form.ProjectJobId, form.ChangeOrderNumber, form.Description, form.Reason, form.RequestedOn, form.EffectiveOn, form.ContractAmountChange, form.BudgetAmountChange, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {form.ChangeOrderNumber} saved as a draft." : result.ErrorMessage; if (result.Succeeded) { form.Reset(); await ReloadAsync(); } }
+    private void EditChangeOrder(ProjectChangeOrderSnapshot changeOrder) { ChangeOrderForm.Load(changeOrder); StatusMessage = string.Empty; }
+    private void CancelChangeOrderEdit() => ChangeOrderForm.Reset();
+    private async Task SubmitChangeOrderAsync(ProjectChangeOrderSnapshot changeOrder) { var result = await TransactionService.SubmitProjectChangeOrderAsync(new(changeOrder.Id, changeOrder.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {changeOrder.ChangeOrderNumber} submitted for independent review." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync(); }
+    private void BeginChangeOrderDecision(ProjectChangeOrderSnapshot changeOrder, bool approve) => ChangeOrderDecisionForm = new(changeOrder.Id, changeOrder.ChangeOrderNumber, approve, changeOrder.ConcurrencyToken);
+    private async Task CompleteChangeOrderDecisionAsync() { var form = ChangeOrderDecisionForm!; var result = await TransactionService.DecideProjectChangeOrderAsync(new(form.Id, form.Approve, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {form.ChangeOrderNumber} {(form.Approve ? "approved" : "rejected")}." : result.ErrorMessage; if (result.Succeeded) { ChangeOrderDecisionForm = null; await ReloadAsync(); } }
+    private void BeginChangeOrderCancellation(ProjectChangeOrderSnapshot changeOrder) => ChangeOrderCancellationForm = new(changeOrder.Id, changeOrder.ChangeOrderNumber, changeOrder.ConcurrencyToken);
+    private async Task CompleteChangeOrderCancellationAsync() { var form = ChangeOrderCancellationForm!; var result = await TransactionService.CancelProjectChangeOrderAsync(new(form.Id, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {form.ChangeOrderNumber} cancelled." : result.ErrorMessage; if (result.Succeeded) { ChangeOrderCancellationForm = null; await ReloadAsync(); } }
 
     private sealed class ProjectEditor
     {
@@ -116,4 +197,12 @@ else
     {
         public Guid ProjectJobId { get; } = projectJobId; public string JobNumber { get; } = jobNumber; public string ConcurrencyToken { get; } = concurrencyToken; public bool Reopen { get; } = reopen; public DateOnly ClosedOn { get; set; } = startDate.HasValue && startDate > DateOnly.FromDateTime(DateTime.Today) ? startDate.Value : DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty;
     }
+    private sealed class ChangeOrderEditor
+    {
+        public Guid? Id { get; set; } public Guid ProjectJobId { get; set; } public string ChangeOrderNumber { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public string Reason { get; set; } = string.Empty; public DateOnly RequestedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal ContractAmountChange { get; set; } public decimal BudgetAmountChange { get; set; } public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectChangeOrderSnapshot value) { Id = value.Id; ProjectJobId = value.ProjectJobId; ChangeOrderNumber = value.ChangeOrderNumber; Description = value.Description; Reason = value.Reason; RequestedOn = value.RequestedOn; EffectiveOn = value.EffectiveOn; ContractAmountChange = value.ContractAmountChange; BudgetAmountChange = value.BudgetAmountChange; ConcurrencyToken = value.ConcurrencyToken; }
+        public void Reset() { Id = null; ProjectJobId = Guid.Empty; ChangeOrderNumber = string.Empty; Description = string.Empty; Reason = string.Empty; RequestedOn = DateOnly.FromDateTime(DateTime.Today); EffectiveOn = RequestedOn; ContractAmountChange = 0m; BudgetAmountChange = 0m; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class ChangeOrderDecisionEditor(Guid id, string changeOrderNumber, bool approve, string concurrencyToken) { public Guid Id { get; } = id; public string ChangeOrderNumber { get; } = changeOrderNumber; public bool Approve { get; } = approve; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = string.Empty; }
+    private sealed class ChangeOrderCancellationEditor(Guid id, string changeOrderNumber, string concurrencyToken) { public Guid Id { get; } = id; public string ChangeOrderNumber { get; } = changeOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = string.Empty; }
 }

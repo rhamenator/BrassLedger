@@ -10,6 +10,14 @@ Only an active project can receive new activity. BrassLedger rejects missing, cl
 
 Closing requires a close date, reason, and current concurrency token. A project cannot close while it has an open journal, quote, sales order, purchase order, purchase requisition, draft/submitted/approved payroll timecard, or unposted payroll run. Closing retains the actor, time, reason, and prior activity. Reopening also requires a reason and creates separate audit evidence. Corrective reversals and supplier returns can retain a historical closed-project dimension so closing a job does not make its posted accounting impossible to reverse.
 
+## Controlled change orders
+
+After project activity or change-order history exists, revise the authorized contract or budget through a project change order instead of editing those totals directly. A preparer records a project-specific number, description, business reason, request and effective dates, and signed contract and budget changes. Numbers are normalized to uppercase and are unique within a project. At least one amount must be nonzero, the effective date cannot precede the request or project start date, and a change cannot make the resulting contract or budget negative.
+
+Save the change as a draft and submit it for independent review. The submitted record captures the project's concurrency token. A later project setup change makes approval stale, so the reviewer must reject the proposal and the preparer must correct and resubmit it. The preparer or submitter cannot approve or reject that same change order. Approval atomically records the before-and-after contract and budget amounts, changes both authorized project totals, and retains the decision actor, time, reason, and audit event. Rejection preserves its reason and permits correction in place with the same number. Draft, submitted, or rejected work can be cancelled with a reason; unresolved change orders block project closing.
+
+Approved change orders are immutable. Record a reduction or reversal as a new negative change order so the original authority and the subsequent correction both remain visible. The built-in **Project Change Order Preparer** and **Project Change Order Approver** roles provide least-privilege access; the Controller has both permissions for staffing flexibility, but same-document self-decision remains prohibited.
+
 ## Assigning activity
 
 The project selector is available on:
@@ -46,7 +54,6 @@ QuickBooks products and subscriptions expose project and class tracking differen
 
 The following project-accounting capabilities remain future work and must not be represented as complete:
 
-- change-order documents and approval;
 - automated progress, milestone, cost-plus, or time-and-materials billing;
 - retainage invoicing, release, receivable classification, and aging;
 - committed-cost forecasting beyond unreceived purchase-order value;

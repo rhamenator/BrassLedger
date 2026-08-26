@@ -133,7 +133,7 @@ api.MapGet("/projects", async (IBusinessWorkspaceService service, CancellationTo
 })
 .WithName("GetProjectsWorkspace")
 .WithOpenApi()
-.RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+.RequireAuthorization(BrassLedgerAuthorizationPolicies.AccessProjects);
 
 api.MapPost("/projects", async (SaveProjectJobRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
@@ -162,6 +162,41 @@ api.MapPost("/projects/{projectJobId:guid}/reopen", async (Guid projectJobId, Re
     var result = await service.ReopenProjectJobAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["project"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
+api.MapPost("/projects/{projectJobId:guid}/change-orders", async (Guid projectJobId, SaveProjectChangeOrderDraftRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id.HasValue || request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("A new change-order request must match the route project and cannot contain an identifier."));
+    var result = await service.SaveProjectChangeOrderDraftAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/project-change-orders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectChangeOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders);
+
+api.MapPut("/projects/{projectJobId:guid}/change-orders/{projectChangeOrderId:guid}", async (Guid projectJobId, Guid projectChangeOrderId, SaveProjectChangeOrderDraftRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id != projectChangeOrderId || request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("The change-order and project identifiers in the route and request must match."));
+    var result = await service.SaveProjectChangeOrderDraftAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectChangeOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders);
+
+api.MapPost("/project-change-orders/{projectChangeOrderId:guid}/submission", async (Guid projectChangeOrderId, SubmitProjectChangeOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.ProjectChangeOrderId != projectChangeOrderId) return Results.BadRequest(TransactionResult.Failure("The change-order identifier in the route and request must match."));
+    var result = await service.SubmitProjectChangeOrderAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectChangeOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders);
+
+api.MapPost("/project-change-orders/{projectChangeOrderId:guid}/decision", async (Guid projectChangeOrderId, DecideProjectChangeOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.ProjectChangeOrderId != projectChangeOrderId) return Results.BadRequest(TransactionResult.Failure("The change-order identifier in the route and request must match."));
+    var result = await service.DecideProjectChangeOrderAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectChangeOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApproveProjectChangeOrders);
+
+api.MapPost("/project-change-orders/{projectChangeOrderId:guid}/cancellation", async (Guid projectChangeOrderId, CancelProjectChangeOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.ProjectChangeOrderId != projectChangeOrderId) return Results.BadRequest(TransactionResult.Failure("The change-order identifier in the route and request must match."));
+    var result = await service.CancelProjectChangeOrderAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectChangeOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders);
 
 api.MapGet("/reporting-catalog", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
 {
