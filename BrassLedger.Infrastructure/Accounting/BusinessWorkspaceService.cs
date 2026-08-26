@@ -34,6 +34,8 @@ public sealed class BusinessWorkspaceService(
         var users = await dbContext.Users.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsActive).ToListAsync(cancellationToken);
         var accounts = await dbContext.Accounts.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsActive).OrderBy(x => x.Number).ToListAsync(cancellationToken);
         var journalEntries = await dbContext.JournalEntries.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.PostedOn).ThenByDescending(x => x.EntryNumber).Take(20).ToListAsync(cancellationToken);
+        var journalEntryIds = journalEntries.Select(entry => entry.Id).ToArray();
+        var journalEntryLines = journalEntryIds.Length == 0 ? [] : await dbContext.JournalEntryLines.AsNoTracking().Where(line => journalEntryIds.Contains(line.JournalEntryId)).ToListAsync(cancellationToken);
         var customers = await dbContext.Customers.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.CustomerNumber).ToListAsync(cancellationToken);
         var invoices = await dbContext.SalesInvoices.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.InvoiceDate).ToListAsync(cancellationToken);
         var invoiceIds = invoices.Select(invoice => invoice.Id).ToArray();
@@ -241,7 +243,7 @@ public sealed class BusinessWorkspaceService(
                 Revenue: SumByType(accounts, AccountType.Revenue),
                 Expenses: SumByType(accounts, AccountType.Expense),
                 Accounts: accounts.Select(x => new AccountSnapshot(x.Number, x.Name, x.Type.ToString(), x.CurrentBalance, x.IsControlAccount, x.OperationalRole ?? string.Empty)).ToArray(),
-                RecentEntries: journalEntries.Select(x => new JournalEntrySnapshot(x.EntryNumber, x.PostedOn, x.SourceModule, x.Description, x.TotalAmount, x.Id, x.Reference, x.Status, x.ReversalOfJournalEntryId, x.ReversedByJournalEntryId)).ToArray()),
+                RecentEntries: journalEntries.Select(x => new JournalEntrySnapshot(x.EntryNumber, x.PostedOn, x.SourceModule, x.Description, x.TotalAmount, x.Id, x.Reference, x.Status, x.ReversalOfJournalEntryId, x.ReversedByJournalEntryId, x.RejectedAtUtc, x.DecisionReason, x.ConcurrencyToken, journalEntryLines.Where(line => line.JournalEntryId == x.Id).Select(line => new JournalEntryLineSnapshot(accounts.Single(account => account.Id == line.AccountId).Number, line.Description, line.Debit, line.Credit)).ToArray())).ToArray()),
             Receivables: new ReceivablesWorkspace(
                 OpenBalance: invoices.Sum(x => x.BalanceDue),
                 PastDueCount: invoices.Count(x => x.DueDate < DateOnly.FromDateTime(DateTime.Today) && x.BalanceDue > 0m),

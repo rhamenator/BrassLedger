@@ -69,7 +69,13 @@ public sealed record JournalEntrySnapshot(
     string Reference = "",
     string Status = "Posted",
     Guid? ReversalOfJournalEntryId = null,
-    Guid? ReversedByJournalEntryId = null);
+    Guid? ReversedByJournalEntryId = null,
+    DateTimeOffset? RejectedAtUtc = null,
+    string DecisionReason = "",
+    string ConcurrencyToken = "",
+    IReadOnlyList<JournalEntryLineSnapshot>? Lines = null);
+
+public sealed record JournalEntryLineSnapshot(string AccountNumber, string Description, decimal Debit, decimal Credit);
 
 public sealed record ReceivablesWorkspace(
     decimal OpenBalance,

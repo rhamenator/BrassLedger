@@ -62,6 +62,8 @@ Overview is the control tower for the day. Use it to answer these questions quic
 
 Ledger is the home for journal entries, accruals, reclasses, and period adjustments that genuinely belong in the general ledger.
 
+Save an ordinary journal as a draft. Its preparer cannot approve or reject it, and its approver cannot post it. A reviewer can reject an ordinary draft or approved-but-unposted journal with a specific correction note. The preparer then chooses **Correct**, revises the same journal, and resubmits it for independent approval. Account balances change only at posting; prior versions and decisions remain in the audit history. Correct journals created by another module through that module's own workflow rather than editing their generated entries.
+
 Best practices:
 
 - include reference text and effective dates on every batch

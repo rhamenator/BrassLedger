@@ -40,6 +40,12 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("malformed-customers.csv", cut.Markup);
         Assert.Contains("Fix row 2", cut.Markup);
         Assert.Contains("Fixed assets, prepaids, and loans", cut.Markup);
+        Assert.NotNull(cut.Find("input[aria-label='Journal rejection reason']"));
+        Assert.Contains("Attach the supporting bank statement.", cut.Markup);
+        cut.FindAll("button").Single(button => button.TextContent.Trim() == "Correct").Click();
+        Assert.Contains("Correct journal entry", cut.Markup);
+        Assert.Equal("JE-CORRECT-1", cut.Find("input[aria-label='Journal entry reference']").GetAttribute("value"));
+        Assert.Equal("1000", cut.Find("select[aria-label='Journal entry account']").GetAttribute("value"));
         cut.Find("select[aria-label='Accounting schedule type']").Change("Loan");
         Assert.Contains("Loan payment bank account", cut.Markup);
     }
@@ -101,10 +107,9 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
 {
     public Task<TransactionResult> SaveJournalEntryDraftAsync(SaveJournalEntryDraftRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> ApproveJournalEntryAsync(Guid journalEntryId, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(journalEntryId));
+    public Task<TransactionResult> RejectJournalEntryAsync(RejectJournalEntryRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.JournalEntryId));
     public Task<TransactionResult> PostApprovedJournalEntryAsync(Guid journalEntryId, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(journalEntryId));
     public Task<TransactionResult> ReverseJournalEntryAsync(ReverseJournalEntryRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
-    public Task<TransactionResult> PostJournalEntryAsync(PostJournalEntryRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
-    public Task<TransactionResult> PostJournalEntriesAsync(IReadOnlyList<PostJournalEntryRequest> requests, CancellationToken cancellationToken = default) => Task.FromResult(requests.Count == 0 ? TransactionResult.Failure("Provide at least one journal entry to import.") : TransactionResult.Success(Guid.NewGuid()));
     public Task<AccountingScheduleWorkspace> GetAccountingScheduleWorkspaceAsync(CancellationToken cancellationToken = default) => Task.FromResult(new AccountingScheduleWorkspace([], [], []));
     public Task<TransactionResult> SaveAccountingScheduleAsync(SaveAccountingScheduleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> ApproveAccountingScheduleAsync(ApproveAccountingScheduleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ScheduleId));

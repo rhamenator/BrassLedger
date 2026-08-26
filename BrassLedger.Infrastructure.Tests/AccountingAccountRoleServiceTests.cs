@@ -104,7 +104,7 @@ public sealed class AccountingAccountRoleServiceTests : IDisposable
             Assert.Contains(await verified.JournalEntryLines.Where(line => line.JournalEntryId == entryId).ToArrayAsync(), line => line.AccountId == replacementClearingId && line.Debit == 25m);
         }
 
-        var attemptedBypass = await transactions.PostJournalEntryAsync(new(new DateOnly(2026, 8, 25), "ROLE-BYPASS", "Attempt internal role reference",
+        var attemptedBypass = await transactions.SaveJournalEntryDraftAsync(new(null, new DateOnly(2026, 8, 25), "ROLE-BYPASS", "Attempt internal role reference",
         [
             new("\u001foperational-role:AccountsReceivable", 1m, 0m, "Unauthorized control route"),
             new("4999", 0m, 1m, "Offset")

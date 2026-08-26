@@ -324,6 +324,9 @@ public sealed class JournalEntry
     public DateTimeOffset CreatedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
     public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
     public Guid? PostedByUserId { get; set; }
     public DateTimeOffset PostedAtUtc { get; set; }
     public Guid? ReversalOfJournalEntryId { get; set; }

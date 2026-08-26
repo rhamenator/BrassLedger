@@ -44,8 +44,9 @@ public sealed class AccountingScheduleTests : IDisposable
         var installment = schedule.Installments[0];
         Assert.Equal("Draft", installment.JournalStatus);
         Assert.NotNull(installment.JournalEntryId);
-        Assert.True((await service.ApproveJournalEntryAsync(installment.JournalEntryId.Value)).Succeeded);
-        Assert.True((await service.PostApprovedJournalEntryAsync(installment.JournalEntryId.Value)).Succeeded);
+        var posting = await ApproveAndPostJournalAsSeparateActorsAsync(scope.ServiceProvider, service, actor.CompanyId, installment.JournalEntryId.Value);
+        Assert.True(posting.Succeeded, posting.ErrorMessage);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost, BrassLedgerPermissions.JournalReverse);
 
         await using (var posted = await factory.CreateDbContextAsync())
         {
@@ -61,7 +62,8 @@ public sealed class AccountingScheduleTests : IDisposable
         await using var verified = await factory.CreateDbContextAsync();
         Assert.Equal(0m, (await verified.Accounts.SingleAsync(account => account.Id == accounts.DepreciationExpense)).CurrentBalance);
         Assert.Equal(0m, (await verified.Accounts.SingleAsync(account => account.Id == accounts.AccumulatedDepreciation)).CurrentBalance);
-        Assert.Contains(await verified.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "accounting-schedule.installment.reversed" && audit.EntityId == schedule.Id && audit.UserId == actor.UserId);
+        var reversalAudit = Assert.Single(await verified.BusinessAuditEntries.Where(audit => audit.Action == "accounting-schedule.installment.reversed" && audit.EntityId == schedule.Id).ToArrayAsync());
+        Assert.Equal(actor.UserId, reversalAudit.UserId);
     }
 
     [Fact]
@@ -96,8 +98,9 @@ public sealed class AccountingScheduleTests : IDisposable
         Assert.True((await service.PrepareAccountingScheduleInstallmentsAsync(new(schedule.Id, schedule.StartDate, schedule.ConcurrencyToken))).Succeeded);
         schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
         var paymentInstallment = schedule.Installments[0];
-        Assert.True((await service.ApproveJournalEntryAsync(paymentInstallment.JournalEntryId!.Value)).Succeeded);
-        Assert.True((await service.PostApprovedJournalEntryAsync(paymentInstallment.JournalEntryId.Value)).Succeeded);
+        var paymentPosting = await ApproveAndPostJournalAsSeparateActorsAsync(scope.ServiceProvider, service, actor.CompanyId, paymentInstallment.JournalEntryId!.Value);
+        Assert.True(paymentPosting.Succeeded, paymentPosting.ErrorMessage);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost, BrassLedgerPermissions.JournalReverse);
         await using (var db = await factory.CreateDbContextAsync())
         {
             var journal = await db.JournalEntries.SingleAsync(entry => entry.Id == paymentInstallment.JournalEntryId);
@@ -169,8 +172,11 @@ public sealed class AccountingScheduleTests : IDisposable
         var accounts = await AddScheduleAccountsAsync(factory, actor.CompanyId);
         SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost, BrassLedgerPermissions.JournalReverse);
         var service = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
-        var acquisition = await service.PostJournalEntryAsync(new(new DateOnly(2026, 4, 1), "FA-DISP-ACQ", "Record forklift acquisition", [new("1500", 1200m, 0m, "Forklift cost"), new("3000", 0m, 1200m, "Opening asset financing")]));
+        var acquisitionDraft = await service.SaveJournalEntryDraftAsync(new(null, new DateOnly(2026, 4, 1), "FA-DISP-ACQ", "Record forklift acquisition", [new("1500", 1200m, 0m, "Forklift cost"), new("3000", 0m, 1200m, "Opening asset financing")]));
+        Assert.True(acquisitionDraft.Succeeded, acquisitionDraft.ErrorMessage);
+        var acquisition = await ApproveAndPostJournalAsSeparateActorsAsync(scope.ServiceProvider, service, actor.CompanyId, acquisitionDraft.Id!.Value);
         Assert.True(acquisition.Succeeded, acquisition.ErrorMessage);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost, BrassLedgerPermissions.JournalReverse);
 
         var saved = await service.SaveAccountingScheduleAsync(new(null, "FA-DISP", "Forklift", "FixedAsset", new DateOnly(2026, 4, 30), 12, 1200m, 0m, 0m, accounts.FixedAsset, accounts.AccumulatedDepreciation, accounts.DepreciationExpense, null, "Disposal lifecycle."));
         Assert.True(saved.Succeeded, saved.ErrorMessage);
@@ -180,8 +186,9 @@ public sealed class AccountingScheduleTests : IDisposable
         Assert.True((await service.PrepareAccountingScheduleInstallmentsAsync(new(schedule.Id, schedule.StartDate, schedule.ConcurrencyToken))).Succeeded);
         schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
         var depreciation = schedule.Installments[0];
-        Assert.True((await service.ApproveJournalEntryAsync(depreciation.JournalEntryId!.Value)).Succeeded);
-        Assert.True((await service.PostApprovedJournalEntryAsync(depreciation.JournalEntryId.Value)).Succeeded);
+        var depreciationPosting = await ApproveAndPostJournalAsSeparateActorsAsync(scope.ServiceProvider, service, actor.CompanyId, depreciation.JournalEntryId!.Value);
+        Assert.True(depreciationPosting.Succeeded, depreciationPosting.ErrorMessage);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost, BrassLedgerPermissions.JournalReverse);
 
         schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
         decimal bankBalanceBeforeDisposal;
@@ -209,8 +216,9 @@ public sealed class AccountingScheduleTests : IDisposable
         Assert.False(editAttempt.Succeeded);
         Assert.Contains("originating workflow", editAttempt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
 
-        Assert.True((await service.ApproveJournalEntryAsync(disposalId)).Succeeded);
-        Assert.True((await service.PostApprovedJournalEntryAsync(disposalId)).Succeeded);
+        var disposalPosting = await ApproveAndPostJournalAsSeparateActorsAsync(scope.ServiceProvider, service, actor.CompanyId, disposalId);
+        Assert.True(disposalPosting.Succeeded, disposalPosting.ErrorMessage);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost, BrassLedgerPermissions.JournalReverse);
         schedule = Assert.Single((await service.GetAccountingScheduleWorkspaceAsync()).Schedules, candidate => candidate.Id == saved.Id);
         Assert.Equal("Disposed", schedule.Status);
         decimal bankBalanceAfterDisposal;
@@ -262,6 +270,23 @@ public sealed class AccountingScheduleTests : IDisposable
         var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, userId.ToString()), new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()) };
         claims.AddRange(permissions.Select(permission => new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
         services.GetRequiredService<IHttpContextAccessor>().HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "test")) };
+    }
+
+    private static async Task<TransactionResult> ApproveAndPostJournalAsSeparateActorsAsync(
+        IServiceProvider services,
+        IAccountingTransactionService transactions,
+        Guid companyId,
+        Guid journalEntryId)
+    {
+        SetContext(services, Guid.NewGuid(), companyId, BrassLedgerPermissions.JournalApprove);
+        var approval = await transactions.ApproveJournalEntryAsync(journalEntryId);
+        if (!approval.Succeeded)
+        {
+            return approval;
+        }
+
+        SetContext(services, Guid.NewGuid(), companyId, BrassLedgerPermissions.JournalPost);
+        return await transactions.PostApprovedJournalEntryAsync(journalEntryId);
     }
 
     private sealed record ScheduleAccounts(Guid PrepaidAsset, Guid FixedAsset, Guid AccumulatedDepreciation, Guid DepreciationExpense, Guid PrepaidExpense, Guid LoanLiability, Guid InterestExpense, Guid DisposalGain, Guid DisposalLoss, Guid PaymentBank);

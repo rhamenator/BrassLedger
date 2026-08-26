@@ -88,12 +88,13 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Empty(unprotectedRoutes);
 
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
-        var request = new PostJournalEntryRequest(new DateOnly(2026, 8, 26), "CSRF-REJECT", "Must not post", [new("1000", 1m, 0m, "Cash"), new("4000", 0m, 1m, "Revenue")]);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/journal-entries", request)).StatusCode);
+        var request = new SaveJournalEntryDraftRequest(null, new DateOnly(2026, 8, 26), "CSRF-REJECT", "Must not save", [new("1000", 1m, 0m, "Cash"), new("4000", 0m, 1m, "Revenue")]);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/journal-entries", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/journal-entry-drafts", request)).StatusCode);
         Assert.DoesNotContain((await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.GeneralLedger.RecentEntries, entry => entry.Reference == request.Reference);
 
         client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", await GetAntiforgeryTokenAsync(client));
-        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/journal-entries", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/journal-entry-drafts", request)).StatusCode);
     }
 
     [Fact]
@@ -942,7 +943,11 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     public async Task JournalDraftApi_RequiresApprovalBeforePostingAndPreservesReversalLinks()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
+        await EnsureControllerCloneAsync(isolatedFactory, "journal-reviewer-api");
+        await EnsureControllerCloneAsync(isolatedFactory, "journal-poster-api");
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var reviewer = await CreateAuthenticatedClientAsync(isolatedFactory, "journal-reviewer-api");
+        using var poster = await CreateAuthenticatedClientAsync(isolatedFactory, "journal-poster-api");
         var before = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         Assert.NotNull(before);
 
@@ -958,8 +963,25 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
 
         var prematurePost = await client.PostAsync($"/api/journal-entry-drafts/{draft!.Id}/post", null);
         Assert.Equal(HttpStatusCode.BadRequest, prematurePost.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/journal-entry-drafts/{draft.Id}/approve", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/journal-entry-drafts/{draft.Id}/post", null)).StatusCode);
+        var current = (await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.GeneralLedger.RecentEntries.Single(entry => entry.Id == draft.Id);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/journal-entry-drafts/{draft.Id}/reject", new RejectJournalEntryRequest(draft.Id.Value, "Self-review must fail.", current.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await reviewer.PostAsJsonAsync($"/api/journal-entry-drafts/{draft.Id}/reject", new RejectJournalEntryRequest(draft.Id.Value, "Stale review.", "stale-token"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reviewer.PostAsJsonAsync($"/api/journal-entry-drafts/{draft.Id}/reject", new RejectJournalEntryRequest(draft.Id.Value, "Attach supporting documentation.", current.ConcurrencyToken))).StatusCode);
+        current = (await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.GeneralLedger.RecentEntries.Single(entry => entry.Id == draft.Id);
+        Assert.Equal("Rejected", current.Status);
+        Assert.Equal("Attach supporting documentation.", current.DecisionReason);
+        var correctionResponse = await client.PostAsJsonAsync("/api/journal-entry-drafts", new SaveJournalEntryDraftRequest(
+            draft.Id,
+            new DateOnly(2026, 5, 4),
+            "JE-API-LIFECYCLE-1",
+            "API journal lifecycle — support attached",
+            [new JournalLineRequest("1000", 40m, 0m, "Cash"), new JournalLineRequest("4000", 0m, 40m, "Revenue")],
+            current.ConcurrencyToken));
+        Assert.Equal(HttpStatusCode.Created, correctionResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync($"/api/journal-entry-drafts/{draft.Id}/approve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reviewer.PostAsync($"/api/journal-entry-drafts/{draft.Id}/approve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await reviewer.PostAsync($"/api/journal-entry-drafts/{draft.Id}/post", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await poster.PostAsync($"/api/journal-entry-drafts/{draft.Id}/post", null)).StatusCode);
 
         var afterPosting = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         Assert.NotNull(afterPosting);
@@ -1155,13 +1177,24 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         journalForm.Add(new StringContent("Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue"), "file", "quickbooks-journals.csv");
         var journalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", journalForm);
         Assert.True(journalImport.StatusCode == HttpStatusCode.OK, await journalImport.Content.ReadAsStringAsync());
+        var afterJournalImport = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var importedJournalDraft = Assert.Single(afterJournalImport!.GeneralLedger.RecentEntries, entry => entry.Status == "Draft" && entry.Description.Contains("QBO-JE-1", StringComparison.Ordinal));
+        Assert.Equal("Draft", importedJournalDraft.Status);
+        var draftJournalExport = await client.GetStringAsync("/api/interchange/quickbooks-online/journal-entries.csv");
+        Assert.DoesNotContain("QBO-JE-1", draftJournalExport);
         using var duplicateJournalForm = new MultipartFormDataContent();
         duplicateJournalForm.Add(new StringContent("Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue"), "file", "quickbooks-journals-retry.csv");
         var duplicateJournalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", duplicateJournalForm);
         Assert.Equal(HttpStatusCode.BadRequest, duplicateJournalImport.StatusCode);
+        using var invalidJournalForm = new MultipartFormDataContent();
+        invalidJournalForm.Add(new StringContent("Journal No.,Journal Date,Account Name,Debits,Credits\r\nQBO-JE-BAD,2026-05-01,Operating Cash,-25.00,0.00\r\nQBO-JE-BAD,2026-05-01,Product Revenue,0.00,-25.00"), "file", "invalid-quickbooks-journals.csv");
+        var invalidJournalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries?dryRun=true", invalidJournalForm);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidJournalImport.StatusCode);
         using var malformedForm = new MultipartFormDataContent();
         malformedForm.Add(new StringContent("Display Name,Customer Number\r\n\"unterminated,QBO-BAD-1"), "file", "malformed-customers.csv");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/interchange/quickbooks-online/customers?dryRun=true", malformedForm)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await invoiceApprover.PostAsync($"/api/journal-entry-drafts/{importedJournalDraft.Id}/approve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await invoicePoster.PostAsync($"/api/journal-entry-drafts/{importedJournalDraft.Id}/post", null)).StatusCode);
         var journalExport = await client.GetStringAsync("/api/interchange/quickbooks-online/journal-entries.csv");
         Assert.Contains("\"Journal No.\",\"Journal Date\",\"Reference\",\"Journal/Description\",\"Account Name\",\"Debits\",\"Credits\",\"Line Description\"", journalExport);
         Assert.Contains("QBO-JE-1", journalExport);
@@ -1174,11 +1207,13 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             await db.SaveChangesAsync();
         }
         var batches = await client.GetFromJsonAsync<AccountingInterchangeBatchSnapshot[]>("/api/interchange/batches");
-        Assert.Equal(5, batches!.Length);
+        Assert.Equal(6, batches!.Length);
         Assert.DoesNotContain(batches, batch => batch.FileName == "other-company.csv");
         Assert.Contains(batches, batch => batch.Status == "Validated" && batch.IsDryRun && batch.EntityType == "customers");
         Assert.Contains(batches, batch => batch.Status == "Imported" && !batch.IsDryRun && batch.ImportedCount == 1);
+        Assert.Contains(batches, batch => batch.Status == "DraftsCreated" && batch.EntityType == "journal-entries" && batch.ImportedCount == 1);
         Assert.Contains(batches, batch => batch.Status == "DuplicateRejected" && batch.DuplicateCount == 2 && batch.RejectedCount == 2 && batch.Rejections.Count == 1);
+        Assert.Contains(batches, batch => batch.Status == "Rejected" && batch.FileName == "invalid-quickbooks-journals.csv" && batch.RejectedCount == 2);
         Assert.Contains(batches, batch => batch.Status == "Rejected" && batch.FileName == "malformed-customers.csv" && batch.RejectedCount == 1 && batch.ContentSha256.Length == 64);
 
         var beforeInvoiceImport = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
@@ -1279,6 +1314,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     public async Task AccountingScheduleApi_RequiresAuthorityAntiforgeryAndPreservesReviewWorkflow()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
+        await EnsureControllerCloneAsync(isolatedFactory, "schedule-journal-approver-api");
+        await EnsureControllerCloneAsync(isolatedFactory, "schedule-journal-poster-api");
         Guid assetId;
         Guid accumulatedId;
         Guid expenseId;
@@ -1302,9 +1339,14 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         }
 
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var journalApprover = await CreateAuthenticatedClientAsync(isolatedFactory, "schedule-journal-approver-api");
+        using var journalPoster = await CreateAuthenticatedClientAsync(isolatedFactory, "schedule-journal-poster-api");
         using var missingTokenClient = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
-        var acquisition = await client.PostAsJsonAsync("/api/journal-entries", new PostJournalEntryRequest(new DateOnly(2026, 1, 1), "API-FA-ACQ", "Record API equipment", [new("1501", 400m, 0m, "Equipment cost"), new("3000", 0m, 400m, "Opening financing")]));
-        Assert.Equal(HttpStatusCode.Created, acquisition.StatusCode);
+        var acquisitionResponse = await client.PostAsJsonAsync("/api/journal-entry-drafts", new SaveJournalEntryDraftRequest(null, new DateOnly(2026, 1, 1), "API-FA-ACQ", "Record API equipment", [new("1501", 400m, 0m, "Equipment cost"), new("3000", 0m, 400m, "Opening financing")]));
+        Assert.Equal(HttpStatusCode.Created, acquisitionResponse.StatusCode);
+        var acquisition = Assert.IsType<TransactionResult>(await acquisitionResponse.Content.ReadFromJsonAsync<TransactionResult>());
+        Assert.Equal(HttpStatusCode.OK, (await journalApprover.PostAsync($"/api/journal-entry-drafts/{acquisition.Id}/approve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await journalPoster.PostAsync($"/api/journal-entry-drafts/{acquisition.Id}/post", null)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/accounting-schedules")).StatusCode);
         var save = new SaveAccountingScheduleRequest(null, "API-FA-1", "API equipment", "FixedAsset", new DateOnly(2026, 1, 31), 4, 400m, 0m, 0m, assetId, accumulatedId, expenseId, null, "API lifecycle");
         Assert.Equal(HttpStatusCode.BadRequest, (await missingTokenClient.PutAsJsonAsync("/api/accounting-schedules", save)).StatusCode);
@@ -1330,8 +1372,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         workspace = Assert.IsType<AccountingScheduleWorkspace>(await client.GetFromJsonAsync<AccountingScheduleWorkspace>("/api/accounting-schedules"));
         schedule = workspace.Schedules.Single(candidate => candidate.Id == saved.Id);
         var installment = Assert.Single(schedule.Installments, candidate => candidate.JournalStatus == "Draft");
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/journal-entry-drafts/{installment.JournalEntryId}/approve", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/journal-entry-drafts/{installment.JournalEntryId}/post", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await journalApprover.PostAsync($"/api/journal-entry-drafts/{installment.JournalEntryId}/approve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await journalPoster.PostAsync($"/api/journal-entry-drafts/{installment.JournalEntryId}/post", null)).StatusCode);
         workspace = Assert.IsType<AccountingScheduleWorkspace>(await client.GetFromJsonAsync<AccountingScheduleWorkspace>("/api/accounting-schedules"));
         schedule = workspace.Schedules.Single(candidate => candidate.Id == saved.Id);
         var disposal = new PrepareFixedAssetDisposalRequest(schedule.Id, new DateOnly(2026, 2, 15), 400m, bankId, gainId, lossId, "API disposal", schedule.ConcurrencyToken);
@@ -1343,8 +1385,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         schedule = workspace.Schedules.Single(candidate => candidate.Id == saved.Id);
         Assert.Equal("DisposalPending", schedule.Status);
         Assert.NotNull(schedule.DisposalJournalEntryId);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/journal-entry-drafts/{schedule.DisposalJournalEntryId}/approve", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/journal-entry-drafts/{schedule.DisposalJournalEntryId}/post", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await journalApprover.PostAsync($"/api/journal-entry-drafts/{schedule.DisposalJournalEntryId}/approve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await journalPoster.PostAsync($"/api/journal-entry-drafts/{schedule.DisposalJournalEntryId}/post", null)).StatusCode);
         workspace = Assert.IsType<AccountingScheduleWorkspace>(await client.GetFromJsonAsync<AccountingScheduleWorkspace>("/api/accounting-schedules"));
         schedule = workspace.Schedules.Single(candidate => candidate.Id == saved.Id);
         Assert.Equal("Disposed", schedule.Status);

@@ -21,8 +21,10 @@ public sealed partial class AccountingTransactionService(
         if (!HasPermission(BrassLedgerPermissions.JournalPrepare)) return TransactionResult.Failure("You are not authorized to prepare journal entries.");
         if (string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Description))
             return TransactionResult.Failure("A journal reference and description are required.");
-        if (request.Lines.Count < 2 || request.Lines.Any(line => line.Debit < 0 || line.Credit < 0 || (line.Debit == 0 && line.Credit == 0) || (line.Debit > 0 && line.Credit > 0)))
+        if (request.Lines.Count < 2 || request.Lines.Any(line => string.IsNullOrWhiteSpace(line.AccountNumber) || line.Debit < 0 || line.Credit < 0 || (line.Debit == 0 && line.Credit == 0) || (line.Debit > 0 && line.Credit > 0)))
             return TransactionResult.Failure("Journal drafts require at least two valid debit or credit lines.");
+        if (request.Lines.Any(line => line.AccountNumber.StartsWith(OperationalRoleReferencePrefix, StringComparison.Ordinal)))
+            return TransactionResult.Failure("Operational account references are reserved for authorized accounting workflows.");
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
@@ -34,14 +36,26 @@ public sealed partial class AccountingTransactionService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var userId = ResolveUserId();
         JournalEntry entry;
+        object? priorDraft = null;
         if (request.Id.HasValue)
         {
             var existing = await db.JournalEntries.SingleOrDefaultAsync(candidate => candidate.Id == request.Id && candidate.CompanyId == companyId, cancellationToken);
             if (existing is null) return TransactionResult.Failure("Journal draft not found.");
             entry = existing;
-            if (!entry.Status.Equals("Draft", StringComparison.OrdinalIgnoreCase)) return TransactionResult.Failure("Only journal drafts can be edited.");
             if (entry.SourceDocumentId.HasValue || !entry.SourceModule.Equals("General Ledger", StringComparison.OrdinalIgnoreCase)) return TransactionResult.Failure("Edit a source-workflow journal through its originating workflow.");
-            db.JournalEntryLines.RemoveRange(await db.JournalEntryLines.Where(line => line.JournalEntryId == entry.Id).ToListAsync(cancellationToken));
+            if (entry.Status is not ("Draft" or "Rejected")) return TransactionResult.Failure("Only draft or rejected general journals can be edited.");
+            if (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(entry.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The journal draft changed after it was displayed. Refresh before editing it.");
+            var priorLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == entry.Id).ToListAsync(cancellationToken);
+            priorDraft = new { entry.PostedOn, entry.Reference, entry.Description, entry.TotalAmount, entry.Status, entry.DecisionReason, lines = priorLines.Select(line => new { line.AccountId, line.Description, line.Debit, line.Credit }).ToArray() };
+            db.JournalEntryLines.RemoveRange(priorLines);
+            entry.CreatedByUserId = userId;
+            entry.CreatedAtUtc = DateTimeOffset.UtcNow;
+            entry.Status = "Draft";
+            entry.ApprovedByUserId = null;
+            entry.ApprovedAtUtc = null;
+            entry.RejectedByUserId = null;
+            entry.RejectedAtUtc = null;
+            entry.DecisionReason = string.Empty;
         }
         else
         {
@@ -69,7 +83,7 @@ public sealed partial class AccountingTransactionService(
             var account = accounts.Single(candidate => candidate.Number.Equals(line.AccountNumber.Trim(), StringComparison.OrdinalIgnoreCase));
             db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit });
         }
-        AddJournalAudit(db, companyId, userId, "journal.draft.saved", entry, new { lineCount = request.Lines.Count });
+        AddJournalAudit(db, companyId, userId, priorDraft is null ? "journal.draft.saved" : "journal.draft.revised", entry, new { lineCount = request.Lines.Count, priorDraft });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The journal draft changed while it was being saved. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);
@@ -89,6 +103,7 @@ public sealed partial class AccountingTransactionService(
         if (lines.Count < 2 || lines.Sum(line => line.Debit) != lines.Sum(line => line.Credit)) return TransactionResult.Failure("The journal draft must balance before approval.");
 
         var userId = ResolveUserId();
+        if (userId.HasValue && entry.CreatedByUserId == userId) return TransactionResult.Failure("The person who prepared a journal draft cannot approve it.");
         entry.Status = "Approved";
         entry.ApprovedByUserId = userId;
         entry.ApprovedAtUtc = DateTimeOffset.UtcNow;
@@ -96,6 +111,30 @@ public sealed partial class AccountingTransactionService(
         AddJournalAudit(db, companyId, userId, "journal.approved", entry, new { entry.ApprovedAtUtc });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The journal draft changed during approval. Refresh and try again."); }
+        return TransactionResult.Success(entry.Id);
+    }
+
+    public async Task<TransactionResult> RejectJournalEntryAsync(RejectJournalEntryRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.JournalApprove)) return TransactionResult.Failure("You are not authorized to reject journal entries.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A journal rejection reason is required.");
+        if (request.Reason.Trim().Length > 1000) return TransactionResult.Failure("The journal rejection reason cannot exceed 1,000 characters.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var entry = await db.JournalEntries.SingleOrDefaultAsync(candidate => candidate.Id == request.JournalEntryId && candidate.CompanyId == companyId, cancellationToken);
+        if (entry is null || entry.SourceDocumentId.HasValue || !entry.SourceModule.Equals("General Ledger", StringComparison.OrdinalIgnoreCase) || entry.Status is not ("Draft" or "Approved"))
+            return TransactionResult.Failure("Only an unposted general journal draft can be rejected; source-workflow journals must be corrected in their originating workflow.");
+        if (!string.Equals(entry.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The journal draft changed after it was displayed. Refresh before rejecting it.");
+        var userId = ResolveUserId();
+        if (userId.HasValue && entry.CreatedByUserId == userId) return TransactionResult.Failure("The person who prepared a journal draft cannot reject it as its reviewer.");
+        entry.Status = "Rejected";
+        entry.RejectedByUserId = userId;
+        entry.RejectedAtUtc = DateTimeOffset.UtcNow;
+        entry.DecisionReason = request.Reason.Trim();
+        entry.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddJournalAudit(db, companyId, userId, "journal.rejected", entry, new { entry.DecisionReason, entry.RejectedAtUtc });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The journal draft changed during rejection. Refresh and try again."); }
         return TransactionResult.Success(entry.Id);
     }
 
@@ -108,6 +147,8 @@ public sealed partial class AccountingTransactionService(
         var entry = await db.JournalEntries.SingleOrDefaultAsync(candidate => candidate.Id == journalEntryId && candidate.CompanyId == companyId, cancellationToken);
         if (entry is null) return TransactionResult.Failure("Approved journal entry not found.");
         if (!entry.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase) || entry.IsPosted) return TransactionResult.Failure("Only an approved, unposted journal entry can be posted.");
+        var userId = ResolveUserId();
+        if (userId.HasValue && entry.ApprovedByUserId == userId) return TransactionResult.Failure("The person who approved a journal entry cannot post it.");
         if (await IsClosedPeriodAsync(db, companyId, entry.PostedOn, cancellationToken)) return TransactionResult.Failure("This posting date is in a closed accounting period.");
         var lines = await db.JournalEntryLines.Where(line => line.JournalEntryId == entry.Id).ToListAsync(cancellationToken);
         if (lines.Count < 2 || lines.Sum(line => line.Debit) != lines.Sum(line => line.Credit)) return TransactionResult.Failure("The approved journal entry is no longer balanced.");
@@ -122,7 +163,6 @@ public sealed partial class AccountingTransactionService(
         }
         var bankError = await ApplyBankJournalMovementAsync(db, companyId, entry, lines, cancellationToken);
         if (bankError is not null) return TransactionResult.Failure(bankError);
-        var userId = ResolveUserId();
         entry.EntryNumber = $"JE-{entry.PostedOn:yyyyMMdd}-{Guid.NewGuid():N}"[..20];
         entry.Status = "Posted";
         entry.IsPosted = true;
@@ -166,35 +206,6 @@ public sealed partial class AccountingTransactionService(
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The journal entry changed while it was being reversed. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);
         return posting;
-    }
-
-    public async Task<TransactionResult> PostJournalEntryAsync(PostJournalEntryRequest request, CancellationToken cancellationToken = default)
-    {
-        if (!HasPermission(BrassLedgerPermissions.JournalPost)) return TransactionResult.Failure("You are not authorized to post journal entries.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var result = await PostAsync(db, companyId, request.PostedOn, "General Ledger", request.Reference, request.Description, request.Lines, cancellationToken);
-        if (!result.Succeeded) return result;
-        await transaction.CommitAsync(cancellationToken);
-        return result;
-    }
-
-    public async Task<TransactionResult> PostJournalEntriesAsync(IReadOnlyList<PostJournalEntryRequest> requests, CancellationToken cancellationToken = default)
-    {
-        if (!HasPermission(BrassLedgerPermissions.JournalPost)) return TransactionResult.Failure("You are not authorized to post journal entries.");
-        if (requests.Count == 0) return TransactionResult.Failure("Provide at least one journal entry to import.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        TransactionResult? lastResult = null;
-        foreach (var request in requests)
-        {
-            lastResult = await PostAsync(db, companyId, request.PostedOn, "General Ledger", request.Reference, request.Description, request.Lines, cancellationToken);
-            if (!lastResult.Succeeded) return lastResult;
-        }
-        await transaction.CommitAsync(cancellationToken);
-        return lastResult!;
     }
 
     public async Task<AccountingScheduleWorkspace> GetAccountingScheduleWorkspaceAsync(CancellationToken cancellationToken = default)

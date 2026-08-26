@@ -11,8 +11,7 @@ namespace BrassLedger.Infrastructure.Accounting;
 
 public sealed class QuickBooksOnlineInterchangeService(
     IDbContextFactory<BrassLedgerDbContext> dbContextFactory,
-    IHttpContextAccessor httpContextAccessor,
-    IAccountingTransactionService transactionService) : IAccountingInterchangeService
+    IHttpContextAccessor httpContextAccessor) : IAccountingInterchangeService
 {
     private const int MaximumRows = 1000;
     private const int MaximumBytes = 2 * 1024 * 1024;
@@ -55,6 +54,8 @@ public sealed class QuickBooksOnlineInterchangeService(
             return AccountingInterchangeImportResult.Failure("Supported imports are chart-of-accounts, customers, vendors, general journal entries, and zero-tax invoices.");
         if (normalizedEntity == "invoices" && (!HasPermission(BrassLedgerPermissions.SubledgerPrepare) || !HasPermission(BrassLedgerPermissions.ReceivablesManage)))
             return AccountingInterchangeImportResult.Failure("You are not authorized to prepare accounts-receivable invoice drafts.");
+        if (normalizedEntity == "journal-entries" && !HasPermission(BrassLedgerPermissions.JournalPrepare))
+            return AccountingInterchangeImportResult.Failure("You are not authorized to prepare general journal drafts.");
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
@@ -81,7 +82,7 @@ public sealed class QuickBooksOnlineInterchangeService(
         if (!result.Succeeded)
             return await RecordRejectedBatchAsync(db, companyId, normalizedEntity, options, parsed.ContentSha256, rows.Count, result.Errors, cancellationToken);
 
-        var batchStatus = options.DryRun ? "Validated" : normalizedEntity == "invoices" ? "DraftsCreated" : "Imported";
+        var batchStatus = options.DryRun ? "Validated" : normalizedEntity is "invoices" or "journal-entries" ? "DraftsCreated" : "Imported";
         var batch = NewBatch(companyId, normalizedEntity, options, parsed.ContentSha256, batchStatus, rows.Count, result.ImportedCount, [], options.DryRun ? null : committedImportKey);
         db.AccountingInterchangeBatches.Add(batch);
         db.BusinessAuditEntries.Add(new BusinessAuditEntry
@@ -118,7 +119,11 @@ public sealed class QuickBooksOnlineInterchangeService(
 
     private static async Task<IEnumerable<string[]>> ExportJournalEntriesAsync(BrassLedgerDbContext db, Guid companyId, CancellationToken ct)
     {
-        var entries = await db.JournalEntries.Where(entry => entry.CompanyId == companyId && entry.SourceModule == "General Ledger").OrderBy(entry => entry.PostedOn).ThenBy(entry => entry.EntryNumber).ToListAsync(ct);
+        var entries = await db.JournalEntries
+            .Where(entry => entry.CompanyId == companyId && entry.SourceModule == "General Ledger" && entry.IsPosted && entry.Status == "Posted")
+            .OrderBy(entry => entry.PostedOn)
+            .ThenBy(entry => entry.EntryNumber)
+            .ToListAsync(ct);
         var entryIds = entries.Select(entry => entry.Id).ToArray();
         var lines = await db.JournalEntryLines.Where(line => entryIds.Contains(line.JournalEntryId)).ToListAsync(ct);
         var accountNames = await db.Accounts.Where(account => account.CompanyId == companyId).ToDictionaryAsync(account => account.Id, account => account.Name, ct);
@@ -148,7 +153,7 @@ public sealed class QuickBooksOnlineInterchangeService(
     private async Task<AccountingInterchangeImportResult> ImportJournalEntriesAsync(BrassLedgerDbContext db, Guid companyId, List<Dictionary<string, string>> rows, bool dryRun, CancellationToken ct)
     {
         var errors = new List<string>();
-        var eligibleAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount).Select(account => new { account.Number, account.Name }).ToListAsync(ct);
+        var eligibleAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount).Select(account => new { account.Id, account.Number, account.Name }).ToListAsync(ct);
         var imports = new Dictionary<string, (DateOnly Date, string Reference, string Description, List<JournalLineRequest> Lines)>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
         {
@@ -162,6 +167,11 @@ public sealed class QuickBooksOnlineInterchangeService(
                 || !decimal.TryParse(Value(row, "credits", "credit"), NumberStyles.Number, CultureInfo.InvariantCulture, out var credit))
             {
                 errors.Add($"Row {index + 2}: Journal No., Journal Date, one unique active non-control Account Name (or BrassLedger account number), Debits, and Credits are required.");
+                continue;
+            }
+            if (debit < 0 || credit < 0 || (debit == 0 && credit == 0) || (debit > 0 && credit > 0))
+            {
+                errors.Add($"Row {index + 2}: provide a positive debit or a positive credit, but not both.");
                 continue;
             }
             if (!imports.TryGetValue(journalNumber, out var journal))
@@ -186,8 +196,32 @@ public sealed class QuickBooksOnlineInterchangeService(
         errors.AddRange(previouslyImported.Select(reference => $"QuickBooks journal '{imports.Single(item => BuildJournalImportReference(item.Key) == reference).Key}' was already imported. A file retry will not double-post it."));
         if (errors.Count > 0) return AccountingInterchangeImportResult.Failure(errors.ToArray());
         if (dryRun) return AccountingInterchangeImportResult.Success(imports.Count, true, rows.Count);
-        var posted = await transactionService.PostJournalEntriesAsync(imports.Select(pair => new PostJournalEntryRequest(pair.Value.Date, BuildJournalImportReference(pair.Key), BuildImportedJournalDescription(pair.Key, pair.Value.Reference, pair.Value.Description), pair.Value.Lines)).ToArray(), ct);
-        if (!posted.Succeeded) return AccountingInterchangeImportResult.Failure($"Journal import was not committed: {posted.ErrorMessage}");
+        var importedByUserId = ResolveUserId();
+        var importedAtUtc = DateTimeOffset.UtcNow;
+        foreach (var (sourceNumber, journal) in imports)
+        {
+            var entry = new JournalEntry
+            {
+                Id = Guid.NewGuid(), CompanyId = companyId, EntryNumber = $"DRAFT-{Guid.NewGuid():N}"[..20], PostedOn = journal.Date,
+                SourceModule = "General Ledger", Reference = BuildJournalImportReference(sourceNumber),
+                Description = BuildImportedJournalDescription(sourceNumber, journal.Reference, journal.Description),
+                TotalAmount = RoundCurrency(journal.Lines.Sum(line => line.Debit)), Status = "Draft", IsPosted = false,
+                CreatedByUserId = importedByUserId, CreatedAtUtc = importedAtUtc, ConcurrencyToken = Guid.NewGuid().ToString("N")
+            };
+            db.JournalEntries.Add(entry);
+            db.JournalEntryLines.AddRange(journal.Lines.Select(line => new JournalEntryLine
+            {
+                Id = Guid.NewGuid(), JournalEntryId = entry.Id,
+                AccountId = eligibleAccounts.Single(account => account.Number.Equals(line.AccountNumber, StringComparison.OrdinalIgnoreCase)).Id,
+                Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit
+            }));
+            db.BusinessAuditEntries.Add(new BusinessAuditEntry
+            {
+                Id = Guid.NewGuid(), CompanyId = companyId, UserId = importedByUserId, Action = "journal.draft.imported",
+                EntityType = nameof(JournalEntry), EntityId = entry.Id, OccurredAtUtc = importedAtUtc,
+                DetailJson = System.Text.Json.JsonSerializer.Serialize(new { provider = "quickbooks-online", sourceNumber, entry.Reference, lineCount = journal.Lines.Count })
+            });
+        }
         return AccountingInterchangeImportResult.Success(imports.Count);
     }
 

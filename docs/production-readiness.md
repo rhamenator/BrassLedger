@@ -37,6 +37,12 @@ Saving and approving a draft now execute the retained posting payload inside a d
 
 Vendor-scoped external invoice numbers now apply consistently to drafts, recurring templates, generated drafts, posted bills, purchase-invoice matches, and landed-cost bills. Two vendors may both issue `1001`; a second `1001` for the same vendor is rejected before review. Versioned SQLite and PostgreSQL migrations backfill historical workflow identity from retained request data, support lost-history adoption, and block unsafe downgrade.
 
+### Controlled general-journal posting
+
+Ordinary general journals now enter only through draft, approval, and posting; neither the HTTP API nor the public accounting application-service contract exposes the former direct-post operation. The preparer cannot approve or reject the same journal, and its approver cannot post it. Reviewers can reject a draft or approved-but-unposted ordinary journal with a required reason and current concurrency token. Correction revises the same journal identity, resets it to Draft, and retains its previous header, lines, status, and decision in audit evidence. Generated source-workflow journals cannot be edited or rejected through the general-journal screen.
+
+QuickBooks CSV journal imports create controlled drafts atomically with their import batch and provenance instead of changing balances. Invalid line polarity, unavailable or control accounts, imbalance, and duplicates are rejected. Only posted general journals are exported. SQLite and PostgreSQL migrations retain journal review decisions and prohibit destructive downgrade. Service, API, component, and browser regressions cover stale review, self-approval, self-rejection, approver self-posting, correction, posting, reversal, import draft behavior, and the three-user rendered workflow on 2026-08-26.
+
 ## Known limitations and unverified areas
 
 The following areas are not yet proven complete against the project definition of done:

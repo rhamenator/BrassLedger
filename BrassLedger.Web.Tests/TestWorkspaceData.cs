@@ -23,7 +23,26 @@ internal static class TestWorkspaceData
                 640225.18m,
                 511130.09m,
                 new[] { new AccountSnapshot("1000", "Operating Cash", "Asset", 112540.32m, false) },
-                new[] { new JournalEntrySnapshot("JE-2401", new DateOnly(2026, 3, 30), "Accounts Receivable", "March billing batch", 12720m) }),
+                new[]
+                {
+                    new JournalEntrySnapshot("JE-2401", new DateOnly(2026, 3, 30), "Accounts Receivable", "March billing batch", 12720m),
+                    new JournalEntrySnapshot(
+                        "DRAFT-REVIEW-1",
+                        new DateOnly(2026, 4, 2),
+                        "General Ledger",
+                        "Correct cash classification",
+                        25m,
+                        Guid.Parse("05e8de66-563d-46d2-afde-b9629c078fe2"),
+                        "JE-CORRECT-1",
+                        "Rejected",
+                        DecisionReason: "Attach the supporting bank statement.",
+                        ConcurrencyToken: "journal-review-token",
+                        Lines:
+                        [
+                            new JournalEntryLineSnapshot("1000", "Cash", 25m, 0m),
+                            new JournalEntryLineSnapshot("4000", "Revenue", 0m, 25m)
+                        ])
+                }),
             Receivables: new ReceivablesWorkspace(
                 34715.75m,
                 0,
@@ -119,4 +138,3 @@ internal sealed class StubProductCatalogService : IProductCatalogService
         return _assessment;
     }
 }
-

@@ -358,6 +358,10 @@ public static class ServiceCollectionExtensions
             return await HasColumnAsync(dbContext, "SubledgerDocumentWorkflows", "RejectedByUserId", cancellationToken)
                 && await HasColumnAsync(dbContext, "SubledgerDocumentWorkflows", "RejectedAtUtc", cancellationToken)
                 && await HasColumnAsync(dbContext, "SubledgerDocumentWorkflows", "DecisionReason", cancellationToken);
+        if (migrationId.EndsWith("_AddControlledJournalReview", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "JournalEntries", "RejectedByUserId", cancellationToken)
+                && await HasColumnAsync(dbContext, "JournalEntries", "RejectedAtUtc", cancellationToken)
+                && await HasColumnAsync(dbContext, "JournalEntries", "DecisionReason", cancellationToken);
         return false;
     }
 

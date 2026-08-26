@@ -92,7 +92,7 @@ public sealed class LedgerPage
         await Assertions.Expect(treasuryActivity.Locator("tbody tr").Filter(new() { HasText = adjustmentReference })).ToContainTextAsync("Reversed");
     }
 
-    public async Task CreateDepreciateDisposeAndReverseAssetAsync(string suffix)
+    public async Task CreateDepreciateDisposeAndReverseAssetAsync(string suffix, LedgerPage reviewer, LedgerPage poster)
     {
         var scheduleNumber = $"FA-E2E-{suffix}";
         var acquisitionReference = $"ACQ-{suffix}";
@@ -108,9 +108,34 @@ public sealed class LedgerPage
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save draft", Exact = true }).ClickAsync();
         var recentEntries = _session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" });
         var acquisitionRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
-        await acquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        await Assertions.Expect(acquisitionRow).ToContainTextAsync("Draft");
+
+        await reviewer.OpenAsync();
+        await reviewer._session.Page.GetByLabel("Journal rejection reason").FillAsync("Attach the acquisition support.");
+        var reviewerEntries = reviewer._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" });
+        var reviewerAcquisitionRow = reviewerEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
+        await reviewerAcquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Reject", Exact = true }).ClickAsync();
+        await Assertions.Expect(reviewer._session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Journal draft rejected");
+        await Assertions.Expect(reviewerEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First).ToContainTextAsync("Attach the acquisition support.");
+
+        await OpenAsync();
         acquisitionRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
-        await acquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await acquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Correct", Exact = true }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Heading, new() { Name = "Correct journal entry" })).ToBeVisibleAsync();
+        await _session.Page.GetByLabel("Journal entry description").FillAsync("Record E2E asset acquisition — support attached");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save corrected draft", Exact = true }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Corrected journal draft saved for review");
+
+        await reviewer.OpenAsync();
+        reviewerAcquisitionRow = reviewerEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
+        await reviewerAcquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        await Assertions.Expect(reviewer._session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Journal entry approved and ready to post");
+        await poster.OpenAsync();
+        var posterEntries = poster._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" });
+        var posterAcquisitionRow = posterEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
+        await posterAcquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await Assertions.Expect(poster._session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Approved journal entry posted");
+        await OpenAsync();
 
         await _session.Page.GetByLabel("Accounting schedule number").FillAsync(scheduleNumber);
         await _session.Page.GetByLabel("Accounting schedule name").FillAsync("E2E test asset");
@@ -134,10 +159,15 @@ public sealed class LedgerPage
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("journal review queue");
 
         var depreciationRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = "E2E test asset installment 1" }).First;
-        await depreciationRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
-        depreciationRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = "E2E test asset installment 1" }).First;
-        await depreciationRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
-        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Approved journal entry posted");
+        await Assertions.Expect(depreciationRow).ToContainTextAsync("Draft");
+        await reviewer.OpenAsync();
+        var reviewerDepreciationRow = reviewer._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" }).Locator("tbody tr").Filter(new() { HasText = "E2E test asset installment 1" }).First;
+        await reviewerDepreciationRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        await poster.OpenAsync();
+        var posterDepreciationRow = poster._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" }).Locator("tbody tr").Filter(new() { HasText = "E2E test asset installment 1" }).First;
+        await posterDepreciationRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await Assertions.Expect(poster._session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Approved journal entry posted");
+        await OpenAsync();
 
         scheduleRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = scheduleNumber }).First;
         await scheduleRow.GetByRole(AriaRole.Button, new() { Name = "Dispose / retire" }).ClickAsync();
@@ -150,9 +180,14 @@ public sealed class LedgerPage
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("disposal draft was added");
 
         var disposalRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = "Dispose or retire E2E test asset" }).First;
-        await disposalRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
-        disposalRow = recentEntries.Locator("tbody tr").Filter(new() { HasText = "Dispose or retire E2E test asset" }).First;
-        await disposalRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await Assertions.Expect(disposalRow).ToContainTextAsync("Draft");
+        await reviewer.OpenAsync();
+        var reviewerDisposalRow = reviewer._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" }).Locator("tbody tr").Filter(new() { HasText = "Dispose or retire E2E test asset" }).First;
+        await reviewerDisposalRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        await poster.OpenAsync();
+        var posterDisposalRow = poster._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" }).Locator("tbody tr").Filter(new() { HasText = "Dispose or retire E2E test asset" }).First;
+        await posterDisposalRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await OpenAsync();
         scheduleRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = scheduleNumber }).First;
         await Assertions.Expect(scheduleRow).ToContainTextAsync("Disposed");
 

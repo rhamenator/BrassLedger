@@ -45,7 +45,7 @@ else
         </section>
 
         <section class="panel">
-            <h2>Prepare journal entry</h2>
+            <h2>@(JournalForm.Id.HasValue ? "Correct journal entry" : "Prepare journal entry")</h2>
             <p class="page-intro">Save the entry as a draft, approve it after review, and then post it. Account balances do not change until the approved entry is posted. Receivables, payables, inventory, and payroll control accounts remain restricted to their dedicated workflows.</p>
             @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
             <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals">
@@ -72,7 +72,7 @@ else
                     </tbody>
                     <tfoot><tr><th colspan="2">Totals</th><th>@JournalForm.Lines.Sum(line => line.Debit).ToString("C")</th><th>@JournalForm.Lines.Sum(line => line.Credit).ToString("C")</th><th></th></tr></tfoot>
                 </table>
-                <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddJournalLine">Add line</button><button class="action-primary" type="submit">Save draft</button></div>
+                <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddJournalLine">Add line</button><button class="action-primary" type="submit">@(JournalForm.Id.HasValue ? "Save corrected draft" : "Save draft")</button>@if (JournalForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelJournalEdit">Cancel edit</button> }</div>
             </EditForm>
             </Authorized>
             <NotAuthorized><p class="muted-copy">Your role can review the ledger but cannot prepare journal drafts.</p></NotAuthorized>
@@ -194,6 +194,7 @@ else
 
             <article class="panel">
                 <h2>Recent journal entries</h2>
+                <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><div class="field-group"><label class="field-label">Journal rejection reason</label><InputText aria-label="Journal rejection reason" class="field-input" @bind-Value="JournalRejectionReason" /><span class="field-help">Reject an ordinary general journal with a specific correction request. Source-workflow journals must be corrected in their originating workflow.</span></div></AuthorizeView>
                 <table class="data-table">
                     <thead>
                         <tr>
@@ -201,6 +202,7 @@ else
                             <th>Date</th>
                             <th>Module</th>
                             <th>Status</th>
+                            <th>Review note</th>
                             <th>Description</th>
                             <th>Total</th>
                             <th><span class="sr-only">Actions</span></th>
@@ -214,20 +216,27 @@ else
                                 <td>@entry.PostedOn.ToString("MMM d, yyyy")</td>
                                 <td>@entry.SourceModule</td>
                                 <td>@entry.Status</td>
+                                <td>@(string.IsNullOrWhiteSpace(entry.DecisionReason) ? "—" : entry.DecisionReason)</td>
                                 <td>@entry.Description</td>
                                 <td>@entry.TotalAmount.ToString("C")</td>
                                 <td>
                                     @if (entry.Status == "Draft")
                                     {
+                                        @if (entry.SourceModule == "General Ledger") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => EditJournal(entry)">Edit</button></AuthorizeView> }
                                         <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals">
-                                            <Authorized Context="journalApprovalAuthorization"><button class="action-secondary" type="button" @onclick="() => ApproveJournalAsync(entry.Id)">Approve</button></Authorized>
+                                            <Authorized Context="journalApprovalAuthorization"><button class="action-secondary" type="button" @onclick="() => ApproveJournalAsync(entry.Id)">Approve</button>@if (entry.SourceModule == "General Ledger") { <button class="action-secondary" type="button" @onclick="() => RejectJournalAsync(entry)">Reject</button> }</Authorized>
                                         </AuthorizeView>
                                     }
                                     else if (entry.Status == "Approved")
                                     {
+                                        @if (entry.SourceModule == "General Ledger") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-secondary" type="button" @onclick="() => RejectJournalAsync(entry)">Reject</button></AuthorizeView> }
                                         <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostJournals">
                                             <Authorized Context="journalPostingAuthorization"><button class="action-primary" type="button" @onclick="() => PostApprovedJournalAsync(entry.Id)">Post</button></Authorized>
                                         </AuthorizeView>
+                                    }
+                                    else if (entry.Status == "Rejected" && entry.SourceModule == "General Ledger")
+                                    {
+                                        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => EditJournal(entry)">Correct</button></AuthorizeView>
                                     }
                                 </td>
                             </tr>
@@ -369,6 +378,7 @@ else
     private AccountingScheduleWorkspace ScheduleWorkspace { get; set; } = new([], [], []);
     private IReadOnlyList<AccountingInterchangeBatchSnapshot> InterchangeBatches = [];
     private string? StatusMessage;
+    private string JournalRejectionReason = string.Empty;
     private JournalEditor JournalForm { get; } = new();
     private JournalReversalEditor ReversalForm { get; } = new();
     private ReconciliationEditor ReconciliationForm { get; } = new();
@@ -397,17 +407,28 @@ else
 
     private async Task SaveJournalDraftAsync()
     {
-        var result = await TransactionService.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(null, JournalForm.Date, JournalForm.Reference, JournalForm.Description,
-            JournalForm.Lines.Select(line => new JournalLineRequest(line.AccountNumber, line.Debit, line.Credit, line.Description)).ToArray()));
-        StatusMessage = result.Succeeded ? "Journal draft saved for review." : result.ErrorMessage;
+        var result = await TransactionService.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(JournalForm.Id, JournalForm.Date, JournalForm.Reference, JournalForm.Description,
+            JournalForm.Lines.Select(line => new JournalLineRequest(line.AccountNumber, line.Debit, line.Credit, line.Description)).ToArray(), JournalForm.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? (JournalForm.Id.HasValue ? "Corrected journal draft saved for review." : "Journal draft saved for review.") : result.ErrorMessage;
         if (result.Succeeded) { JournalForm.Reset(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     }
+
+    private void EditJournal(JournalEntrySnapshot entry) => JournalForm.Load(entry);
+    private void CancelJournalEdit() => JournalForm.Reset();
 
     private async Task ApproveJournalAsync(Guid journalEntryId)
     {
         var result = await TransactionService.ApproveJournalEntryAsync(journalEntryId);
         StatusMessage = result.Succeeded ? "Journal entry approved and ready to post." : result.ErrorMessage;
         if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync(); }
+    }
+
+    private async Task RejectJournalAsync(JournalEntrySnapshot entry)
+    {
+        var result = await TransactionService.RejectJournalEntryAsync(new RejectJournalEntryRequest(entry.Id, JournalRejectionReason, entry.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Journal draft rejected for correction." : result.ErrorMessage;
+        if (result.Succeeded) JournalRejectionReason = string.Empty;
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
 
     private async Task PostApprovedJournalAsync(Guid journalEntryId)
@@ -549,7 +570,7 @@ else
         else ReconciliationForm.SelectedEntryIds.Remove(entryId);
     }
 
-    private sealed class JournalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public List<JournalLineEditor> Lines { get; } = [new(), new()]; public void Reset() { Date = DateOnly.FromDateTime(DateTime.Today); Reference = string.Empty; Description = string.Empty; Lines.Clear(); Lines.Add(new()); Lines.Add(new()); } }
+    private sealed class JournalEditor { public Guid? Id { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public List<JournalLineEditor> Lines { get; } = [new(), new()]; public void Load(JournalEntrySnapshot entry) { Id = entry.Id; ConcurrencyToken = entry.ConcurrencyToken; Date = entry.PostedOn; Reference = entry.Reference; Description = entry.Description; Lines.Clear(); Lines.AddRange((entry.Lines ?? []).Select(line => new JournalLineEditor { AccountNumber = line.AccountNumber, Description = line.Description, Debit = line.Debit, Credit = line.Credit })); } public void Reset() { Id = null; ConcurrencyToken = string.Empty; Date = DateOnly.FromDateTime(DateTime.Today); Reference = string.Empty; Description = string.Empty; Lines.Clear(); Lines.Add(new()); Lines.Add(new()); } }
     private sealed class JournalLineEditor { public Guid Key { get; } = Guid.NewGuid(); public string AccountNumber { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public decimal Debit { get; set; } public decimal Credit { get; set; } }
     private sealed class JournalReversalEditor { public Guid JournalEntryId { get; set; } public DateOnly ReversalDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; public void Reset() { JournalEntryId = Guid.Empty; ReversalDate = DateOnly.FromDateTime(DateTime.Today); Reason = string.Empty; } }
     private sealed class ReconciliationEditor { public Guid BankAccountId { get; set; } public DateOnly StatementDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal StatementBalance { get; set; } public string Notes { get; set; } = string.Empty; public HashSet<Guid> SelectedEntryIds { get; set; } = []; }

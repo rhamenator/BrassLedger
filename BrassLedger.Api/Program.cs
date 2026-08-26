@@ -151,12 +151,6 @@ api.MapGet("/tax-workspace", async (IBusinessWorkspaceService service, Cancellat
 .WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageTaxes);
 
-api.MapPost("/journal-entries", async (PostJournalEntryRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
-{
-    var result = await service.PostJournalEntryAsync(request, cancellationToken);
-    return result.Succeeded ? Results.Created($"/api/journal-entries/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PostJournals);
-
 api.MapPost("/journal-entry-drafts", async (SaveJournalEntryDraftRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveJournalEntryDraftAsync(request, cancellationToken);
@@ -166,6 +160,13 @@ api.MapPost("/journal-entry-drafts", async (SaveJournalEntryDraftRequest request
 api.MapPost("/journal-entry-drafts/{journalEntryId:guid}/approve", async (Guid journalEntryId, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.ApproveJournalEntryAsync(journalEntryId, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApproveJournals);
+
+api.MapPost("/journal-entry-drafts/{journalEntryId:guid}/reject", async (Guid journalEntryId, RejectJournalEntryRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (journalEntryId != request.JournalEntryId) return Results.BadRequest(TransactionResult.Failure("The journal identifier in the route and request must match."));
+    var result = await service.RejectJournalEntryAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApproveJournals);
 

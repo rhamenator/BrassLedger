@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("18", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("19", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -82,6 +82,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826150956_ScopeVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826160416_ScopeSubledgerVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826164319_AddSubledgerRejectionWorkflow';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826172628_AddControlledJournalReview';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -112,7 +113,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("18", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("19", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -130,6 +131,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826150956_ScopeVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826160416_ScopeSubledgerVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826164319_AddSubledgerRejectionWorkflow';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826172628_AddControlledJournalReview';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -1683,13 +1685,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
         var before = await workspaceService.GetWorkspaceAsync();
 
-        var posted = await transactions.PostJournalEntryAsync(new PostJournalEntryRequest(new DateOnly(2026, 5, 1), "JE-TEST-1", "Journal test",
+        var posted = await PostJournalThroughWorkflowAsync(transactions, new SaveJournalEntryDraftRequest(null, new DateOnly(2026, 5, 1), "JE-TEST-1", "Journal test",
             [new JournalLineRequest("1000", 50m, 0m, "Cash adjustment"), new JournalLineRequest("4000", 0m, 50m, "Revenue adjustment")]));
         Assert.True(posted.Succeeded, posted.ErrorMessage);
-        var invalid = await transactions.PostJournalEntryAsync(new PostJournalEntryRequest(new DateOnly(2026, 5, 1), "JE-TEST-2", "Invalid journal test",
+        var invalidDraft = await transactions.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(null, new DateOnly(2026, 5, 1), "JE-TEST-2", "Invalid journal test",
             [new JournalLineRequest("1000", 50m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 40m, "Credit")]));
-        Assert.False(invalid.Succeeded);
-        var controlAccountJournal = await transactions.PostJournalEntryAsync(new PostJournalEntryRequest(new DateOnly(2026, 5, 1), "JE-TEST-3", "Control account journal",
+        Assert.True(invalidDraft.Succeeded, invalidDraft.ErrorMessage);
+        Assert.False((await transactions.ApproveJournalEntryAsync(invalidDraft.Id!.Value)).Succeeded);
+        var controlAccountJournal = await transactions.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(null, new DateOnly(2026, 5, 1), "JE-TEST-3", "Control account journal",
             [new JournalLineRequest("1100", 50m, 0m, "Receivable adjustment"), new JournalLineRequest("4000", 0m, 50m, "Revenue adjustment")]));
         Assert.False(controlAccountJournal.Succeeded);
         Assert.Contains("control accounts", controlAccountJournal.ErrorMessage);
@@ -1716,8 +1719,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.NotNull(draft.Id);
         Assert.False((await transactions.ApproveJournalEntryAsync(draft.Id!.Value)).Succeeded);
 
+        var draftSnapshot = (await workspaceService.GetWorkspaceAsync()).GeneralLedger.RecentEntries.Single(entry => entry.Id == draft.Id);
         var balancedDraft = await transactions.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(draft.Id, date, "JE-LIFECYCLE-1", "Lifecycle test",
-            [new JournalLineRequest("1000", 75m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 75m, "Balanced credit")]));
+            [new JournalLineRequest("1000", 75m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 75m, "Balanced credit")], draftSnapshot.ConcurrencyToken));
         Assert.True(balancedDraft.Succeeded, balancedDraft.ErrorMessage);
         var afterDraft = await workspaceService.GetWorkspaceAsync();
         Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance, afterDraft.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance);
@@ -1768,33 +1772,71 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
 
-        void ActAs(string permission)
+        void ActAs(Guid userId, params string[] permissions)
         {
             var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
-            context.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-            [
+            var claims = new List<System.Security.Claims.Claim>
+            {
                 new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
-                new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)
-            ], "test"));
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString())
+            };
+            claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+            context.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test"));
             accessor.HttpContext = context;
         }
 
-        ActAs(BrassLedgerPermissions.JournalPrepare);
+        var preparerId = Guid.NewGuid();
+        var reviewerId = Guid.NewGuid();
+        var posterId = Guid.NewGuid();
+        var reverserId = Guid.NewGuid();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+
+        ActAs(preparerId, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove);
         var draft = await transactions.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(null, new DateOnly(2026, 5, 6), "JE-SOD-1", "Separation of duties",
             [new JournalLineRequest("1000", 20m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 20m, "Credit")]));
         Assert.True(draft.Succeeded, draft.ErrorMessage);
-        Assert.False((await transactions.ApproveJournalEntryAsync(draft.Id!.Value)).Succeeded);
+        var selfApproval = await transactions.ApproveJournalEntryAsync(draft.Id!.Value);
+        Assert.False(selfApproval.Succeeded);
+        Assert.Contains("prepared", selfApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var current = (await workspaceService.GetWorkspaceAsync()).GeneralLedger.RecentEntries.Single(entry => entry.Id == draft.Id);
+        var selfRejection = await transactions.RejectJournalEntryAsync(new(draft.Id.Value, "Prepared amount needs support.", current.ConcurrencyToken));
+        Assert.False(selfRejection.Succeeded);
+        Assert.Contains("prepared", selfRejection.ErrorMessage, StringComparison.OrdinalIgnoreCase);
 
-        ActAs(BrassLedgerPermissions.JournalApprove);
+        ActAs(reviewerId, BrassLedgerPermissions.JournalApprove);
+        var staleRejection = await transactions.RejectJournalEntryAsync(new(draft.Id.Value, "Stale review.", "stale-token"));
+        Assert.False(staleRejection.Succeeded);
+        Assert.Contains("changed", staleRejection.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var rejection = await transactions.RejectJournalEntryAsync(new(draft.Id.Value, "Attach the supporting calculation.", current.ConcurrencyToken));
+        Assert.True(rejection.Succeeded, rejection.ErrorMessage);
+        current = (await workspaceService.GetWorkspaceAsync()).GeneralLedger.RecentEntries.Single(entry => entry.Id == draft.Id);
+        Assert.Equal("Rejected", current.Status);
+        Assert.Equal("Attach the supporting calculation.", current.DecisionReason);
+
+        ActAs(preparerId, BrassLedgerPermissions.JournalPrepare);
+        var correction = await transactions.SaveJournalEntryDraftAsync(new(draft.Id, new DateOnly(2026, 5, 6), "JE-SOD-1", "Separation of duties — support attached",
+            [new JournalLineRequest("1000", 20m, 0m, "Corrected debit"), new JournalLineRequest("4000", 0m, 20m, "Corrected credit")], current.ConcurrencyToken));
+        Assert.True(correction.Succeeded, correction.ErrorMessage);
+        current = (await workspaceService.GetWorkspaceAsync()).GeneralLedger.RecentEntries.Single(entry => entry.Id == draft.Id);
+        Assert.Equal("Draft", current.Status);
+        Assert.Equal(string.Empty, current.DecisionReason);
+
+        ActAs(reviewerId, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost);
         Assert.True((await transactions.ApproveJournalEntryAsync(draft.Id.Value)).Succeeded);
-        Assert.False((await transactions.PostApprovedJournalEntryAsync(draft.Id.Value)).Succeeded);
+        var selfPosting = await transactions.PostApprovedJournalEntryAsync(draft.Id.Value);
+        Assert.False(selfPosting.Succeeded);
+        Assert.Contains("approved", selfPosting.ErrorMessage, StringComparison.OrdinalIgnoreCase);
 
-        ActAs(BrassLedgerPermissions.JournalPost);
+        ActAs(posterId, BrassLedgerPermissions.JournalPost);
         Assert.True((await transactions.PostApprovedJournalEntryAsync(draft.Id.Value)).Succeeded);
         Assert.False((await transactions.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(draft.Id.Value, new DateOnly(2026, 5, 7), "Not authorized"))).Succeeded);
 
-        ActAs(BrassLedgerPermissions.JournalReverse);
+        ActAs(reverserId, BrassLedgerPermissions.JournalReverse);
         Assert.True((await transactions.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(draft.Id.Value, new DateOnly(2026, 5, 7), "Authorized reversal"))).Succeeded);
+
+        var auditActions = await db.BusinessAuditEntries.Where(entry => entry.EntityId == draft.Id).Select(entry => entry.Action).ToListAsync();
+        Assert.Contains("journal.rejected", auditActions);
+        Assert.Contains("journal.draft.revised", auditActions);
     }
 
     [Fact]
@@ -3702,8 +3744,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => transactions.PostJournalEntryAsync(new PostJournalEntryRequest(
-            new DateOnly(2026, 5, 1), "NO-COMPANY", "Must fail closed", [new JournalLineRequest("1000", 1m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 1m, "Credit")])));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => transactions.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(
+            null, new DateOnly(2026, 5, 1), "NO-COMPANY", "Must fail closed", [new JournalLineRequest("1000", 1m, 0m, "Debit"), new JournalLineRequest("4000", 0m, 1m, "Credit")])));
     }
 
     [Fact]
@@ -4134,6 +4176,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         if (!draft.Succeeded) return draft;
         var approval = await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value);
         return approval.Succeeded ? await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value) : approval;
+    }
+
+    private static async Task<TransactionResult> PostJournalThroughWorkflowAsync(IAccountingTransactionService transactions, SaveJournalEntryDraftRequest request)
+    {
+        var draft = await transactions.SaveJournalEntryDraftAsync(request);
+        if (!draft.Succeeded) return draft;
+        var approval = await transactions.ApproveJournalEntryAsync(draft.Id!.Value);
+        return approval.Succeeded ? await transactions.PostApprovedJournalEntryAsync(draft.Id.Value) : approval;
     }
 
     private static async Task<TransactionResult> PostVendorBillThroughWorkflowAsync(IAccountingTransactionService transactions, CreateVendorBillRequest request)

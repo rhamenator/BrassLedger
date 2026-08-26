@@ -722,6 +722,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<VendorBill>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<BankAccount>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<JournalEntry>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<JournalEntry>().Property(x => x.DecisionReason).HasMaxLength(1000);
         modelBuilder.Entity<SubledgerPayment>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<CustomerReturnAuthorization>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
