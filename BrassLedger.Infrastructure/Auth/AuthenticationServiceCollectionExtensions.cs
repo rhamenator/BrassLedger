@@ -114,7 +114,10 @@ public static class AuthenticationServiceCollectionExtensions
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageOperations, policy =>
                 policy.RequireAssertion(context =>
                     context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage)
-                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage)));
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage)));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManagePayroll, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.AccessPayroll, policy =>

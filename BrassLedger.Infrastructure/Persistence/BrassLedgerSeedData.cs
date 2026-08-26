@@ -52,7 +52,9 @@ internal static class BrassLedgerSeedData
             CreateSeedUser(passwordHasher, Guid.Parse("535e60cf-7572-4dca-8328-fda4a470cdb9"), "controller", "Erin Dorsey", "erin@brassledger.local", "Controller"),
             CreateSeedUser(passwordHasher, Guid.Parse("a1d1c1de-af10-49f5-a2c4-e40bc060f9f6"), "operations", "Marco Patel", "marco@brassledger.local", "Purchasing Manager"),
             CreateSeedUser(passwordHasher, Guid.Parse("9fc1ab25-5f42-4230-b8a5-c4df814dcb7d"), "payroll", "June Ellis", "june@brassledger.local", "Payroll Manager"),
-            CreateSeedUser(passwordHasher, Guid.Parse("c77634df-9bc0-4cac-b57d-bf7b8df7f604"), "sales", "Noah Bennett", "noah@brassledger.local", "Requisitioning Clerk")
+            CreateSeedUser(passwordHasher, Guid.Parse("c77634df-9bc0-4cac-b57d-bf7b8df7f604"), "sales", "Noah Bennett", "noah@brassledger.local", "Sales Clerk"),
+            CreateSeedUser(passwordHasher, Guid.Parse("ce0b195f-1b65-44fb-b3d9-23e5f398b028"), "requisition", "Maya Ellis", "maya@brassledger.local", "Requisitioning Clerk"),
+            CreateSeedUser(passwordHasher, Guid.Parse("62af3885-9a2d-4fa2-976d-297e22e62d04"), "warehouse", "Luis Ortega", "luis@brassledger.local", "Warehouse Operator")
         };
 
         var accounts = new[]
@@ -116,9 +118,16 @@ internal static class BrassLedgerSeedData
 
         var salesOrders = new[]
         {
-            new SalesOrder { Id = Guid.Parse("4af34d71-1f1c-4ad7-b21d-c7490dc9c4e7"), CompanyId = CompanyId, CustomerId = customers[0].Id, OrderNumber = "SO-3107", OrderedOn = new DateOnly(2026, 3, 27), Status = "Picking", TotalAmount = 12840m },
-            new SalesOrder { Id = Guid.Parse("d73d33bf-adb4-44aa-b3bf-bd7052db5389"), CompanyId = CompanyId, CustomerId = customers[1].Id, OrderNumber = "SO-3112", OrderedOn = new DateOnly(2026, 4, 1), Status = "Open", TotalAmount = 9425m },
-            new SalesOrder { Id = Guid.Parse("8d6466fa-7d2d-49fb-b97b-e10e2d5ed9bd"), CompanyId = CompanyId, CustomerId = customers[2].Id, OrderNumber = "SO-3114", OrderedOn = new DateOnly(2026, 4, 2), Status = "Allocated", TotalAmount = 18200m }
+            new SalesOrder { Id = Guid.Parse("4af34d71-1f1c-4ad7-b21d-c7490dc9c4e7"), CompanyId = CompanyId, CustomerId = customers[0].Id, OrderNumber = "SO-3107", OrderedOn = new DateOnly(2026, 3, 27), RequestedShipOn = new DateOnly(2026, 4, 8), Status = "Allocated", TotalAmount = 11100m, Notes = "Sample allocated customer order", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") },
+            new SalesOrder { Id = Guid.Parse("d73d33bf-adb4-44aa-b3bf-bd7052db5389"), CompanyId = CompanyId, CustomerId = customers[1].Id, OrderNumber = "SO-3112", OrderedOn = new DateOnly(2026, 4, 1), RequestedShipOn = new DateOnly(2026, 4, 10), Status = "Approved", TotalAmount = 2300m, Notes = "Sample approved customer order", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") },
+            new SalesOrder { Id = Guid.Parse("8d6466fa-7d2d-49fb-b97b-e10e2d5ed9bd"), CompanyId = CompanyId, CustomerId = customers[2].Id, OrderNumber = "SO-3114", OrderedOn = new DateOnly(2026, 4, 2), RequestedShipOn = new DateOnly(2026, 4, 15), Status = "Draft", TotalAmount = 4300m, Notes = "Sample draft customer order", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }
+        };
+
+        var salesOrderLines = new[]
+        {
+            new SalesOrderLine { Id = Guid.Parse("7f748853-1aae-4bb7-96b6-940e124fa476"), SalesOrderId = salesOrders[0].Id, Sequence = 1, InventoryItemId = inventoryItems[0].Id, RevenueAccountId = accounts[11].Id, Description = inventoryItems[0].Description, OrderedQuantity = 60m, AllocatedQuantity = 60m, UnitPrice = 185m, LineTotal = 11100m },
+            new SalesOrderLine { Id = Guid.Parse("c17b7aac-c180-4dc1-bf10-71235f4fd7ae"), SalesOrderId = salesOrders[1].Id, Sequence = 1, InventoryItemId = inventoryItems[1].Id, RevenueAccountId = accounts[11].Id, Description = inventoryItems[1].Description, OrderedQuantity = 25m, UnitPrice = 92m, LineTotal = 2300m },
+            new SalesOrderLine { Id = Guid.Parse("a4bc5f0e-a6de-4765-b78a-e99ad9ea0125"), SalesOrderId = salesOrders[2].Id, Sequence = 1, InventoryItemId = inventoryItems[2].Id, RevenueAccountId = accounts[11].Id, Description = inventoryItems[2].Description, OrderedQuantity = 10m, UnitPrice = 430m, LineTotal = 4300m }
         };
 
         var purchaseOrders = new[]
@@ -203,6 +212,7 @@ internal static class BrassLedgerSeedData
         await dbContext.VendorBills.AddRangeAsync(vendorBills, cancellationToken);
         await dbContext.InventoryItems.AddRangeAsync(inventoryItems, cancellationToken);
         await dbContext.SalesOrders.AddRangeAsync(salesOrders, cancellationToken);
+        await dbContext.SalesOrderLines.AddRangeAsync(salesOrderLines, cancellationToken);
         await dbContext.PurchaseOrders.AddRangeAsync(purchaseOrders, cancellationToken);
         await dbContext.BankAccounts.AddRangeAsync(bankAccounts, cancellationToken);
         await dbContext.Employees.AddRangeAsync(employees, cancellationToken);
@@ -304,7 +314,9 @@ internal static class BrassLedgerSeedData
             ["erin@brassledger.local"] = ("controller", "Controller"),
             ["marco@brassledger.local"] = ("operations", "Purchasing Manager"),
             ["june@brassledger.local"] = ("payroll", "Payroll Manager"),
-            ["noah@brassledger.local"] = ("sales", "Requisitioning Clerk")
+            ["noah@brassledger.local"] = ("sales", "Sales Clerk"),
+            ["maya@brassledger.local"] = ("requisition", "Requisitioning Clerk"),
+            ["luis@brassledger.local"] = ("warehouse", "Warehouse Operator")
         };
 
         var users = await dbContext.Users.ToListAsync(cancellationToken);

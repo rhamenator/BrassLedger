@@ -64,10 +64,11 @@ public sealed class NavigationAndSafetyTests
         await shell.OpenAsync();
         await shell.NavigateMenuAsync("ledger", "Core accounting balances and posting history.");
         await shell.NavigateMenuAsync("receivables", "Customers, invoices, and open-balance follow-up.");
+        await shell.NavigateMenuAsync("operations", "Operational flow from stock to shipment.");
         await shell.NavigateMenuAsync("reporting", "Reports, labels, forms, and print fidelity stay in the product.");
         await shell.NavigateMenuAsync("publish", "One .NET web application, packaged per platform.");
 
-        Assert.Equal(0, await session.Page.Locator("a.nav-link[href='operations']").CountAsync());
+        Assert.Equal(1, await session.Page.Locator("a.nav-link[href='operations']").CountAsync());
         Assert.Equal(0, await session.Page.Locator("a.nav-link[href='payroll']").CountAsync());
 
         await session.AssertNoUiFailuresAsync("sidebar navigation");

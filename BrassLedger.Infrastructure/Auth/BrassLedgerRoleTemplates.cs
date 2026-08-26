@@ -60,6 +60,12 @@ public static class BrassLedgerRoleTemplates
             BrassLedgerPermissions.PayablesManage,
             BrassLedgerPermissions.ReportingManage
         ]),
+        new("sales", "Sales Clerk", "Prepares and approves quotes and sales orders without inventory-shipment or receivables posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.SalesManage,
+            BrassLedgerPermissions.ReportingManage
+        ]),
         new("cash-disbursements", "Cash Disbursements", "Handles payment preparation and checks separately from requisitioning and purchasing.", false, false,
         [
             BrassLedgerPermissions.WorkspaceView,
@@ -103,6 +109,7 @@ public static class BrassLedgerRoleTemplates
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.RequisitionManage,
             BrassLedgerPermissions.PurchasingManage,
+            BrassLedgerPermissions.FulfillmentManage,
             BrassLedgerPermissions.ReportingManage
         ])
     ];

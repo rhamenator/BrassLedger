@@ -184,8 +184,8 @@ public sealed class FakeDataPopulationService(
 
         var orders = new[]
         {
-            new SalesOrder { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[0].Id, OrderNumber = "SO-8801", OrderedOn = new DateOnly(2026, 4, 7), Status = "Open", TotalAmount = 15440m },
-            new SalesOrder { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[Math.Min(1, customers.Count - 1)].Id, OrderNumber = "SO-8802", OrderedOn = new DateOnly(2026, 4, 7), Status = "Allocated", TotalAmount = 9320m }
+            new SalesOrder { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[0].Id, OrderNumber = "SO-8801", OrderedOn = new DateOnly(2026, 4, 7), Status = "LegacyReference", TotalAmount = 15440m, Notes = "Synthetic header-only reference; create a line-based order before fulfillment.", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") },
+            new SalesOrder { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[Math.Min(1, customers.Count - 1)].Id, OrderNumber = "SO-8802", OrderedOn = new DateOnly(2026, 4, 7), Status = "LegacyReference", TotalAmount = 9320m, Notes = "Synthetic header-only reference; create a line-based order before fulfillment.", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }
         };
 
         await dbContext.SalesOrders.AddRangeAsync(orders, cancellationToken);

@@ -839,6 +839,41 @@ api.MapPost("/inventory-adjustments", async (RecordInventoryAdjustmentRequest re
     var result = await service.RecordInventoryAdjustmentAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["inventory"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
 
+api.MapPost("/sales-orders", async (SaveSalesOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveSalesOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/sales-orders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
+api.MapPost("/sales-orders/{salesOrderId:guid}/approval", async (Guid salesOrderId, ApproveSalesOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesOrderId != salesOrderId) return Results.BadRequest(new { error = "sales_order_id_mismatch" });
+    var result = await service.ApproveSalesOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesOrder"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
+api.MapPost("/sales-orders/{salesOrderId:guid}/allocation", async (Guid salesOrderId, AllocateSalesOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesOrderId != salesOrderId) return Results.BadRequest(new { error = "sales_order_id_mismatch" });
+    var result = await service.AllocateSalesOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["allocation"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
+api.MapPost("/sales-orders/{salesOrderId:guid}/shipments", async (Guid salesOrderId, ShipSalesOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesOrderId != salesOrderId) return Results.BadRequest(new { error = "sales_order_id_mismatch" });
+    var result = await service.ShipSalesOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-shipments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["shipment"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
+api.MapPost("/inventory-shipments/{inventoryShipmentId:guid}/invoice", async (Guid inventoryShipmentId, InvoiceInventoryShipmentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryShipmentId != inventoryShipmentId) return Results.BadRequest(new { error = "inventory_shipment_id_mismatch" });
+    var result = await service.InvoiceInventoryShipmentAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/receivables/invoices/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["shipmentInvoice"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage));
+
+api.MapPost("/inventory-shipments/{inventoryShipmentId:guid}/reversal", async (Guid inventoryShipmentId, ReverseInventoryShipmentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryShipmentId != inventoryShipmentId) return Results.BadRequest(new { error = "inventory_shipment_id_mismatch" });
+    var result = await service.ReverseInventoryShipmentAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["shipment"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
 api.MapPost("/purchase-orders", async (SavePurchaseOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SavePurchaseOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/purchase-orders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["purchaseOrder"] = [result.ErrorMessage] });

@@ -93,7 +93,7 @@ public sealed class WorkflowDataTests
         var billNumber = $"BILL-E2E-{suffix}";
         await using (var preparerSession = await _fixture.CreateSessionAsync(browserKind))
         {
-            await preparerSession.SignInAsync("sales");
+            await preparerSession.SignInAsync("requisition");
             var preparation = new OperationsPage(preparerSession);
             await preparation.OpenAsync();
             await preparation.PreparePurchaseOrderAsync(orderNumber);
@@ -105,5 +105,22 @@ public sealed class WorkflowDataTests
         await purchasing.OpenAsync();
         await purchasing.ApproveReceiveAndMatchAsync(orderNumber, receiptNumber, billNumber);
         await purchasingSession.AssertNoUiFailuresAsync("purchase-order approval, receipt, and invoice match");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task SalesOrder_AllocationShipmentAndInvoice_WorkAcrossSeparatedRoles(BrowserKind browserKind)
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8]; var orderNumber = $"SO-E2E-{suffix}"; var shipmentNumber = $"SHIP-E2E-{suffix}"; var invoiceNumber = $"INV-E2E-{suffix}";
+        await using (var salesSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await salesSession.SignInAsync("sales"); var sales = new OperationsPage(salesSession); await sales.OpenAsync(); await sales.PrepareAndApproveSalesOrderAsync(orderNumber); await salesSession.AssertNoUiFailuresAsync("sales-order preparation and approval");
+        }
+        await using (var warehouseSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await warehouseSession.SignInAsync("warehouse"); var warehouse = new OperationsPage(warehouseSession); await warehouse.OpenAsync(); await warehouse.AllocateAndShipSalesOrderAsync(orderNumber, shipmentNumber); await warehouseSession.AssertNoUiFailuresAsync("sales-order allocation and shipment");
+        }
+        await using var receivablesSession = await _fixture.CreateSessionAsync(browserKind);
+        await receivablesSession.SignInAsync("controller"); var receivables = new OperationsPage(receivablesSession); await receivables.OpenAsync(); await receivables.InvoiceShipmentAsync(shipmentNumber, invoiceNumber); await receivablesSession.AssertNoUiFailuresAsync("shipment invoicing");
     }
 }

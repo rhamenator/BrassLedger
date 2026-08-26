@@ -21,8 +21,8 @@ else
                 <h1>Operational flow from stock to shipment.</h1>
             </div>
             <p class="page-intro">
-                Prepare and approve purchase orders, receive inventory at average cost, and match receipts to vendor bills.
-                Each posted receipt records inventory and goods received not invoiced in the ledger.
+                Prepare customer and supplier orders, reserve stock, post shipments and receipts, and create their accounting documents.
+                Physical inventory movements remain separate from receivable and payable authority.
             </p>
         </header>
 
@@ -48,6 +48,36 @@ else
         </section>
 
         <section class="content-grid">
+            @if (CanManageSales)
+            {
+            <article class="panel">
+                <h2>Prepare sales order</h2>
+                <p class="page-intro">Save a priced multi-line draft. Approval authorizes fulfillment but does not reserve or ship stock.</p>
+                <EditForm Model="SalesOrderForm" OnValidSubmit="SaveSalesOrderAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Customer</label><InputSelect aria-label="Sales order customer" class="field-input" @bind-Value="SalesOrderForm.CustomerId"><option value="@Guid.Empty">Select customer</option>@foreach (var customer in Workspace.Receivables.Customers) { <option value="@customer.Id">@customer.CustomerNumber — @customer.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Order number</label><InputText aria-label="Sales order number" class="field-input" @bind-Value="SalesOrderForm.OrderNumber" /></div>
+                    <div class="field-group"><label class="field-label">Order date</label><InputDate aria-label="Sales order date" class="field-input" @bind-Value="SalesOrderForm.OrderedOn" /></div>
+                    <div class="field-group"><label class="field-label">Requested ship date</label><InputDate aria-label="Sales order requested ship date" class="field-input" @bind-Value="SalesOrderForm.RequestedShipOn" /></div>
+                    <div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Sales order notes" class="field-input" @bind-Value="SalesOrderForm.Notes" /></div>
+                    @for (var index = 0; index < SalesOrderForm.Lines.Count; index++)
+                    {
+                        var lineIndex = index; var line = SalesOrderForm.Lines[lineIndex];
+                        <fieldset class="panel-subsection"><legend>Line @(lineIndex + 1)</legend>
+                            <div class="field-group"><label class="field-label">Inventory item</label><InputSelect aria-label="@($"Sales order line {lineIndex + 1} item")" class="field-input" @bind-Value="line.InventoryItemId"><option value="@Guid.Empty">Select item</option>@foreach (var item in Workspace.Operations.InventoryItems) { <option value="@item.Id">@item.Sku — @item.Description</option> }</InputSelect></div>
+                            <div class="field-group"><label class="field-label">Description</label><InputText aria-label="@($"Sales order line {lineIndex + 1} description")" class="field-input" @bind-Value="line.Description" /></div>
+                            <div class="field-group"><label class="field-label">Quantity</label><InputNumber aria-label="@($"Sales order line {lineIndex + 1} quantity")" class="field-input" @bind-Value="line.Quantity" /></div>
+                            <div class="field-group"><label class="field-label">Unit price</label><InputNumber aria-label="@($"Sales order line {lineIndex + 1} unit price")" class="field-input" @bind-Value="line.UnitPrice" /></div>
+                            <div class="field-group"><label class="field-label">Discount</label><InputNumber aria-label="@($"Sales order line {lineIndex + 1} discount")" class="field-input" @bind-Value="line.DiscountAmount" /></div>
+                            <div class="field-group"><label class="field-label">Tax</label><InputNumber aria-label="@($"Sales order line {lineIndex + 1} tax")" class="field-input" @bind-Value="line.TaxAmount" /></div>
+                            <div class="field-group"><label class="field-label">Revenue account</label><InputSelect aria-label="@($"Sales order line {lineIndex + 1} revenue account")" class="field-input" @bind-Value="line.RevenueAccountNumber"><option value="">Select revenue account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => account.Type == "Revenue" && !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                            @if (SalesOrderForm.Lines.Count > 1) { <button class="action-secondary" type="button" @onclick="() => RemoveSalesOrderLine(lineIndex)">Remove line</button> }
+                        </fieldset>
+                    }
+                    <button class="action-secondary" type="button" @onclick="AddSalesOrderLine">Add line</button>
+                    <button class="action-primary" type="submit">Save sales-order draft</button>
+                </div></EditForm>
+            </article>
+            }
             @if (CanPreparePurchaseOrders)
             {
             <article class="panel">
@@ -126,6 +156,8 @@ else
                             <th>Status</th>
                             <th>Ordered</th>
                             <th>Total</th>
+                            <th>Progress</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -137,12 +169,68 @@ else
                                 <td>@order.Status</td>
                                 <td>@order.OrderedOn.ToString("MMM d, yyyy")</td>
                                 <td>@order.TotalAmount.ToString("C")</td>
+                                <td>@((order.Lines ?? []).Sum(line => line.AllocatedQuantity)) allocated / @((order.Lines ?? []).Sum(line => line.OrderedQuantity)) ordered<br />@((order.Lines ?? []).Sum(line => line.ShippedQuantity)) shipped; @((order.Lines ?? []).Sum(line => line.InvoicedQuantity)) invoiced</td>
+                                <td>
+                                    @if (CanManageSales && order.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => ApproveSalesOrderAsync(order)">Approve</button> }
+                                    @if (CanFulfillSales && order.Status is "Approved" or "Allocated" or "PartiallyShipped") { <button class="action-secondary" type="button" @onclick="() => BeginAllocation(order)">Allocate</button> }
+                                    @if (CanFulfillSales && (order.Lines ?? []).Any(line => line.AllocatedQuantity > 0m)) { <button class="action-secondary" type="button" @onclick="() => BeginShipment(order)">Ship</button> }
+                                </td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </article>
         </section>
+
+        @if (CanFulfillSales && AllocationForm is not null)
+        {
+            <section class="panel"><h2>Allocate @AllocationForm.SalesOrderNumber</h2><p class="page-intro">Enter the total quantity to reserve on each line. Zero releases an existing reservation; availability includes reservations on other orders.</p><EditForm Model="AllocationForm" OnValidSubmit="AllocateSalesOrderAsync"><div class="auth-form">
+                @foreach (var line in AllocationForm.Lines) { <div class="field-group"><label class="field-label">@line.Sku — unshipped @line.UnshippedQuantity</label><InputNumber aria-label="@($"Allocate {line.Sku} quantity")" class="field-input" @bind-Value="line.Quantity" /></div> }
+                <button class="action-primary" type="submit">Save allocation</button><button class="action-secondary" type="button" @onclick="CancelAllocation">Cancel</button>
+            </div></EditForm></section>
+        }
+
+        @if (CanFulfillSales && ShipmentForm is not null)
+        {
+            <section class="panel"><h2>Ship @ShipmentForm.SalesOrderNumber</h2><p class="page-intro">Only reserved quantities can ship. Posting relieves on-hand inventory and debits cost of goods sold at current average cost.</p><EditForm Model="ShipmentForm" OnValidSubmit="PostShipmentAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Shipment number</label><InputText aria-label="Inventory shipment number" class="field-input" @bind-Value="ShipmentForm.ShipmentNumber" /></div>
+                <div class="field-group"><label class="field-label">Shipment date</label><InputDate aria-label="Inventory shipment date" class="field-input" @bind-Value="ShipmentForm.ShippedOn" /></div>
+                @foreach (var line in ShipmentForm.Lines) { <div class="field-group"><label class="field-label">@line.Sku — allocated @line.AllocatedQuantity</label><InputNumber aria-label="@($"Ship {line.Sku} quantity")" class="field-input" @bind-Value="line.Quantity" /></div> }
+                <button class="action-primary" type="submit">Post shipment</button><button class="action-secondary" type="button" @onclick="CancelShipment">Cancel</button>
+            </div></EditForm></section>
+        }
+
+        <section class="panel"><h2>Customer shipments and invoicing</h2><p class="page-intro">Warehouse posting relieves inventory and COGS. Receivables then creates one invoice from the exact shipped quantities; void that invoice before reversing a shipment.</p>
+            <table class="data-table"><thead><tr><th>Shipment</th><th>Sales order</th><th>Date</th><th>Status</th><th>Cost</th><th>Invoice</th><th>Action</th></tr></thead><tbody>
+                @foreach (var shipment in Workspace.Operations.InventoryShipments ?? [])
+                {
+                    <tr><td>@shipment.ShipmentNumber</td><td>@shipment.SalesOrderNumber</td><td>@shipment.ShippedOn.ToString("MMM d, yyyy")</td><td>@shipment.Status</td><td>@shipment.TotalCost.ToString("C")</td><td>@(shipment.SalesInvoiceId.HasValue ? "Invoiced" : "Uninvoiced")</td><td>
+                        @if (CanInvoiceShipments && shipment.Status == "Posted" && !shipment.SalesInvoiceId.HasValue) { <button class="action-secondary" type="button" @onclick="() => BeginShipmentInvoice(shipment)">Create invoice</button> }
+                        @if (CanFulfillSales && shipment.Status == "Posted" && !shipment.SalesInvoiceId.HasValue) { <button class="action-secondary" type="button" @onclick="() => BeginShipmentReversal(shipment)">Reverse shipment</button> }
+                    </td></tr>
+                }
+            </tbody></table>
+        </section>
+
+        @if (CanInvoiceShipments && ShipmentInvoiceForm is not null)
+        {
+            <section class="panel"><h2>Invoice shipment @ShipmentInvoiceForm.ShipmentNumber</h2><EditForm Model="ShipmentInvoiceForm" OnValidSubmit="InvoiceShipmentAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Invoice number</label><InputText aria-label="Shipment invoice number" class="field-input" @bind-Value="ShipmentInvoiceForm.InvoiceNumber" /></div>
+                <div class="field-group"><label class="field-label">Invoice date</label><InputDate aria-label="Shipment invoice date" class="field-input" @bind-Value="ShipmentInvoiceForm.InvoiceDate" /></div>
+                <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Shipment invoice due date" class="field-input" @bind-Value="ShipmentInvoiceForm.DueDate" /></div>
+                <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Shipment invoice description" class="field-input" @bind-Value="ShipmentInvoiceForm.Description" /></div>
+                <button class="action-primary" type="submit">Post shipment invoice</button><button class="action-secondary" type="button" @onclick="CancelShipmentInvoice">Cancel</button>
+            </div></EditForm></section>
+        }
+
+        @if (CanFulfillSales && ShipmentReversalForm is not null)
+        {
+            <section class="panel"><h2>Reverse shipment @ShipmentReversalForm.ShipmentNumber</h2><p class="page-intro">This preserves the original shipment and creates a dated reversing journal. Later valuation activity requires a compensating return or adjustment instead.</p><EditForm Model="ShipmentReversalForm" OnValidSubmit="ReverseShipmentAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Shipment reversal date" class="field-input" @bind-Value="ShipmentReversalForm.ReversalDate" /></div>
+                <div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Shipment reversal reason" class="field-input" @bind-Value="ShipmentReversalForm.Reason" /></div>
+                <button class="action-primary" type="submit">Confirm shipment reversal</button><button class="action-secondary" type="button" @onclick="CancelShipmentReversal">Cancel</button>
+            </div></EditForm></section>
+        }
 
         <section class="panel">
             <h2>Purchase orders</h2>
@@ -231,13 +319,21 @@ else
     private BusinessWorkspaceSnapshot? Workspace;
     private string? StatusMessage;
     private InventoryAdjustmentEditor AdjustmentForm { get; } = new();
+    private SalesOrderEditor SalesOrderForm { get; } = new();
     private PurchaseOrderEditor PurchaseOrderForm { get; } = new();
+    private SalesAllocationEditor? AllocationForm;
+    private SalesShipmentEditor? ShipmentForm;
+    private ShipmentInvoiceEditor? ShipmentInvoiceForm;
+    private ShipmentReversalEditor? ShipmentReversalForm;
     private ReceiptEditor? ReceiptForm;
     private BillMatchEditor? BillMatchForm;
     private PurchaseCorrectionEditor? CorrectionForm;
     private bool CanPreparePurchaseOrders;
     private bool CanManagePurchasing;
     private bool CanMatchReceiptBills;
+    private bool CanManageSales;
+    private bool CanFulfillSales;
+    private bool CanInvoiceShipments;
 
     protected override async Task OnInitializedAsync()
     {
@@ -246,11 +342,50 @@ else
         CanPreparePurchaseOrders = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage);
         CanManagePurchasing = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage);
         CanMatchReceiptBills = CanManagePurchasing && (privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage));
+        CanManageSales = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage);
+        CanFulfillSales = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage);
+        CanInvoiceShipments = privileged || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage);
         Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
     private async Task RecordAdjustmentAsync()
     {
         var result = await TransactionService.RecordInventoryAdjustmentAsync(new RecordInventoryAdjustmentRequest(AdjustmentForm.InventoryItemId, AdjustmentForm.OccurredOn, AdjustmentForm.QuantityChange, AdjustmentForm.UnitCost, AdjustmentForm.Reference, AdjustmentForm.Description)); StatusMessage = result.Succeeded ? "Inventory adjustment posted." : result.ErrorMessage; if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+    private void AddSalesOrderLine() => SalesOrderForm.Lines.Add(new());
+    private void RemoveSalesOrderLine(int index) => SalesOrderForm.Lines.RemoveAt(index);
+    private async Task SaveSalesOrderAsync()
+    {
+        var result = await TransactionService.SaveSalesOrderAsync(new SaveSalesOrderRequest(null, SalesOrderForm.CustomerId, SalesOrderForm.OrderNumber, SalesOrderForm.OrderedOn, SalesOrderForm.RequestedShipOn, SalesOrderForm.Notes, SalesOrderForm.Lines.Select(line => new SalesOrderLineRequest(line.InventoryItemId, line.Description, line.Quantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.RevenueAccountNumber)).ToArray()));
+        StatusMessage = result.Succeeded ? "Sales-order draft saved." : result.ErrorMessage;
+        if (result.Succeeded) { SalesOrderForm.Reset(); await ReloadAsync(); }
+    }
+    private async Task ApproveSalesOrderAsync(SalesOrderSnapshot order)
+    {
+        var result = await TransactionService.ApproveSalesOrderAsync(new ApproveSalesOrderRequest(order.Id, order.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Sales order {order.OrderNumber} approved." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync();
+    }
+    private void BeginAllocation(SalesOrderSnapshot order) => AllocationForm = new SalesAllocationEditor(order.Id, order.OrderNumber, order.ConcurrencyToken, (order.Lines ?? []).Where(line => line.ShippedQuantity < line.OrderedQuantity).Select(line => new SalesAllocationLineEditor(line.Id, line.Sku, line.OrderedQuantity - line.ShippedQuantity, line.AllocatedQuantity)).ToList());
+    private void CancelAllocation() => AllocationForm = null;
+    private async Task AllocateSalesOrderAsync()
+    {
+        var form = AllocationForm!; var result = await TransactionService.AllocateSalesOrderAsync(new AllocateSalesOrderRequest(form.SalesOrderId, form.Lines.Select(line => new AllocateSalesOrderLineRequest(line.SalesOrderLineId, line.Quantity)).ToArray(), form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Inventory allocation saved." : result.ErrorMessage; if (result.Succeeded) { AllocationForm = null; await ReloadAsync(); }
+    }
+    private void BeginShipment(SalesOrderSnapshot order) => ShipmentForm = new SalesShipmentEditor(order.Id, order.OrderNumber, order.ConcurrencyToken, (order.Lines ?? []).Where(line => line.AllocatedQuantity > 0m).Select(line => new SalesShipmentLineEditor(line.Id, line.Sku, line.AllocatedQuantity)).ToList());
+    private void CancelShipment() => ShipmentForm = null;
+    private async Task PostShipmentAsync()
+    {
+        var form = ShipmentForm!; var result = await TransactionService.ShipSalesOrderAsync(new ShipSalesOrderRequest(form.SalesOrderId, form.ShipmentNumber, form.ShippedOn, form.Lines.Where(line => line.Quantity > 0m).Select(line => new ShipSalesOrderLineRequest(line.SalesOrderLineId, line.Quantity)).ToArray(), form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Customer shipment posted; inventory and COGS were updated." : result.ErrorMessage; if (result.Succeeded) { ShipmentForm = null; await ReloadAsync(); }
+    }
+    private void BeginShipmentInvoice(InventoryShipmentSnapshot shipment) => ShipmentInvoiceForm = new ShipmentInvoiceEditor(shipment.Id, shipment.ShipmentNumber, shipment.ConcurrencyToken, shipment.ShippedOn);
+    private void CancelShipmentInvoice() => ShipmentInvoiceForm = null;
+    private async Task InvoiceShipmentAsync()
+    {
+        var form = ShipmentInvoiceForm!; var result = await TransactionService.InvoiceInventoryShipmentAsync(new InvoiceInventoryShipmentRequest(form.InventoryShipmentId, form.InvoiceNumber, form.InvoiceDate, form.DueDate, form.Description, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Shipment invoice posted to receivables." : result.ErrorMessage; if (result.Succeeded) { ShipmentInvoiceForm = null; await ReloadAsync(); }
+    }
+    private void BeginShipmentReversal(InventoryShipmentSnapshot shipment) => ShipmentReversalForm = new ShipmentReversalEditor(shipment.Id, shipment.ShipmentNumber, shipment.ConcurrencyToken, shipment.ShippedOn);
+    private void CancelShipmentReversal() => ShipmentReversalForm = null;
+    private async Task ReverseShipmentAsync()
+    {
+        var form = ShipmentReversalForm!; var result = await TransactionService.ReverseInventoryShipmentAsync(new ReverseInventoryShipmentRequest(form.InventoryShipmentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Customer shipment reversed and inventory restored." : result.ErrorMessage; if (result.Succeeded) { ShipmentReversalForm = null; await ReloadAsync(); }
     }
     private void AddPurchaseOrderLine() => PurchaseOrderForm.Lines.Add(new());
     private void RemovePurchaseOrderLine(int index) => PurchaseOrderForm.Lines.RemoveAt(index);
@@ -289,6 +424,14 @@ else
     }
     private async Task ReloadAsync() => Workspace = await WorkspaceService.GetWorkspaceAsync();
     private sealed class InventoryAdjustmentEditor { public Guid InventoryItemId { get; set; } public DateOnly OccurredOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal QuantityChange { get; set; } public decimal UnitCost { get; set; } public string Reference { get; set; } = $"INV-{DateTime.Today:yyyyMMdd}"; public string Description { get; set; } = "Inventory count adjustment"; }
+    private sealed class SalesOrderEditor { public Guid CustomerId { get; set; } public string OrderNumber { get; set; } = $"SO-{DateTime.Today:yyyyMMdd}"; public DateOnly OrderedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? RequestedShipOn { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(3)); public string Notes { get; set; } = ""; public List<SalesOrderLineEditor> Lines { get; } = [new()]; public void Reset() { CustomerId = Guid.Empty; OrderNumber = $"SO-{DateTime.Now:yyyyMMddHHmm}"; OrderedOn = DateOnly.FromDateTime(DateTime.Today); RequestedShipOn = OrderedOn.AddDays(3); Notes = ""; Lines.Clear(); Lines.Add(new()); } }
+    private sealed class SalesOrderLineEditor { public Guid InventoryItemId { get; set; } public string Description { get; set; } = "Inventory sale"; public decimal Quantity { get; set; } = 1m; public decimal UnitPrice { get; set; } public decimal DiscountAmount { get; set; } public decimal TaxAmount { get; set; } public string RevenueAccountNumber { get; set; } = ""; }
+    private sealed class SalesAllocationEditor(Guid salesOrderId, string salesOrderNumber, string concurrencyToken, List<SalesAllocationLineEditor> lines) { public Guid SalesOrderId { get; } = salesOrderId; public string SalesOrderNumber { get; } = salesOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public List<SalesAllocationLineEditor> Lines { get; } = lines; }
+    private sealed class SalesAllocationLineEditor(Guid salesOrderLineId, string sku, decimal unshippedQuantity, decimal quantity) { public Guid SalesOrderLineId { get; } = salesOrderLineId; public string Sku { get; } = sku; public decimal UnshippedQuantity { get; } = unshippedQuantity; public decimal Quantity { get; set; } = quantity; }
+    private sealed class SalesShipmentEditor(Guid salesOrderId, string salesOrderNumber, string concurrencyToken, List<SalesShipmentLineEditor> lines) { public Guid SalesOrderId { get; } = salesOrderId; public string SalesOrderNumber { get; } = salesOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string ShipmentNumber { get; set; } = $"SHIP-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly ShippedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public List<SalesShipmentLineEditor> Lines { get; } = lines; }
+    private sealed class SalesShipmentLineEditor(Guid salesOrderLineId, string sku, decimal allocatedQuantity) { public Guid SalesOrderLineId { get; } = salesOrderLineId; public string Sku { get; } = sku; public decimal AllocatedQuantity { get; } = allocatedQuantity; public decimal Quantity { get; set; } = allocatedQuantity; }
+    private sealed class ShipmentInvoiceEditor(Guid inventoryShipmentId, string shipmentNumber, string concurrencyToken, DateOnly shippedOn) { public Guid InventoryShipmentId { get; } = inventoryShipmentId; public string ShipmentNumber { get; } = shipmentNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string InvoiceNumber { get; set; } = $"INV-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly InvoiceDate { get; set; } = DateOnly.FromDateTime(DateTime.Today) < shippedOn ? shippedOn : DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = (DateOnly.FromDateTime(DateTime.Today) < shippedOn ? shippedOn : DateOnly.FromDateTime(DateTime.Today)).AddDays(30); public string Description { get; set; } = $"Invoice for shipment {shipmentNumber}"; }
+    private sealed class ShipmentReversalEditor(Guid inventoryShipmentId, string shipmentNumber, string concurrencyToken, DateOnly shippedOn) { public Guid InventoryShipmentId { get; } = inventoryShipmentId; public string ShipmentNumber { get; } = shipmentNumber; public string ConcurrencyToken { get; } = concurrencyToken; public DateOnly ReversalDate { get; set; } = DateOnly.FromDateTime(DateTime.Today) < shippedOn ? shippedOn : DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = ""; }
     private sealed class PurchaseOrderEditor { public Guid VendorId { get; set; } public string OrderNumber { get; set; } = $"PO-{DateTime.Today:yyyyMMdd}"; public DateOnly OrderedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? ExpectedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(7)); public string Notes { get; set; } = ""; public List<PurchaseOrderLineEditor> Lines { get; } = [new()]; public void Reset() { VendorId = Guid.Empty; OrderNumber = $"PO-{DateTime.Now:yyyyMMddHHmm}"; OrderedOn = DateOnly.FromDateTime(DateTime.Today); ExpectedOn = OrderedOn.AddDays(7); Notes = ""; Lines.Clear(); Lines.Add(new()); } }
     private sealed class PurchaseOrderLineEditor { public Guid InventoryItemId { get; set; } public string Description { get; set; } = "Inventory purchase"; public decimal Quantity { get; set; } = 1m; public decimal UnitCost { get; set; } }
     private sealed class ReceiptEditor(Guid purchaseOrderId, string purchaseOrderNumber, string concurrencyToken, List<ReceiptLineEditor> lines) { public Guid PurchaseOrderId { get; } = purchaseOrderId; public string PurchaseOrderNumber { get; } = purchaseOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string ReceiptNumber { get; set; } = $"RCV-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly ReceivedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public List<ReceiptLineEditor> Lines { get; } = lines; }

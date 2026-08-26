@@ -16,6 +16,8 @@ public static class BrassLedgerPermissions
     public const string SubledgerPost = "subledger.documents.post";
     public const string RequisitionManage = "operations.requisition.manage";
     public const string PurchasingManage = "operations.purchasing.manage";
+    public const string SalesManage = "operations.sales.manage";
+    public const string FulfillmentManage = "operations.fulfillment.manage";
     public const string CheckDisbursementManage = "treasury.check-disbursement.manage";
     public const string PayrollManage = "payroll.manage";
     public const string PayrollPrepare = "payroll.prepare";
@@ -46,6 +48,8 @@ public static class BrassLedgerPermissions
         new(SubledgerPost, "Subledger posting", "Post approved invoice and bill drafts to their control accounts."),
         new(RequisitionManage, "Requisitioning", "Create and route purchase requisitions."),
         new(PurchasingManage, "Purchasing", "Approve and issue purchase orders."),
+        new(SalesManage, "Sales orders", "Prepare and approve customer quotes and sales orders."),
+        new(FulfillmentManage, "Order fulfillment", "Allocate inventory and post or correct customer shipments."),
         new(CheckDisbursementManage, "Check disbursement", "Prepare payments, checks, and cash disbursements."),
         new(PayrollManage, "Payroll", "Maintain payroll-sensitive records and processing."),
         new(PayrollPrepare, "Payroll preparation", "Prepare payroll drafts, earnings, deductions, and calculation previews."),

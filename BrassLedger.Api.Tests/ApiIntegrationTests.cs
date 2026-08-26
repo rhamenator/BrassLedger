@@ -100,8 +100,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     public async Task PurchaseOrderApi_SeparatesPreparationFromApproval_AndRejectsMissingAntiforgery()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
-        using var preparerWithoutToken = await CreateAuthenticatedClientAsync(isolatedFactory, "sales", includeAntiforgery: false);
-        using var preparer = await CreateAuthenticatedClientAsync(isolatedFactory, "sales");
+        using var preparerWithoutToken = await CreateAuthenticatedClientAsync(isolatedFactory, "requisition", includeAntiforgery: false);
+        using var preparer = await CreateAuthenticatedClientAsync(isolatedFactory, "requisition");
         using var purchasing = await CreateAuthenticatedClientAsync(isolatedFactory, "operations");
         var workspaceResponse = await preparer.GetAsync("/api/workspace");
         Assert.True(workspaceResponse.IsSuccessStatusCode, await workspaceResponse.Content.ReadAsStringAsync());
@@ -130,6 +130,40 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var billResponse = await purchasing.PostAsJsonAsync($"/api/inventory-receipts/{receipt.Id}/vendor-bill", new MatchPurchaseOrderReceiptBillRequest(receipt.Id, "BILL-API-1", new DateOnly(2026, 8, 22), new DateOnly(2026, 9, 21), "API matched bill", receipt.ConcurrencyToken));
         Assert.Equal(HttpStatusCode.Created, billResponse.StatusCode);
         Assert.Contains((await purchasing.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.Payables.Bills, bill => bill.BillNumber == "BILL-API-1" && bill.TotalAmount == 15m);
+    }
+
+    [Fact]
+    public async Task SalesFulfillmentApi_SeparatesSalesWarehouseAndReceivables_AndPreservesShipmentProvenance()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var sales = await CreateAuthenticatedClientAsync(isolatedFactory, "sales");
+        using var warehouse = await CreateAuthenticatedClientAsync(isolatedFactory, "warehouse");
+        using var receivables = await CreateAuthenticatedClientAsync(isolatedFactory, "controller");
+        var workspace = await sales.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var customer = workspace!.Receivables.Customers.First();
+        var item = workspace.Operations.InventoryItems.Single(candidate => candidate.Sku == "RM-220");
+        var orderNumber = $"SO-API-{Guid.NewGuid():N}";
+        var request = new SaveSalesOrderRequest(null, customer.Id, orderNumber, new DateOnly(2026, 8, 20), new DateOnly(2026, 8, 22), "API sales fulfillment", [new SalesOrderLineRequest(item.Id, "API fasteners", 3m, 20m, 0m, 3m, "4000")]);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync("/api/sales-orders", request)).StatusCode);
+        var savedResponse = await sales.PostAsJsonAsync("/api/sales-orders", request); Assert.Equal(HttpStatusCode.Created, savedResponse.StatusCode);
+        var saved = await savedResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var draft = Assert.Single((await sales.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == saved!.Id);
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync($"/api/sales-orders/{draft.Id}/approval", new ApproveSalesOrderRequest(draft.Id, draft.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await sales.PostAsJsonAsync($"/api/sales-orders/{draft.Id}/approval", new ApproveSalesOrderRequest(draft.Id, draft.ConcurrencyToken))).StatusCode);
+        var approved = Assert.Single((await warehouse.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == draft.Id);
+        var line = Assert.Single(approved.Lines!);
+        Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync($"/api/sales-orders/{approved.Id}/allocation", new AllocateSalesOrderRequest(approved.Id, [new(line.Id, 3m)], approved.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await warehouse.PostAsJsonAsync($"/api/sales-orders/{approved.Id}/allocation", new AllocateSalesOrderRequest(approved.Id, [new(line.Id, 3m)], approved.ConcurrencyToken))).StatusCode);
+        var allocated = Assert.Single((await warehouse.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.SalesOrders, order => order.Id == approved.Id);
+        var shipmentResponse = await warehouse.PostAsJsonAsync($"/api/sales-orders/{allocated.Id}/shipments", new ShipSalesOrderRequest(allocated.Id, $"SHIP-{orderNumber}", new DateOnly(2026, 8, 22), [new(line.Id, 2m)], allocated.ConcurrencyToken)); Assert.Equal(HttpStatusCode.Created, shipmentResponse.StatusCode);
+        var shipment = Assert.Single((await warehouse.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.InventoryShipments!, candidate => candidate.SalesOrderId == allocated.Id);
+        var invoiceRequest = new InvoiceInventoryShipmentRequest(shipment.Id, $"INV-{orderNumber}", new DateOnly(2026, 8, 22), new DateOnly(2026, 9, 21), "API shipment invoice", shipment.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.PostAsJsonAsync($"/api/inventory-shipments/{shipment.Id}/invoice", invoiceRequest)).StatusCode);
+        var invoiceResponse = await receivables.PostAsJsonAsync($"/api/inventory-shipments/{shipment.Id}/invoice", invoiceRequest); Assert.Equal(HttpStatusCode.Created, invoiceResponse.StatusCode);
+        var invoicedShipment = Assert.Single((await receivables.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.InventoryShipments!, candidate => candidate.Id == shipment.Id);
+        Assert.NotNull(invoicedShipment.SalesInvoiceId);
+        Assert.Contains((await receivables.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.Receivables.Invoices, invoice => invoice.Id == invoicedShipment.SalesInvoiceId && invoice.TotalAmount == 42m);
     }
 
     [Fact]

@@ -477,6 +477,8 @@ public sealed class SalesInvoice
     public decimal TaxAmount { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal BalanceDue { get; set; }
+    public Guid? SalesOrderId { get; set; }
+    public Guid? InventoryShipmentId { get; set; }
     public string ConcurrencyToken { get; set; } = string.Empty;
 }
 
@@ -486,6 +488,9 @@ public sealed class SalesInvoiceLine
     public Guid SalesInvoiceId { get; set; }
     public int Sequence { get; set; }
     public Guid RevenueAccountId { get; set; }
+    public Guid? SalesOrderLineId { get; set; }
+    public Guid? InventoryShipmentLineId { get; set; }
+    public Guid? InventoryItemId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
@@ -638,8 +643,67 @@ public sealed class SalesOrder
     public Guid CustomerId { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public DateOnly OrderedOn { get; set; }
+    public DateOnly? RequestedShipOn { get; set; }
     public string Status { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
+    public string Notes { get; set; } = string.Empty;
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class SalesOrderLine
+{
+    public Guid Id { get; set; }
+    public Guid SalesOrderId { get; set; }
+    public int Sequence { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public Guid RevenueAccountId { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public decimal OrderedQuantity { get; set; }
+    public decimal AllocatedQuantity { get; set; }
+    public decimal ShippedQuantity { get; set; }
+    public decimal ReturnedQuantity { get; set; }
+    public decimal InvoicedQuantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal LineTotal { get; set; }
+}
+
+public sealed class InventoryShipment
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid SalesOrderId { get; set; }
+    public string ShipmentNumber { get; set; } = string.Empty;
+    public DateOnly ShippedOn { get; set; }
+    public string Status { get; set; } = "Posted";
+    public decimal TotalCost { get; set; }
+    public Guid JournalEntryId { get; set; }
+    public Guid? SalesInvoiceId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ShippedByUserId { get; set; }
+    public DateTimeOffset ShippedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class InventoryShipmentLine
+{
+    public Guid Id { get; set; }
+    public Guid InventoryShipmentId { get; set; }
+    public Guid SalesOrderLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public int Sequence { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TotalCost { get; set; }
 }
 
 public sealed class PurchaseOrder

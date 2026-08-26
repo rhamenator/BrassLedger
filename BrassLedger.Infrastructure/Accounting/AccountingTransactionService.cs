@@ -988,6 +988,18 @@ public sealed partial class AccountingTransactionService(
             var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
             invoice.BalanceDue = invoice.TotalAmount; invoice.Status = "Open"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
             (await db.Customers.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
+            if (invoice.InventoryShipmentId.HasValue)
+            {
+                var shipment = await db.InventoryShipments.SingleAsync(item => item.Id == invoice.InventoryShipmentId.Value && item.CompanyId == companyId, cancellationToken);
+                if (shipment.Status != "Posted" || shipment.SalesInvoiceId.HasValue) return TransactionResult.Failure("The shipment is no longer available for restoration of this invoice void.");
+                shipment.SalesInvoiceId = invoice.Id;
+                shipment.ConcurrencyToken = Guid.NewGuid().ToString("N");
+                var invoiceLines = await db.SalesInvoiceLines.Where(line => line.SalesInvoiceId == invoice.Id && line.SalesOrderLineId.HasValue).ToListAsync(cancellationToken);
+                var order = await db.SalesOrders.SingleAsync(item => item.Id == invoice.SalesOrderId && item.CompanyId == companyId, cancellationToken);
+                var orderLines = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).ToDictionaryAsync(line => line.Id, cancellationToken);
+                foreach (var line in invoiceLines) orderLines[line.SalesOrderLineId!.Value].InvoicedQuantity += line.Quantity;
+                UpdateSalesOrderFulfillmentStatus(order, orderLines.Values.ToList());
+            }
         }
         else if (adjustment.Kind == "VendorBillVoid")
         {
@@ -1013,11 +1025,19 @@ public sealed partial class AccountingTransactionService(
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var reference = string.Empty; var documentDate = default(DateOnly); var amount = 0m; var counterpartyId = Guid.Empty;
+        InventoryShipment? invoiceShipment = null;
+        List<SalesInvoiceLine> fulfillmentInvoiceLines = [];
         if (receivable)
         {
             var invoice = await db.SalesInvoices.SingleOrDefaultAsync(item => item.Id == request.DocumentId && item.CompanyId == companyId, cancellationToken);
             if (invoice is null) return TransactionResult.Failure("Invoice not found.");
             if (invoice.Status == "Voided" || invoice.BalanceDue != invoice.TotalAmount) return TransactionResult.Failure("Only a fully open, unadjusted invoice can be voided.");
+            if (invoice.InventoryShipmentId.HasValue)
+            {
+                invoiceShipment = await db.InventoryShipments.SingleOrDefaultAsync(shipment => shipment.Id == invoice.InventoryShipmentId.Value && shipment.CompanyId == companyId, cancellationToken);
+                if (invoiceShipment is null || invoiceShipment.SalesInvoiceId != invoice.Id) return TransactionResult.Failure("The shipment and invoice provenance are not synchronized. Correct the source-document link before voiding.");
+                fulfillmentInvoiceLines = await db.SalesInvoiceLines.Where(line => line.SalesInvoiceId == invoice.Id && line.SalesOrderLineId.HasValue).ToListAsync(cancellationToken);
+            }
             reference = invoice.InvoiceNumber; documentDate = invoice.InvoiceDate; amount = invoice.TotalAmount; counterpartyId = invoice.CustomerId;
         }
         else
@@ -1040,6 +1060,20 @@ public sealed partial class AccountingTransactionService(
         {
             var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == request.DocumentId, cancellationToken); invoice.BalanceDue = 0; invoice.Status = "Voided"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
             (await db.Customers.SingleAsync(item => item.Id == counterpartyId, cancellationToken)).OpenBalance -= amount;
+            if (invoiceShipment is not null)
+            {
+                invoiceShipment.SalesInvoiceId = null;
+                invoiceShipment.ConcurrencyToken = Guid.NewGuid().ToString("N");
+                var order = await db.SalesOrders.SingleAsync(item => item.Id == invoice.SalesOrderId && item.CompanyId == companyId, cancellationToken);
+                var orderLines = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).ToDictionaryAsync(line => line.Id, cancellationToken);
+                foreach (var line in fulfillmentInvoiceLines)
+                {
+                    var source = orderLines[line.SalesOrderLineId!.Value];
+                    source.InvoicedQuantity -= line.Quantity;
+                    if (source.InvoicedQuantity < 0m) return TransactionResult.Failure("The sales-order invoiced quantity would become negative. Correct the fulfillment provenance before voiding.");
+                }
+                UpdateSalesOrderFulfillmentStatus(order, orderLines.Values.ToList());
+            }
         }
         else
         {

@@ -1,0 +1,37 @@
+# Sales orders and inventory fulfillment
+
+BrassLedger provides a controlled order-to-cash path for stocked inventory. A sales operator prepares and approves a priced, multi-line sales order. A warehouse operator separately reserves available stock and posts partial or complete shipments. A receivables operator creates the customer invoice from an exact posted shipment rather than re-keying quantities.
+
+## Workflow and authority
+
+1. A user with **Sales orders** permission saves a draft containing the customer, dates, items, quantities, prices, line discounts, line tax, and revenue distributions.
+2. Sales approval authorizes fulfillment but does not reserve or move inventory.
+3. A user with **Order fulfillment** permission sets the total reservation on each unshipped line. Availability subtracts reservations held by other orders. Setting zero releases a reservation.
+4. The warehouse ships only reserved quantities. Partial shipments leave the remaining reservation and order balance open.
+5. A user with **Receivables** permission creates one invoice from each uninvoiced posted shipment. The invoice retains its order, shipment, shipment-line, order-line, item, and revenue-account provenance.
+
+Sales, fulfillment, and receivables permissions are intentionally separate. Administrators can combine them when staffing requires it, but a warehouse operator cannot approve prices or post accounts receivable merely because that person can move stock.
+
+## Accounting
+
+Shipment posting credits the configured **Inventory asset** control account and debits **Cost of goods sold** using the item's current moving-average cost. On-hand quantity, reserved quantity, shipped quantity, the inventory movement, COGS journal, shipment, and audit event are saved atomically.
+
+Shipment invoicing debits **Accounts receivable**, credits each line's reviewed revenue account, and credits **Sales-tax payable** for line tax. Discounts and tax are prorated across partial shipments; the final shipment for a line receives any rounding remainder so the invoices reconcile to the approved order amounts. The customer open balance and order invoiced quantities change in the same transaction.
+
+The selling price and moving-average cost remain independent. A shipment never changes the item's average cost.
+
+## Corrections
+
+Do not edit shipment or invoice journals. An invoiced shipment cannot be physically reversed. First void its fully open, unapplied invoice through the normal controlled invoice-void workflow. That clears the shipment's invoice link and restores its uninvoiced quantities while retaining the invoice, its provenance, and all journals. Reversing that invoice void restores the exact link and quantities.
+
+An uninvoiced shipment can be reversed only when it is still the latest valuation event for every affected item. BrassLedger posts an inverse COGS/inventory journal, restores on-hand and reserved quantities, and retains the original shipment. If a later valuation event exists, use a dated customer-return or compensating inventory workflow instead of rewriting history.
+
+All operations enforce company isolation, closed periods, active customers/items/accounts, customer credit limits, unique document numbers, optimistic concurrency, balanced entries, and immutable audit events.
+
+## Migrated header-only orders
+
+Older prerelease databases may contain sales-order headers with no authoritative lines. The migration preserves those records as `LegacyReference`; it does not invent item, price, tax, revenue-distribution, or fulfillment detail. Create a new line-based order before fulfillment.
+
+## Current boundary
+
+This workflow covers line-based sales orders, approval, reservations, partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Quotes, order amendments and cancellation, pick/pack documents, backorders, customer return authorization and credit/refund coordination, warehouses/bins/lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.

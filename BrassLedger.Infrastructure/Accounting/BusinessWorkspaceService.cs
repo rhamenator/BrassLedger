@@ -54,6 +54,11 @@ public sealed class BusinessWorkspaceService(
         var subledgerWorkflows = (await dbContext.SubledgerDocumentWorkflows.AsNoTracking().Where(workflow => workflow.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(workflow => workflow.CreatedAtUtc).ToList();
         var inventoryItems = await dbContext.InventoryItems.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsActive).OrderBy(x => x.Sku).ToListAsync(cancellationToken);
         var salesOrders = await dbContext.SalesOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
+        var salesOrderIds = salesOrders.Select(order => order.Id).ToArray();
+        var salesOrderLines = salesOrderIds.Length == 0 ? [] : await dbContext.SalesOrderLines.AsNoTracking().Where(line => salesOrderIds.Contains(line.SalesOrderId)).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
+        var inventoryShipments = (await dbContext.InventoryShipments.AsNoTracking().Where(shipment => shipment.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(shipment => shipment.ShippedOn).ThenByDescending(shipment => shipment.ShippedAtUtc).ToList();
+        var inventoryShipmentIds = inventoryShipments.Select(shipment => shipment.Id).ToArray();
+        var inventoryShipmentLines = inventoryShipmentIds.Length == 0 ? [] : await dbContext.InventoryShipmentLines.AsNoTracking().Where(line => inventoryShipmentIds.Contains(line.InventoryShipmentId)).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
         var purchaseOrders = await dbContext.PurchaseOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.OrderedOn).ToListAsync(cancellationToken);
         var purchaseOrderIds = purchaseOrders.Select(order => order.Id).ToArray();
         var purchaseOrderLines = purchaseOrderIds.Length == 0 ? [] : await dbContext.PurchaseOrderLines.AsNoTracking().Where(line => purchaseOrderIds.Contains(line.PurchaseOrderId)).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
@@ -111,6 +116,9 @@ public sealed class BusinessWorkspaceService(
         var inventoryReceiptLineLookup = inventoryReceiptLines.ToLookup(line => line.InventoryReceiptId);
         var inventoryItemById = inventoryItems.ToDictionary(item => item.Id);
         var purchaseOrderById = purchaseOrders.ToDictionary(order => order.Id);
+        var salesOrderById = salesOrders.ToDictionary(order => order.Id);
+        var salesOrderLineLookup = salesOrderLines.ToLookup(line => line.SalesOrderId);
+        var inventoryShipmentLineLookup = inventoryShipmentLines.ToLookup(line => line.InventoryShipmentId);
 
         var moduleCounts = BuildModuleCounts(
             accounts.Count + journalEntries.Count,
@@ -140,7 +148,7 @@ public sealed class BusinessWorkspaceService(
                 PayablesOpen: vendorBills.Sum(x => x.BalanceDue),
                 MonthlyPayroll: employeeSummary.Where(x => x.IsActive).Sum(x => x.MonthlyBasePay),
                 InventoryItems: inventoryItems.Count,
-                OpenSalesOrders: salesOrders.Count(x => x.Status is "Open" or "Picking" or "Allocated"),
+                OpenSalesOrders: salesOrders.Count(x => x.Status is "Draft" or "Approved" or "Allocated" or "PartiallyShipped" or "Shipped"),
                 OpenProjects: projectJobs.Count(x => x.Status is "Open" or "Billing"),
                 EnabledModules: assessment.Modules.Count,
                 ReportsReady: reports.Count + labels.Count),
@@ -204,7 +212,7 @@ public sealed class BusinessWorkspaceService(
             Operations: new OperationsWorkspace(
                 InventoryItemCount: inventoryItems.Count,
                 ReorderAlerts: inventoryItems.Count(x => x.QuantityOnHand <= x.ReorderPoint),
-                OpenSalesOrderCount: salesOrders.Count(x => x.Status is "Open" or "Picking" or "Allocated"),
+                OpenSalesOrderCount: salesOrders.Count(x => x.Status is "Draft" or "Approved" or "Allocated" or "PartiallyShipped" or "Shipped"),
                 OpenPurchaseOrderCount: purchaseOrders.Count(x => x.Status is "Draft" or "Issued" or "Approved" or "PartiallyReceived" or "Received"),
                 InventoryItems: inventoryItems.Select(x => new InventoryItemSnapshot(x.Sku, x.Description, x.UnitPrice, x.QuantityOnHand, x.ReorderPoint, x.Id, x.UnitCost)).ToArray(),
                 SalesOrders: salesOrders.Select(x => new SalesOrderSnapshot(
@@ -212,7 +220,13 @@ public sealed class BusinessWorkspaceService(
                     customerNames.GetValueOrDefault(x.CustomerId, "Unknown customer"),
                     x.OrderedOn,
                     x.Status,
-                    x.TotalAmount)).ToArray(),
+                    x.TotalAmount,
+                    x.Id,
+                    x.CustomerId,
+                    x.RequestedShipOn,
+                    x.Notes,
+                    x.ConcurrencyToken,
+                    salesOrderLineLookup[x.Id].Select(line => new SalesOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.AllocatedQuantity, line.ShippedQuantity, line.ReturnedQuantity, line.InvoicedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"))).ToArray())).ToArray(),
                 PurchaseOrders: purchaseOrders.Select(x => new PurchaseOrderSnapshot(
                     x.OrderNumber,
                     vendorNames.GetValueOrDefault(x.VendorId, "Unknown vendor"),
@@ -225,7 +239,8 @@ public sealed class BusinessWorkspaceService(
                     x.Notes,
                     x.ConcurrencyToken,
                     purchaseOrderLineLookup[x.Id].Select(line => new PurchaseOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.UnitCost, line.ReceivedQuantity, line.InvoicedQuantity, line.LineTotal)).ToArray())).ToArray(),
-                InventoryReceipts: inventoryReceipts.Select(receipt => new InventoryReceiptSnapshot(receipt.Id, receipt.PurchaseOrderId, purchaseOrderById.GetValueOrDefault(receipt.PurchaseOrderId)?.OrderNumber ?? "Unavailable", receipt.ReceiptNumber, receipt.ReceivedOn, receipt.Status, receipt.TotalAmount, vendorBillByReceiptId.GetValueOrDefault(receipt.Id)?.Id, receipt.ConcurrencyToken, inventoryReceiptLineLookup[receipt.Id].Select(line => new InventoryReceiptLineSnapshot(line.Id, line.PurchaseOrderLineId, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Sequence, line.Quantity, line.UnitCost, line.LineTotal)).ToArray(), receipt.JournalEntryId, receipt.ReversalJournalEntryId)).ToArray()),
+                InventoryReceipts: inventoryReceipts.Select(receipt => new InventoryReceiptSnapshot(receipt.Id, receipt.PurchaseOrderId, purchaseOrderById.GetValueOrDefault(receipt.PurchaseOrderId)?.OrderNumber ?? "Unavailable", receipt.ReceiptNumber, receipt.ReceivedOn, receipt.Status, receipt.TotalAmount, vendorBillByReceiptId.GetValueOrDefault(receipt.Id)?.Id, receipt.ConcurrencyToken, inventoryReceiptLineLookup[receipt.Id].Select(line => new InventoryReceiptLineSnapshot(line.Id, line.PurchaseOrderLineId, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Sequence, line.Quantity, line.UnitCost, line.LineTotal)).ToArray(), receipt.JournalEntryId, receipt.ReversalJournalEntryId)).ToArray(),
+                InventoryShipments: inventoryShipments.Select(shipment => new InventoryShipmentSnapshot(shipment.Id, shipment.SalesOrderId, salesOrderById.GetValueOrDefault(shipment.SalesOrderId)?.OrderNumber ?? "Unavailable", shipment.ShipmentNumber, shipment.ShippedOn, shipment.Status, shipment.TotalCost, shipment.SalesInvoiceId, shipment.ConcurrencyToken, inventoryShipmentLineLookup[shipment.Id].Select(line => new InventoryShipmentLineSnapshot(line.Id, line.SalesOrderLineId, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Sequence, line.Quantity, line.UnitCost, line.TotalCost)).ToArray(), shipment.JournalEntryId, shipment.ReversalJournalEntryId)).ToArray()),
             Treasury: new TreasuryWorkspace(
                 CashOnHand: bankAccounts.Sum(x => x.CurrentBalance),
                 UnreconciledBalance: bankAccounts.Sum(x => x.UnreconciledAmount),

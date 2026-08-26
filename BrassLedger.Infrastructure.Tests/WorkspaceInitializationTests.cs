@@ -63,11 +63,12 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("4", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("5", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826054520_AddSalesFulfillment';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -98,10 +99,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("4", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("5", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826054520_AddSalesFulfillment';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -326,7 +328,31 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826054520_AddSalesFulfillment';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('AccountingSchedules') WHERE name = 'DisposalJournalEntryId';"));
+    }
+
+    [Fact]
+    public async Task SalesFulfillmentMigration_PreservesHeaderOnlyOrdersAsNonFulfillableReferences()
+    {
+        using var services = CreateServiceProvider();
+        var companyId = Guid.NewGuid(); var customerId = Guid.NewGuid(); var orderId = Guid.NewGuid();
+        using (var scope = services.CreateScope())
+        {
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            await db.Database.GetService<IMigrator>().MigrateAsync("20260826052206_AddPurchaseReceiving");
+            await db.Database.ExecuteSqlInterpolatedAsync($"""INSERT INTO "Companies" ("Id", "Name", "LegalName", "TaxId", "BaseCurrency", "FiscalYearStartMonth") VALUES ({companyId}, {"Migration Test Company"}, {"Migration Test Company LLC"}, {"00-0000000"}, {"USD"}, {1});""");
+            await db.Database.ExecuteSqlInterpolatedAsync($"""INSERT INTO "Customers" ("Id", "CompanyId", "CustomerNumber", "Name", "Email", "State", "CreditLimit", "OpenBalance") VALUES ({customerId}, {companyId}, {"C-LEGACY"}, {"Legacy Customer"}, {"legacy@example.test"}, {"MI"}, {1000m}, {0m});""");
+            await db.Database.ExecuteSqlInterpolatedAsync($"""INSERT INTO "SalesOrders" ("Id", "CompanyId", "CustomerId", "OrderNumber", "OrderedOn", "Status", "TotalAmount") VALUES ({orderId}, {companyId}, {customerId}, {"SO-LEGACY-1"}, {new DateOnly(2026, 7, 1)}, {"Open"}, {125m});""");
+        }
+
+        await services.InitializeBrassLedgerAsync();
+
+        using var verifiedScope = services.CreateScope(); var verifiedFactory = verifiedScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var verified = await verifiedFactory.CreateDbContextAsync();
+        var order = await verified.SalesOrders.SingleAsync(candidate => candidate.Id == orderId);
+        Assert.Equal("LegacyReference", order.Status); Assert.Contains("header-only", order.Notes, StringComparison.OrdinalIgnoreCase); Assert.StartsWith("legacy-", order.ConcurrencyToken); Assert.False(await verified.SalesOrderLines.AnyAsync(line => line.SalesOrderId == order.Id));
+        Assert.Contains("20260826054520_AddSalesFulfillment", await verified.Database.GetAppliedMigrationsAsync());
     }
 
     [Fact]
@@ -1597,6 +1623,120 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("Voided", bill.Status); Assert.Equal(0m, bill.BalanceDue); Assert.Null(bill.InventoryReceiptId);
         Assert.Equal("Approved", await after.PurchaseOrders.Where(order => order.Id == saved.Id).Select(order => order.Status).SingleAsync());
         Assert.Equal(2, await after.InventoryTransactions.CountAsync(movement => movement.Reference == "RCV-REVERSE-1" || movement.Reference == "REV-RCV-REVERSE-1"));
+    }
+
+    [Fact]
+    public async Task SalesFulfillment_PartiallyShipsInvoicesVoidsAndReverses_WithBalancedTraceablePostings()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        Guid customerId; Guid itemId; decimal priorQuantity; decimal unitCost; decimal inventoryBalance; decimal cogsBalance; decimal receivableBalance;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            customerId = await db.Customers.Select(customer => customer.Id).FirstAsync();
+            var item = await db.InventoryItems.SingleAsync(candidate => candidate.Sku == "FG-200"); itemId = item.Id; priorQuantity = item.QuantityOnHand; unitCost = item.UnitCost;
+            inventoryBalance = await db.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.InventoryAsset).Select(account => account.CurrentBalance).SingleAsync();
+            cogsBalance = await db.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.CostOfGoodsSold).Select(account => account.CurrentBalance).SingleAsync();
+            receivableBalance = await db.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.AccountsReceivable).Select(account => account.CurrentBalance).SingleAsync();
+        }
+
+        var roundedToZero = await transactions.SaveSalesOrderAsync(new SaveSalesOrderRequest(null, customerId, "SO-FULFILL-TINY", new DateOnly(2026, 8, 1), null, "Sub-precision quantity", [new SalesOrderLineRequest(itemId, "Compression kits", 0.00001m, 100m, 0m, 0m, "4000")]));
+        Assert.False(roundedToZero.Succeeded);
+        Assert.Contains("positive quantity", roundedToZero.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var saved = await transactions.SaveSalesOrderAsync(new SaveSalesOrderRequest(null, customerId, "SO-FULFILL-1", new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 5), "Controlled fulfillment test", [new SalesOrderLineRequest(itemId, "Compression kits", 4m, 100m, 10m, 8m, "4000")]));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        Guid orderLineId; string token;
+        await using (var db = await factory.CreateDbContextAsync()) { var order = await db.SalesOrders.SingleAsync(candidate => candidate.Id == saved.Id); orderLineId = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).Select(line => line.Id).SingleAsync(); Assert.True((await transactions.ApproveSalesOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded); }
+        await using (var db = await factory.CreateDbContextAsync()) token = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
+        var staleAllocation = await transactions.AllocateSalesOrderAsync(new(saved.Id!.Value, [new(orderLineId, 4m)], "stale-token")); Assert.False(staleAllocation.Succeeded); Assert.Contains("changed", staleAllocation.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var overAllocation = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new(orderLineId, priorQuantity + 1m)], token)); Assert.False(overAllocation.Succeeded);
+        var allocated = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new(orderLineId, 4m)], token)); Assert.True(allocated.Succeeded, allocated.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) token = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
+        var overShipment = await transactions.ShipSalesOrderAsync(new(saved.Id.Value, "SHIP-OVER-1", new DateOnly(2026, 8, 5), [new(orderLineId, 5m)], token)); Assert.False(overShipment.Succeeded); Assert.Contains("allocated", overShipment.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var shipped = await transactions.ShipSalesOrderAsync(new(saved.Id.Value, "SHIP-FULFILL-1", new DateOnly(2026, 8, 5), [new(orderLineId, 2m)], token)); Assert.True(shipped.Succeeded, shipped.ErrorMessage);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var order = await db.SalesOrders.SingleAsync(candidate => candidate.Id == saved.Id); var line = await db.SalesOrderLines.SingleAsync(candidate => candidate.Id == orderLineId); var item = await db.InventoryItems.SingleAsync(candidate => candidate.Id == itemId); var shipment = await db.InventoryShipments.SingleAsync(candidate => candidate.Id == shipped.Id);
+            Assert.Equal("PartiallyShipped", order.Status); Assert.Equal(2m, line.AllocatedQuantity); Assert.Equal(2m, line.ShippedQuantity); Assert.Equal(priorQuantity - 2m, item.QuantityOnHand); Assert.Equal(2m * unitCost, shipment.TotalCost);
+            Assert.Equal(inventoryBalance - shipment.TotalCost, await db.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.InventoryAsset).Select(account => account.CurrentBalance).SingleAsync());
+            Assert.Equal(cogsBalance + shipment.TotalCost, await db.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.CostOfGoodsSold).Select(account => account.CurrentBalance).SingleAsync());
+            token = shipment.ConcurrencyToken;
+        }
+        Guid ambiguousMovementId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            ambiguousMovementId = Guid.NewGuid();
+            var otherJournalId = await db.JournalEntries.Where(entry => entry.Id != db.InventoryShipments.Where(shipment => shipment.Id == shipped.Id).Select(shipment => shipment.JournalEntryId).Single()).Select(entry => entry.Id).FirstAsync();
+            db.InventoryTransactions.Add(new InventoryTransaction { Id = ambiguousMovementId, CompanyId = await db.Companies.Select(company => company.Id).SingleAsync(), InventoryItemId = itemId, OccurredOn = new DateOnly(2026, 8, 5), TransactionType = "Same-day valuation test", QuantityChange = 0m, UnitCost = unitCost, TotalCost = 0m, Reference = "SAME-DAY-VALUATION", JournalEntryId = otherJournalId });
+            await db.SaveChangesAsync();
+        }
+        var ambiguousReversal = await transactions.ReverseInventoryShipmentAsync(new(shipped.Id!.Value, new DateOnly(2026, 8, 5), "Ambiguous same-day valuation", token));
+        Assert.False(ambiguousReversal.Succeeded);
+        Assert.Contains("same-day", ambiguousReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.InventoryTransactions.Remove(await db.InventoryTransactions.SingleAsync(entry => entry.Id == ambiguousMovementId));
+            await db.SaveChangesAsync();
+        }
+        var invoiced = await transactions.InvoiceInventoryShipmentAsync(new(shipped.Id!.Value, "INV-FULFILL-1", new DateOnly(2026, 8, 6), new DateOnly(2026, 9, 5), "Invoice exact shipped quantities", token)); Assert.True(invoiced.Succeeded, invoiced.ErrorMessage);
+        var duplicateInvoice = await transactions.InvoiceInventoryShipmentAsync(new(shipped.Id.Value, "INV-FULFILL-2", new DateOnly(2026, 8, 6), new DateOnly(2026, 9, 5), "Duplicate attempt", token)); Assert.False(duplicateInvoice.Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var invoice = await db.SalesInvoices.SingleAsync(candidate => candidate.Id == invoiced.Id); var line = await db.SalesInvoiceLines.SingleAsync(candidate => candidate.SalesInvoiceId == invoice.Id); var shipment = await db.InventoryShipments.SingleAsync(candidate => candidate.Id == shipped.Id);
+            Assert.Equal(195m, invoice.Subtotal); Assert.Equal(4m, invoice.TaxAmount); Assert.Equal(199m, invoice.TotalAmount); Assert.Equal(orderLineId, line.SalesOrderLineId); Assert.Equal(shipped.Id, invoice.InventoryShipmentId); Assert.Equal(invoice.Id, shipment.SalesInvoiceId);
+            Assert.Equal(receivableBalance + 199m, await db.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.AccountsReceivable).Select(account => account.CurrentBalance).SingleAsync());
+            token = shipment.ConcurrencyToken;
+        }
+        var unsafeReversal = await transactions.ReverseInventoryShipmentAsync(new(shipped.Id.Value, new DateOnly(2026, 8, 7), "Cannot reverse billed goods", token)); Assert.False(unsafeReversal.Succeeded); Assert.Contains("invoice", unsafeReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var voided = await transactions.VoidInvoiceAsync(new(invoiced.Id!.Value, new DateOnly(2026, 8, 7), "Customer shipment invoice entered prematurely")); Assert.True(voided.Succeeded, voided.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) token = await db.InventoryShipments.Where(shipment => shipment.Id == shipped.Id).Select(shipment => shipment.ConcurrencyToken).SingleAsync();
+        var reversed = await transactions.ReverseInventoryShipmentAsync(new(shipped.Id.Value, new DateOnly(2026, 8, 8), "Carrier returned goods before delivery", token)); Assert.True(reversed.Succeeded, reversed.ErrorMessage);
+
+        await using var after = await factory.CreateDbContextAsync();
+        Assert.Equal(priorQuantity, await after.InventoryItems.Where(item => item.Id == itemId).Select(item => item.QuantityOnHand).SingleAsync());
+        Assert.Equal("Reversed", await after.InventoryShipments.Where(shipment => shipment.Id == shipped.Id).Select(shipment => shipment.Status).SingleAsync());
+        Assert.Equal("Voided", await after.SalesInvoices.Where(invoice => invoice.Id == invoiced.Id).Select(invoice => invoice.Status).SingleAsync());
+        var finalOrderLine = await after.SalesOrderLines.SingleAsync(line => line.Id == orderLineId); Assert.Equal(4m, finalOrderLine.AllocatedQuantity); Assert.Equal(0m, finalOrderLine.ShippedQuantity); Assert.Equal(0m, finalOrderLine.InvoicedQuantity);
+        Assert.Equal(inventoryBalance, await after.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.InventoryAsset).Select(account => account.CurrentBalance).SingleAsync());
+        Assert.Equal(cogsBalance, await after.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.CostOfGoodsSold).Select(account => account.CurrentBalance).SingleAsync());
+        Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "inventory-shipment.posted" && audit.EntityId == shipped.Id);
+        Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "inventory-shipment.invoiced" && audit.EntityId == shipped.Id);
+        Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "inventory-shipment.reversed" && audit.EntityId == shipped.Id);
+    }
+
+    [Fact]
+    public async Task SalesFulfillment_EnforcesSalesWarehouseAndReceivablesSeparation()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>(); var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        Guid companyId; Guid customerId; Guid itemId; Guid foreignCustomerId; Guid foreignItemId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(company => company.Id).SingleAsync(); customerId = await db.Customers.Select(customer => customer.Id).FirstAsync(); itemId = await db.InventoryItems.Where(item => item.Sku == "RM-220").Select(item => item.Id).SingleAsync();
+            var foreignCompanyId = Guid.NewGuid(); foreignCustomerId = Guid.NewGuid(); foreignItemId = Guid.NewGuid();
+            db.Companies.Add(new Company { Id = foreignCompanyId, Name = "Foreign company", LegalName = "Foreign company", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            db.Customers.Add(new Customer { Id = foreignCustomerId, CompanyId = foreignCompanyId, CustomerNumber = "FOREIGN-C", Name = "Foreign customer" });
+            db.InventoryItems.Add(new InventoryItem { Id = foreignItemId, CompanyId = foreignCompanyId, Sku = "FOREIGN-I", Description = "Foreign item", UnitPrice = 1m, UnitCost = 1m, QuantityOnHand = 10m, IsActive = true });
+            await db.SaveChangesAsync();
+        }
+        void ActAs(params string[] permissions) { var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()) }; claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
+        var request = new SaveSalesOrderRequest(null, customerId, "SO-SOD-1", new DateOnly(2026, 8, 10), null, "Separation test", [new SalesOrderLineRequest(itemId, "Fasteners", 2m, 20m, 0m, 0m, "4000")]);
+        ActAs(BrassLedgerPermissions.FulfillmentManage); Assert.False((await transactions.SaveSalesOrderAsync(request)).Succeeded);
+        ActAs(BrassLedgerPermissions.SalesManage);
+        Assert.False((await transactions.SaveSalesOrderAsync(request with { CustomerId = foreignCustomerId, OrderNumber = "SO-FOREIGN-C" })).Succeeded);
+        Assert.False((await transactions.SaveSalesOrderAsync(request with { OrderNumber = "SO-FOREIGN-I", Lines = [new SalesOrderLineRequest(foreignItemId, "Foreign", 1m, 1m, 0m, 0m, "4000")] })).Succeeded);
+        var saved = await transactions.SaveSalesOrderAsync(request); Assert.True(saved.Succeeded, saved.ErrorMessage);
+        Guid lineId; string token; await using (var db = await factory.CreateDbContextAsync()) { var order = await db.SalesOrders.SingleAsync(candidate => candidate.Id == saved.Id); lineId = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).Select(line => line.Id).SingleAsync(); Assert.True((await transactions.ApproveSalesOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded); }
+        await using (var db = await factory.CreateDbContextAsync()) token = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
+        Assert.False((await transactions.AllocateSalesOrderAsync(new(saved.Id!.Value, [new(lineId, 2m)], token))).Succeeded);
+        ActAs(BrassLedgerPermissions.FulfillmentManage); Assert.True((await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new(lineId, 2m)], token))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) token = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
+        var shipped = await transactions.ShipSalesOrderAsync(new(saved.Id.Value, "SHIP-SOD-1", new DateOnly(2026, 8, 11), [new(lineId, 2m)], token)); Assert.True(shipped.Succeeded, shipped.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) token = await db.InventoryShipments.Where(shipment => shipment.Id == shipped.Id).Select(shipment => shipment.ConcurrencyToken).SingleAsync();
+        Assert.False((await transactions.InvoiceInventoryShipmentAsync(new(shipped.Id!.Value, "INV-SOD-1", new DateOnly(2026, 8, 11), new DateOnly(2026, 9, 10), "Unauthorized invoice", token))).Succeeded);
+        ActAs(BrassLedgerPermissions.ReceivablesManage); Assert.True((await transactions.InvoiceInventoryShipmentAsync(new(shipped.Id.Value, "INV-SOD-1", new DateOnly(2026, 8, 11), new DateOnly(2026, 9, 10), "Authorized invoice", token))).Succeeded);
     }
 
     [Fact]

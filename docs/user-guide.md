@@ -97,6 +97,8 @@ Operations covers inventory, order flow, fulfillment, and the documents that acc
 
 The current purchasing workflow separates preparation from approval. Create a purchase-order draft with one or more inventory lines, have a purchasing operator approve it, and receive only the quantities physically accepted. Partial receipts remain open. Each receipt updates on-hand quantity and moving-average cost and posts Inventory against GRNI. When the corresponding vendor invoice agrees with that receipt, use **Create matched bill** to clear GRNI into Accounts Payable. See [Purchasing and inventory receiving](purchasing-guide.md) for accounting, correction, and current-boundary details.
 
+The sales workflow also separates duties. Sales prepares and approves priced line-based orders; the warehouse reserves available quantities and posts partial or complete shipments; receivables creates an invoice from each exact shipment. Shipment posting relieves inventory to COGS at moving-average cost, while invoice posting records AR, revenue, and sales tax with line-level source provenance. Void a fully open shipment invoice before correcting its physical shipment. See [Sales orders and inventory fulfillment](sales-fulfillment-guide.md).
+
 Best practices:
 
 - resolve stock exceptions before committing shipment promises

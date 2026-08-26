@@ -146,7 +146,8 @@ public sealed record OperationsWorkspace(
     IReadOnlyList<InventoryItemSnapshot> InventoryItems,
     IReadOnlyList<SalesOrderSnapshot> SalesOrders,
     IReadOnlyList<PurchaseOrderSnapshot> PurchaseOrders,
-    IReadOnlyList<InventoryReceiptSnapshot>? InventoryReceipts = null);
+    IReadOnlyList<InventoryReceiptSnapshot>? InventoryReceipts = null,
+    IReadOnlyList<InventoryShipmentSnapshot>? InventoryShipments = null);
 
 public sealed record InventoryItemSnapshot(
     string Sku,
@@ -162,7 +163,17 @@ public sealed record SalesOrderSnapshot(
     string CustomerName,
     DateOnly OrderedOn,
     string Status,
-    decimal TotalAmount);
+    decimal TotalAmount,
+    Guid Id = default,
+    Guid CustomerId = default,
+    DateOnly? RequestedShipOn = null,
+    string Notes = "",
+    string ConcurrencyToken = "",
+    IReadOnlyList<SalesOrderLineSnapshot>? Lines = null);
+
+public sealed record SalesOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal AllocatedQuantity, decimal ShippedQuantity, decimal ReturnedQuantity, decimal InvoicedQuantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber);
+public sealed record InventoryShipmentSnapshot(Guid Id, Guid SalesOrderId, string SalesOrderNumber, string ShipmentNumber, DateOnly ShippedOn, string Status, decimal TotalCost, Guid? SalesInvoiceId, string ConcurrencyToken, IReadOnlyList<InventoryShipmentLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId);
+public sealed record InventoryShipmentLineSnapshot(Guid Id, Guid SalesOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal TotalCost);
 
 public sealed record PurchaseOrderSnapshot(
     string OrderNumber,

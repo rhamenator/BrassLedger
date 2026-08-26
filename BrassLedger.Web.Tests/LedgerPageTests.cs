@@ -49,10 +49,14 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("Prepare purchase order", cut.Markup);
         Assert.NotNull(cut.Find("select[aria-label='Purchase order vendor']"));
         Assert.NotNull(cut.Find("select[aria-label='Purchase order line 1 item']"));
-        cut.FindAll("button").Single(button => button.TextContent.Trim() == "Add line").Click();
+        cut.FindAll("button").Last(button => button.TextContent.Trim() == "Add line").Click();
         Assert.NotNull(cut.Find("select[aria-label='Purchase order line 2 item']"));
         Assert.Contains("Inventory receipts and invoice matching", cut.Markup);
         Assert.Contains("Average cost", cut.Markup);
+        Assert.Contains("Prepare sales order", cut.Markup);
+        Assert.NotNull(cut.Find("select[aria-label='Sales order customer']"));
+        Assert.NotNull(cut.Find("select[aria-label='Sales order line 1 item']"));
+        Assert.Contains("Customer shipments and invoicing", cut.Markup);
     }
 }
 
@@ -119,6 +123,12 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.PaymentId));
     public Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> SaveSalesOrderAsync(SaveSalesOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> ApproveSalesOrderAsync(ApproveSalesOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SalesOrderId));
+    public Task<TransactionResult> AllocateSalesOrderAsync(AllocateSalesOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SalesOrderId));
+    public Task<TransactionResult> ShipSalesOrderAsync(ShipSalesOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> InvoiceInventoryShipmentAsync(InvoiceInventoryShipmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> ReverseInventoryShipmentAsync(ReverseInventoryShipmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryShipmentId));
     public Task<TransactionResult> SavePurchaseOrderAsync(SavePurchaseOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> ApprovePurchaseOrderAsync(ApprovePurchaseOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.PurchaseOrderId));
     public Task<TransactionResult> ReceivePurchaseOrderAsync(ReceivePurchaseOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
