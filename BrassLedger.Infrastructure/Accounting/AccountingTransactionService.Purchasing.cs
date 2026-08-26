@@ -29,6 +29,8 @@ public sealed partial class AccountingTransactionService
         var itemIds = requestedLines.Select(line => line.InventoryItemId).ToArray();
         if (await db.InventoryItems.CountAsync(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id), cancellationToken) != itemIds.Length)
             return TransactionResult.Failure("Every purchase-order item must be active in the current company.");
+        if (!await AreActiveProjectsAsync(db, companyId, requestedLines.Select(line => line.ProjectJobId), cancellationToken))
+            return TransactionResult.Failure("Every purchase-order project must be active and belong to this company.");
         var number = request.OrderNumber.Trim();
         if (await db.PurchaseOrders.AnyAsync(order => order.CompanyId == companyId && order.OrderNumber == number && order.Id != request.Id, cancellationToken))
             return TransactionResult.Failure("Purchase-order number already exists.");
@@ -71,6 +73,7 @@ public sealed partial class AccountingTransactionService
             PurchaseOrderId = order.Id,
             Sequence = index + 1,
             InventoryItemId = line.InventoryItemId,
+            ProjectJobId = line.ProjectJobId,
             Description = line.Description.Trim(),
             OrderedQuantity = RoundQuantity(line.Quantity),
             UnitCost = RoundCurrency(line.UnitCost),
@@ -93,7 +96,9 @@ public sealed partial class AccountingTransactionService
         if (order is null) return TransactionResult.Failure("Purchase order not found.");
         if (order.Status != "Draft") return TransactionResult.Failure("Only a draft purchase order can be approved.");
         if (!string.Equals(order.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The purchase order changed after it was opened. Refresh and review it again.");
-        if (!await db.PurchaseOrderLines.AnyAsync(line => line.PurchaseOrderId == order.Id, cancellationToken)) return TransactionResult.Failure("A purchase order must contain at least one line before approval.");
+        var approvalLines = await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).ToListAsync(cancellationToken);
+        if (approvalLines.Count == 0) return TransactionResult.Failure("A purchase order must contain at least one line before approval.");
+        if (!await AreActiveProjectsAsync(db, companyId, approvalLines.Select(line => line.ProjectJobId), cancellationToken)) return TransactionResult.Failure("One or more purchase-order projects are closed or unavailable.");
         order.Status = "Approved";
         order.ApprovedByUserId = ResolveUserId();
         order.ApprovedAtUtc = DateTimeOffset.UtcNow;

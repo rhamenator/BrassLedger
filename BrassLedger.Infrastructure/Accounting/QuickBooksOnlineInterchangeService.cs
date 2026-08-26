@@ -36,9 +36,9 @@ public sealed class QuickBooksOnlineInterchangeService(
         if (rows is null) return null;
 
         var header = normalizedEntity == "journal-entries"
-            ? new[] { "Journal No.", "Journal Date", "Reference", "Journal/Description", "Account Name", "Debits", "Credits", "Line Description" }
+            ? new[] { "Journal No.", "Journal Date", "Reference", "Journal/Description", "Account Name", "Debits", "Credits", "Line Description", "Project / Job" }
             : normalizedEntity == "invoices"
-            ? new[] { "Invoice No.", "Customer", "Invoice Date", "Due Date", "Item Amount", "Item Description", "Quantity", "Rate" }
+            ? new[] { "Invoice No.", "Customer", "Invoice Date", "Due Date", "Item Amount", "Item Description", "Quantity", "Rate", "Project / Job" }
             : normalizedEntity == "chart-of-accounts"
             ? new[] { "Account Name", "Type", "Detail Type", "Account Number" }
             : new[] { "Display Name", "Company Name", "Email", normalizedEntity == "customers" ? "Customer Number" : "Vendor Number" };
@@ -127,10 +127,13 @@ public sealed class QuickBooksOnlineInterchangeService(
         var entryIds = entries.Select(entry => entry.Id).ToArray();
         var lines = await db.JournalEntryLines.Where(line => entryIds.Contains(line.JournalEntryId)).ToListAsync(ct);
         var accountNames = await db.Accounts.Where(account => account.CompanyId == companyId).ToDictionaryAsync(account => account.Id, account => account.Name, ct);
+        var projectIds = lines.Where(line => line.ProjectJobId.HasValue).Select(line => line.ProjectJobId!.Value).Distinct().ToArray();
+        var projectNumbers = await db.ProjectJobs.Where(project => project.CompanyId == companyId && projectIds.Contains(project.Id)).ToDictionaryAsync(project => project.Id, project => project.JobNumber, ct);
         return entries.SelectMany(entry => lines.Where(line => line.JournalEntryId == entry.Id).Select(line => new[]
         {
             entry.EntryNumber, entry.PostedOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), entry.Reference, entry.Description,
-            accountNames.GetValueOrDefault(line.AccountId, string.Empty), line.Debit.ToString("0.00", CultureInfo.InvariantCulture), line.Credit.ToString("0.00", CultureInfo.InvariantCulture), line.Description
+            accountNames.GetValueOrDefault(line.AccountId, string.Empty), line.Debit.ToString("0.00", CultureInfo.InvariantCulture), line.Credit.ToString("0.00", CultureInfo.InvariantCulture), line.Description,
+            line.ProjectJobId.HasValue ? projectNumbers.GetValueOrDefault(line.ProjectJobId.Value, string.Empty) : string.Empty
         }));
     }
 
@@ -141,12 +144,14 @@ public sealed class QuickBooksOnlineInterchangeService(
         var lines = await db.SalesInvoiceLines.AsNoTracking().Where(line => invoiceIds.Contains(line.SalesInvoiceId)).OrderBy(line => line.Sequence).ToListAsync(ct);
         var customerIds = invoices.Select(invoice => invoice.CustomerId).Distinct().ToArray();
         var customers = await db.Customers.AsNoTracking().Where(customer => customerIds.Contains(customer.Id)).ToDictionaryAsync(customer => customer.Id, customer => customer.Name, ct);
+        var projectIds = lines.Where(line => line.ProjectJobId.HasValue).Select(line => line.ProjectJobId!.Value).Distinct().ToArray();
+        var projectNumbers = await db.ProjectJobs.AsNoTracking().Where(project => project.CompanyId == companyId && projectIds.Contains(project.Id)).ToDictionaryAsync(project => project.Id, project => project.JobNumber, ct);
         return invoices.SelectMany(invoice =>
         {
             var invoiceLines = lines.Where(line => line.SalesInvoiceId == invoice.Id).ToArray();
             if (invoiceLines.Length == 0)
-                return new[] { new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture), "Imported invoice", "1", invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture) } };
-            return invoiceLines.Select(line => new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), RoundCurrency(line.Quantity * line.UnitPrice - line.DiscountAmount).ToString("0.00", CultureInfo.InvariantCulture), line.Description, line.DiscountAmount == 0 ? line.Quantity.ToString("0.####", CultureInfo.InvariantCulture) : string.Empty, line.DiscountAmount == 0 ? line.UnitPrice.ToString("0.00", CultureInfo.InvariantCulture) : string.Empty });
+                return new[] { new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture), "Imported invoice", "1", invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture), string.Empty } };
+            return invoiceLines.Select(line => new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), RoundCurrency(line.Quantity * line.UnitPrice - line.DiscountAmount).ToString("0.00", CultureInfo.InvariantCulture), line.Description, line.DiscountAmount == 0 ? line.Quantity.ToString("0.####", CultureInfo.InvariantCulture) : string.Empty, line.DiscountAmount == 0 ? line.UnitPrice.ToString("0.00", CultureInfo.InvariantCulture) : string.Empty, line.ProjectJobId.HasValue ? projectNumbers.GetValueOrDefault(line.ProjectJobId.Value, string.Empty) : string.Empty });
         });
     }
 
@@ -154,6 +159,7 @@ public sealed class QuickBooksOnlineInterchangeService(
     {
         var errors = new List<string>();
         var eligibleAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount).Select(account => new { account.Id, account.Number, account.Name }).ToListAsync(ct);
+        var activeProjects = await db.ProjectJobs.Where(project => project.CompanyId == companyId && project.Status == "Active").Select(project => new { project.Id, project.JobNumber, project.Name }).ToListAsync(ct);
         var imports = new Dictionary<string, (DateOnly Date, string Reference, string Description, List<JournalLineRequest> Lines)>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
         {
@@ -174,6 +180,13 @@ public sealed class QuickBooksOnlineInterchangeService(
                 errors.Add($"Row {index + 2}: provide a positive debit or a positive credit, but not both.");
                 continue;
             }
+            var projectReference = Value(row, "project / job", "project/job", "project job", "project", "class");
+            var projectMatches = activeProjects.Where(project => project.JobNumber.Equals(projectReference, StringComparison.OrdinalIgnoreCase) || project.Name.Equals(projectReference, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (!string.IsNullOrWhiteSpace(projectReference) && projectMatches.Length != 1)
+            {
+                errors.Add($"Row {index + 2}: Project / Job must identify one active BrassLedger project by job number or unique name.");
+                continue;
+            }
             if (!imports.TryGetValue(journalNumber, out var journal))
             {
                 journal = (date, Value(row, "reference"), Value(row, "journal/description", "journal", "description"), []);
@@ -184,7 +197,7 @@ public sealed class QuickBooksOnlineInterchangeService(
                 errors.Add($"Row {index + 2}: every line in journal '{journalNumber}' must have the same date.");
                 continue;
             }
-            journal.Lines.Add(new JournalLineRequest(accountMatches[0].Number, debit, credit, Value(row, "line description", "description")));
+            journal.Lines.Add(new JournalLineRequest(accountMatches[0].Number, debit, credit, Value(row, "line description", "description"), projectMatches.SingleOrDefault()?.Id));
         }
         foreach (var (number, journal) in imports)
         {
@@ -213,7 +226,7 @@ public sealed class QuickBooksOnlineInterchangeService(
             {
                 Id = Guid.NewGuid(), JournalEntryId = entry.Id,
                 AccountId = eligibleAccounts.Single(account => account.Number.Equals(line.AccountNumber, StringComparison.OrdinalIgnoreCase)).Id,
-                Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit
+                ProjectJobId = line.ProjectJobId, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit
             }));
             db.BusinessAuditEntries.Add(new BusinessAuditEntry
             {
@@ -230,6 +243,7 @@ public sealed class QuickBooksOnlineInterchangeService(
         var errors = new List<string>();
         var customers = await db.Customers.Where(customer => customer.CompanyId == companyId).Select(customer => new { customer.Id, customer.CustomerNumber, customer.Name }).ToListAsync(ct);
         var revenueAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && !account.IsControlAccount && account.Type == AccountType.Revenue).Select(account => new { account.Number, account.Name, account.OperationalRole }).ToListAsync(ct);
+        var activeProjects = await db.ProjectJobs.Where(project => project.CompanyId == companyId && project.Status == "Active").Select(project => new { project.Id, project.JobNumber, project.Name }).ToListAsync(ct);
         var defaultRevenueAccount = revenueAccounts.SingleOrDefault(account => account.OperationalRole == AccountingAccountRoles.DefaultRevenue)?.Number ?? string.Empty;
         var imports = new Dictionary<string, (Guid CustomerId, DateOnly InvoiceDate, DateOnly DueDate, List<SalesInvoiceLineRequest> Lines)>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
@@ -264,6 +278,13 @@ public sealed class QuickBooksOnlineInterchangeService(
                     continue;
                 }
             }
+            var projectReference = Value(row, "project / job", "project/job", "project job", "project", "class");
+            var projectMatches = activeProjects.Where(project => project.JobNumber.Equals(projectReference, StringComparison.OrdinalIgnoreCase) || project.Name.Equals(projectReference, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (!string.IsNullOrWhiteSpace(projectReference) && projectMatches.Length != 1)
+            {
+                errors.Add($"Row {index + 2}: Project / Job must identify one active BrassLedger project by job number or unique name.");
+                continue;
+            }
             if (!imports.TryGetValue(invoiceNumber, out var invoice))
             {
                 invoice = (customerMatches[0].Id, invoiceDate, dueDate, []);
@@ -275,7 +296,7 @@ public sealed class QuickBooksOnlineInterchangeService(
                 continue;
             }
             var description = Value(row, "item description", "description");
-            invoice.Lines.Add(new SalesInvoiceLineRequest(string.IsNullOrWhiteSpace(description) ? $"QuickBooks invoice {invoiceNumber}" : description, quantity, rate, 0, 0, accountMatches[0].Number));
+            invoice.Lines.Add(new SalesInvoiceLineRequest(string.IsNullOrWhiteSpace(description) ? $"QuickBooks invoice {invoiceNumber}" : description, quantity, rate, 0, 0, accountMatches[0].Number, projectMatches.SingleOrDefault()?.Id));
         }
         if (imports.Count > 100) errors.Add("A QuickBooks invoice batch can contain at most 100 invoices.");
         var numbers = imports.Keys.ToArray();

@@ -22,7 +22,8 @@ public sealed class LedgerPageTests : TestContext
             BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments,
             BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments,
             BrassLedgerAuthorizationPolicies.PostSubledgerDocuments,
-            BrassLedgerAuthorizationPolicies.ManageOperations);
+            BrassLedgerAuthorizationPolicies.ManageOperations,
+            BrassLedgerAuthorizationPolicies.ManageProjects);
         Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(TestWorkspaceData.CreateWorkspace()));
         Services.AddSingleton<IAccountingTransactionService>(new StubAccountingTransactionService());
         Services.AddSingleton<IAccountingInterchangeService>(new StubAccountingInterchangeService());
@@ -59,6 +60,7 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("Purchase requisitions", cut.Markup);
         Assert.NotNull(cut.Find("select[aria-label='Purchase order vendor']"));
         Assert.NotNull(cut.Find("select[aria-label='Purchase order line 1 item']"));
+        Assert.NotNull(cut.Find("select[aria-label='Purchase order line 1 project']"));
         cut.FindAll("button").Last(button => button.TextContent.Trim() == "Add line").Click();
         Assert.NotNull(cut.Find("select[aria-label='Purchase order line 2 item']"));
         Assert.Contains("Inventory receipts and invoice matching", cut.Markup);
@@ -66,9 +68,11 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("Prepare sales quote", cut.Markup);
         Assert.NotNull(cut.Find("select[aria-label='Sales quote customer']"));
         Assert.NotNull(cut.Find("select[aria-label='Sales quote line 1 item']"));
+        Assert.NotNull(cut.Find("select[aria-label='Sales quote line 1 project']"));
         Assert.Contains("Prepare sales order", cut.Markup);
         Assert.NotNull(cut.Find("select[aria-label='Sales order customer']"));
         Assert.NotNull(cut.Find("select[aria-label='Sales order line 1 item']"));
+        Assert.NotNull(cut.Find("select[aria-label='Sales order line 1 project']"));
         Assert.NotNull(cut.Find("table[aria-label='Inventory picks']"));
         Assert.NotNull(cut.Find("table[aria-label='Inventory packing slips']"));
         Assert.NotNull(cut.Find("table[aria-label='Sales backorder promises']"));
@@ -86,6 +90,24 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("purchase-price variance", cut.Markup);
         Assert.NotNull(cut.Find("table[aria-label='Landed cost allocations']"));
         Assert.Contains("Freight and import charges remain tied to their source receipt", cut.Markup);
+    }
+
+    [Fact]
+    public void ProjectsPage_ExposesMaintenanceLifecycleMetricsAndLedgerDrillDown()
+    {
+        var cut = RenderComponent<Projects>();
+
+        Assert.Contains("Project accounting", cut.Markup);
+        Assert.Contains("Open commitments", cut.Markup);
+        Assert.NotNull(cut.Find("input[aria-label='Project number']"));
+        Assert.NotNull(cut.Find("select[aria-label='Project customer']"));
+        Assert.NotNull(cut.Find("select[aria-label='Project billing method']"));
+        Assert.NotNull(cut.Find("input[aria-label='Project retainage percent']"));
+        Assert.NotNull(cut.Find("table[aria-label='Project portfolio']"));
+        Assert.Contains("Gross margin", cut.Markup);
+        cut.FindAll("button").First(button => button.TextContent.Contains("JOB-5007", StringComparison.Ordinal)).Click();
+        Assert.Contains("JOB-5007 ledger", cut.Markup);
+        Assert.Contains("Budget remaining after posted cost and open commitments", cut.Markup);
     }
 
     [Fact]
@@ -162,6 +184,9 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> VoidPayrollTimecardAsync(VoidPayrollTimecardRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.TimecardId));
     public Task<TransactionResult> RecordPayrollLiabilityPaymentAsync(RecordPayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.PaymentId));
+    public Task<TransactionResult> SaveProjectJobAsync(SaveProjectJobRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> CloseProjectJobAsync(CloseProjectJobRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectJobId));
+    public Task<TransactionResult> ReopenProjectJobAsync(ReopenProjectJobRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectJobId));
     public Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> SaveInventoryWarehouseAsync(SaveInventoryWarehouseRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));

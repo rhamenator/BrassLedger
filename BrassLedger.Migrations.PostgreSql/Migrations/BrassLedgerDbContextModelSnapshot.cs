@@ -3080,7 +3080,12 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ProjectJobId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("ProjectJobId", "JournalEntryId");
 
                     b.ToTable("JournalEntryLines");
                 });
@@ -3991,6 +3996,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid?>("PayrollTimeEntryId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ProjectJobId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("Rate")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
@@ -4024,6 +4032,8 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("PayrollTimeEntryId");
+
+                    b.HasIndex("ProjectJobId");
 
                     b.HasIndex("PayrollRunEmployeeLineId", "Sequence")
                         .IsUnique();
@@ -5510,16 +5520,56 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<string>("BillingMethod")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<decimal>("BudgetAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<string>("CloseReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("ClosedOn")
+                        .HasColumnType("date");
+
                     b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("ContractAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CustomerId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("CustomerName")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateOnly?>("ExpectedEndDate")
+                        .HasColumnType("date");
 
                     b.Property<string>("JobNumber")
                         .IsRequired()
@@ -5529,11 +5579,20 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<decimal>("RetainagePercent")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<DateOnly?>("StartDate")
+                        .HasColumnType("date");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
 
                     b.HasIndex("CompanyId", "JobNumber")
                         .IsUnique();
@@ -5861,6 +5920,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
 
+                    b.Property<Guid?>("ProjectJobId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("PurchaseOrderId")
                         .HasColumnType("uuid");
 
@@ -5881,6 +5943,8 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("ProjectJobId");
 
                     b.HasIndex("PurchaseOrderId", "Sequence")
                         .IsUnique();
@@ -6002,6 +6066,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid>("InventoryItemId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ProjectJobId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("PurchaseRequisitionId")
                         .HasColumnType("uuid");
 
@@ -6015,6 +6082,8 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("ProjectJobId");
 
                     b.HasIndex("PurchaseRequisitionId", "Sequence")
                         .IsUnique();
@@ -6148,6 +6217,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<Guid?>("ProjectJobId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
@@ -6177,6 +6249,8 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasIndex("InventoryItemId");
 
                     b.HasIndex("InventoryShipmentLineId");
+
+                    b.HasIndex("ProjectJobId");
 
                     b.HasIndex("RevenueAccountId");
 
@@ -6415,6 +6489,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
 
+                    b.Property<Guid?>("ProjectJobId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("ReturnedQuantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
@@ -6447,6 +6524,8 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasIndex("AllocationWarehouseId");
 
                     b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("ProjectJobId");
 
                     b.HasIndex("RevenueAccountId");
 
@@ -6554,6 +6633,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<Guid?>("ProjectJobId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
@@ -6578,6 +6660,8 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("ProjectJobId");
 
                     b.HasIndex("RevenueAccountId");
 
@@ -8039,6 +8123,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<Guid?>("ProjectJobId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
@@ -8074,6 +8161,8 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasIndex("ExpenseAccountId");
 
                     b.HasIndex("InventoryReceiptLineId");
+
+                    b.HasIndex("ProjectJobId");
 
                     b.HasIndex("VendorBillId", "Sequence")
                         .IsUnique();
@@ -8708,6 +8797,14 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.JournalEntryLine", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.LandedCostAllocation", b =>
                 {
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryReceipt", null)
@@ -8813,6 +8910,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.PayrollTimeEntry", null)
                         .WithMany()
                         .HasForeignKey("PayrollTimeEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -9025,6 +9127,14 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectJob", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseInvoiceMatch", b =>
                 {
                     b.HasOne("BrassLedger.Domain.Accounting.Company", null)
@@ -9116,6 +9226,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.PurchaseOrder", null)
                         .WithMany()
                         .HasForeignKey("PurchaseOrderId")
@@ -9138,6 +9253,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasForeignKey("InventoryItemId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.PurchaseRequisition", null)
                         .WithMany()
@@ -9169,6 +9289,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryShipmentLine", null)
                         .WithMany()
                         .HasForeignKey("InventoryShipmentLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
@@ -9245,6 +9370,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
                         .WithMany()
                         .HasForeignKey("RevenueAccountId")
@@ -9274,6 +9404,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasForeignKey("InventoryItemId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
                         .WithMany()
@@ -9533,6 +9668,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryReceiptLine", null)
                         .WithMany()
                         .HasForeignKey("InventoryReceiptLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.VendorBill", null)

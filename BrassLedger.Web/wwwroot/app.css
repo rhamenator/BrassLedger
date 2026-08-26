@@ -419,6 +419,39 @@ h1:focus {
     overflow-x: auto;
 }
 
+.table-link {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ink-strong);
+    font: inherit;
+    font-weight: 700;
+    text-align: left;
+    text-decoration: underline;
+    text-decoration-thickness: 0.08em;
+    text-underline-offset: 0.16em;
+    cursor: pointer;
+}
+
+.table-link:hover,
+.table-link:focus-visible {
+    color: var(--brand-teal);
+}
+
+.project-portfolio-table {
+    min-width: 82rem;
+}
+
+.project-portfolio-table th:first-child,
+.project-portfolio-table td:first-child {
+    min-width: 13rem;
+}
+
+.project-portfolio-table th:nth-child(2),
+.project-portfolio-table td:nth-child(2) {
+    min-width: 10rem;
+}
+
 .payroll-employee-picker {
     max-width: 28rem;
     margin: 1rem 0;

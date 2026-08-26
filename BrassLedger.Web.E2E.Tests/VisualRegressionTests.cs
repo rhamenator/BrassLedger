@@ -38,6 +38,18 @@ public sealed class VisualRegressionTests
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.SnapshotBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task ProjectsSnapshot_MatchesBaseline(BrowserKind browserKind)
+    {
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync();
+        await session.GotoAsync("/projects");
+        await session.WaitForHeadingAsync("Track project setup, commitments, costs, and revenue.");
+        await session.AssertNoUiFailuresAsync("projects visual snapshot");
+        await session.AssertSnapshotAsync("projects");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.SnapshotBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task PayrollSnapshot_MatchesBaseline(BrowserKind browserKind)
     {
         await using var session = await _fixture.CreateSessionAsync(browserKind);

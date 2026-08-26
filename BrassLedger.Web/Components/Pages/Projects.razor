@@ -1,82 +1,119 @@
 @page "/projects"
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageProjects)]
 @inject IBusinessWorkspaceService WorkspaceService
+@inject IAccountingTransactionService TransactionService
 
 <PageTitle>Projects</PageTitle>
 
 @if (Workspace is null)
 {
-    <section class="panel">
-        <h1>Loading projects...</h1>
-    </section>
+    <section class="panel"><h1>Loading projects...</h1></section>
 }
 else
 {
     <section class="page-shell">
         <header class="page-header">
-            <div>
-                <p class="eyebrow">Projects, Jobs, Property Extensions</p>
-                <h1>Job tracking with room for industry-specific workflows.</h1>
-            </div>
-            <p class="page-intro">
-                Job tracking is live now. Property management can layer on top of the same job ledger instead of becoming
-                a closed-off premium edition.
-            </p>
+            <div><p class="eyebrow">Project accounting</p><h1>Track project setup, commitments, costs, and revenue.</h1></div>
+            <p class="page-intro">Amounts come from approved purchase commitments and posted project-tagged journal lines. Closing a project prevents new transactions while preserving its ledger history.</p>
         </header>
 
+        @if (!string.IsNullOrWhiteSpace(StatusMessage))
+        {
+            <p class="status-banner" role="status">@StatusMessage</p>
+        }
+
         <section class="stats-grid">
-            <article class="stat-card accent-sand">
-                <span class="stat-value">@Workspace.Projects.OpenJobs</span>
-                <span class="stat-label">Open jobs</span>
-            </article>
-            <article class="stat-card accent-sky">
-                <span class="stat-value">@Workspace.Projects.BudgetAmount.ToString("C0")</span>
-                <span class="stat-label">Budgeted</span>
-            </article>
-            <article class="stat-card accent-sage">
-                <span class="stat-value">@Workspace.Projects.ActualCost.ToString("C0")</span>
-                <span class="stat-label">Actual cost</span>
-            </article>
-            <article class="stat-card accent-coral">
-                <span class="stat-value">@((Workspace.Projects.BudgetAmount - Workspace.Projects.ActualCost).ToString("C0"))</span>
-                <span class="stat-label">Remaining margin</span>
-            </article>
+            <article class="stat-card accent-sand"><span class="stat-value">@Workspace.Projects.OpenJobs</span><span class="stat-label">Active projects</span></article>
+            <article class="stat-card accent-sky"><span class="stat-value">@Workspace.Projects.BudgetAmount.ToString("C0")</span><span class="stat-label">Total budget</span></article>
+            <article class="stat-card accent-sage"><span class="stat-value">@Workspace.Projects.ActualCost.ToString("C0")</span><span class="stat-label">Posted costs</span></article>
+            <article class="stat-card accent-coral"><span class="stat-value">@Workspace.Projects.Commitments.ToString("C0")</span><span class="stat-label">Open commitments</span></article>
         </section>
 
         <section class="panel">
-            <h2>Job ledger</h2>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Job</th>
-                        <th>Customer</th>
-                        <th>Status</th>
-                        <th>Budget</th>
-                        <th>Actual</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var job in Workspace.Projects.Jobs)
-                    {
-                        <tr>
-                            <td>@job.JobNumber - @job.Name</td>
-                            <td>@job.CustomerName</td>
-                            <td>@job.Status</td>
-                            <td>@job.BudgetAmount.ToString("C")</td>
-                            <td>@job.ActualCost.ToString("C")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+            <h2>@(ProjectForm.Id.HasValue ? $"Edit {ProjectForm.JobNumber}" : "Add a project")</h2>
+            <EditForm Model="ProjectForm" OnValidSubmit="SaveProjectAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Project number</label><InputText aria-label="Project number" class="field-input" placeholder="For example, JOB-1001" @bind-Value="ProjectForm.JobNumber" /></div>
+                <div class="field-group"><label class="field-label">Name</label><InputText aria-label="Project name" class="field-input" @bind-Value="ProjectForm.Name" /></div>
+                <div class="field-group"><label class="field-label">Customer</label><InputSelect aria-label="Project customer" class="field-input" @bind-Value="ProjectForm.CustomerId"><option value="@Guid.Empty">Select customer</option>@foreach (var customer in Workspace.Receivables.Customers) { <option value="@customer.Id">@customer.CustomerNumber — @customer.Name</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Start date</label><InputDate aria-label="Project start date" class="field-input" @bind-Value="ProjectForm.StartDate" /></div>
+                <div class="field-group"><label class="field-label">Expected end date</label><InputDate aria-label="Project expected end date" class="field-input" @bind-Value="ProjectForm.ExpectedEndDate" /></div>
+                <div class="field-group"><label class="field-label">Billing method</label><InputSelect aria-label="Project billing method" class="field-input" @bind-Value="ProjectForm.BillingMethod"><option value="TimeAndMaterials">Time and materials</option><option value="FixedPrice">Fixed price</option><option value="CostPlus">Cost plus</option><option value="Internal">Internal</option></InputSelect></div>
+                <div class="field-group"><label class="field-label">Contract amount</label><InputNumber aria-label="Project contract amount" class="field-input" @bind-Value="ProjectForm.ContractAmount" /></div>
+                <div class="field-group"><label class="field-label">Budget</label><InputNumber aria-label="Project budget" class="field-input" @bind-Value="ProjectForm.BudgetAmount" /></div>
+                <div class="field-group"><label class="field-label">Retainage percent</label><InputNumber aria-label="Project retainage percent" class="field-input" @bind-Value="ProjectForm.RetainagePercentDisplay" /></div>
+                <button class="action-primary" type="submit">@(ProjectForm.Id.HasValue ? "Save project changes" : "Create project")</button>
+                @if (ProjectForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelEdit">Cancel edit</button> }
+            </div></EditForm>
         </section>
+
+        @if (ProjectDecisionForm is not null)
+        {
+            <section class="panel">
+                <h2>@(ProjectDecisionForm.Reopen ? $"Reopen {ProjectDecisionForm.JobNumber}" : $"Close {ProjectDecisionForm.JobNumber}")</h2>
+                <EditForm Model="ProjectDecisionForm" OnValidSubmit="CompleteProjectDecisionAsync"><div class="auth-form">
+                    @if (!ProjectDecisionForm.Reopen) { <div class="field-group"><label class="field-label">Close date</label><InputDate aria-label="Project close date" class="field-input" @bind-Value="ProjectDecisionForm.ClosedOn" /></div> }
+                    <div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Project status change reason" class="field-input" @bind-Value="ProjectDecisionForm.Reason" /></div>
+                    <button class="action-primary" type="submit">@(ProjectDecisionForm.Reopen ? "Reopen project" : "Close project")</button>
+                    <button class="action-secondary" type="button" @onclick="CancelDecision">Cancel</button>
+                </div></EditForm>
+            </section>
+        }
+
+        <section class="panel">
+            <h2>Project portfolio</h2>
+            @if (Workspace.Projects.Jobs.Count == 0)
+            {
+                <p class="empty-state">No projects have been created. Add a project above before assigning transactions or time.</p>
+            }
+            else
+            {
+                <div class="table-scroll"><table class="data-table project-portfolio-table" aria-label="Project portfolio">
+                    <thead><tr><th>Project</th><th>Customer</th><th>Status</th><th>Method</th><th>Contract</th><th>Budget</th><th>Cost</th><th>Commitments</th><th>Revenue</th><th>Gross margin</th><th>Action</th></tr></thead>
+                    <tbody>@foreach (var job in Workspace.Projects.Jobs) { <tr><td><button class="table-link" type="button" @onclick="() => SelectProject(job.Id)">@job.JobNumber — @job.Name</button></td><td>@job.CustomerName</td><td>@job.Status</td><td>@BillingMethodLabel(job.BillingMethod)</td><td>@job.ContractAmount.ToString("C")</td><td>@job.BudgetAmount.ToString("C")</td><td>@job.ActualCost.ToString("C")</td><td>@job.Commitments.ToString("C")</td><td>@job.Revenue.ToString("C")</td><td>@((job.Revenue - job.ActualCost).ToString("C"))</td><td><button class="action-secondary" type="button" @onclick="() => EditProject(job)">Edit</button> @if (job.Status == "Closed") { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, true)">Reopen</button> } else { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, false)">Close</button> }</td></tr> }</tbody>
+                </table></div>
+            }
+        </section>
+
+        @if (SelectedProject is not null)
+        {
+            <section class="panel">
+                <h2>@SelectedProject.JobNumber ledger</h2>
+                <p class="page-intro">Budget remaining after posted cost and open commitments: @((SelectedProject.BudgetAmount - SelectedProject.ActualCost - SelectedProject.Commitments).ToString("C")); retainage: @SelectedProject.RetainagePercent.ToString("P2").</p>
+                @{ var ledgerLines = (Workspace.Projects.LedgerLines ?? []).Where(line => line.ProjectJobId == SelectedProject.Id).ToArray(); }
+                @if (ledgerLines.Length == 0) { <p class="empty-state">No posted ledger lines are assigned to this project.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Selected project ledger"><thead><tr><th>Date</th><th>Reference</th><th>Source</th><th>Account</th><th>Description</th><th>Debit</th><th>Credit</th><th>Cost</th><th>Revenue</th></tr></thead><tbody>@foreach (var line in ledgerLines) { <tr><td>@line.PostedOn</td><td>@line.Reference</td><td>@line.SourceModule</td><td>@line.AccountNumber — @line.AccountName</td><td>@line.Description</td><td>@line.Debit.ToString("C")</td><td>@line.Credit.ToString("C")</td><td>@line.Cost.ToString("C")</td><td>@line.Revenue.ToString("C")</td></tr> }</tbody></table></div> }
+            </section>
+        }
     </section>
 }
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private ProjectEditor ProjectForm { get; } = new();
+    private ProjectDecisionEditor? ProjectDecisionForm;
+    private Guid? SelectedProjectId;
+    private string StatusMessage = string.Empty;
+    private ProjectJobSnapshot? SelectedProject => Workspace?.Projects.Jobs.SingleOrDefault(project => project.Id == SelectedProjectId);
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    private async Task ReloadAsync() { Workspace = await WorkspaceService.GetWorkspaceAsync(); if (SelectedProjectId.HasValue && Workspace.Projects.Jobs.All(project => project.Id != SelectedProjectId)) SelectedProjectId = null; }
+    private async Task SaveProjectAsync() { var result = await TransactionService.SaveProjectJobAsync(new(ProjectForm.Id, ProjectForm.JobNumber, ProjectForm.Name, ProjectForm.CustomerId, ProjectForm.StartDate, ProjectForm.ExpectedEndDate, ProjectForm.BillingMethod, ProjectForm.ContractAmount, ProjectForm.BudgetAmount, ProjectForm.RetainagePercentDisplay / 100m, ProjectForm.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project {ProjectForm.JobNumber} saved." : result.ErrorMessage; if (result.Succeeded) { SelectedProjectId = result.Id; ProjectForm.Reset(); await ReloadAsync(); } }
+    private void EditProject(ProjectJobSnapshot project) { ProjectForm.Load(project); StatusMessage = string.Empty; }
+    private void CancelEdit() => ProjectForm.Reset();
+    private void SelectProject(Guid id) => SelectedProjectId = id;
+    private void BeginDecision(ProjectJobSnapshot project, bool reopen) => ProjectDecisionForm = new(project.Id, project.JobNumber, project.ConcurrencyToken, reopen, project.StartDate);
+    private void CancelDecision() => ProjectDecisionForm = null;
+    private async Task CompleteProjectDecisionAsync() { var form = ProjectDecisionForm!; var result = form.Reopen ? await TransactionService.ReopenProjectJobAsync(new(form.ProjectJobId, form.Reason, form.ConcurrencyToken)) : await TransactionService.CloseProjectJobAsync(new(form.ProjectJobId, form.ClosedOn, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project {form.JobNumber} {(form.Reopen ? "reopened" : "closed")}." : result.ErrorMessage; if (result.Succeeded) { ProjectDecisionForm = null; await ReloadAsync(); } }
+    private static string BillingMethodLabel(string method) => method switch { "FixedPrice" => "Fixed price", "TimeAndMaterials" => "Time and materials", "CostPlus" => "Cost plus", "Internal" => "Internal", _ => method };
+
+    private sealed class ProjectEditor
     {
-        Workspace = await WorkspaceService.GetWorkspaceAsync();
+        public Guid? Id { get; set; } public string JobNumber { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public Guid CustomerId { get; set; } public DateOnly StartDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? ExpectedEndDate { get; set; } public string BillingMethod { get; set; } = "TimeAndMaterials"; public decimal ContractAmount { get; set; } public decimal BudgetAmount { get; set; } public decimal RetainagePercentDisplay { get; set; } public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectJobSnapshot project) { Id = project.Id; JobNumber = project.JobNumber; Name = project.Name; CustomerId = project.CustomerId ?? Guid.Empty; StartDate = project.StartDate ?? DateOnly.FromDateTime(DateTime.Today); ExpectedEndDate = project.ExpectedEndDate; BillingMethod = project.BillingMethod; ContractAmount = project.ContractAmount; BudgetAmount = project.BudgetAmount; RetainagePercentDisplay = project.RetainagePercent * 100m; ConcurrencyToken = project.ConcurrencyToken; }
+        public void Reset() { Id = null; JobNumber = string.Empty; Name = string.Empty; CustomerId = Guid.Empty; StartDate = DateOnly.FromDateTime(DateTime.Today); ExpectedEndDate = null; BillingMethod = "TimeAndMaterials"; ContractAmount = 0m; BudgetAmount = 0m; RetainagePercentDisplay = 0m; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class ProjectDecisionEditor(Guid projectJobId, string jobNumber, string concurrencyToken, bool reopen, DateOnly? startDate)
+    {
+        public Guid ProjectJobId { get; } = projectJobId; public string JobNumber { get; } = jobNumber; public string ConcurrencyToken { get; } = concurrencyToken; public bool Reopen { get; } = reopen; public DateOnly ClosedOn { get; set; } = startDate.HasValue && startDate > DateOnly.FromDateTime(DateTime.Today) ? startDate.Value : DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty;
     }
 }

@@ -369,6 +369,17 @@ public static class ServiceCollectionExtensions
                 && await HasTableAsync(dbContext, "PayrollRunRevisions", cancellationToken)
                 && await HasColumnAsync(dbContext, "PayrollRunRevisions", "PayloadJson", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_PayrollRunRevisions_PayrollRunId_RevisionNumber", cancellationToken);
+        if (migrationId.EndsWith("_AddProjectLedgerDimensions", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "ProjectJobs", "CustomerId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectJobs", "BillingMethod", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectJobs", "ConcurrencyToken", cancellationToken)
+                && await HasColumnAsync(dbContext, "JournalEntryLines", "ProjectJobId", cancellationToken)
+                && await HasColumnAsync(dbContext, "PayrollEarningLines", "ProjectJobId", cancellationToken)
+                && await HasColumnAsync(dbContext, "SalesInvoiceLines", "ProjectJobId", cancellationToken)
+                && await HasColumnAsync(dbContext, "VendorBillLines", "ProjectJobId", cancellationToken)
+                && await HasColumnAsync(dbContext, "SalesOrderLines", "ProjectJobId", cancellationToken)
+                && await HasColumnAsync(dbContext, "PurchaseOrderLines", "ProjectJobId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_JournalEntryLines_ProjectJobId_JournalEntryId", cancellationToken);
         return false;
     }
 

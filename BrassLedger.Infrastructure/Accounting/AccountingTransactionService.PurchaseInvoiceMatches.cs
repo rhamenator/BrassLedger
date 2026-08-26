@@ -479,26 +479,18 @@ public sealed partial class AccountingTransactionService
         if (grni is null)
             return TransactionResult.Failure("Configure an active goods received not invoiced account before posting this bill.");
 
-        var journalLines = new List<JournalLineRequest>();
-        if (match.AccrualAmount > 0m)
-            journalLines.Add(new(
-                OperationalRoleReference(AccountingAccountRoles.GoodsReceivedNotInvoiced),
-                match.AccrualAmount,
-                0m,
-                "Clear matched receipt accrual"));
+        var purchaseOrderLineIds = lines.Select(line => line.PurchaseOrderLineId).Distinct().ToArray();
+        var projectByPurchaseOrderLine = await db.PurchaseOrderLines.Where(line => purchaseOrderLineIds.Contains(line.Id)).ToDictionaryAsync(line => line.Id, line => line.ProjectJobId, cancellationToken);
         var totalVariance = match.InvoiceAmount - match.AccrualAmount;
-        if (totalVariance > 0m)
-            journalLines.Add(new(
-                OperationalRoleReference(AccountingAccountRoles.PurchasePriceVariance),
-                totalVariance,
-                0m,
-                "Approved purchase price and quantity variance"));
-        else if (totalVariance < 0m)
-            journalLines.Add(new(
-                OperationalRoleReference(AccountingAccountRoles.PurchasePriceVariance),
-                0m,
-                -totalVariance,
-                "Approved favorable purchase variance"));
+        var journalLines = new List<JournalLineRequest>();
+        journalLines.AddRange(lines.Where(line => line.AccrualAmount > 0m).GroupBy(line => projectByPurchaseOrderLine.GetValueOrDefault(line.PurchaseOrderLineId)).Select(group => new JournalLineRequest(
+            OperationalRoleReference(AccountingAccountRoles.GoodsReceivedNotInvoiced), group.Sum(line => line.AccrualAmount), 0m, "Clear matched receipt accrual", group.Key)));
+        foreach (var group in lines.GroupBy(line => projectByPurchaseOrderLine.GetValueOrDefault(line.PurchaseOrderLineId)))
+        {
+            var variance = group.Sum(line => line.PriceVarianceAmount + line.QuantityVarianceAmount);
+            if (variance > 0m) journalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.PurchasePriceVariance), variance, 0m, "Approved purchase price and quantity variance", group.Key));
+            else if (variance < 0m) journalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.PurchasePriceVariance), 0m, -variance, "Approved favorable purchase variance", group.Key));
+        }
         journalLines.Add(new(
             OperationalRoleReference(AccountingAccountRoles.AccountsPayable),
             0m,
@@ -546,6 +538,7 @@ public sealed partial class AccountingTransactionService
             InventoryReceiptLineId = line.InventoryReceiptLineId,
             Sequence = line.Sequence,
             ExpenseAccountId = grni.Id,
+            ProjectJobId = projectByPurchaseOrderLine.GetValueOrDefault(line.PurchaseOrderLineId),
             Description = $"Receipt {receipt.ReceiptNumber}, line {line.Sequence}",
             Quantity = line.InvoiceQuantity,
             UnitCost = line.InvoiceUnitCost,

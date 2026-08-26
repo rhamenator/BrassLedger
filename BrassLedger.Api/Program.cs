@@ -135,6 +135,34 @@ api.MapGet("/projects", async (IBusinessWorkspaceService service, CancellationTo
 .WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
 
+api.MapPost("/projects", async (SaveProjectJobRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id.HasValue) return Results.BadRequest(TransactionResult.Failure("A new project request cannot contain an identifier."));
+    var result = await service.SaveProjectJobAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/projects/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["project"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
+api.MapPut("/projects/{projectJobId:guid}", async (Guid projectJobId, SaveProjectJobRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id != projectJobId) return Results.BadRequest(TransactionResult.Failure("The project identifier in the route and request must match."));
+    var result = await service.SaveProjectJobAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["project"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
+api.MapPost("/projects/{projectJobId:guid}/close", async (Guid projectJobId, CloseProjectJobRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("The project identifier in the route and request must match."));
+    var result = await service.CloseProjectJobAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["project"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
+api.MapPost("/projects/{projectJobId:guid}/reopen", async (Guid projectJobId, ReopenProjectJobRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("The project identifier in the route and request must match."));
+    var result = await service.ReopenProjectJobAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["project"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
 api.MapGet("/reporting-catalog", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
 {
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Reporting);

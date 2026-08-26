@@ -57,12 +57,13 @@ else
                     <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Journal entry description" class="field-input" @bind-Value="JournalForm.Description" /></div>
                 </div>
                 <table class="data-table">
-                    <thead><tr><th>Account</th><th>Line description</th><th>Debit</th><th>Credit</th><th><span class="sr-only">Remove line</span></th></tr></thead>
+                    <thead><tr><th>Account</th><th>Project</th><th>Line description</th><th>Debit</th><th>Credit</th><th><span class="sr-only">Remove line</span></th></tr></thead>
                     <tbody>
                         @foreach (var line in JournalForm.Lines)
                         {
                             <tr @key="line.Key">
                                 <td><InputSelect aria-label="Journal entry account" class="field-input" @bind-Value="line.AccountNumber"><option value="">Select account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></td>
+                                <td><InputSelect aria-label="Journal entry project" class="field-input" @bind-Value="line.ProjectJobId"><option value="">No project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status is "Active" or "Open" or "Billing")) { <option value="@project.Id">@project.JobNumber — @project.Name</option> }</InputSelect></td>
                                 <td><InputText aria-label="Journal entry line description" class="field-input" @bind-Value="line.Description" /></td>
                                 <td><InputNumber aria-label="Journal entry debit" class="field-input" @bind-Value="line.Debit" /></td>
                                 <td><InputNumber aria-label="Journal entry credit" class="field-input" @bind-Value="line.Credit" /></td>
@@ -70,7 +71,7 @@ else
                             </tr>
                         }
                     </tbody>
-                    <tfoot><tr><th colspan="2">Totals</th><th>@JournalForm.Lines.Sum(line => line.Debit).ToString("C")</th><th>@JournalForm.Lines.Sum(line => line.Credit).ToString("C")</th><th></th></tr></tfoot>
+                    <tfoot><tr><th colspan="3">Totals</th><th>@JournalForm.Lines.Sum(line => line.Debit).ToString("C")</th><th>@JournalForm.Lines.Sum(line => line.Credit).ToString("C")</th><th></th></tr></tfoot>
                 </table>
                 <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddJournalLine">Add line</button><button class="action-primary" type="submit">@(JournalForm.Id.HasValue ? "Save corrected draft" : "Save draft")</button>@if (JournalForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelJournalEdit">Cancel edit</button> }</div>
             </EditForm>
@@ -408,7 +409,7 @@ else
     private async Task SaveJournalDraftAsync()
     {
         var result = await TransactionService.SaveJournalEntryDraftAsync(new SaveJournalEntryDraftRequest(JournalForm.Id, JournalForm.Date, JournalForm.Reference, JournalForm.Description,
-            JournalForm.Lines.Select(line => new JournalLineRequest(line.AccountNumber, line.Debit, line.Credit, line.Description)).ToArray(), JournalForm.ConcurrencyToken));
+            JournalForm.Lines.Select(line => new JournalLineRequest(line.AccountNumber, line.Debit, line.Credit, line.Description, line.ProjectJobId)).ToArray(), JournalForm.ConcurrencyToken));
         StatusMessage = result.Succeeded ? (JournalForm.Id.HasValue ? "Corrected journal draft saved for review." : "Journal draft saved for review.") : result.ErrorMessage;
         if (result.Succeeded) { JournalForm.Reset(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     }
@@ -570,8 +571,8 @@ else
         else ReconciliationForm.SelectedEntryIds.Remove(entryId);
     }
 
-    private sealed class JournalEditor { public Guid? Id { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public List<JournalLineEditor> Lines { get; } = [new(), new()]; public void Load(JournalEntrySnapshot entry) { Id = entry.Id; ConcurrencyToken = entry.ConcurrencyToken; Date = entry.PostedOn; Reference = entry.Reference; Description = entry.Description; Lines.Clear(); Lines.AddRange((entry.Lines ?? []).Select(line => new JournalLineEditor { AccountNumber = line.AccountNumber, Description = line.Description, Debit = line.Debit, Credit = line.Credit })); } public void Reset() { Id = null; ConcurrencyToken = string.Empty; Date = DateOnly.FromDateTime(DateTime.Today); Reference = string.Empty; Description = string.Empty; Lines.Clear(); Lines.Add(new()); Lines.Add(new()); } }
-    private sealed class JournalLineEditor { public Guid Key { get; } = Guid.NewGuid(); public string AccountNumber { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public decimal Debit { get; set; } public decimal Credit { get; set; } }
+    private sealed class JournalEditor { public Guid? Id { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public List<JournalLineEditor> Lines { get; } = [new(), new()]; public void Load(JournalEntrySnapshot entry) { Id = entry.Id; ConcurrencyToken = entry.ConcurrencyToken; Date = entry.PostedOn; Reference = entry.Reference; Description = entry.Description; Lines.Clear(); Lines.AddRange((entry.Lines ?? []).Select(line => new JournalLineEditor { AccountNumber = line.AccountNumber, ProjectJobId = line.ProjectJobId, Description = line.Description, Debit = line.Debit, Credit = line.Credit })); } public void Reset() { Id = null; ConcurrencyToken = string.Empty; Date = DateOnly.FromDateTime(DateTime.Today); Reference = string.Empty; Description = string.Empty; Lines.Clear(); Lines.Add(new()); Lines.Add(new()); } }
+    private sealed class JournalLineEditor { public Guid Key { get; } = Guid.NewGuid(); public string AccountNumber { get; set; } = string.Empty; public Guid? ProjectJobId { get; set; } public string Description { get; set; } = string.Empty; public decimal Debit { get; set; } public decimal Credit { get; set; } }
     private sealed class JournalReversalEditor { public Guid JournalEntryId { get; set; } public DateOnly ReversalDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; public void Reset() { JournalEntryId = Guid.Empty; ReversalDate = DateOnly.FromDateTime(DateTime.Today); Reason = string.Empty; } }
     private sealed class ReconciliationEditor { public Guid BankAccountId { get; set; } public DateOnly StatementDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal StatementBalance { get; set; } public string Notes { get; set; } = string.Empty; public HashSet<Guid> SelectedEntryIds { get; set; } = []; }
     private sealed class BankMappingEditor { public Guid BankAccountId { get; set; } public string LedgerAccountNumber { get; set; } = string.Empty; }

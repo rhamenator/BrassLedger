@@ -27,6 +27,8 @@ public sealed partial class AccountingTransactionService
         var itemIds = requestedLines.Select(line => line.InventoryItemId).ToArray();
         if (await db.InventoryItems.CountAsync(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id), cancellationToken) != itemIds.Length)
             return TransactionResult.Failure("Every requisition item must be active in the current company.");
+        if (!await AreActiveProjectsAsync(db, companyId, requestedLines.Select(line => line.ProjectJobId), cancellationToken))
+            return TransactionResult.Failure("Every requisition project must be active and belong to this company.");
         var number = request.RequisitionNumber.Trim();
         if (await db.PurchaseRequisitions.AnyAsync(requisition => requisition.CompanyId == companyId && requisition.RequisitionNumber == number && requisition.Id != request.Id, cancellationToken))
             return TransactionResult.Failure("Purchase-requisition number already exists.");
@@ -60,6 +62,7 @@ public sealed partial class AccountingTransactionService
             PurchaseRequisitionId = requisition.Id,
             Sequence = index + 1,
             InventoryItemId = line.InventoryItemId,
+            ProjectJobId = line.ProjectJobId,
             Description = line.Description.Trim(),
             RequestedQuantity = RoundQuantity(line.Quantity),
             EstimatedUnitCost = RoundCurrency(line.EstimatedUnitCost),
@@ -98,6 +101,7 @@ public sealed partial class AccountingTransactionService
         if (requisition.Status != "Submitted") return TransactionResult.Failure("Only a submitted purchase requisition can be approved or rejected.");
         if (!string.Equals(requisition.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The purchase requisition changed after it was opened. Refresh and review it again.");
         requisition.DecisionReason = request.Reason?.Trim() ?? string.Empty;
+        if (request.Approve && !await AreActiveProjectsAsync(db, companyId, db.PurchaseRequisitionLines.Where(line => line.PurchaseRequisitionId == requisition.Id).Select(line => line.ProjectJobId), cancellationToken)) return TransactionResult.Failure("One or more requisition projects are closed or unavailable.");
         if (request.Approve) { requisition.Status = "Approved"; requisition.ApprovedByUserId = ResolveUserId(); requisition.ApprovedAtUtc = DateTimeOffset.UtcNow; }
         else { requisition.Status = "Rejected"; requisition.RejectedByUserId = ResolveUserId(); requisition.RejectedAtUtc = DateTimeOffset.UtcNow; }
         requisition.ConcurrencyToken = Guid.NewGuid().ToString("N");
@@ -140,11 +144,12 @@ public sealed partial class AccountingTransactionService
         if (lines.Count == 0 || lines.Sum(line => line.EstimatedLineTotal) != requisition.TotalEstimatedAmount) return TransactionResult.Failure("The approved requisition lines do not reconcile to its reviewed total.");
         var itemIds = lines.Select(line => line.InventoryItemId).ToArray();
         if (await db.InventoryItems.CountAsync(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id), cancellationToken) != itemIds.Distinct().Count()) return TransactionResult.Failure("One or more approved requisition items are no longer active in this company.");
+        if (!await AreActiveProjectsAsync(db, companyId, lines.Select(line => line.ProjectJobId), cancellationToken)) return TransactionResult.Failure("One or more approved requisition projects are closed or unavailable.");
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var order = new PurchaseOrder { Id = Guid.NewGuid(), CompanyId = companyId, PurchaseRequisitionId = requisition.Id, VendorId = request.VendorId, OrderNumber = orderNumber, OrderedOn = request.OrderedOn, ExpectedOn = request.ExpectedOn, Status = "Draft", TotalAmount = requisition.TotalEstimatedAmount, Notes = string.IsNullOrWhiteSpace(request.Notes) ? requisition.Purpose : request.Notes.Trim(), PreparedByUserId = ResolveUserId(), PreparedAtUtc = DateTimeOffset.UtcNow };
         db.PurchaseOrders.Add(order);
-        db.PurchaseOrderLines.AddRange(lines.Select(line => new PurchaseOrderLine { Id = Guid.NewGuid(), PurchaseOrderId = order.Id, Sequence = line.Sequence, InventoryItemId = line.InventoryItemId, Description = line.Description, OrderedQuantity = line.RequestedQuantity, UnitCost = line.EstimatedUnitCost, LineTotal = line.EstimatedLineTotal }));
+        db.PurchaseOrderLines.AddRange(lines.Select(line => new PurchaseOrderLine { Id = Guid.NewGuid(), PurchaseOrderId = order.Id, Sequence = line.Sequence, InventoryItemId = line.InventoryItemId, ProjectJobId = line.ProjectJobId, Description = line.Description, OrderedQuantity = line.RequestedQuantity, UnitCost = line.EstimatedUnitCost, LineTotal = line.EstimatedLineTotal }));
         requisition.Status = "Converted"; requisition.ConvertedByUserId = ResolveUserId(); requisition.ConvertedAtUtc = DateTimeOffset.UtcNow; requisition.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddPurchasingAudit(db, companyId, "purchase-requisition.converted", nameof(PurchaseRequisition), requisition.Id, new { requisition.RequisitionNumber, order.Id, order.OrderNumber, order.VendorId, order.TotalAmount });
         AddPurchasingAudit(db, companyId, "purchase-order.created-from-requisition", nameof(PurchaseOrder), order.Id, new { order.OrderNumber, requisition.Id, requisition.RequisitionNumber, order.TotalAmount });

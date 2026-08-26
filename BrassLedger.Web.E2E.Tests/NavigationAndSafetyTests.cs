@@ -26,7 +26,7 @@ public sealed class NavigationAndSafetyTests
             ("/ledger", "Core accounting balances and posting history."),
             ("/receivables", "Customers, invoices, and open-balance follow-up."),
             ("/payables", "Vendor management and outgoing cash commitments."),
-            ("/projects", "Job tracking with room for industry-specific workflows."),
+            ("/projects", "Track project setup, commitments, costs, and revenue."),
             ("/reporting", "Reports, labels, forms, and print fidelity stay in the product."),
             ("/taxes", "Keep withholdings, filing rules, and odd state behavior in editable tables instead of buried code."),
             ("/publish", "One .NET web application, packaged per platform."),

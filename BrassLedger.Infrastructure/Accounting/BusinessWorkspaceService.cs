@@ -141,6 +141,44 @@ public sealed class BusinessWorkspaceService(
         var payrollLiabilityEmployeeLineIds = payrollLiabilities.Select(liability => liability.PayrollRunEmployeeLineId).Distinct().ToArray();
         var payrollLiabilityEmployeeLines = payrollLiabilityEmployeeLineIds.Length == 0 ? [] : await dbContext.PayrollRunEmployeeLines.AsNoTracking().Where(line => payrollLiabilityEmployeeLineIds.Contains(line.Id)).ToListAsync(cancellationToken);
         var projectJobs = await dbContext.ProjectJobs.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.JobNumber).ToListAsync(cancellationToken);
+        var projectLedgerQuery =
+            from line in dbContext.JournalEntryLines.AsNoTracking()
+            join entry in dbContext.JournalEntries.AsNoTracking() on line.JournalEntryId equals entry.Id
+            join account in dbContext.Accounts.AsNoTracking() on line.AccountId equals account.Id
+            where entry.CompanyId == company.Id && entry.IsPosted && line.ProjectJobId != null
+            select new
+            {
+                LineId = line.Id,
+                ProjectJobId = line.ProjectJobId!.Value,
+                EntryId = entry.Id,
+                entry.PostedOn,
+                entry.EntryNumber,
+                entry.Reference,
+                entry.SourceModule,
+                AccountNumber = account.Number,
+                AccountName = account.Name,
+                AccountType = account.Type,
+                LineDescription = line.Description,
+                line.Debit,
+                line.Credit
+            };
+        var projectLedgerTotals = new Dictionary<Guid, (decimal ActualCost, decimal Revenue)>();
+        await foreach (var row in projectLedgerQuery
+            .Select(row => new { row.ProjectJobId, row.AccountType, row.Debit, row.Credit })
+            .AsAsyncEnumerable()
+            .WithCancellation(cancellationToken))
+        {
+            var totals = projectLedgerTotals.GetValueOrDefault(row.ProjectJobId);
+            if (row.AccountType == AccountType.Expense) totals.ActualCost += row.Debit - row.Credit;
+            if (row.AccountType == AccountType.Revenue) totals.Revenue += row.Credit - row.Debit;
+            projectLedgerTotals[row.ProjectJobId] = totals;
+        }
+        var projectLedgerRows = await projectLedgerQuery
+            .OrderByDescending(row => row.PostedOn)
+            .ThenByDescending(row => row.EntryNumber)
+            .ThenBy(row => row.LineId)
+            .Take(250)
+            .ToListAsync(cancellationToken);
         var taxProfiles = await dbContext.TaxProfiles.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Jurisdiction).ThenBy(x => x.TaxType).ToListAsync(cancellationToken);
         var reports = await dbContext.ReportCatalogItems.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Category).ThenBy(x => x.Name).ToListAsync(cancellationToken);
         var labels = await dbContext.LabelTemplates.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.Name).ToListAsync(cancellationToken);
@@ -156,6 +194,12 @@ public sealed class BusinessWorkspaceService(
         var payrollLiabilityById = payrollLiabilities.ToDictionary(liability => liability.Id);
         var payrollLiabilityPaymentApplicationLookup = payrollLiabilityPaymentApplications.ToLookup(application => application.PayrollLiabilityPaymentId);
         var employeeById = employees.ToDictionary(employee => employee.Id);
+        var projectById = projectJobs.ToDictionary(project => project.Id);
+        var projectActualCost = projectLedgerTotals.ToDictionary(item => item.Key, item => item.Value.ActualCost);
+        var projectRevenue = projectLedgerTotals.ToDictionary(item => item.Key, item => item.Value.Revenue);
+        var projectCommitments = purchaseOrderLines.Where(line => line.ProjectJobId.HasValue && purchaseOrders.Any(order => order.Id == line.PurchaseOrderId && order.Status is "Approved" or "PartiallyReceived" or "Received"))
+            .GroupBy(line => line.ProjectJobId!.Value)
+            .ToDictionary(group => group.Key, group => group.Sum(line => Math.Max(0m, line.OrderedQuantity - (line.ReceivedQuantity - line.ReturnedQuantity)) * line.UnitCost));
         var invoiceNumbersById = invoices.ToDictionary(invoice => invoice.Id, invoice => invoice.InvoiceNumber);
         var bankAccountNamesById = bankAccounts.ToDictionary(account => account.Id, account => account.Name);
         var billNumbersById = vendorBills.ToDictionary(bill => bill.Id, bill => bill.BillNumber);
@@ -243,7 +287,7 @@ public sealed class BusinessWorkspaceService(
                 Revenue: SumByType(accounts, AccountType.Revenue),
                 Expenses: SumByType(accounts, AccountType.Expense),
                 Accounts: accounts.Select(x => new AccountSnapshot(x.Number, x.Name, x.Type.ToString(), x.CurrentBalance, x.IsControlAccount, x.OperationalRole ?? string.Empty)).ToArray(),
-                RecentEntries: journalEntries.Select(x => new JournalEntrySnapshot(x.EntryNumber, x.PostedOn, x.SourceModule, x.Description, x.TotalAmount, x.Id, x.Reference, x.Status, x.ReversalOfJournalEntryId, x.ReversedByJournalEntryId, x.RejectedAtUtc, x.DecisionReason, x.ConcurrencyToken, journalEntryLines.Where(line => line.JournalEntryId == x.Id).Select(line => new JournalEntryLineSnapshot(accounts.Single(account => account.Id == line.AccountId).Number, line.Description, line.Debit, line.Credit)).ToArray())).ToArray()),
+                RecentEntries: journalEntries.Select(x => new JournalEntrySnapshot(x.EntryNumber, x.PostedOn, x.SourceModule, x.Description, x.TotalAmount, x.Id, x.Reference, x.Status, x.ReversalOfJournalEntryId, x.ReversedByJournalEntryId, x.RejectedAtUtc, x.DecisionReason, x.ConcurrencyToken, journalEntryLines.Where(line => line.JournalEntryId == x.Id).Select(line => new JournalEntryLineSnapshot(accounts.Single(account => account.Id == line.AccountId).Number, line.Description, line.Debit, line.Credit, line.ProjectJobId, line.ProjectJobId.HasValue && projectById.TryGetValue(line.ProjectJobId.Value, out var project) ? project.JobNumber : string.Empty)).ToArray())).ToArray()),
             Receivables: new ReceivablesWorkspace(
                 OpenBalance: invoices.Sum(x => x.BalanceDue),
                 PastDueCount: invoices.Count(x => x.DueDate < DateOnly.FromDateTime(DateTime.Today) && x.BalanceDue > 0m),
@@ -297,7 +341,7 @@ public sealed class BusinessWorkspaceService(
                     x.RequestedShipOn,
                     x.Notes,
                     x.ConcurrencyToken,
-                    salesOrderLineLookup[x.Id].Select(line => new SalesOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.AllocatedQuantity, line.ShippedQuantity, line.CancelledQuantity, line.ReturnedQuantity, line.InvoicedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"), line.AllocationWarehouseId, line.AllocationBinId, InventoryLocationLabel(line.AllocationWarehouseId, line.AllocationBinId))).ToArray(),
+                    salesOrderLineLookup[x.Id].Select(line => new SalesOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.AllocatedQuantity, line.ShippedQuantity, line.CancelledQuantity, line.ReturnedQuantity, line.InvoicedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"), line.AllocationWarehouseId, line.AllocationBinId, InventoryLocationLabel(line.AllocationWarehouseId, line.AllocationBinId), line.ProjectJobId)).ToArray(),
                     x.SalesQuoteId)).ToArray(),
                 PurchaseOrders: purchaseOrders.Select(x => new PurchaseOrderSnapshot(
                     x.OrderNumber,
@@ -310,7 +354,7 @@ public sealed class BusinessWorkspaceService(
                     x.ExpectedOn,
                     x.Notes,
                     x.ConcurrencyToken,
-                    purchaseOrderLineLookup[x.Id].Select(line => new PurchaseOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.UnitCost, line.ReceivedQuantity, line.InvoicedQuantity, line.LineTotal, line.ReturnedQuantity, line.CreditedQuantity)).ToArray())).ToArray(),
+                    purchaseOrderLineLookup[x.Id].Select(line => new PurchaseOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.UnitCost, line.ReceivedQuantity, line.InvoicedQuantity, line.LineTotal, line.ReturnedQuantity, line.CreditedQuantity, line.ProjectJobId)).ToArray())).ToArray(),
                 InventoryReceipts: inventoryReceipts.Select(receipt =>
                 {
                     var matchedBills = vendorBillsByReceiptId[receipt.Id].OrderByDescending(bill => bill.BillDate).ToArray();
@@ -321,7 +365,7 @@ public sealed class BusinessWorkspaceService(
                     quote.Id, quote.CustomerId, quote.QuoteNumber, customerNames.GetValueOrDefault(quote.CustomerId, "Unknown customer"), quote.QuotedOn, quote.ExpiresOn,
                     quote.Status, quote.Status == "Approved" && quote.ExpiresOn < DateOnly.FromDateTime(DateTime.UtcNow), quote.TotalAmount, quote.Notes,
                     salesOrderByQuoteId.GetValueOrDefault(quote.Id)?.Id, quote.ConcurrencyToken,
-                    salesQuoteLineLookup[quote.Id].Select(line => new SalesQuoteLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.Quantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"))).ToArray())).ToArray(),
+                    salesQuoteLineLookup[quote.Id].Select(line => new SalesQuoteLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.Quantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"), line.ProjectJobId)).ToArray())).ToArray(),
                 Warehouses: inventoryWarehouses.Select(warehouse => new InventoryWarehouseSnapshot(warehouse.Id, warehouse.Code, warehouse.Name, warehouse.AddressLine1, warehouse.AddressLine2, warehouse.City, warehouse.StateOrProvince, warehouse.PostalCode, warehouse.CountryCode, warehouse.IsDefault, warehouse.IsActive, warehouse.ConcurrencyToken,
                     inventoryBins.Where(bin => bin.WarehouseId == warehouse.Id).Select(bin => new InventoryBinSnapshot(bin.Id, bin.WarehouseId, bin.Code, bin.Name, bin.IsDefault, bin.IsActive, bin.ConcurrencyToken,
                         inventoryLocationBalances.Where(balance => balance.BinId == bin.Id).Select(balance => new InventoryLocationBalanceSnapshot(balance.Id, balance.InventoryItemId, inventoryItemById.GetValueOrDefault(balance.InventoryItemId)?.Sku ?? "Unavailable", balance.QuantityOnHand, balance.ConcurrencyToken)).ToArray())).ToArray())).ToArray(),
@@ -336,7 +380,7 @@ public sealed class BusinessWorkspaceService(
                 CustomerReturnAuthorizations: customerReturnAuthorizations.Select(item => new CustomerReturnAuthorizationSnapshot(item.Id, item.InventoryShipmentId, inventoryShipmentById.GetValueOrDefault(item.InventoryShipmentId)?.ShipmentNumber ?? "Unavailable", item.SalesOrderId, salesOrderById.GetValueOrDefault(item.SalesOrderId)?.OrderNumber ?? "Unavailable", item.CustomerId, customerNames.GetValueOrDefault(item.CustomerId, "Unknown customer"), item.ReturnNumber, item.AuthorizedOn, item.Reason, item.Status, item.ConcurrencyToken, customerReturnAuthorizationLineLookup[item.Id].Select(line => new CustomerReturnAuthorizationLineSnapshot(line.Id, line.InventoryShipmentLineId, line.SalesOrderLineId, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Sequence, line.AuthorizedQuantity, line.ReceivedQuantity)).ToArray())).ToArray(),
                 CustomerReturnReceipts: customerReturnReceipts.Select(item => new CustomerReturnReceiptSnapshot(item.Id, item.CustomerReturnAuthorizationId, customerReturnAuthorizationById.GetValueOrDefault(item.CustomerReturnAuthorizationId)?.ReturnNumber ?? "Unavailable", item.ReceiptNumber, item.ReceivedOn, item.Status, item.TotalCost, item.WarehouseId, item.BinId, InventoryLocationLabel(item.WarehouseId, item.BinId), item.JournalEntryId, item.ReversalJournalEntryId, item.ConcurrencyToken, customerReturnReceiptLineLookup[item.Id].Select(line => new CustomerReturnReceiptLineSnapshot(line.Id, line.CustomerReturnAuthorizationLineId, line.InventoryShipmentLineId, line.SalesOrderLineId, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Sequence, line.Quantity, line.UnitCost, line.TotalCost)).ToArray())).ToArray(),
                 CustomerReturnCredits: customerReturnCredits.Select(item => new CustomerReturnCreditSnapshot(item.Id, item.CustomerReturnReceiptId, customerReturnReceiptById.GetValueOrDefault(item.CustomerReturnReceiptId)?.ReceiptNumber ?? "Unavailable", item.SalesInvoiceId, invoiceNumbersById.GetValueOrDefault(item.SalesInvoiceId, "Unavailable"), item.CustomerId, customerNames.GetValueOrDefault(item.CustomerId, "Unknown customer"), item.CreditNumber, item.CreditDate, item.Reason, item.Status, item.Subtotal, item.TaxAmount, item.TotalAmount, item.SourceAppliedAmount, item.AppliedAmount, item.RefundedAmount, item.TotalAmount - item.AppliedAmount - item.RefundedAmount, item.JournalEntryId, item.ReversalJournalEntryId, item.ConcurrencyToken, customerReturnCreditApplicationLookup[item.Id].Select(application => new CustomerReturnCreditApplicationSnapshot(application.Id, application.SalesInvoiceId, invoiceNumbersById.GetValueOrDefault(application.SalesInvoiceId, "Unavailable"), application.AppliedOn, application.Amount, application.Status, application.ConcurrencyToken)).ToArray(), customerReturnCreditRefundLookup[item.Id].Select(refund => new CustomerReturnCreditRefundSnapshot(refund.Id, refund.BankAccountId, bankAccountNamesById.GetValueOrDefault(refund.BankAccountId, "Unavailable"), refund.Reference, refund.RefundDate, refund.Amount, refund.Status, refund.JournalEntryId, refund.ReversalJournalEntryId, refund.ConcurrencyToken)).ToArray())).ToArray(),
-                PurchaseRequisitions: purchaseRequisitions.Select(requisition => { var order = purchaseOrderByRequisitionId.GetValueOrDefault(requisition.Id); return new PurchaseRequisitionSnapshot(requisition.Id, requisition.RequestedVendorId, requisition.RequestedVendorId.HasValue ? vendorNames.GetValueOrDefault(requisition.RequestedVendorId.Value, "Unavailable") : "Vendor to be selected", requisition.RequisitionNumber, requisition.RequestedOn, requisition.NeededBy, requisition.Purpose, requisition.Status, requisition.TotalEstimatedAmount, requisition.DecisionReason, requisition.CancellationReason, order?.Id, order?.OrderNumber ?? string.Empty, requisition.ConcurrencyToken, purchaseRequisitionLineLookup[requisition.Id].Select(line => new PurchaseRequisitionLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.RequestedQuantity, line.EstimatedUnitCost, line.EstimatedLineTotal)).ToArray()); }).ToArray(),
+                PurchaseRequisitions: purchaseRequisitions.Select(requisition => { var order = purchaseOrderByRequisitionId.GetValueOrDefault(requisition.Id); return new PurchaseRequisitionSnapshot(requisition.Id, requisition.RequestedVendorId, requisition.RequestedVendorId.HasValue ? vendorNames.GetValueOrDefault(requisition.RequestedVendorId.Value, "Unavailable") : "Vendor to be selected", requisition.RequisitionNumber, requisition.RequestedOn, requisition.NeededBy, requisition.Purpose, requisition.Status, requisition.TotalEstimatedAmount, requisition.DecisionReason, requisition.CancellationReason, order?.Id, order?.OrderNumber ?? string.Empty, requisition.ConcurrencyToken, purchaseRequisitionLineLookup[requisition.Id].Select(line => new PurchaseRequisitionLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.RequestedQuantity, line.EstimatedUnitCost, line.EstimatedLineTotal, line.ProjectJobId)).ToArray()); }).ToArray(),
                 SupplierReturnAuthorizations: supplierReturnAuthorizations.Select(item => new SupplierReturnAuthorizationSnapshot(item.Id, item.InventoryReceiptId, inventoryReceiptById.GetValueOrDefault(item.InventoryReceiptId)?.ReceiptNumber ?? "Unavailable", item.PurchaseOrderId, purchaseOrderById.GetValueOrDefault(item.PurchaseOrderId)?.OrderNumber ?? "Unavailable", item.VendorId, vendorNames.GetValueOrDefault(item.VendorId, "Unknown vendor"), item.ReturnNumber, item.AuthorizedOn, item.Reason, item.Status, item.CancellationReason, item.ConcurrencyToken, supplierReturnAuthorizationLineLookup[item.Id].Select(line => new SupplierReturnAuthorizationLineSnapshot(line.Id, line.InventoryReceiptLineId, line.PurchaseOrderLineId, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Sequence, line.AuthorizedQuantity, line.ShippedQuantity, line.UnitCost, line.ReceiptUnitCost)).ToArray())).ToArray(),
                 SupplierReturnShipments: supplierReturnShipments.Select(item =>
                 {
@@ -447,10 +491,13 @@ public sealed class BusinessWorkspaceService(
                 }).ToArray(),
                 LiabilityPayments: payrollLiabilityPayments.Select(payment => new PayrollLiabilityPaymentSnapshot(payment.Id, payment.BankAccountId, payment.PaymentDate, payment.Reference, payment.Payee, payment.Method, payment.Amount, payment.Status, payment.JournalEntryId, payment.ReversalJournalEntryId, payment.ConcurrencyToken, payrollLiabilityPaymentApplicationLookup[payment.Id].Select(application => new PayrollLiabilityPaymentApplicationSnapshot(application.PayrollLiabilityId, payrollLiabilityById[application.PayrollLiabilityId].ObligationCode, application.Amount)).ToArray())).ToArray()),
             Projects: new ProjectsWorkspace(
-                OpenJobs: projectJobs.Count(x => x.Status is "Open" or "Billing"),
+                OpenJobs: projectJobs.Count(x => x.Status is "Active" or "Open" or "Billing"),
                 BudgetAmount: projectJobs.Sum(x => x.BudgetAmount),
-                ActualCost: projectJobs.Sum(x => x.ActualCost),
-                Jobs: projectJobs.Select(x => new ProjectJobSnapshot(x.JobNumber, x.Name, x.CustomerName, x.Status, x.BudgetAmount, x.ActualCost, x.Id)).ToArray()),
+                ActualCost: projectActualCost.Values.Sum(),
+                Jobs: projectJobs.Select(x => new ProjectJobSnapshot(x.JobNumber, x.Name, x.CustomerId.HasValue ? customerNames.GetValueOrDefault(x.CustomerId.Value, x.CustomerName) : x.CustomerName, x.Status, x.BudgetAmount, projectActualCost.GetValueOrDefault(x.Id), x.Id, x.CustomerId, x.StartDate, x.ExpectedEndDate, x.ClosedOn, x.BillingMethod, x.ContractAmount, x.RetainagePercent, projectRevenue.GetValueOrDefault(x.Id), projectCommitments.GetValueOrDefault(x.Id), x.ConcurrencyToken)).ToArray(),
+                Revenue: projectRevenue.Values.Sum(),
+                Commitments: projectCommitments.Values.Sum(),
+                LedgerLines: projectLedgerRows.Select(row => new ProjectLedgerLineSnapshot(row.LineId, row.ProjectJobId, row.PostedOn, row.Reference, row.SourceModule, row.AccountNumber, row.AccountName, row.LineDescription, row.Debit, row.Credit, row.AccountType == AccountType.Expense ? row.Debit - row.Credit : 0m, row.AccountType == AccountType.Revenue ? row.Credit - row.Debit : 0m, row.EntryId)).ToArray()),
             Reporting: new ReportingWorkspace(
                 ReportCount: reports.Count,
                 LabelCount: labels.Count,

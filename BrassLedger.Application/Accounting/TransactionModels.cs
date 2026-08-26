@@ -1,12 +1,12 @@
 namespace BrassLedger.Application.Accounting;
 
-public sealed record JournalLineRequest(string AccountNumber, decimal Debit, decimal Credit, string Description);
+public sealed record JournalLineRequest(string AccountNumber, decimal Debit, decimal Credit, string Description, Guid? ProjectJobId = null);
 public sealed record SaveJournalEntryDraftRequest(Guid? Id, DateOnly EntryDate, string Reference, string Description, IReadOnlyList<JournalLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record RejectJournalEntryRequest(Guid JournalEntryId, string Reason, string ConcurrencyToken);
 public sealed record ReverseJournalEntryRequest(Guid JournalEntryId, DateOnly ReversalDate, string Reason);
-public sealed record SalesInvoiceLineRequest(string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, string RevenueAccountNumber);
+public sealed record SalesInvoiceLineRequest(string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, string RevenueAccountNumber, Guid? ProjectJobId = null);
 public sealed record CreateInvoiceRequest(Guid CustomerId, string InvoiceNumber, DateOnly InvoiceDate, DateOnly DueDate, decimal Subtotal, decimal TaxAmount, string RevenueAccountNumber, string Description, IReadOnlyList<SalesInvoiceLineRequest>? Lines = null);
-public sealed record VendorBillLineRequest(string Description, decimal Quantity, decimal UnitCost, decimal DiscountAmount, decimal TaxAmount, string ExpenseAccountNumber);
+public sealed record VendorBillLineRequest(string Description, decimal Quantity, decimal UnitCost, decimal DiscountAmount, decimal TaxAmount, string ExpenseAccountNumber, Guid? ProjectJobId = null);
 public sealed record CreateVendorBillRequest(Guid VendorId, string BillNumber, DateOnly BillDate, DateOnly DueDate, decimal TotalAmount, string ExpenseAccountNumber, string Description, IReadOnlyList<VendorBillLineRequest>? Lines = null);
 public sealed record ApplyInvoicePaymentRequest(Guid InvoiceId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference);
 public sealed record ApplyBillPaymentRequest(Guid VendorBillId, Guid BankAccountId, DateOnly PaymentDate, decimal Amount, string Reference);
@@ -40,7 +40,7 @@ public sealed record PayrollW2ReportingInput(
     decimal CashTipsReported = 0,
     decimal QualifiedOvertimeCompensation = 0,
     IReadOnlyList<string>? TreasuryTippedOccupationCodes = null);
-public sealed record PayrollEarningInput(string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable = true, DateOnly? WorkedOn = null, string WorkState = "", string WorkCounty = "", string WorkCity = "", string WorkSchoolDistrict = "", Guid? SourceTimeEntryId = null, PayrollW2ReportingInput? W2Reporting = null);
+public sealed record PayrollEarningInput(string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable = true, DateOnly? WorkedOn = null, string WorkState = "", string WorkCounty = "", string WorkCity = "", string WorkSchoolDistrict = "", Guid? SourceTimeEntryId = null, PayrollW2ReportingInput? W2Reporting = null, Guid? ProjectJobId = null);
 public sealed record PayrollDeductionInput(string DeductionCode, string DeductionType, decimal EmployeeAmount, decimal EmployerAmount = 0, bool IsPreTax = false, string LiabilityAccountNumber = "", bool ExemptFromFederalIncomeTax = false, bool ExemptFromFica = false, bool ExemptFromFuta = false, Guid? PayrollDeductionPlanId = null, Guid? EmployeePayrollDeductionElectionId = null, decimal? RequestedEmployeeAmount = null, bool LimitApplied = false, string LimitRuleCode = "None", string CalculationTraceJson = "{}");
 public sealed record PayrollTimeEntryInput(DateOnly WorkDate, string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable = true, string WorkState = "", string WorkCounty = "", string WorkCity = "", string WorkSchoolDistrict = "", Guid? ProjectJobId = null, string Notes = "", PayrollW2ReportingInput? W2Reporting = null);
 public sealed record SavePayrollTimecardDraftRequest(Guid? TimecardId, Guid EmployeeId, DateOnly PeriodStart, DateOnly PeriodEnd, IReadOnlyList<PayrollTimeEntryInput> Entries, string Notes = "", string ConcurrencyToken = "");
@@ -50,6 +50,20 @@ public sealed record VoidPayrollTimecardRequest(Guid TimecardId, string Reason, 
 public sealed record PayrollLiabilityPaymentApplicationInput(Guid PayrollLiabilityId, decimal Amount);
 public sealed record RecordPayrollLiabilityPaymentRequest(Guid BankAccountId, DateOnly PaymentDate, string Reference, string Payee, string Method, IReadOnlyList<PayrollLiabilityPaymentApplicationInput> Applications);
 public sealed record ReversePayrollLiabilityPaymentRequest(Guid PaymentId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
+public sealed record SaveProjectJobRequest(
+    Guid? Id,
+    string JobNumber,
+    string Name,
+    Guid CustomerId,
+    DateOnly StartDate,
+    DateOnly? ExpectedEndDate,
+    string BillingMethod,
+    decimal ContractAmount,
+    decimal BudgetAmount,
+    decimal RetainagePercent,
+    string ConcurrencyToken = "");
+public sealed record CloseProjectJobRequest(Guid ProjectJobId, DateOnly ClosedOn, string Reason, string ConcurrencyToken);
+public sealed record ReopenProjectJobRequest(Guid ProjectJobId, string Reason, string ConcurrencyToken);
 public sealed record EmployeePayrollInput(Guid EmployeeId, decimal GrossPay, IReadOnlyList<PayrollEarningInput>? Earnings = null, IReadOnlyList<PayrollDeductionInput>? Deductions = null);
 public sealed record PostEmployeePayrollRunRequest(Guid BankAccountId, DateOnly PayDate, string Reference, IReadOnlyList<EmployeePayrollInput> Employees, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null, string RunType = "Regular", IReadOnlyList<Guid>? ApprovedTimecardIds = null, Guid? Id = null, string ConcurrencyToken = "");
 public sealed record PayrollTaxEstimate(string ObligationCode, string JurisdictionCode, string JurisdictionName, string TaxType, decimal TaxableWages, decimal YearToDateTaxableWagesBefore, decimal EmployeeAmount, decimal EmployerAmount, Guid? TaxRuleSetId, Guid? TaxContentPackageId, string ContentVersion, string Source, string CalculationTraceJson);
@@ -67,7 +81,7 @@ public sealed record SaveInventoryWarehouseRequest(Guid? Id, string Code, string
 public sealed record SaveInventoryBinRequest(Guid? Id, Guid WarehouseId, string Code, string Name, bool IsDefault, bool IsActive, string ConcurrencyToken = "");
 public sealed record TransferInventoryRequest(Guid InventoryItemId, Guid SourceWarehouseId, Guid SourceBinId, Guid DestinationWarehouseId, Guid DestinationBinId, decimal Quantity, DateOnly TransferDate, string Reference, string Reason);
 public sealed record ReverseInventoryTransferRequest(Guid InventoryTransferId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
-public sealed record SalesOrderLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, string RevenueAccountNumber);
+public sealed record SalesOrderLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, string RevenueAccountNumber, Guid? ProjectJobId = null);
 public sealed record SaveSalesQuoteRequest(Guid? Id, Guid CustomerId, string QuoteNumber, DateOnly QuotedOn, DateOnly ExpiresOn, string Notes, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record ApproveSalesQuoteRequest(Guid SalesQuoteId, string ConcurrencyToken);
 public sealed record WithdrawSalesQuoteRequest(Guid SalesQuoteId, string Reason, string ConcurrencyToken);
@@ -104,13 +118,13 @@ public sealed record ApplyCustomerReturnCreditRequest(Guid CustomerReturnCreditI
 public sealed record ReverseCustomerReturnCreditApplicationRequest(Guid CustomerReturnCreditApplicationId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record RefundCustomerReturnCreditRequest(Guid CustomerReturnCreditId, Guid BankAccountId, string Reference, DateOnly RefundDate, decimal Amount, string ConcurrencyToken);
 public sealed record ReverseCustomerReturnCreditRefundRequest(Guid CustomerReturnCreditRefundId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
-public sealed record PurchaseRequisitionLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal EstimatedUnitCost);
+public sealed record PurchaseRequisitionLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal EstimatedUnitCost, Guid? ProjectJobId = null);
 public sealed record SavePurchaseRequisitionRequest(Guid? Id, Guid? RequestedVendorId, string RequisitionNumber, DateOnly RequestedOn, DateOnly? NeededBy, string Purpose, IReadOnlyList<PurchaseRequisitionLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record SubmitPurchaseRequisitionRequest(Guid PurchaseRequisitionId, string ConcurrencyToken);
 public sealed record DecidePurchaseRequisitionRequest(Guid PurchaseRequisitionId, bool Approve, string Reason, string ConcurrencyToken);
 public sealed record CancelPurchaseRequisitionRequest(Guid PurchaseRequisitionId, string Reason, string ConcurrencyToken);
 public sealed record ConvertPurchaseRequisitionRequest(Guid PurchaseRequisitionId, Guid VendorId, string OrderNumber, DateOnly OrderedOn, DateOnly? ExpectedOn, string Notes, string ConcurrencyToken);
-public sealed record PurchaseOrderLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal UnitCost);
+public sealed record PurchaseOrderLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal UnitCost, Guid? ProjectJobId = null);
 public sealed record SavePurchaseOrderRequest(Guid? Id, Guid VendorId, string OrderNumber, DateOnly OrderedOn, DateOnly? ExpectedOn, string Notes, IReadOnlyList<PurchaseOrderLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record ApprovePurchaseOrderRequest(Guid PurchaseOrderId, string ConcurrencyToken);
 public sealed record ReceivePurchaseOrderLineRequest(Guid PurchaseOrderLineId, decimal Quantity);
@@ -217,6 +231,9 @@ public interface IAccountingTransactionService
     Task<TransactionResult> VoidPayrollTimecardAsync(VoidPayrollTimecardRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordPayrollLiabilityPaymentAsync(RecordPayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveProjectJobAsync(SaveProjectJobRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CloseProjectJobAsync(CloseProjectJobRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReopenProjectJobAsync(ReopenProjectJobRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveInventoryWarehouseAsync(SaveInventoryWarehouseRequest request, CancellationToken cancellationToken = default);

@@ -46,7 +46,7 @@ public sealed partial class AccountingTransactionService(
             if (entry.Status is not ("Draft" or "Rejected")) return TransactionResult.Failure("Only draft or rejected general journals can be edited.");
             if (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(entry.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The journal draft changed after it was displayed. Refresh before editing it.");
             var priorLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == entry.Id).ToListAsync(cancellationToken);
-            priorDraft = new { entry.PostedOn, entry.Reference, entry.Description, entry.TotalAmount, entry.Status, entry.DecisionReason, lines = priorLines.Select(line => new { line.AccountId, line.Description, line.Debit, line.Credit }).ToArray() };
+            priorDraft = new { entry.PostedOn, entry.Reference, entry.Description, entry.TotalAmount, entry.Status, entry.DecisionReason, lines = priorLines.Select(line => new { line.AccountId, line.ProjectJobId, line.Description, line.Debit, line.Credit }).ToArray() };
             db.JournalEntryLines.RemoveRange(priorLines);
             entry.CreatedByUserId = userId;
             entry.CreatedAtUtc = DateTimeOffset.UtcNow;
@@ -78,10 +78,13 @@ public sealed partial class AccountingTransactionService(
         entry.TotalAmount = request.Lines.Sum(line => line.Debit);
         entry.IsPosted = false;
         entry.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var projectIds = request.Lines.Where(line => line.ProjectJobId.HasValue).Select(line => line.ProjectJobId!.Value).Distinct().ToArray();
+        if (projectIds.Length > 0 && await db.ProjectJobs.CountAsync(project => project.CompanyId == companyId && project.Status == "Active" && projectIds.Contains(project.Id), cancellationToken) != projectIds.Length)
+            return TransactionResult.Failure("Every journal project must be active. Closed, missing, or another company's projects are unavailable.");
         foreach (var line in request.Lines)
         {
             var account = accounts.Single(candidate => candidate.Number.Equals(line.AccountNumber.Trim(), StringComparison.OrdinalIgnoreCase));
-            db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit });
+            db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, ProjectJobId = line.ProjectJobId, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit });
         }
         AddJournalAudit(db, companyId, userId, priorDraft is null ? "journal.draft.saved" : "journal.draft.revised", entry, new { lineCount = request.Lines.Count, priorDraft });
         try { await db.SaveChangesAsync(cancellationToken); }
@@ -155,6 +158,8 @@ public sealed partial class AccountingTransactionService(
         var accountIds = lines.Select(line => line.AccountId).Distinct().ToArray();
         var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && accountIds.Contains(account.Id)).ToListAsync(cancellationToken);
         if (accounts.Count != accountIds.Length || accounts.Any(account => account.IsControlAccount)) return TransactionResult.Failure("The approved journal contains an unavailable or control account.");
+        var projectIds = lines.Where(line => line.ProjectJobId.HasValue).Select(line => line.ProjectJobId!.Value).Distinct().ToArray();
+        if (projectIds.Length > 0 && await db.ProjectJobs.CountAsync(project => project.CompanyId == companyId && project.Status == "Active" && projectIds.Contains(project.Id), cancellationToken) != projectIds.Length) return TransactionResult.Failure("The approved journal contains a closed or unavailable project.");
 
         foreach (var line in lines)
         {
@@ -192,8 +197,8 @@ public sealed partial class AccountingTransactionService(
         var originalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == original.Id).ToListAsync(cancellationToken);
         var accountIds = originalLines.Select(line => line.AccountId).Distinct().ToArray();
         var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
-        var reversingLines = originalLines.Select(line => new JournalLineRequest(accounts[line.AccountId].Number, line.Credit, line.Debit, $"Reversal: {line.Description}")).ToArray();
-        var posting = await PostAsync(db, companyId, request.ReversalDate, "General Ledger", $"REV-{original.Reference}", request.Reason, reversingLines, cancellationToken, sourceDocumentId: original.Id, sourceDocumentType: "JournalEntryReversal");
+        var reversingLines = originalLines.Select(line => new JournalLineRequest(accounts[line.AccountId].Number, line.Credit, line.Debit, $"Reversal: {line.Description}", line.ProjectJobId)).ToArray();
+        var posting = await PostAsync(db, companyId, request.ReversalDate, "General Ledger", $"REV-{original.Reference}", request.Reason, reversingLines, cancellationToken, sourceDocumentId: original.Id, sourceDocumentType: "JournalEntryReversal", allowClosedProjects: true);
         if (!posting.Succeeded) return posting;
         var reversal = await db.JournalEntries.SingleAsync(entry => entry.Id == posting.Id, cancellationToken);
         reversal.ReversalOfJournalEntryId = original.Id;
@@ -563,7 +568,7 @@ public sealed partial class AccountingTransactionService(
             new(OperationalRoleReference(AccountingAccountRoles.AccountsReceivable), total, 0, "Invoice receivable")
         };
         if (requestedLines.Length == 0) lines.Add(new JournalLineRequest(request.RevenueAccountNumber, 0, subtotal, "Invoice revenue"));
-        else lines.AddRange(lineAmounts.GroupBy(line => line.Request.RevenueAccountNumber.Trim(), StringComparer.OrdinalIgnoreCase).Select(group => new JournalLineRequest(group.Key, 0, group.Sum(line => line.NetAmount), "Invoice revenue")));
+        else lines.AddRange(lineAmounts.GroupBy(line => new { AccountNumber = line.Request.RevenueAccountNumber.Trim().ToUpperInvariant(), line.Request.ProjectJobId }).Select(group => new JournalLineRequest(group.Key.AccountNumber, 0, group.Sum(line => line.NetAmount), "Invoice revenue", group.Key.ProjectJobId)));
         if (taxAmount > 0) lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.SalesTaxPayable), 0, taxAmount, "Sales tax payable"));
         var invoiceId = Guid.NewGuid();
         var posting = await PostAsync(db, companyId, request.InvoiceDate, "Accounts Receivable", request.InvoiceNumber, request.Description, lines, cancellationToken, allowControlAccounts: true, sourceDocumentId: invoiceId, sourceDocumentType: "SalesInvoice", resolveOperationalRoles: true);
@@ -573,7 +578,7 @@ public sealed partial class AccountingTransactionService(
         if (lineAmounts.Length > 0)
         {
             var revenueAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && revenueNumbers.Contains(account.Number)).ToDictionaryAsync(account => account.Number, StringComparer.OrdinalIgnoreCase, cancellationToken);
-            db.SalesInvoiceLines.AddRange(lineAmounts.Select(line => new SalesInvoiceLine { Id = Guid.NewGuid(), SalesInvoiceId = invoice.Id, Sequence = line.Sequence, RevenueAccountId = revenueAccounts[line.Request.RevenueAccountNumber.Trim()].Id, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitPrice = line.Request.UnitPrice, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount }));
+            db.SalesInvoiceLines.AddRange(lineAmounts.Select(line => new SalesInvoiceLine { Id = Guid.NewGuid(), SalesInvoiceId = invoice.Id, Sequence = line.Sequence, RevenueAccountId = revenueAccounts[line.Request.RevenueAccountNumber.Trim()].Id, ProjectJobId = line.Request.ProjectJobId, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitPrice = line.Request.UnitPrice, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount }));
         }
         customer.OpenBalance += total;
         try { await db.SaveChangesAsync(cancellationToken); }
@@ -611,8 +616,8 @@ public sealed partial class AccountingTransactionService(
         var billId = Guid.NewGuid();
         IReadOnlyList<JournalLineRequest> postingLines = requestedLines.Length == 0
             ? [new(request.ExpenseAccountNumber, total, 0, "Bill expense"), new(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), 0, total, "Accounts payable")]
-            : lineAmounts.GroupBy(line => line.Request.ExpenseAccountNumber.Trim(), StringComparer.OrdinalIgnoreCase)
-                .Select(group => new JournalLineRequest(group.Key, group.Sum(line => line.NetAmount + line.TaxAmount), 0, "Bill expense and tax"))
+            : lineAmounts.GroupBy(line => new { AccountNumber = line.Request.ExpenseAccountNumber.Trim().ToUpperInvariant(), line.Request.ProjectJobId })
+                .Select(group => new JournalLineRequest(group.Key.AccountNumber, group.Sum(line => line.NetAmount + line.TaxAmount), 0, "Bill expense and tax", group.Key.ProjectJobId))
                 .Append(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), 0, total, "Accounts payable")).ToArray();
         var posting = await PostAsync(db, companyId, request.BillDate, "Accounts Payable", request.BillNumber, request.Description,
             postingLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: billId, sourceDocumentType: "VendorBill", resolveOperationalRoles: true);
@@ -622,7 +627,7 @@ public sealed partial class AccountingTransactionService(
         if (lineAmounts.Length > 0)
         {
             var expenseAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && expenseNumbers.Contains(account.Number)).ToDictionaryAsync(account => account.Number, StringComparer.OrdinalIgnoreCase, cancellationToken);
-            db.VendorBillLines.AddRange(lineAmounts.Select(line => new VendorBillLine { Id = Guid.NewGuid(), VendorBillId = bill.Id, Sequence = line.Sequence, ExpenseAccountId = expenseAccounts[line.Request.ExpenseAccountNumber.Trim()].Id, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitCost = line.Request.UnitCost, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount }));
+            db.VendorBillLines.AddRange(lineAmounts.Select(line => new VendorBillLine { Id = Guid.NewGuid(), VendorBillId = bill.Id, Sequence = line.Sequence, ExpenseAccountId = expenseAccounts[line.Request.ExpenseAccountNumber.Trim()].Id, ProjectJobId = line.Request.ProjectJobId, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitCost = line.Request.UnitCost, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount }));
         }
         var vendor = await db.Vendors.SingleAsync(x => x.Id == request.VendorId, cancellationToken);
         vendor.OpenBalance += total;
@@ -1435,7 +1440,7 @@ public sealed partial class AccountingTransactionService(
         var employees = employeeLines.Select(line =>
         {
             var explicitEarnings = earnings.Where(earning => earning.PayrollRunEmployeeLineId == line.Id && earning.PayrollTimeEntryId is null)
-                .Select(earning => new PayrollEarningInput(earning.EarningCode, earning.EarningType, earning.Hours, earning.Rate, earning.Amount, earning.IsTaxable, earning.WorkedOn, earning.WorkState, earning.WorkCounty, earning.WorkCity, earning.WorkSchoolDistrict, W2Reporting: ParseW2Reporting(earning.W2ReportingJson))).ToArray();
+                .Select(earning => new PayrollEarningInput(earning.EarningCode, earning.EarningType, earning.Hours, earning.Rate, earning.Amount, earning.IsTaxable, earning.WorkedOn, earning.WorkState, earning.WorkCounty, earning.WorkCity, earning.WorkSchoolDistrict, W2Reporting: ParseW2Reporting(earning.W2ReportingJson), ProjectJobId: earning.ProjectJobId)).ToArray();
             var explicitDeductions = deductions.Where(deduction => deduction.PayrollRunEmployeeLineId == line.Id && deduction.PayrollDeductionPlanId is null && deduction.EmployeePayrollDeductionElectionId is null && deduction.DeductionCode is not ("RECURRING-PRE-TAX" or "RECURRING-POST-TAX"))
                 .Select(deduction => new PayrollDeductionInput(deduction.DeductionCode, deduction.DeductionType, deduction.EmployeeAmount, deduction.EmployerAmount, deduction.IsPreTax, deduction.LiabilityAccountNumber, deduction.ExemptFromFederalIncomeTax, deduction.ExemptFromFica, deduction.ExemptFromFuta, RequestedEmployeeAmount: deduction.RequestedEmployeeAmount, LimitApplied: deduction.LimitApplied, LimitRuleCode: deduction.LimitRuleCode, CalculationTraceJson: deduction.CalculationTraceJson)).ToArray();
             var hasTimecardEarnings = earnings.Any(earning => earning.PayrollRunEmployeeLineId == line.Id && earning.PayrollTimeEntryId is not null);
@@ -1477,6 +1482,9 @@ public sealed partial class AccountingTransactionService(
         }
         var defaultPayrollLiabilityAccount = await ResolveOperationalAccountNumberAsync(db, companyId, AccountingAccountRoles.PayrollLiabilities, cancellationToken);
         if (string.IsNullOrWhiteSpace(defaultPayrollLiabilityAccount)) return TransactionResult.Failure("Configure an active payroll liabilities operational account before preparing payroll.");
+        var projectIds = request.Employees.SelectMany(employee => employee.Earnings ?? []).Where(earning => earning.ProjectJobId.HasValue).Select(earning => earning.ProjectJobId!.Value).Distinct().ToArray();
+        if (projectIds.Length > 0 && await db.ProjectJobs.CountAsync(project => project.CompanyId == companyId && project.Status == "Active" && projectIds.Contains(project.Id), cancellationToken) != projectIds.Length)
+            return TransactionResult.Failure("Every payroll earning project must be active and belong to this company.");
         if (await IsPayrollPeriodLockedAsync(db, companyId, request.PayDate, cancellationToken)) return TransactionResult.Failure("Reopen the approved payroll filing or closed payroll period before preparing payroll for this pay date.");
         var expansion = await ExpandApprovedTimecardsAsync(db, companyId, request, cancellationToken);
         if (expansion.Request is null) return TransactionResult.Failure(expansion.ErrorMessage);
@@ -1539,7 +1547,7 @@ public sealed partial class AccountingTransactionService(
             var line = new PayrollRunEmployeeLine { Id = Guid.NewGuid(), PayrollRunId = run.Id, EmployeeId = estimateLine.EmployeeId, WorkState = estimateLine.WorkState, WorkCity = employee.WorkCity, ResidenceState = string.IsNullOrWhiteSpace(employee.ResidenceState) ? employee.State : employee.ResidenceState, ResidenceCity = employee.ResidenceCity, FilingStatus = estimateLine.FilingStatus, PayrollFrequency = employee.PayrollFrequency, GrossPay = estimateLine.GrossPay, TaxableWages = estimateLine.GrossPay - estimateLine.PreTaxDeductions, YearToDateGrossBefore = estimateLine.YearToDateGrossBefore, YearToDateGrossAfter = estimateLine.YearToDateGrossBefore + estimateLine.GrossPay, PreTaxDeductions = estimateLine.PreTaxDeductions, EmployeeWithholdings = estimateLine.EmployeeWithholdings, PostTaxDeductions = estimateLine.PostTaxDeductions, EmployerPayrollTaxes = estimateLine.EmployerPayrollTaxes, EmployerBenefitContributions = estimateLine.EmployerBenefitContributions, NetPay = estimateLine.NetPay };
             db.PayrollRunEmployeeLines.Add(line);
             var earnings = input.Earnings is { Count: > 0 } ? input.Earnings : [new PayrollEarningInput("REGULAR", "Regular", 0, 0, estimateLine.GrossPay, true, null, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict)];
-            db.PayrollEarningLines.AddRange(earnings.Select((earning, index) => new PayrollEarningLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, PayrollTimeEntryId = earning.SourceTimeEntryId, Sequence = index + 1, EarningCode = earning.EarningCode.Trim(), EarningType = earning.EarningType.Trim(), Hours = earning.Hours, Rate = earning.Rate, Amount = RoundCurrency(earning.Amount), IsTaxable = earning.IsTaxable, WorkedOn = earning.WorkedOn, WorkState = string.IsNullOrWhiteSpace(earning.WorkState) ? employee.State : earning.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(earning.WorkCounty) ? employee.WorkCounty : earning.WorkCounty.Trim(), WorkCity = string.IsNullOrWhiteSpace(earning.WorkCity) ? employee.WorkCity : earning.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(earning.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : earning.WorkSchoolDistrict.Trim(), W2ReportingJson = SerializeW2Reporting(earning.W2Reporting) }));
+            db.PayrollEarningLines.AddRange(earnings.Select((earning, index) => new PayrollEarningLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, PayrollTimeEntryId = earning.SourceTimeEntryId, ProjectJobId = earning.ProjectJobId, Sequence = index + 1, EarningCode = earning.EarningCode.Trim(), EarningType = earning.EarningType.Trim(), Hours = earning.Hours, Rate = earning.Rate, Amount = RoundCurrency(earning.Amount), IsTaxable = earning.IsTaxable, WorkedOn = earning.WorkedOn, WorkState = string.IsNullOrWhiteSpace(earning.WorkState) ? employee.State : earning.WorkState.Trim(), WorkCounty = string.IsNullOrWhiteSpace(earning.WorkCounty) ? employee.WorkCounty : earning.WorkCounty.Trim(), WorkCity = string.IsNullOrWhiteSpace(earning.WorkCity) ? employee.WorkCity : earning.WorkCity.Trim(), WorkSchoolDistrict = string.IsNullOrWhiteSpace(earning.WorkSchoolDistrict) ? employee.WorkSchoolDistrict : earning.WorkSchoolDistrict.Trim(), W2ReportingJson = SerializeW2Reporting(earning.W2Reporting) }));
             var deductions = estimateLine.Deductions ?? [];
             db.PayrollDeductionLines.AddRange(deductions.Select((deduction, index) => new PayrollDeductionLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, PayrollDeductionPlanId = deduction.PayrollDeductionPlanId, EmployeePayrollDeductionElectionId = deduction.EmployeePayrollDeductionElectionId, DeductionCode = deduction.DeductionCode.Trim(), DeductionType = deduction.DeductionType.Trim(), EmployeeAmount = RoundCurrency(deduction.EmployeeAmount), RequestedEmployeeAmount = RoundCurrency(deduction.RequestedEmployeeAmount ?? deduction.EmployeeAmount), EmployerAmount = RoundCurrency(deduction.EmployerAmount), IsPreTax = deduction.IsPreTax, ExemptFromFederalIncomeTax = deduction.ExemptFromFederalIncomeTax, ExemptFromFica = deduction.ExemptFromFica, ExemptFromFuta = deduction.ExemptFromFuta, LiabilityAccountNumber = NormalizeLiabilityAccountNumber(deduction.LiabilityAccountNumber, defaultPayrollLiabilityAccount), LimitApplied = deduction.LimitApplied, LimitRuleCode = deduction.LimitRuleCode, CalculationTraceJson = deduction.CalculationTraceJson }));
             db.PayrollTaxLines.AddRange((estimateLine.Taxes ?? []).Select((tax, index) => new PayrollTaxLine { Id = Guid.NewGuid(), PayrollRunEmployeeLineId = line.Id, Sequence = index + 1, ObligationCode = tax.ObligationCode, JurisdictionCode = tax.JurisdictionCode, JurisdictionName = tax.JurisdictionName, TaxType = tax.TaxType, TaxableWages = tax.TaxableWages, YearToDateTaxableWagesBefore = tax.YearToDateTaxableWagesBefore, EmployeeAmount = tax.EmployeeAmount, EmployerAmount = tax.EmployerAmount, TaxRuleSetId = tax.TaxRuleSetId, TaxContentPackageId = tax.TaxContentPackageId, ContentVersion = tax.ContentVersion, Source = tax.Source, CalculationTraceJson = tax.CalculationTraceJson }));
@@ -1623,6 +1631,7 @@ public sealed partial class AccountingTransactionService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var employeeLines = await db.PayrollRunEmployeeLines.Where(line => line.PayrollRunId == run.Id).ToListAsync(cancellationToken);
         var employeeLineIds = employeeLines.Select(line => line.Id).ToArray();
+        var earningLines = await db.PayrollEarningLines.Where(line => employeeLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
         var taxLines = await db.PayrollTaxLines.Where(line => employeeLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
         var deductionLines = await db.PayrollDeductionLines.Where(line => employeeLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
         if (await db.PayrollLiabilities.AnyAsync(liability => liability.PayrollRunId == run.Id, cancellationToken)) return TransactionResult.Failure("Payroll liabilities were already created for this run.");
@@ -1632,7 +1641,38 @@ public sealed partial class AccountingTransactionService(
             .ToArray();
         var expectedLiabilities = RoundCurrency(run.PreTaxDeductions + run.EmployeeWithholdings + run.PostTaxDeductions + run.EmployerPayrollTaxes + run.EmployerBenefitContributions);
         if (RoundCurrency(liabilityAmounts.Sum(item => item.Amount)) != expectedLiabilities) return TransactionResult.Failure("Payroll tax and deduction details do not reconcile to the run liabilities. Cancel and recalculate the draft.");
-        var postingLines = new List<JournalLineRequest> { new(OperationalRoleReference(AccountingAccountRoles.PayrollExpense), run.GrossPayroll + run.EmployerPayrollTaxes + run.EmployerBenefitContributions, 0, "Gross payroll, employer taxes, and employer benefit contributions"), new(await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken), 0, run.NetPay, "Net payroll funding") };
+        var allocatedPayrollExpense = new List<(Guid? ProjectJobId, decimal Amount)>();
+        foreach (var employeeLine in employeeLines)
+        {
+            var employeeEarnings = earningLines.Where(line => line.PayrollRunEmployeeLineId == employeeLine.Id).ToArray();
+            if (RoundCurrency(employeeEarnings.Sum(line => line.Amount)) != employeeLine.GrossPay)
+                return TransactionResult.Failure("Payroll earning details do not reconcile to employee gross pay. Cancel and recalculate the draft.");
+
+            var earningGroups = employeeEarnings.GroupBy(line => line.ProjectJobId)
+                .Select(group => new { ProjectJobId = group.Key, GrossPay = RoundCurrency(group.Sum(line => line.Amount)) })
+                .Where(group => group.GrossPay != 0m)
+                .OrderBy(group => group.ProjectJobId.HasValue ? 0 : 1)
+                .ThenBy(group => group.ProjectJobId)
+                .ToArray();
+            var employerBurden = RoundCurrency(employeeLine.EmployerPayrollTaxes + employeeLine.EmployerBenefitContributions);
+            var unallocatedBurden = employerBurden;
+            for (var index = 0; index < earningGroups.Length; index++)
+            {
+                var group = earningGroups[index];
+                var allocatedBurden = index == earningGroups.Length - 1
+                    ? unallocatedBurden
+                    : RoundCurrency(employerBurden * group.GrossPay / employeeLine.GrossPay);
+                unallocatedBurden = RoundCurrency(unallocatedBurden - allocatedBurden);
+                allocatedPayrollExpense.Add((group.ProjectJobId, RoundCurrency(group.GrossPay + allocatedBurden)));
+            }
+        }
+        var payrollExpenseTotal = RoundCurrency(run.GrossPayroll + run.EmployerPayrollTaxes + run.EmployerBenefitContributions);
+        if (RoundCurrency(allocatedPayrollExpense.Sum(line => line.Amount)) != payrollExpenseTotal)
+            return TransactionResult.Failure("Project payroll allocations do not reconcile to payroll expense. Cancel and recalculate the draft.");
+        var postingLines = allocatedPayrollExpense.GroupBy(line => line.ProjectJobId)
+            .Select(group => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.PayrollExpense), RoundCurrency(group.Sum(line => line.Amount)), 0, "Gross payroll, employer taxes, and employer benefit contributions", group.Key))
+            .ToList();
+        postingLines.Add(new JournalLineRequest(await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken), 0, run.NetPay, "Net payroll funding"));
         postingLines.AddRange(liabilityAmounts.GroupBy(item => item.AccountNumber, StringComparer.OrdinalIgnoreCase).Select(group => new JournalLineRequest(group.Key, 0, RoundCurrency(group.Sum(item => item.Amount)), "Payroll liabilities")));
         var posting = await PostAsync(db, companyId, run.PayDate, "Payroll", run.Reference, "Employee payroll run", postingLines, cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: run.Id, sourceDocumentType: "PayrollRun", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
@@ -1846,8 +1886,8 @@ public sealed partial class AccountingTransactionService(
         var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
         var bank = await db.BankAccounts.SingleAsync(account => account.Id == run.BankAccountId && account.CompanyId == companyId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var reversingLines = originalLines.Select(line => new JournalLineRequest(accounts[line.AccountId].Number, line.Credit, line.Debit, $"Reversal: {line.Description}")).ToArray();
-        var posting = await PostAsync(db, companyId, request.ReversalDate, "Payroll", $"REV-{run.Reference}", request.Reason.Trim(), reversingLines, cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: run.Id, sourceDocumentType: "PayrollRunReversal");
+        var reversingLines = originalLines.Select(line => new JournalLineRequest(accounts[line.AccountId].Number, line.Credit, line.Debit, $"Reversal: {line.Description}", line.ProjectJobId)).ToArray();
+        var posting = await PostAsync(db, companyId, request.ReversalDate, "Payroll", $"REV-{run.Reference}", request.Reason.Trim(), reversingLines, cancellationToken, bank.Id, allowControlAccounts: true, sourceDocumentId: run.Id, sourceDocumentType: "PayrollRunReversal", allowClosedProjects: true);
         if (!posting.Succeeded) return posting;
         var reversal = await db.JournalEntries.SingleAsync(entry => entry.Id == posting.Id, cancellationToken);
         reversal.ReversalOfJournalEntryId = original.Id; reversal.ConcurrencyToken = Guid.NewGuid().ToString("N");
@@ -2164,7 +2204,7 @@ public sealed partial class AccountingTransactionService(
             var earnings = input.Earnings?.ToList() ?? [];
             if (earnings.Count == 0 && employees.TryGetValue(input.EmployeeId, out var employee) && employee.PayType.Contains("Salary", StringComparison.OrdinalIgnoreCase) && input.GrossPay > 0)
                 earnings.Add(new PayrollEarningInput("SALARY", "Salary", 0, 0, input.GrossPay, true, null, employee.State, employee.WorkCounty, employee.WorkCity, employee.WorkSchoolDistrict));
-            earnings.AddRange(employeeEntries.Select(entry => new PayrollEarningInput(entry.EarningCode, entry.EarningType, entry.Hours, entry.Rate, entry.Amount, entry.IsTaxable, entry.WorkDate, entry.WorkState, entry.WorkCounty, entry.WorkCity, entry.WorkSchoolDistrict, entry.Id, ParseW2Reporting(entry.W2ReportingJson))));
+            earnings.AddRange(employeeEntries.Select(entry => new PayrollEarningInput(entry.EarningCode, entry.EarningType, entry.Hours, entry.Rate, entry.Amount, entry.IsTaxable, entry.WorkDate, entry.WorkState, entry.WorkCounty, entry.WorkCity, entry.WorkSchoolDistrict, entry.Id, ParseW2Reporting(entry.W2ReportingJson), entry.ProjectJobId)));
             expandedEmployees.Add(input with { GrossPay = RoundCurrency(earnings.Sum(earning => earning.Amount)), Earnings = earnings });
         }
 
@@ -2688,7 +2728,7 @@ public sealed partial class AccountingTransactionService(
         return TransactionResult.Success(payment.Id);
     }
 
-    private async Task<TransactionResult> PostAsync(BrassLedgerDbContext db, Guid companyId, DateOnly date, string module, string reference, string description, IReadOnlyList<JournalLineRequest> lines, CancellationToken ct, Guid? bankAccountId = null, bool allowControlAccounts = false, Guid? sourceDocumentId = null, string? sourceDocumentType = null, bool resolveOperationalRoles = false)
+    private async Task<TransactionResult> PostAsync(BrassLedgerDbContext db, Guid companyId, DateOnly date, string module, string reference, string description, IReadOnlyList<JournalLineRequest> lines, CancellationToken ct, Guid? bankAccountId = null, bool allowControlAccounts = false, Guid? sourceDocumentId = null, string? sourceDocumentType = null, bool resolveOperationalRoles = false, bool allowClosedProjects = false)
     {
         if (await IsClosedPeriodAsync(db, companyId, date, ct)) return TransactionResult.Failure("This posting date is in a closed accounting period.");
         if (lines.Count < 2 || lines.Any(x => x.Debit < 0 || x.Credit < 0 || (x.Debit == 0 && x.Credit == 0) || (x.Debit > 0 && x.Credit > 0))) return TransactionResult.Failure("Journal entries require at least two valid debit or credit lines.");
@@ -2719,6 +2759,9 @@ public sealed partial class AccountingTransactionService(
         var accounts = await db.Accounts.Where(x => x.CompanyId == companyId && x.IsActive && numbers.Contains(x.Number)).ToListAsync(ct);
         if (accounts.Count != numbers.Length) return TransactionResult.Failure("One or more active posting accounts could not be found.");
         if (!allowControlAccounts && accounts.Any(account => account.IsControlAccount)) return TransactionResult.Failure("General journal entries cannot post directly to control accounts; use the related receivables, payables, inventory, or payroll workflow.");
+        var projectIds = lines.Where(line => line.ProjectJobId.HasValue).Select(line => line.ProjectJobId!.Value).Distinct().ToArray();
+        if (projectIds.Length > 0 && await db.ProjectJobs.CountAsync(project => project.CompanyId == companyId && (allowClosedProjects || project.Status == "Active") && projectIds.Contains(project.Id), ct) != projectIds.Length)
+            return TransactionResult.Failure(allowClosedProjects ? "One or more journal projects do not belong to this company." : "Every journal project must be active. Closed, missing, or another company's projects are unavailable.");
         var userId = ResolveUserId();
         var now = DateTimeOffset.UtcNow;
         var entry = new JournalEntry { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bankAccountId, SourceDocumentId = sourceDocumentId, SourceDocumentType = sourceDocumentType ?? string.Empty, EntryNumber = $"JE-{date:yyyyMMdd}-{Guid.NewGuid():N}"[..20], PostedOn = date, SourceModule = module, Reference = reference.Trim(), Description = description.Trim(), TotalAmount = debits, Status = "Posted", IsPosted = true, CreatedByUserId = userId, CreatedAtUtc = now, ApprovedByUserId = userId, ApprovedAtUtc = now, PostedByUserId = userId, PostedAtUtc = now, ConcurrencyToken = Guid.NewGuid().ToString("N") };
@@ -2727,7 +2770,7 @@ public sealed partial class AccountingTransactionService(
         {
             var account = accounts.Single(x => string.Equals(x.Number, line.AccountNumber.Trim(), StringComparison.OrdinalIgnoreCase));
             account.CurrentBalance += account.Type is AccountType.Asset or AccountType.Expense ? line.Debit - line.Credit : line.Credit - line.Debit;
-            db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit });
+            db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, ProjectJobId = line.ProjectJobId, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit });
         }
         AddJournalAudit(db, companyId, userId, "journal.posted", entry, new { entry.SourceDocumentType, entry.SourceDocumentId });
         await db.SaveChangesAsync(ct);
@@ -3250,7 +3293,7 @@ public sealed partial class AccountingTransactionService(
         var accountIds = originalLines.Select(line => line.AccountId).Distinct().ToArray();
         var accounts = await db.Accounts.Where(account => account.CompanyId == companyId && accountIds.Contains(account.Id)).ToDictionaryAsync(account => account.Id, cancellationToken);
         if (originalLines.Count < 2 || accounts.Count != accountIds.Length) return TransactionResult.Failure("The original journal distribution is unavailable.");
-        var lines = originalLines.Select(line => new JournalLineRequest(accounts[line.AccountId].Number, line.Credit, line.Debit, $"Reversal: {line.Description}")).ToArray();
+        var lines = originalLines.Select(line => new JournalLineRequest(accounts[line.AccountId].Number, line.Credit, line.Debit, $"Reversal: {line.Description}", line.ProjectJobId)).ToArray();
         if (await IsClosedPeriodAsync(db, companyId, date, cancellationToken)) return TransactionResult.Failure("This posting date is in a closed accounting period.");
         var debits = lines.Sum(line => line.Debit); var credits = lines.Sum(line => line.Credit);
         if (debits != credits) return TransactionResult.Failure("The original journal is not balanced.");
@@ -3265,7 +3308,7 @@ public sealed partial class AccountingTransactionService(
         {
             var account = accounts.Values.Single(item => item.Number.Equals(line.AccountNumber, StringComparison.OrdinalIgnoreCase));
             account.CurrentBalance += account.Type is AccountType.Asset or AccountType.Expense ? line.Debit - line.Credit : line.Credit - line.Debit;
-            db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, Description = line.Description, Debit = line.Debit, Credit = line.Credit });
+            db.JournalEntryLines.Add(new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = entry.Id, AccountId = account.Id, ProjectJobId = line.ProjectJobId, Description = line.Description, Debit = line.Debit, Credit = line.Credit });
         }
         AddJournalAudit(db, companyId, userId, "journal.posted", entry, new { entry.SourceDocumentType, entry.SourceDocumentId });
         await db.SaveChangesAsync(cancellationToken);

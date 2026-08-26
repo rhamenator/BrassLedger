@@ -53,12 +53,13 @@ else
                 </div>
                 <div class="table-scroll">
                     <table class="data-table">
-                        <thead><tr><th>Description</th><th>Quantity</th><th>Unit cost</th><th>Discount</th><th>Tax</th><th>Expense account</th><th>Line total</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                        <thead><tr><th>Description</th><th>Project</th><th>Quantity</th><th>Unit cost</th><th>Discount</th><th>Tax</th><th>Expense account</th><th>Line total</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
                         <tbody>
                             @foreach (var line in BillForm.Lines)
                             {
                                 <tr @key="line">
                                     <td><InputText aria-label="Bill line description" class="field-input" @bind-Value="line.Description" /></td>
+                                    <td><InputSelect aria-label="Bill line project" class="field-input" @bind-Value="line.ProjectJobId"><option value="">No project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status is "Active" or "Open" or "Billing")) { <option value="@project.Id">@project.JobNumber</option> }</InputSelect></td>
                                     <td><InputNumber aria-label="Bill line quantity" class="field-input" @bind-Value="line.Quantity" /></td>
                                     <td><InputNumber aria-label="Bill line unit cost" class="field-input" @bind-Value="line.UnitCost" /></td>
                                     <td><InputNumber aria-label="Bill line discount" class="field-input" @bind-Value="line.Discount" /></td>
@@ -69,7 +70,7 @@ else
                                 </tr>
                             }
                         </tbody>
-                        <tfoot><tr><th colspan="6">Bill total</th><th>@BillForm.Total.ToString("C")</th><th></th></tr></tfoot>
+                        <tfoot><tr><th colspan="7">Bill total</th><th>@BillForm.Total.ToString("C")</th><th></th></tr></tfoot>
                     </table>
                 </div>
                 <button class="action-secondary" type="button" @onclick="AddBillLine">Add line</button>
@@ -229,7 +230,7 @@ else
 
     private async Task SaveBillDraftAsync()
     {
-        var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount)).ToArray();
+        var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount, line.ProjectJobId)).ToArray();
         var result = await TransactionService.SaveVendorBillDraftAsync(new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? DefaultCostAccountNumber, $"Bill {BillForm.Number}", lines));
         StatusMessage = result.Succeeded ? "Vendor bill draft saved." : result.ErrorMessage;
         if (result.Succeeded)
@@ -240,7 +241,7 @@ else
         }
     }
 
-    private async Task SaveRecurringBillTemplateAsync() { var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount)).ToArray(); var request = new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? DefaultCostAccountNumber, $"Recurring bill {BillForm.Number}", lines); var result = await TransactionService.SaveRecurringVendorBillTemplateAsync(new SaveRecurringVendorBillTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring vendor bill template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); BillForm.Reset(DefaultCostAccountNumber); } }
+    private async Task SaveRecurringBillTemplateAsync() { var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount, line.ProjectJobId)).ToArray(); var request = new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? DefaultCostAccountNumber, $"Recurring bill {BillForm.Number}", lines); var result = await TransactionService.SaveRecurringVendorBillTemplateAsync(new SaveRecurringVendorBillTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring vendor bill template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); BillForm.Reset(DefaultCostAccountNumber); } }
     private async Task GenerateRecurringDraftsAsync() { var result = await TransactionService.GenerateDueRecurringDocumentsAsync(RecurringForm.GenerateThrough); StatusMessage = result.Succeeded ? "Due recurring drafts generated." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task ApproveWorkflowAsync(Guid id) { var result = await TransactionService.ApproveSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Vendor bill draft approved." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task RejectWorkflowAsync(SubledgerDocumentWorkflowSnapshot workflow) { var result = await TransactionService.RejectSubledgerDocumentAsync(new RejectSubledgerDocumentRequest(workflow.Id, RejectionReason, workflow.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Vendor bill draft rejected. Its preparer can correct and resubmit it using the same vendor and bill number." : result.ErrorMessage; if (result.Succeeded) RejectionReason = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
@@ -297,6 +298,7 @@ else
     private sealed class BillLineEditor
     {
         public string Description { get; set; } = string.Empty;
+        public Guid? ProjectJobId { get; set; }
         public decimal Quantity { get; set; } = 1m;
         public decimal UnitCost { get; set; }
         public decimal Discount { get; set; }

@@ -152,9 +152,9 @@ internal static class BrassLedgerSeedData
 
         var projectJobs = new[]
         {
-            new ProjectJob { Id = Guid.Parse("bcc9c7cc-51ff-4574-9b06-73d3d1004a7c"), CompanyId = CompanyId, JobNumber = "JOB-5007", Name = "Red Mesa Expansion", CustomerName = "Red Mesa Builders", Status = "Open", BudgetAmount = 45000m, ActualCost = 27600m },
-            new ProjectJob { Id = Guid.Parse("ca58f9c0-f6fd-4a05-8d7a-c9df54b7468c"), CompanyId = CompanyId, JobNumber = "JOB-5012", Name = "Hilltop Retrofit", CustomerName = "Hilltop Civic Works", Status = "Open", BudgetAmount = 28500m, ActualCost = 14320m },
-            new ProjectJob { Id = Guid.Parse("d6579a0b-9767-47eb-bdab-b649fbebaf9e"), CompanyId = CompanyId, JobNumber = "JOB-5002", Name = "North Coast Lab Fitout", CustomerName = "North Coast Health", Status = "Billing", BudgetAmount = 62000m, ActualCost = 61710m }
+            new ProjectJob { Id = Guid.Parse("bcc9c7cc-51ff-4574-9b06-73d3d1004a7c"), CompanyId = CompanyId, JobNumber = "JOB-5007", Name = "Red Mesa Expansion", CustomerId = customers[0].Id, CustomerName = customers[0].Name, Status = "Active", StartDate = new DateOnly(2026, 1, 5), ExpectedEndDate = new DateOnly(2026, 10, 30), BillingMethod = "TimeAndMaterials", ContractAmount = 72000m, BudgetAmount = 45000m, CreatedAtUtc = DateTimeOffset.UtcNow },
+            new ProjectJob { Id = Guid.Parse("ca58f9c0-f6fd-4a05-8d7a-c9df54b7468c"), CompanyId = CompanyId, JobNumber = "JOB-5012", Name = "Hilltop Retrofit", CustomerId = customers[3].Id, CustomerName = customers[3].Name, Status = "Active", StartDate = new DateOnly(2026, 2, 2), ExpectedEndDate = new DateOnly(2026, 8, 31), BillingMethod = "FixedPrice", ContractAmount = 36000m, RetainagePercent = 0.1m, BudgetAmount = 28500m, CreatedAtUtc = DateTimeOffset.UtcNow },
+            new ProjectJob { Id = Guid.Parse("d6579a0b-9767-47eb-bdab-b649fbebaf9e"), CompanyId = CompanyId, JobNumber = "JOB-5002", Name = "North Coast Lab Fitout", CustomerId = customers[2].Id, CustomerName = customers[2].Name, Status = "Active", StartDate = new DateOnly(2025, 11, 10), ExpectedEndDate = new DateOnly(2026, 6, 30), BillingMethod = "CostPlus", ContractAmount = 81000m, BudgetAmount = 62000m, CreatedAtUtc = DateTimeOffset.UtcNow }
         };
 
         var taxProfiles = new[]

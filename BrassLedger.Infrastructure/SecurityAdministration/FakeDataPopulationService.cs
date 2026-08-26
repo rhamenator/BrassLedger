@@ -240,10 +240,12 @@ public sealed class FakeDataPopulationService(
             return 0;
         }
 
+        var customers = await dbContext.Customers.Where(customer => customer.CompanyId == companyId).ToDictionaryAsync(customer => customer.Name, cancellationToken);
+        if (!customers.TryGetValue("Harbor View Contractors", out var harborCustomer) || !customers.TryGetValue("Blue Canyon Transit", out var transitCustomer)) return 0;
         var jobs = new[]
         {
-            new ProjectJob { Id = Guid.NewGuid(), CompanyId = companyId, JobNumber = "JOB-8801", Name = "Harbor Retrofit Phase 1", CustomerName = "Harbor View Contractors", Status = "Open", BudgetAmount = 58000m, ActualCost = 17120m },
-            new ProjectJob { Id = Guid.NewGuid(), CompanyId = companyId, JobNumber = "JOB-8802", Name = "Transit Depot Refit", CustomerName = "Blue Canyon Transit", Status = "Billing", BudgetAmount = 41300m, ActualCost = 40110m }
+            new ProjectJob { Id = Guid.NewGuid(), CompanyId = companyId, JobNumber = "JOB-8801", Name = "Harbor Retrofit Phase 1", CustomerId = harborCustomer.Id, CustomerName = harborCustomer.Name, Status = "Active", StartDate = new DateOnly(2026, 1, 12), ExpectedEndDate = new DateOnly(2026, 11, 30), BillingMethod = "TimeAndMaterials", ContractAmount = 76000m, BudgetAmount = 58000m, CreatedAtUtc = DateTimeOffset.UtcNow },
+            new ProjectJob { Id = Guid.NewGuid(), CompanyId = companyId, JobNumber = "JOB-8802", Name = "Transit Depot Refit", CustomerId = transitCustomer.Id, CustomerName = transitCustomer.Name, Status = "Active", StartDate = new DateOnly(2026, 2, 9), ExpectedEndDate = new DateOnly(2026, 9, 30), BillingMethod = "FixedPrice", ContractAmount = 55000m, RetainagePercent = 0.05m, BudgetAmount = 41300m, CreatedAtUtc = DateTimeOffset.UtcNow }
         };
 
         await dbContext.ProjectJobs.AddRangeAsync(jobs, cancellationToken);

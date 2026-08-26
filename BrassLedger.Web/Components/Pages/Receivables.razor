@@ -53,12 +53,13 @@ else
                 </div>
                 <div class="table-scroll">
                     <table class="data-table">
-                        <thead><tr><th>Description</th><th>Quantity</th><th>Unit price</th><th>Discount</th><th>Tax</th><th>Revenue account</th><th>Line total</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                        <thead><tr><th>Description</th><th>Project</th><th>Quantity</th><th>Unit price</th><th>Discount</th><th>Tax</th><th>Revenue account</th><th>Line total</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
                         <tbody>
                             @foreach (var line in InvoiceForm.Lines)
                             {
                                 <tr @key="line">
                                     <td><InputText aria-label="Invoice line description" class="field-input" @bind-Value="line.Description" /></td>
+                                    <td><InputSelect aria-label="Invoice line project" class="field-input" @bind-Value="line.ProjectJobId"><option value="">No project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status is "Active" or "Open" or "Billing")) { <option value="@project.Id">@project.JobNumber</option> }</InputSelect></td>
                                     <td><InputNumber aria-label="Invoice line quantity" class="field-input" @bind-Value="line.Quantity" /></td>
                                     <td><InputNumber aria-label="Invoice line unit price" class="field-input" @bind-Value="line.UnitPrice" /></td>
                                     <td><InputNumber aria-label="Invoice line discount" class="field-input" @bind-Value="line.Discount" /></td>
@@ -69,7 +70,7 @@ else
                                 </tr>
                             }
                         </tbody>
-                        <tfoot><tr><th colspan="6">Invoice total</th><th>@InvoiceForm.Total.ToString("C")</th><th></th></tr></tfoot>
+                        <tfoot><tr><th colspan="7">Invoice total</th><th>@InvoiceForm.Total.ToString("C")</th><th></th></tr></tfoot>
                     </table>
                 </div>
                 <button class="action-secondary" type="button" @onclick="AddInvoiceLine">Add line</button>
@@ -237,7 +238,7 @@ else
 
     private async Task SaveInvoiceDraftAsync()
     {
-        var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount)).ToArray();
+        var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount, line.ProjectJobId)).ToArray();
         var result = await TransactionService.SaveInvoiceDraftAsync(new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? DefaultRevenueAccountNumber, $"Invoice {InvoiceForm.Number}", lines));
         StatusMessage = result.Succeeded ? "Invoice draft saved." : result.ErrorMessage;
         if (result.Succeeded)
@@ -248,7 +249,7 @@ else
         }
     }
 
-    private async Task SaveRecurringInvoiceTemplateAsync() { var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount)).ToArray(); var request = new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? DefaultRevenueAccountNumber, $"Recurring invoice {InvoiceForm.Number}", lines); var result = await TransactionService.SaveRecurringInvoiceTemplateAsync(new SaveRecurringInvoiceTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring invoice template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); InvoiceForm.Reset(DefaultRevenueAccountNumber); } }
+    private async Task SaveRecurringInvoiceTemplateAsync() { var lines = InvoiceForm.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.Discount, line.Tax, line.RevenueAccount, line.ProjectJobId)).ToArray(); var request = new CreateInvoiceRequest(InvoiceForm.CustomerId, InvoiceForm.Number, InvoiceForm.Date, InvoiceForm.DueDate, 0m, 0m, lines.FirstOrDefault()?.RevenueAccountNumber ?? DefaultRevenueAccountNumber, $"Recurring invoice {InvoiceForm.Number}", lines); var result = await TransactionService.SaveRecurringInvoiceTemplateAsync(new SaveRecurringInvoiceTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring invoice template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); InvoiceForm.Reset(DefaultRevenueAccountNumber); } }
     private async Task GenerateRecurringDraftsAsync() { var result = await TransactionService.GenerateDueRecurringDocumentsAsync(RecurringForm.GenerateThrough); StatusMessage = result.Succeeded ? "Due recurring drafts generated." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task ApproveWorkflowAsync(Guid id) { var result = await TransactionService.ApproveSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Invoice draft approved." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task RejectWorkflowAsync(SubledgerDocumentWorkflowSnapshot workflow) { var result = await TransactionService.RejectSubledgerDocumentAsync(new RejectSubledgerDocumentRequest(workflow.Id, RejectionReason, workflow.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Invoice draft rejected. Its preparer can correct and resubmit it using the same number." : result.ErrorMessage; if (result.Succeeded) RejectionReason = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
@@ -305,6 +306,7 @@ else
     private sealed class InvoiceLineEditor
     {
         public string Description { get; set; } = string.Empty;
+        public Guid? ProjectJobId { get; set; }
         public decimal Quantity { get; set; } = 1m;
         public decimal UnitPrice { get; set; }
         public decimal Discount { get; set; }

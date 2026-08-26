@@ -15,11 +15,11 @@ SQLite and PostgreSQL have separate versioned migrations for this schema. Existi
 Verification completed on 2026-08-26:
 
 - Release solution build: succeeded with zero warnings and zero errors.
-- SQLite/default infrastructure suite: 184 tests passed; six PostgreSQL-only tests were skipped in that run.
-- Disposable PostgreSQL 16 infrastructure suite: 190 of 190 tests passed with zero skips.
-- API integration suite: 32 of 32 tests passed.
-- Web component suite: 8 of 8 tests passed.
-- Chromium end-to-end suite: 28 of 28 tests passed, including separated purchasing and AR/AP roles, rejected-draft correction and resubmission, and the visually approved snapshots.
+- SQLite/default infrastructure suite: 187 tests passed; six PostgreSQL-only tests were skipped in that run.
+- Disposable PostgreSQL 16 infrastructure suite: 193 of 193 tests passed with zero skips.
+- API integration suite: 33 of 33 tests passed.
+- Web component suite: 9 of 9 tests passed.
+- Chromium end-to-end suite: 29 of 29 tests passed, including separated purchasing and AR/AP roles, rejected-draft correction and resubmission, and the visually inspected Ledger and Projects snapshots.
 - SQLite and PostgreSQL EF model-drift checks: no pending model changes.
 - NuGet direct and transitive vulnerability scan: no known vulnerable packages from the configured source.
 - Cross-invoice supplier-return regression: passed for a return spanning two supplier invoices with different prices, followed by exact reversal.
@@ -43,12 +43,41 @@ Ordinary general journals now enter only through draft, approval, and posting; n
 
 QuickBooks CSV journal imports create controlled drafts atomically with their import batch and provenance instead of changing balances. Invalid line polarity, unavailable or control accounts, imbalance, and duplicates are rejected. Only posted general journals are exported. SQLite and PostgreSQL migrations retain journal review decisions and prohibit destructive downgrade. Service, API, component, and browser regressions cover stale review, self-approval, self-rejection, approver self-posting, correction, posting, reversal, import draft behavior, and the three-user rendered workflow on 2026-08-26.
 
+### Project ledger dimensions
+
+Projects now have company-scoped customer, schedule, billing-method, contract, budget, retainage, lifecycle, concurrency, and audit controls. Only active same-company projects accept new source activity. Dimensions propagate through journals, invoice and bill lines, sales and purchasing documents, shipment cost and revenue, invoice matching, customer and supplier returns, timecards, payroll expense allocation, and reversals. Closing is blocked by open orders, requisitions, or timecards; reopening requires a reason. Posted expense and revenue lines, rather than editable project summary fields, drive project cost, revenue, and margin. Unreceived purchase-order value drives commitments. Exact totals use the full posted project ledger while the workspace drill-down is bounded to 250 recent lines.
+
+QuickBooks journal and zero-tax invoice CSV paths preserve an optional project/job number. Imports reject unknown, ambiguous, inactive, or other-company project references instead of silently dropping them. Versioned SQLite and PostgreSQL migrations preserve source and ledger attribution and prohibit destructive downgrade. Service, API, component, migration, and cross-provider verification cover project isolation, concurrency, lifecycle, accounting derivation, payroll allocation, return and reversal propagation, and CSV round trips on 2026-08-26. Change orders, automated project billing, retainage accounting, WIP, and revenue recognition remain explicitly incomplete; see the [project accounting guide](project-accounting-guide.md).
+
+## Capability matrix
+
+| Area | Status | Current evidence or principal gap |
+| --- | --- | --- |
+| Controlled general journals | Implemented and tested | Draft, independent approval, separate posting, rejection, correction, reversal, closed-period controls, audit, and QuickBooks draft import are covered. |
+| Ordinary receivables and payables | Partially implemented | Controlled invoice/bill posting and corrections are covered; the complete credits, refunds, recurring, payment-batch, ACH, and document-output acceptance matrix is not. |
+| Purchasing and inventory | Partially implemented | Requisitions, orders, partial receiving, matching, landed cost, returns, locations, and core reversals are covered; lots, serials, counts, reorder planning, and all costing variants remain incomplete. |
+| Banking and reconciliation | Partially implemented | Imports, matching, transfers, adjustments, reconciliation, and reopening exist; OFX/QFX/CAMT/MT940 breadth, payment-originating integrations, and full operational rehearsal remain incomplete. |
+| Payroll | Partially implemented | Controlled run review/posting/reversal, jurisdiction allocation, project burden, liabilities, and several corrections are covered; filing/e-file outputs and every jurisdiction-specific rule remain incomplete. |
+| Tax content | Not production-approved | Versioned schema, intake, validation, provenance, and selected runtime packages exist; all 50 states plus DC and required local content still need source completion, test vectors, approval, and activation. |
+| Project/job dimensioning | Implemented and tested | Company isolation, lifecycle, source propagation, ledger actuals, commitments, payroll, returns, reversals, CSV interchange, and recent drill-down are covered. |
+| Advanced project accounting | Not implemented | Change orders, automated billing, retainage accounting, WIP, revenue recognition, phases/cost codes, and full historical export remain open. |
+| Financial and operational reporting | Partially implemented | Catalogs and selected reports exist; every required statement, reconciliation, drill-down, export, print, and cross-report reconciliation has not passed acceptance. |
+| Multi-company | Partially implemented | Memberships, secure company context, switching, and isolation tests exist; the complete owner/admin workflow and cross-module isolation matrix remain incomplete. |
+| Multi-currency and consolidation | Partially implemented | Exchange-rate and consolidation foundations exist; transaction remeasurement, gains/losses, ownership periods, intercompany matching/eliminations, and consolidated statements are incomplete. |
+| QuickBooks interoperability | Partially implemented | Controlled CSV and bounded inbound API master synchronization exist; broader transaction types, outbound API synchronization, live OAuth rehearsal, and Desktop IIF are incomplete. |
+| Other accounting products | Not implemented | Xero, Sage, Wave, FreshBooks, and GnuCash adapters remain open. |
+| Security and administration | Partially implemented | Authentication, permissions, MFA, invitations, recovery, sessions, audit, sensitive-field protection, and company context exist; complete hosted security assessment, key-rotation rehearsal, alerts, and privacy controls remain open. |
+| Database lifecycle and recovery | Partially implemented | Versioned SQLite/PostgreSQL migrations and several backup/restore controls are tested; oldest-supported production upgrade and encrypted off-machine clean-install restore remain release blockers. |
+| Packaging and release provenance | Partially implemented | Publishing and quality workflows exist; clean installer lifecycle, signing/notarization, SBOM, checksums, and complete provenance gate remain incomplete. |
+| Independent professional review | Required before production | Human accounting, payroll-tax, security, accessibility, and release approval has not been completed. |
+
 ## Known limitations and unverified areas
 
 The following areas are not yet proven complete against the project definition of done:
 
 - The representative-business acceptance scenario has not passed as one uninterrupted install-to-restore workflow.
-- The ordinary AR/AP draft-to-post path is controlled, rejectable, correctable, and retry-safe, but complete AR, AP, banking, payroll, inventory, projects, fixed assets, period-end, multi-currency, consolidation, and reporting acceptance matrices remain to be audited against the required positive, negative, authorization, isolation, rounding, concurrency, and reversal cases.
+- The ordinary AR/AP draft-to-post path is controlled, rejectable, correctable, and retry-safe, but complete AR, AP, banking, payroll, inventory, fixed assets, period-end, multi-currency, consolidation, and reporting acceptance matrices remain to be audited against the required positive, negative, authorization, isolation, rounding, concurrency, and reversal cases.
+- Project dimensioning, lifecycle, derived actuals, purchase commitments, and recent-ledger drill-down are implemented, but change orders, automated project billing, retainage accounting, WIP, revenue recognition, phased budgets, and full historical ledger export are not yet complete.
 - Tax runtime packages for every state and the District of Columbia require a source-by-source completion audit, executable boundary tests, review, and explicit activation. Captured or LLM-assisted interpretations are not regulatory approval.
 - Local payroll-tax coverage, reciprocity, convenience-of-employer rules, filing outputs, and multi-work-location allocation require jurisdiction-specific verification by qualified payroll/tax reviewers.
 - QuickBooks and other interchange paths require a capability-by-capability audit of mapping, dry runs, idempotency, duplicate handling, rejection correction, reconciliation totals, and round trips. QuickBooks Online production synchronization additionally depends on provider credentials and approval.

@@ -339,6 +339,7 @@ public sealed class JournalEntryLine
     public Guid Id { get; set; }
     public Guid JournalEntryId { get; set; }
     public Guid AccountId { get; set; }
+    public Guid? ProjectJobId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
@@ -494,6 +495,7 @@ public sealed class SalesInvoiceLine
     public Guid SalesInvoiceId { get; set; }
     public int Sequence { get; set; }
     public Guid RevenueAccountId { get; set; }
+    public Guid? ProjectJobId { get; set; }
     public Guid? SalesOrderLineId { get; set; }
     public Guid? InventoryShipmentLineId { get; set; }
     public Guid? InventoryItemId { get; set; }
@@ -540,6 +542,7 @@ public sealed class VendorBillLine
     public Guid? InventoryReceiptLineId { get; set; }
     public int Sequence { get; set; }
     public Guid ExpenseAccountId { get; set; }
+    public Guid? ProjectJobId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public decimal UnitCost { get; set; }
@@ -751,6 +754,7 @@ public sealed class SalesQuoteLine
     public int Sequence { get; set; }
     public Guid InventoryItemId { get; set; }
     public Guid RevenueAccountId { get; set; }
+    public Guid? ProjectJobId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
@@ -788,6 +792,7 @@ public sealed class SalesOrderLine
     public int Sequence { get; set; }
     public Guid InventoryItemId { get; set; }
     public Guid RevenueAccountId { get; set; }
+    public Guid? ProjectJobId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal OrderedQuantity { get; set; }
     public decimal AllocatedQuantity { get; set; }
@@ -1132,6 +1137,7 @@ public sealed class PurchaseRequisitionLine
     public Guid PurchaseRequisitionId { get; set; }
     public int Sequence { get; set; }
     public Guid InventoryItemId { get; set; }
+    public Guid? ProjectJobId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal RequestedQuantity { get; set; }
     public decimal EstimatedUnitCost { get; set; }
@@ -1144,6 +1150,7 @@ public sealed class PurchaseOrderLine
     public Guid PurchaseOrderId { get; set; }
     public int Sequence { get; set; }
     public Guid InventoryItemId { get; set; }
+    public Guid? ProjectJobId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal OrderedQuantity { get; set; }
     public decimal UnitCost { get; set; }
@@ -1587,12 +1594,25 @@ public sealed class ProjectJob
 {
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
+    public Guid? CustomerId { get; set; }
     public string JobNumber { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public DateOnly? StartDate { get; set; }
+    public DateOnly? ExpectedEndDate { get; set; }
+    public DateOnly? ClosedOn { get; set; }
+    public string BillingMethod { get; set; } = "TimeAndMaterials";
+    public decimal ContractAmount { get; set; }
+    public decimal RetainagePercent { get; set; }
     public decimal BudgetAmount { get; set; }
     public decimal ActualCost { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? ClosedByUserId { get; set; }
+    public DateTimeOffset? ClosedAtUtc { get; set; }
+    public string CloseReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class TaxProfile
@@ -1800,6 +1820,7 @@ public sealed class PayrollEarningLine
     public Guid Id { get; set; }
     public Guid PayrollRunEmployeeLineId { get; set; }
     public Guid? PayrollTimeEntryId { get; set; }
+    public Guid? ProjectJobId { get; set; }
     public int Sequence { get; set; }
     public string EarningCode { get; set; } = "REGULAR";
     public string EarningType { get; set; } = "Regular";

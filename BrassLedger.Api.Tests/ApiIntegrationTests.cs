@@ -1163,7 +1163,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains("\"Accounts Receivable\",\"Accounts Receivable\",\"Accounts Receivable\",\"1100\"", exportedCsv);
         Assert.Contains("\"Sales Tax Payable\",\"Other Current Liability\",\"Sales tax payable\",\"2100\"", exportedCsv);
         var invoiceExport = await client.GetStringAsync("/api/interchange/quickbooks-online/invoices.csv");
-        Assert.Contains("\"Invoice No.\",\"Customer\",\"Invoice Date\",\"Due Date\",\"Item Amount\",\"Item Description\",\"Quantity\",\"Rate\"", invoiceExport);
+        Assert.Contains("\"Invoice No.\",\"Customer\",\"Invoice Date\",\"Due Date\",\"Item Amount\",\"Item Description\",\"Quantity\",\"Rate\",\"Project / Job\"", invoiceExport);
         Assert.Contains("INV-24021", invoiceExport);
         Assert.DoesNotContain("INV-24015", invoiceExport);
 
@@ -1193,16 +1193,18 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains("quickbooks-customers.csv", importAudit.DetailJson);
 
         using var journalForm = new MultipartFormDataContent();
-        journalForm.Add(new StringContent("Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue"), "file", "quickbooks-journals.csv");
+        const string journalCsv = "Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description,Project / Job\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash,\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue,JOB-5007";
+        journalForm.Add(new StringContent(journalCsv), "file", "quickbooks-journals.csv");
         var journalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", journalForm);
         Assert.True(journalImport.StatusCode == HttpStatusCode.OK, await journalImport.Content.ReadAsStringAsync());
         var afterJournalImport = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         var importedJournalDraft = Assert.Single(afterJournalImport!.GeneralLedger.RecentEntries, entry => entry.Status == "Draft" && entry.Description.Contains("QBO-JE-1", StringComparison.Ordinal));
         Assert.Equal("Draft", importedJournalDraft.Status);
+        Assert.Contains(importedJournalDraft.Lines ?? [], line => line.ProjectJobNumber == "JOB-5007");
         var draftJournalExport = await client.GetStringAsync("/api/interchange/quickbooks-online/journal-entries.csv");
         Assert.DoesNotContain("QBO-JE-1", draftJournalExport);
         using var duplicateJournalForm = new MultipartFormDataContent();
-        duplicateJournalForm.Add(new StringContent("Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Operating Cash,25.00,0.00,Cash\r\nQBO-JE-1,2026-05-01,QBO-JE-1,Imported general journal,Product Revenue,0.00,25.00,Revenue"), "file", "quickbooks-journals-retry.csv");
+        duplicateJournalForm.Add(new StringContent(journalCsv), "file", "quickbooks-journals-retry.csv");
         var duplicateJournalImport = await client.PostAsync("/api/interchange/quickbooks-online/journal-entries", duplicateJournalForm);
         Assert.Equal(HttpStatusCode.BadRequest, duplicateJournalImport.StatusCode);
         using var invalidJournalForm = new MultipartFormDataContent();
@@ -1212,11 +1214,15 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         using var malformedForm = new MultipartFormDataContent();
         malformedForm.Add(new StringContent("Display Name,Customer Number\r\n\"unterminated,QBO-BAD-1"), "file", "malformed-customers.csv");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/interchange/quickbooks-online/customers?dryRun=true", malformedForm)).StatusCode);
+        using var unavailableProjectForm = new MultipartFormDataContent();
+        unavailableProjectForm.Add(new StringContent("Journal No.,Journal Date,Account Name,Debits,Credits,Project / Job\r\nQBO-JE-PROJECT-BAD,2026-05-01,Operating Cash,25.00,0.00,DOES-NOT-EXIST\r\nQBO-JE-PROJECT-BAD,2026-05-01,Product Revenue,0.00,25.00,DOES-NOT-EXIST"), "file", "unavailable-project-journals.csv");
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/interchange/quickbooks-online/journal-entries?dryRun=true", unavailableProjectForm)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await invoiceApprover.PostAsync($"/api/journal-entry-drafts/{importedJournalDraft.Id}/approve", null)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await invoicePoster.PostAsync($"/api/journal-entry-drafts/{importedJournalDraft.Id}/post", null)).StatusCode);
         var journalExport = await client.GetStringAsync("/api/interchange/quickbooks-online/journal-entries.csv");
-        Assert.Contains("\"Journal No.\",\"Journal Date\",\"Reference\",\"Journal/Description\",\"Account Name\",\"Debits\",\"Credits\",\"Line Description\"", journalExport);
+        Assert.Contains("\"Journal No.\",\"Journal Date\",\"Reference\",\"Journal/Description\",\"Account Name\",\"Debits\",\"Credits\",\"Line Description\",\"Project / Job\"", journalExport);
         Assert.Contains("QBO-JE-1", journalExport);
+        Assert.Contains("JOB-5007", journalExport);
         using (var scope = isolatedFactory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<BrassLedgerDbContext>();
@@ -1226,7 +1232,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             await db.SaveChangesAsync();
         }
         var batches = await client.GetFromJsonAsync<AccountingInterchangeBatchSnapshot[]>("/api/interchange/batches");
-        Assert.Equal(6, batches!.Length);
+        Assert.Equal(7, batches!.Length);
         Assert.DoesNotContain(batches, batch => batch.FileName == "other-company.csv");
         Assert.Contains(batches, batch => batch.Status == "Validated" && batch.IsDryRun && batch.EntityType == "customers");
         Assert.Contains(batches, batch => batch.Status == "Imported" && !batch.IsDryRun && batch.ImportedCount == 1);
@@ -1234,10 +1240,11 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains(batches, batch => batch.Status == "DuplicateRejected" && batch.DuplicateCount == 2 && batch.RejectedCount == 2 && batch.Rejections.Count == 1);
         Assert.Contains(batches, batch => batch.Status == "Rejected" && batch.FileName == "invalid-quickbooks-journals.csv" && batch.RejectedCount == 2);
         Assert.Contains(batches, batch => batch.Status == "Rejected" && batch.FileName == "malformed-customers.csv" && batch.RejectedCount == 1 && batch.ContentSha256.Length == 64);
+        Assert.Contains(batches, batch => batch.Status == "Rejected" && batch.FileName == "unavailable-project-journals.csv" && batch.RejectedCount == 2);
 
         var beforeInvoiceImport = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         var receivablesBefore = beforeInvoiceImport!.Receivables.OpenBalance;
-        const string invoiceCsv = "Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Item Description,Quantity,Rate,Income Account\r\nQBO-INV-1,C-1003,2026-05-10,2026-06-09,50.00,Imported service,2,25.00,Product Revenue\r\nQBO-INV-1,C-1003,2026-05-10,2026-06-09,25.00,Imported materials,1,25.00,4000";
+        const string invoiceCsv = "Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Item Description,Quantity,Rate,Income Account,Project / Job\r\nQBO-INV-1,C-1003,2026-05-10,2026-06-09,50.00,Imported service,2,25.00,Product Revenue,JOB-5007\r\nQBO-INV-1,C-1003,2026-05-10,2026-06-09,25.00,Imported materials,1,25.00,4000,JOB-5007";
         using var invoicePreviewForm = new MultipartFormDataContent();
         invoicePreviewForm.Add(new StringContent(invoiceCsv), "file", "quickbooks-invoices.csv");
         var invoicePreview = await client.PostAsync("/api/interchange/quickbooks-online/invoices?dryRun=true", invoicePreviewForm);
@@ -1260,6 +1267,9 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var afterInvoicePost = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         Assert.Equal(receivablesBefore + 75m, afterInvoicePost!.Receivables.OpenBalance);
         Assert.Contains(afterInvoicePost.Receivables.Invoices, invoice => invoice.InvoiceNumber == "QBO-INV-1" && invoice.TotalAmount == 75m);
+        var invoiceRoundTrip = await client.GetStringAsync("/api/interchange/quickbooks-online/invoices.csv");
+        Assert.Contains("QBO-INV-1", invoiceRoundTrip);
+        Assert.Contains("JOB-5007", invoiceRoundTrip);
         using var taxableInvoiceForm = new MultipartFormDataContent();
         taxableInvoiceForm.Add(new StringContent("Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Tax Amount\r\nQBO-TAX-1,C-1003,2026-05-10,2026-06-09,50.00,3.00"), "file", "taxable-quickbooks-invoices.csv");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/interchange/quickbooks-online/invoices?dryRun=true", taxableInvoiceForm)).StatusCode);
@@ -1537,6 +1547,37 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal("{}", stored.CredentialsJson);
         Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.connected" && audit.EntityId == connected.Id);
         Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.disconnected" && audit.EntityId == connected.Id);
+    }
+
+    [Fact]
+    public async Task ProjectApi_ProvidesControlledMaintenanceCloseAndReopenWorkflow()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var missingToken = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
+        var workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var customerId = workspace!.Receivables.Customers.First().Id;
+        var createRequest = new SaveProjectJobRequest(null, "JOB-API-PROJECT", "API project", customerId, new DateOnly(2026, 8, 26), new DateOnly(2027, 2, 28), "TimeAndMaterials", 25_000m, 18_000m, 0.05m);
+        Assert.Equal(HttpStatusCode.BadRequest, (await missingToken.PostAsJsonAsync("/api/projects", createRequest)).StatusCode);
+        var createdResponse = await client.PostAsJsonAsync("/api/projects", createRequest);
+        Assert.Equal(HttpStatusCode.Created, createdResponse.StatusCode);
+        var created = await createdResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var project = Assert.Single((await client.GetFromJsonAsync<ProjectsWorkspace>("/api/projects"))!.Jobs, candidate => candidate.Id == created!.Id);
+        Assert.Equal("Active", project.Status);
+        Assert.Equal(18_000m, project.BudgetAmount);
+
+        var updateRequest = new SaveProjectJobRequest(project.Id, project.JobNumber, "API project revised", customerId, project.StartDate!.Value, project.ExpectedEndDate, "FixedPrice", 26_000m, 19_000m, 0.1m, project.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/projects/{Guid.NewGuid()}", updateRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/projects/{project.Id}", updateRequest)).StatusCode);
+        project = Assert.Single((await client.GetFromJsonAsync<ProjectsWorkspace>("/api/projects"))!.Jobs, candidate => candidate.Id == project.Id);
+        Assert.Equal("FixedPrice", project.BillingMethod);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/projects/{project.Id}/close", new CloseProjectJobRequest(project.Id, new DateOnly(2026, 8, 31), "Stale close", "stale"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/projects/{project.Id}/close", new CloseProjectJobRequest(project.Id, new DateOnly(2026, 8, 31), "Project work completed", project.ConcurrencyToken))).StatusCode);
+        project = Assert.Single((await client.GetFromJsonAsync<ProjectsWorkspace>("/api/projects"))!.Jobs, candidate => candidate.Id == project.Id);
+        Assert.Equal("Closed", project.Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/projects/{Guid.NewGuid()}/reopen", new ReopenProjectJobRequest(project.Id, "Mismatched route", project.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/projects/{project.Id}/reopen", new ReopenProjectJobRequest(project.Id, "Approved follow-up scope", project.ConcurrencyToken))).StatusCode);
+        Assert.Equal("Active", Assert.Single((await client.GetFromJsonAsync<ProjectsWorkspace>("/api/projects"))!.Jobs, candidate => candidate.Id == project.Id).Status);
     }
 
     private async Task<HttpClient> CreateAuthenticatedClientAsync(WebApplicationFactory<Program>? factory = null, string userName = "controller", bool includeAntiforgery = true)

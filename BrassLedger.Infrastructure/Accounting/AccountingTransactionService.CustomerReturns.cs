@@ -91,7 +91,17 @@ public sealed partial class AccountingTransactionService
         if (totalCost <= 0m) return TransactionResult.Failure("The returned inventory cost must be greater than zero.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var receiptId = Guid.NewGuid();
-        var posting = await PostAsync(db, companyId, request.ReceivedOn, "Sales Fulfillment", receiptNumber, $"Customer return {authorization.ReturnNumber}", [new(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), totalCost, 0m, "Returned inventory"), new(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), 0m, totalCost, "Reverse cost of goods sold")], cancellationToken, allowControlAccounts: true, sourceDocumentId: receiptId, sourceDocumentType: "CustomerReturnReceipt", resolveOperationalRoles: true);
+        var postingLines = new List<JournalLineRequest> { new(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), totalCost, 0m, "Returned inventory") };
+        postingLines.AddRange(requested.Select(item =>
+        {
+            var authorizationLine = lines.Single(line => line.Id == item.CustomerReturnAuthorizationLineId);
+            return new
+            {
+                orderLines[authorizationLine.SalesOrderLineId].ProjectJobId,
+                Cost = RoundCurrency(RoundQuantity(item.Quantity) * shipmentLines[authorizationLine.InventoryShipmentLineId].UnitCost)
+            };
+        }).GroupBy(line => line.ProjectJobId).Select(group => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), 0m, group.Sum(line => line.Cost), "Reverse cost of goods sold", group.Key)));
+        var posting = await PostAsync(db, companyId, request.ReceivedOn, "Sales Fulfillment", receiptNumber, $"Customer return {authorization.ReturnNumber}", postingLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: receiptId, sourceDocumentType: "CustomerReturnReceipt", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
         var receipt = new CustomerReturnReceipt { Id = receiptId, CompanyId = companyId, CustomerReturnAuthorizationId = authorization.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, ReceiptNumber = receiptNumber, ReceivedOn = request.ReceivedOn, TotalCost = totalCost, JournalEntryId = posting.Id!.Value, ReceivedByUserId = ResolveUserId(), ReceivedAtUtc = DateTimeOffset.UtcNow };
         db.CustomerReturnReceipts.Add(receipt);

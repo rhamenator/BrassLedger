@@ -440,6 +440,14 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.InboundJournalEntryId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankTransfer>().HasOne<JournalEntry>().WithMany().HasForeignKey(transfer => transfer.ReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ProjectJob>().HasOne<Customer>().WithMany().HasForeignKey(job => job.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<JournalEntryLine>().HasOne<ProjectJob>().WithMany().HasForeignKey(line => line.ProjectJobId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SalesInvoiceLine>().HasOne<ProjectJob>().WithMany().HasForeignKey(line => line.ProjectJobId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VendorBillLine>().HasOne<ProjectJob>().WithMany().HasForeignKey(line => line.ProjectJobId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SalesQuoteLine>().HasOne<ProjectJob>().WithMany().HasForeignKey(line => line.ProjectJobId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SalesOrderLine>().HasOne<ProjectJob>().WithMany().HasForeignKey(line => line.ProjectJobId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PurchaseRequisitionLine>().HasOne<ProjectJob>().WithMany().HasForeignKey(line => line.ProjectJobId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PurchaseOrderLine>().HasOne<ProjectJob>().WithMany().HasForeignKey(line => line.ProjectJobId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollRun>().HasOne<BankAccount>().WithMany().HasForeignKey(run => run.BankAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollRunRevision>().HasOne<PayrollRun>().WithMany().HasForeignKey(revision => revision.PayrollRunId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollTimecard>().HasOne<Employee>().WithMany().HasForeignKey(timecard => timecard.EmployeeId).OnDelete(DeleteBehavior.Restrict);
@@ -454,6 +462,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<EmployeePayrollDeductionElection>().HasOne<PayrollDeductionPlan>().WithMany().HasForeignKey(election => election.PayrollDeductionPlanId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollEarningLine>().HasOne<PayrollRunEmployeeLine>().WithMany().HasForeignKey(line => line.PayrollRunEmployeeLineId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<PayrollEarningLine>().HasOne<PayrollTimeEntry>().WithMany().HasForeignKey(line => line.PayrollTimeEntryId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PayrollEarningLine>().HasOne<ProjectJob>().WithMany().HasForeignKey(line => line.ProjectJobId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollDeductionLine>().HasOne<PayrollRunEmployeeLine>().WithMany().HasForeignKey(line => line.PayrollRunEmployeeLineId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<PayrollDeductionLine>().HasOne<PayrollDeductionPlan>().WithMany().HasForeignKey(line => line.PayrollDeductionPlanId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<PayrollDeductionLine>().HasOne<EmployeePayrollDeductionElection>().WithMany().HasForeignKey(line => line.EmployeePayrollDeductionElectionId).OnDelete(DeleteBehavior.Restrict);
@@ -500,6 +509,9 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollSsaWageFile>().Property(x => x.ContentBase64).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<PayrollSsaOriginalWageFile>().Property(x => x.ContentBase64).HasConversion(encryptedStringConverter);
         modelBuilder.Entity<Employee>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<ProjectJob>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<ProjectJob>().Property(x => x.BillingMethod).HasMaxLength(50);
+        modelBuilder.Entity<ProjectJob>().Property(x => x.CloseReason).HasMaxLength(1000);
         modelBuilder.Entity<PayrollDepositScheduleConfiguration>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollDisasterReliefConfiguration>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<PayrollDeductionPlan>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
@@ -819,6 +831,8 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<Employee>().Property(x => x.FederalStep4Deductions));
         ConfigureMoney(modelBuilder.Entity<ProjectJob>().Property(x => x.BudgetAmount));
         ConfigureMoney(modelBuilder.Entity<ProjectJob>().Property(x => x.ActualCost));
+        ConfigureMoney(modelBuilder.Entity<ProjectJob>().Property(x => x.ContractAmount));
+        modelBuilder.Entity<ProjectJob>().Property(x => x.RetainagePercent).HasPrecision(9, 6);
         ConfigureMoney(modelBuilder.Entity<TaxProfile>().Property(x => x.Rate), 9, 5);
         modelBuilder.Entity<TaxRuleParameter>().Property(x => x.NumericValue).HasPrecision(18, 4);
         ConfigureMoney(modelBuilder.Entity<TaxRuleBracket>().Property(x => x.UpperBoundAmount), 18, 2);
@@ -973,6 +987,14 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<PayrollSsaOriginalWageFile>().HasIndex(x => new { x.CompanyId, x.PayrollFilingId }).IsUnique();
         modelBuilder.Entity<PayrollClosePeriod>().HasIndex(x => new { x.CompanyId, x.PeriodType, x.PeriodKey }).IsUnique();
         modelBuilder.Entity<ProjectJob>().HasIndex(x => new { x.CompanyId, x.JobNumber }).IsUnique();
+        modelBuilder.Entity<JournalEntryLine>().HasIndex(x => new { x.ProjectJobId, x.JournalEntryId });
+        modelBuilder.Entity<SalesInvoiceLine>().HasIndex(x => x.ProjectJobId);
+        modelBuilder.Entity<VendorBillLine>().HasIndex(x => x.ProjectJobId);
+        modelBuilder.Entity<SalesQuoteLine>().HasIndex(x => x.ProjectJobId);
+        modelBuilder.Entity<SalesOrderLine>().HasIndex(x => x.ProjectJobId);
+        modelBuilder.Entity<PurchaseRequisitionLine>().HasIndex(x => x.ProjectJobId);
+        modelBuilder.Entity<PurchaseOrderLine>().HasIndex(x => x.ProjectJobId);
+        modelBuilder.Entity<PayrollEarningLine>().HasIndex(x => x.ProjectJobId);
         modelBuilder.Entity<BankAccount>().HasIndex(x => new { x.CompanyId, x.LedgerAccountId });
         modelBuilder.Entity<BankReconciliation>().HasIndex(x => new { x.BankAccountId, x.StatementDate }).IsUnique();
         modelBuilder.Entity<BankReconciliationItem>().HasIndex(x => new { x.BankReconciliationId, x.JournalEntryId }).IsUnique();
