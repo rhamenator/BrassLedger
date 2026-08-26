@@ -44,6 +44,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `ScopeVendorBillNumbersByVendor` is also intentionally non-reversible after use. Its predecessor required bill numbers to be unique across an entire company; the corrected model allows different vendors to issue the same number. Restoring the former constraint could delete, misassociate, or reject valid bills, so a pre-upgrade backup is required instead.
 
+`ScopeSubledgerVendorBillNumbersByVendor` carries that same identity rule into invoice and bill drafts, recurring templates, and generated drafts. The migration derives each historical vendor scope from its retained JSON request, keeps invoice numbering company-scoped, and isolates an unexpectedly malformed historical vendor payload under a legacy scope rather than guessing. It cannot safely downgrade after two vendors have used the same number through the approval workflow; restore a pre-upgrade backup instead.
+
 ## Verification
 
 At minimum, run:

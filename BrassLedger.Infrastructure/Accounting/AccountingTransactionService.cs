@@ -649,10 +649,10 @@ public sealed partial class AccountingTransactionService(
     }
 
     public Task<TransactionResult> SaveInvoiceDraftAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default) =>
-        SaveSubledgerWorkflowAsync("Invoice", request.InvoiceNumber, request, false, string.Empty, 1, null, null, cancellationToken);
+        SaveSubledgerWorkflowAsync("Invoice", "company", request.InvoiceNumber, request, false, string.Empty, 1, null, null, cancellationToken);
 
     public Task<TransactionResult> SaveVendorBillDraftAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default) =>
-        SaveSubledgerWorkflowAsync("VendorBill", request.BillNumber, request, false, string.Empty, 1, null, null, cancellationToken);
+        SaveSubledgerWorkflowAsync("VendorBill", request.VendorId.ToString("N"), request.BillNumber, request, false, string.Empty, 1, null, null, cancellationToken);
 
     public async Task<TransactionResult> ApproveSubledgerDocumentAsync(Guid workflowId, CancellationToken cancellationToken = default)
     {
@@ -696,12 +696,14 @@ public sealed partial class AccountingTransactionService(
             {
                 var request = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(workflow.PayloadJson);
                 if (request is null) return TransactionResult.Failure("The approved invoice draft payload is empty.");
+                if (!string.Equals(workflow.DocumentScope, "company", StringComparison.Ordinal)) return TransactionResult.Failure("The approved invoice draft identity scope does not match its document type.");
                 posting = await CreateInvoiceCoreAsync(db, companyId, request, cancellationToken);
             }
             else
             {
                 var request = System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(workflow.PayloadJson);
                 if (request is null) return TransactionResult.Failure("The approved vendor bill draft payload is empty.");
+                if (!string.Equals(workflow.DocumentScope, request.VendorId.ToString("N"), StringComparison.Ordinal)) return TransactionResult.Failure("The approved vendor bill draft identity scope does not match its vendor.");
                 posting = await CreateVendorBillCoreAsync(db, companyId, request, cancellationToken);
             }
         }
@@ -719,10 +721,10 @@ public sealed partial class AccountingTransactionService(
     }
 
     public Task<TransactionResult> SaveRecurringInvoiceTemplateAsync(SaveRecurringInvoiceTemplateRequest request, CancellationToken cancellationToken = default) =>
-        SaveSubledgerWorkflowAsync("Invoice", request.Invoice.InvoiceNumber, request.Invoice, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
+        SaveSubledgerWorkflowAsync("Invoice", "company", request.Invoice.InvoiceNumber, request.Invoice, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
 
     public Task<TransactionResult> SaveRecurringVendorBillTemplateAsync(SaveRecurringVendorBillTemplateRequest request, CancellationToken cancellationToken = default) =>
-        SaveSubledgerWorkflowAsync("VendorBill", request.Bill.BillNumber, request.Bill, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
+        SaveSubledgerWorkflowAsync("VendorBill", request.Bill.VendorId.ToString("N"), request.Bill.BillNumber, request.Bill, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
 
     public async Task<TransactionResult> GenerateDueRecurringDocumentsAsync(DateOnly throughDate, CancellationToken cancellationToken = default)
     {
@@ -748,9 +750,9 @@ public sealed partial class AccountingTransactionService(
                     var source = System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(template.PayloadJson)!;
                     payload = System.Text.Json.JsonSerializer.Serialize(source with { BillNumber = number, BillDate = occurrence, DueDate = occurrence.AddDays(source.DueDate.DayNumber - source.BillDate.DayNumber) });
                 }
-                if (!await db.SubledgerDocumentWorkflows.AnyAsync(item => item.CompanyId == companyId && item.DocumentType == template.DocumentType && item.DocumentNumber == number && !item.IsRecurringTemplate, cancellationToken))
+                if (!await db.SubledgerDocumentWorkflows.AnyAsync(item => item.CompanyId == companyId && item.DocumentType == template.DocumentType && item.DocumentScope == template.DocumentScope && item.DocumentNumber == number && !item.IsRecurringTemplate, cancellationToken))
                 {
-                    var draft = new SubledgerDocumentWorkflow { Id = Guid.NewGuid(), CompanyId = companyId, DocumentType = template.DocumentType, DocumentNumber = number, PayloadJson = payload, Status = "Draft", SourceTemplateId = template.Id, CreatedByUserId = ResolveUserId(), CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+                    var draft = new SubledgerDocumentWorkflow { Id = Guid.NewGuid(), CompanyId = companyId, DocumentType = template.DocumentType, DocumentScope = template.DocumentScope, DocumentNumber = number, PayloadJson = payload, Status = "Draft", SourceTemplateId = template.Id, CreatedByUserId = ResolveUserId(), CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
                     db.SubledgerDocumentWorkflows.Add(draft); AddWorkflowAudit(db, draft, "subledger-document.generated"); generated++;
                 }
                 occurrence = AdvanceOccurrence(occurrence, template.Frequency, template.FrequencyInterval);
@@ -2968,7 +2970,7 @@ public sealed partial class AccountingTransactionService(
         ConcurrencyToken = Guid.NewGuid().ToString("N")
     };
 
-    private async Task<TransactionResult> SaveSubledgerWorkflowAsync<T>(string documentType, string documentNumber, T payload, bool recurring, string frequency, int interval, DateOnly? nextDate, DateOnly? endDate, CancellationToken cancellationToken)
+    private async Task<TransactionResult> SaveSubledgerWorkflowAsync<T>(string documentType, string documentScope, string documentNumber, T payload, bool recurring, string frequency, int interval, DateOnly? nextDate, DateOnly? endDate, CancellationToken cancellationToken)
     {
         if (!HasPermission(BrassLedgerPermissions.SubledgerPrepare)) return TransactionResult.Failure("You are not authorized to prepare invoice or bill drafts.");
         var modulePermission = documentType == "Invoice" ? BrassLedgerPermissions.ReceivablesManage : BrassLedgerPermissions.PayablesManage;
@@ -2978,8 +2980,8 @@ public sealed partial class AccountingTransactionService(
         if (recurring && (normalizedFrequency is not ("Weekly" or "Monthly" or "Quarterly" or "Annually") || interval is < 1 or > 12 || !nextDate.HasValue || (endDate.HasValue && endDate.Value < nextDate.Value))) return TransactionResult.Failure("Recurring templates require Weekly, Monthly, Quarterly, or Annually frequency, an interval from 1 to 12, and valid occurrence dates.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        if (await db.SubledgerDocumentWorkflows.AnyAsync(item => item.CompanyId == companyId && item.DocumentType == documentType && item.DocumentNumber == documentNumber.Trim() && item.IsRecurringTemplate == recurring, cancellationToken)) return TransactionResult.Failure("That draft or recurring template number already exists.");
-        var workflow = new SubledgerDocumentWorkflow { Id = Guid.NewGuid(), CompanyId = companyId, DocumentType = documentType, DocumentNumber = documentNumber.Trim(), PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload), Status = recurring ? "Active" : "Draft", IsRecurringTemplate = recurring, Frequency = recurring ? normalizedFrequency : string.Empty, FrequencyInterval = recurring ? interval : 1, NextOccurrenceDate = nextDate, EndDate = endDate, CreatedByUserId = ResolveUserId(), CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        if (await db.SubledgerDocumentWorkflows.AnyAsync(item => item.CompanyId == companyId && item.DocumentType == documentType && item.DocumentScope == documentScope && item.DocumentNumber == documentNumber.Trim() && item.IsRecurringTemplate == recurring, cancellationToken)) return TransactionResult.Failure("That draft or recurring template number already exists for this customer or vendor.");
+        var workflow = new SubledgerDocumentWorkflow { Id = Guid.NewGuid(), CompanyId = companyId, DocumentType = documentType, DocumentScope = documentScope, DocumentNumber = documentNumber.Trim(), PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload), Status = recurring ? "Active" : "Draft", IsRecurringTemplate = recurring, Frequency = recurring ? normalizedFrequency : string.Empty, FrequencyInterval = recurring ? interval : 1, NextOccurrenceDate = nextDate, EndDate = endDate, CreatedByUserId = ResolveUserId(), CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.SubledgerDocumentWorkflows.Add(workflow); AddWorkflowAudit(db, workflow, recurring ? "recurring-template.saved" : "subledger-document.draft.saved");
         try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return TransactionResult.Failure("The draft or recurring template number already exists or changed concurrently."); }
         return TransactionResult.Success(workflow.Id);
@@ -3002,7 +3004,7 @@ public sealed partial class AccountingTransactionService(
         Action = action,
         EntityType = "SubledgerDocumentWorkflow",
         EntityId = workflow.Id,
-        DetailJson = System.Text.Json.JsonSerializer.Serialize(new { workflow.DocumentType, workflow.DocumentNumber, workflow.Status, workflow.IsRecurringTemplate, workflow.Frequency, workflow.FrequencyInterval, workflow.NextOccurrenceDate, workflow.EndDate, workflow.SourceTemplateId, workflow.PostedDocumentId }),
+        DetailJson = System.Text.Json.JsonSerializer.Serialize(new { workflow.DocumentType, workflow.DocumentScope, workflow.DocumentNumber, workflow.Status, workflow.IsRecurringTemplate, workflow.Frequency, workflow.FrequencyInterval, workflow.NextOccurrenceDate, workflow.EndDate, workflow.SourceTemplateId, workflow.PostedDocumentId }),
         OccurredAtUtc = DateTimeOffset.UtcNow
     });
 

@@ -615,6 +615,7 @@ public sealed class SubledgerDocumentWorkflow
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
     public string DocumentType { get; set; } = string.Empty;
+    public string DocumentScope { get; set; } = "company";
     public string DocumentNumber { get; set; } = string.Empty;
     public string PayloadJson { get; set; } = "{}";
     public string Status { get; set; } = "Draft";

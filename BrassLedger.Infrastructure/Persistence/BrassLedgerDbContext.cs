@@ -875,7 +875,8 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SubledgerPaymentApplication>().HasIndex(x => new { x.SubledgerPaymentId, x.DocumentId }).IsUnique();
         modelBuilder.Entity<SubledgerAdjustment>().HasIndex(x => new { x.CompanyId, x.Subledger, x.Reference }).IsUnique();
         modelBuilder.Entity<SubledgerAdjustment>().HasIndex(x => new { x.CompanyId, x.DocumentId });
-        modelBuilder.Entity<SubledgerDocumentWorkflow>().HasIndex(x => new { x.CompanyId, x.DocumentType, x.DocumentNumber, x.IsRecurringTemplate }).IsUnique();
+        modelBuilder.Entity<SubledgerDocumentWorkflow>().Property(x => x.DocumentScope).HasMaxLength(32);
+        modelBuilder.Entity<SubledgerDocumentWorkflow>().HasIndex(x => new { x.CompanyId, x.DocumentType, x.DocumentScope, x.DocumentNumber, x.IsRecurringTemplate }).IsUnique();
         modelBuilder.Entity<SubledgerDocumentWorkflow>().HasIndex(x => new { x.CompanyId, x.Status, x.NextOccurrenceDate });
         modelBuilder.Entity<SalesQuote>().HasIndex(x => new { x.CompanyId, x.QuoteNumber }).IsUnique();
         modelBuilder.Entity<SalesQuoteLine>().HasIndex(x => new { x.SalesQuoteId, x.Sequence }).IsUnique();

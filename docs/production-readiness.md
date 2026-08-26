@@ -15,8 +15,8 @@ SQLite and PostgreSQL have separate versioned migrations for this schema. Existi
 Verification completed on 2026-08-26:
 
 - Release solution build: succeeded with zero warnings and zero errors.
-- SQLite/default infrastructure suite: 180 tests passed; six PostgreSQL-only tests were skipped in that run after the PostgreSQL workflow race test was added.
-- Disposable PostgreSQL 16 infrastructure suite: 186 of 186 tests passed with zero skips.
+- SQLite/default infrastructure suite: 181 tests passed; six PostgreSQL-only tests were skipped in that run.
+- Disposable PostgreSQL 16 infrastructure suite: 187 of 187 tests passed with zero skips.
 - API integration suite: 32 of 32 tests passed.
 - Web component suite: 7 of 7 tests passed.
 - Chromium end-to-end suite: 27 of 27 tests passed, including separated purchasing and AR/AP roles and the visually approved snapshots.
@@ -32,6 +32,8 @@ The browser test host launches the already-built web assembly directly. This avo
 Customer invoices and ordinary vendor bills enter through draft, approval, and posting workflows; the API no longer exposes direct posting routes that bypass review. Built-in Receivables and Payables Preparer, Approver, and Poster roles permit least-privilege assignments. A preparer cannot approve the same document, and its approver cannot post it.
 
 Posting the journal, account and subledger balances, source invoice or bill, workflow state, and audit evidence is one database transaction. A forced source-document insertion failure proves that the earlier journal and balance changes roll back and the workflow remains approved for correction or retry. Repeating a completed request returns the original source-document ID without posting again; concurrent attempts produce exactly one source document and one journal entry. These controls are covered by infrastructure and API authorization regressions on 2026-08-26.
+
+Vendor-scoped external invoice numbers now apply consistently to drafts, recurring templates, generated drafts, posted bills, purchase-invoice matches, and landed-cost bills. Two vendors may both issue `1001`; a second `1001` for the same vendor is rejected before review. Versioned SQLite and PostgreSQL migrations backfill historical workflow identity from retained request data, support lost-history adoption, and block unsafe downgrade.
 
 ## Known limitations and unverified areas
 

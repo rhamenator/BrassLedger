@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("16", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("17", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -80,6 +80,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826133347_SeparateSupplierReturnCreditValue';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826141924_AddControlledPurchaseInvoiceMatching';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826150956_ScopeVendorBillNumbersByVendor';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826160416_ScopeSubledgerVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -110,7 +111,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("16", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("17", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -126,6 +127,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826133347_SeparateSupplierReturnCreditValue';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826141924_AddControlledPurchaseInvoiceMatching';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826150956_ScopeVendorBillNumbersByVendor';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826160416_ScopeSubledgerVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -356,6 +358,32 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826090933_AddPickPackBackorders';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('AccountingSchedules') WHERE name = 'DisposalJournalEntryId';"));
+    }
+
+    [Fact]
+    public async Task SubledgerScopeMigration_BackfillsHistoricalInvoiceAndVendorBillIdentity()
+    {
+        using var services = CreateServiceProvider();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var migrator = db.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260826150956_ScopeVendorBillNumbersByVendor");
+        var companyId = Guid.NewGuid(); var vendorId = Guid.NewGuid(); var billWorkflowId = Guid.NewGuid(); var invoiceWorkflowId = Guid.NewGuid();
+        var createdAt = DateTimeOffset.UtcNow;
+        var billPayload = System.Text.Json.JsonSerializer.Serialize(new CreateVendorBillRequest(vendorId, "LEGACY-1001", new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31), 10m, "5100", "Legacy bill"));
+        var invoicePayload = System.Text.Json.JsonSerializer.Serialize(new CreateInvoiceRequest(Guid.NewGuid(), "LEGACY-INV", new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31), 10m, 0m, "4000", "Legacy invoice"));
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "SubledgerDocumentWorkflows" ("Id", "CompanyId", "DocumentType", "DocumentNumber", "PayloadJson", "Status", "IsRecurringTemplate", "Frequency", "FrequencyInterval", "CreatedAtUtc", "ConcurrencyToken")
+            VALUES ({billWorkflowId}, {companyId}, {"VendorBill"}, {"LEGACY-1001"}, {billPayload}, {"Draft"}, {false}, {string.Empty}, {1}, {createdAt}, {Guid.NewGuid().ToString("N")});
+            INSERT INTO "SubledgerDocumentWorkflows" ("Id", "CompanyId", "DocumentType", "DocumentNumber", "PayloadJson", "Status", "IsRecurringTemplate", "Frequency", "FrequencyInterval", "CreatedAtUtc", "ConcurrencyToken")
+            VALUES ({invoiceWorkflowId}, {companyId}, {"Invoice"}, {"LEGACY-INV"}, {invoicePayload}, {"Draft"}, {false}, {string.Empty}, {1}, {createdAt}, {Guid.NewGuid().ToString("N")});
+            """);
+
+        await migrator.MigrateAsync();
+        db.ChangeTracker.Clear();
+        Assert.Equal(vendorId.ToString("N"), await db.SubledgerDocumentWorkflows.Where(item => item.Id == billWorkflowId).Select(item => item.DocumentScope).SingleAsync());
+        Assert.Equal("company", await db.SubledgerDocumentWorkflows.Where(item => item.Id == invoiceWorkflowId).Select(item => item.DocumentScope).SingleAsync());
     }
 
     [Fact]
@@ -1434,35 +1462,46 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var billDate = new DateOnly(2026, 5, 1);
         var dueDate = new DateOnly(2026, 5, 31);
 
-        var first = await transactions.CreateVendorBillAsync(new(
+        var firstRequest = new CreateVendorBillRequest(
             vendors[0].Id,
             "1001",
             billDate,
             dueDate,
             25m,
             "5100",
-            "First vendor's invoice 1001"));
-        var second = await transactions.CreateVendorBillAsync(new(
+            "First vendor's invoice 1001");
+        var secondRequest = new CreateVendorBillRequest(
             vendors[1].Id,
             "1001",
             billDate,
             dueDate,
             40m,
             "5100",
-            "Second vendor's invoice 1001"));
-        var duplicate = await transactions.CreateVendorBillAsync(new(
+            "Second vendor's invoice 1001");
+        var duplicateRequest = new CreateVendorBillRequest(
             vendors[0].Id,
             "1001",
             billDate,
             dueDate,
             10m,
             "5100",
-            "Duplicate from first vendor"));
+            "Duplicate from first vendor");
+
+        async Task<TransactionResult> PostThroughWorkflowAsync(CreateVendorBillRequest request)
+        {
+            var draft = await transactions.SaveVendorBillDraftAsync(request);
+            if (!draft.Succeeded) return draft;
+            var approval = await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value);
+            return approval.Succeeded ? await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value) : approval;
+        }
+        var first = await PostThroughWorkflowAsync(firstRequest);
+        var second = await PostThroughWorkflowAsync(secondRequest);
+        var duplicate = await transactions.SaveVendorBillDraftAsync(duplicateRequest);
 
         Assert.True(first.Succeeded, first.ErrorMessage);
         Assert.True(second.Succeeded, second.ErrorMessage);
         Assert.False(duplicate.Succeeded);
-        Assert.Contains("this vendor", duplicate.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("customer or vendor", duplicate.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         Assert.Equal(2, await db.VendorBills.CountAsync(bill => bill.BillNumber == "1001"));

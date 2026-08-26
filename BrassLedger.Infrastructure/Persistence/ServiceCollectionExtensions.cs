@@ -349,6 +349,11 @@ public static class ServiceCollectionExtensions
             return await HasIndexAsync(dbContext, "IX_VendorBills_CompanyId_VendorId_BillNumber", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_PurchaseInvoiceMatches_CompanyId_VendorId_BillNumber", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_LandedCostAllocations_CompanyId_VendorId_BillNumber", cancellationToken);
+        if (migrationId.EndsWith("_ScopeSubledgerVendorBillNumbersByVendor", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "SubledgerDocumentWorkflows", "DocumentScope", cancellationToken)
+                && await HasIndexAsync(dbContext, dbContext.Database.IsNpgsql()
+                    ? "IX_SubledgerDocumentWorkflows_CompanyId_DocumentType_DocumentS~"
+                    : "IX_SubledgerDocumentWorkflows_CompanyId_DocumentType_DocumentScope_DocumentNumber_IsRecurringTemplate", cancellationToken);
         return false;
     }
 

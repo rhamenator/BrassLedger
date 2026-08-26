@@ -256,7 +256,7 @@ public sealed class QuickBooksOnlineInterchangeService(
         foreach (var (number, invoice) in imports)
         {
             var request = new CreateInvoiceRequest(invoice.CustomerId, number, invoice.InvoiceDate, invoice.DueDate, invoice.Lines.Sum(line => line.Quantity * line.UnitPrice), 0, invoice.Lines[0].RevenueAccountNumber, $"Imported from QuickBooks invoice {number}", invoice.Lines);
-            var workflow = new SubledgerDocumentWorkflow { Id = Guid.NewGuid(), CompanyId = companyId, DocumentType = "Invoice", DocumentNumber = number.Trim(), PayloadJson = System.Text.Json.JsonSerializer.Serialize(request), Status = "Draft", CreatedByUserId = userId, CreatedAtUtc = now, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+            var workflow = new SubledgerDocumentWorkflow { Id = Guid.NewGuid(), CompanyId = companyId, DocumentType = "Invoice", DocumentScope = "company", DocumentNumber = number.Trim(), PayloadJson = System.Text.Json.JsonSerializer.Serialize(request), Status = "Draft", CreatedByUserId = userId, CreatedAtUtc = now, ConcurrencyToken = Guid.NewGuid().ToString("N") };
             db.SubledgerDocumentWorkflows.Add(workflow);
             db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = userId, Action = "subledger-document.draft.imported", EntityType = nameof(SubledgerDocumentWorkflow), EntityId = workflow.Id, OccurredAtUtc = now, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { provider = "quickbooks-online", safeFileName, contentSha256, workflow.DocumentType, workflow.DocumentNumber, lineCount = invoice.Lines.Count }) });
         }

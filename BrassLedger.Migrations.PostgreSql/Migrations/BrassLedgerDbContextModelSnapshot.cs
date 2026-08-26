@@ -6707,6 +6707,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("DocumentScope")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("DocumentType")
                         .IsRequired()
                         .HasColumnType("text");
@@ -6751,7 +6756,7 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
 
                     b.HasIndex("CompanyId", "Status", "NextOccurrenceDate");
 
-                    b.HasIndex("CompanyId", "DocumentType", "DocumentNumber", "IsRecurringTemplate")
+                    b.HasIndex("CompanyId", "DocumentType", "DocumentScope", "DocumentNumber", "IsRecurringTemplate")
                         .IsUnique();
 
                     b.ToTable("SubledgerDocumentWorkflows");
