@@ -69,7 +69,11 @@ public sealed record CancelPayrollRunRequest(Guid PayrollRunId, string Reason, s
 public sealed record ReversePayrollRunRequest(Guid PayrollRunId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record SaveEmployeePayrollSetupRequest(Guid EmployeeId, string FilingStatus, int Allowances, decimal AdditionalWithholding, decimal PreTaxBenefitDeductions, decimal PostTaxBenefitDeductions, string ResidenceState = "", string ResidenceCity = "", string WorkState = "", string WorkCity = "", string PayrollFrequency = "Biweekly", int FederalFormW4Year = 2026, bool FederalStep2MultipleJobs = false, decimal FederalStep3Credits = 0, decimal FederalStep4OtherIncome = 0, decimal FederalStep4Deductions = 0, bool FederalWithholdingExempt = false);
 public sealed record SaveEmployeeEmploymentDetailsRequest(Guid EmployeeId, string AddressLine1, string AddressLine2, string PostalCode, string ResidenceCounty, string ResidenceSchoolDistrict, string WorkCounty, string WorkSchoolDistrict, DateOnly? EmploymentStartedOn, DateOnly? EmploymentEndedOn, decimal HourlyRate, decimal OvertimeRate, bool DirectDepositEnabled, string BankAccountType, string SocialSecurityNumber = "", string BankRoutingNumber = "", string BankAccountNumber = "", bool ClearSocialSecurityNumber = false, bool ClearBankDetails = false, string ConcurrencyToken = "", DateOnly? DirectDepositAuthorizationOn = null, string DirectDepositAuthorizationReference = "", bool ClearDirectDepositAuthorization = false, string AddressCity = "", string AddressState = "");
-public sealed record RecordInventoryAdjustmentRequest(Guid InventoryItemId, DateOnly OccurredOn, decimal QuantityChange, decimal UnitCost, string Reference, string Description);
+public sealed record RecordInventoryAdjustmentRequest(Guid InventoryItemId, DateOnly OccurredOn, decimal QuantityChange, decimal UnitCost, string Reference, string Description, Guid? WarehouseId = null, Guid? BinId = null);
+public sealed record SaveInventoryWarehouseRequest(Guid? Id, string Code, string Name, string AddressLine1, string AddressLine2, string City, string StateOrProvince, string PostalCode, string CountryCode, bool IsDefault, bool IsActive, string ConcurrencyToken = "");
+public sealed record SaveInventoryBinRequest(Guid? Id, Guid WarehouseId, string Code, string Name, bool IsDefault, bool IsActive, string ConcurrencyToken = "");
+public sealed record TransferInventoryRequest(Guid InventoryItemId, Guid SourceWarehouseId, Guid SourceBinId, Guid DestinationWarehouseId, Guid DestinationBinId, decimal Quantity, DateOnly TransferDate, string Reference, string Reason);
+public sealed record ReverseInventoryTransferRequest(Guid InventoryTransferId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record SalesOrderLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, string RevenueAccountNumber);
 public sealed record SaveSalesQuoteRequest(Guid? Id, Guid CustomerId, string QuoteNumber, DateOnly QuotedOn, DateOnly ExpiresOn, string Notes, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record ApproveSalesQuoteRequest(Guid SalesQuoteId, string ConcurrencyToken);
@@ -80,7 +84,7 @@ public sealed record ApproveSalesOrderRequest(Guid SalesOrderId, string Concurre
 public sealed record AmendSalesOrderRequest(Guid SalesOrderId, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, string Reason, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken);
 public sealed record CancelSalesOrderRequest(Guid SalesOrderId, string Reason, string ConcurrencyToken);
 public sealed record AllocateSalesOrderLineRequest(Guid SalesOrderLineId, decimal Quantity);
-public sealed record AllocateSalesOrderRequest(Guid SalesOrderId, IReadOnlyList<AllocateSalesOrderLineRequest> Lines, string ConcurrencyToken);
+public sealed record AllocateSalesOrderRequest(Guid SalesOrderId, IReadOnlyList<AllocateSalesOrderLineRequest> Lines, string ConcurrencyToken, Guid? WarehouseId = null, Guid? BinId = null);
 public sealed record ShipSalesOrderLineRequest(Guid SalesOrderLineId, decimal Quantity);
 public sealed record ShipSalesOrderRequest(Guid SalesOrderId, string ShipmentNumber, DateOnly ShippedOn, IReadOnlyList<ShipSalesOrderLineRequest> Lines, string ConcurrencyToken);
 public sealed record InvoiceInventoryShipmentRequest(Guid InventoryShipmentId, string InvoiceNumber, DateOnly InvoiceDate, DateOnly DueDate, string Description, string ConcurrencyToken);
@@ -89,7 +93,7 @@ public sealed record PurchaseOrderLineRequest(Guid InventoryItemId, string Descr
 public sealed record SavePurchaseOrderRequest(Guid? Id, Guid VendorId, string OrderNumber, DateOnly OrderedOn, DateOnly? ExpectedOn, string Notes, IReadOnlyList<PurchaseOrderLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record ApprovePurchaseOrderRequest(Guid PurchaseOrderId, string ConcurrencyToken);
 public sealed record ReceivePurchaseOrderLineRequest(Guid PurchaseOrderLineId, decimal Quantity);
-public sealed record ReceivePurchaseOrderRequest(Guid PurchaseOrderId, string ReceiptNumber, DateOnly ReceivedOn, IReadOnlyList<ReceivePurchaseOrderLineRequest> Lines, string ConcurrencyToken);
+public sealed record ReceivePurchaseOrderRequest(Guid PurchaseOrderId, string ReceiptNumber, DateOnly ReceivedOn, IReadOnlyList<ReceivePurchaseOrderLineRequest> Lines, string ConcurrencyToken, Guid? WarehouseId = null, Guid? BinId = null);
 public sealed record MatchPurchaseOrderReceiptBillRequest(Guid InventoryReceiptId, string BillNumber, DateOnly BillDate, DateOnly DueDate, string Description, string ConcurrencyToken);
 public sealed record ReverseInventoryReceiptRequest(Guid InventoryReceiptId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record UnmatchPurchaseOrderReceiptBillRequest(Guid InventoryReceiptId, DateOnly VoidDate, string Reason, string ConcurrencyToken);
@@ -172,6 +176,10 @@ public interface IAccountingTransactionService
     Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveInventoryWarehouseAsync(SaveInventoryWarehouseRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveInventoryBinAsync(SaveInventoryBinRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> TransferInventoryAsync(TransferInventoryRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseInventoryTransferAsync(ReverseInventoryTransferRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveSalesQuoteAsync(SaveSalesQuoteRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApproveSalesQuoteAsync(ApproveSalesQuoteRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> WithdrawSalesQuoteAsync(WithdrawSalesQuoteRequest request, CancellationToken cancellationToken = default);

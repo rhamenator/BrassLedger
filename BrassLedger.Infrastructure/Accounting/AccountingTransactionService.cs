@@ -1997,20 +1997,30 @@ public sealed partial class AccountingTransactionService(
     public async Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.PurchasingManage)) return TransactionResult.Failure("You are not authorized to adjust inventory.");
-        if (request.InventoryItemId == Guid.Empty || request.QuantityChange == 0 || request.UnitCost <= 0 || string.IsNullOrWhiteSpace(request.Reference)) return TransactionResult.Failure("Provide an inventory item, non-zero quantity, positive unit cost, and reference.");
+        var quantityChange = RoundQuantity(request.QuantityChange);
+        if (request.InventoryItemId == Guid.Empty || quantityChange == 0 || request.UnitCost <= 0 || string.IsNullOrWhiteSpace(request.Reference)) return TransactionResult.Failure("Provide an inventory item, non-zero quantity, positive unit cost, and reference.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var item = await db.InventoryItems.SingleOrDefaultAsync(candidate => candidate.CompanyId == companyId && candidate.Id == request.InventoryItemId && candidate.IsActive, cancellationToken); if (item is null) return TransactionResult.Failure("Active inventory item not found.");
-        if (item.QuantityOnHand + request.QuantityChange < 0) return TransactionResult.Failure("This adjustment would make inventory quantity negative.");
-        var effectiveUnitCost = request.QuantityChange > 0m ? RoundCurrency(request.UnitCost) : item.UnitCost;
+        var location = await ResolveInventoryLocationAsync(db, companyId, request.WarehouseId, request.BinId, cancellationToken); if (location is null) return TransactionResult.Failure("Select an active warehouse and bin.");
+        var locationBalance = await GetOrCreateInventoryLocationBalanceAsync(db, companyId, item.Id, location.Value.Warehouse.Id, location.Value.Bin.Id, cancellationToken);
+        if (item.QuantityOnHand + quantityChange < 0 || locationBalance.QuantityOnHand + quantityChange < 0) return TransactionResult.Failure("This adjustment would make company or bin inventory quantity negative.");
+        if (quantityChange < 0m)
+        {
+            var reserved = await db.SalesOrderLines.Where(line => line.InventoryItemId == item.Id && line.AllocationWarehouseId == location.Value.Warehouse.Id && line.AllocationBinId == location.Value.Bin.Id).Select(line => line.AllocatedQuantity).ToListAsync(cancellationToken);
+            if (locationBalance.QuantityOnHand + quantityChange < reserved.Sum()) return TransactionResult.Failure("This adjustment would consume stock reserved for approved sales orders in the selected bin.");
+        }
+        var effectiveUnitCost = quantityChange > 0m ? RoundCurrency(request.UnitCost) : item.UnitCost;
         if (effectiveUnitCost <= 0m) return TransactionResult.Failure("The inventory item requires a positive average cost before quantity can be reduced.");
-        var totalCost = RoundCurrency(Math.Abs(request.QuantityChange) * effectiveUnitCost); await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var lines = request.QuantityChange > 0 ? new[] { new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), totalCost, 0, "Inventory increase"), new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), 0, totalCost, "Inventory adjustment offset") } : new[] { new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), totalCost, 0, "Inventory adjustment offset"), new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), 0, totalCost, "Inventory decrease") };
+        var totalCost = RoundCurrency(Math.Abs(quantityChange) * effectiveUnitCost); await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var lines = quantityChange > 0 ? new[] { new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), totalCost, 0, "Inventory increase"), new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), 0, totalCost, "Inventory adjustment offset") } : new[] { new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), totalCost, 0, "Inventory adjustment offset"), new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), 0, totalCost, "Inventory decrease") };
         var posting = await PostAsync(db, companyId, request.OccurredOn, "Inventory", request.Reference, request.Description, lines, cancellationToken, allowControlAccounts: true, resolveOperationalRoles: true); if (!posting.Succeeded) return posting;
         var priorQuantity = item.QuantityOnHand;
-        item.QuantityOnHand += request.QuantityChange;
-        if (request.QuantityChange > 0) item.UnitCost = RoundCurrency(((priorQuantity * item.UnitCost) + (request.QuantityChange * request.UnitCost)) / item.QuantityOnHand);
-        db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, OccurredOn = request.OccurredOn, TransactionType = request.QuantityChange > 0 ? "Adjustment increase" : "Adjustment decrease", QuantityChange = request.QuantityChange, UnitCost = effectiveUnitCost, TotalCost = totalCost, Reference = request.Reference.Trim(), JournalEntryId = posting.Id!.Value });
-        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return TransactionResult.Success(posting.Id!.Value);
+        item.QuantityOnHand += quantityChange; item.ConcurrencyToken = Guid.NewGuid().ToString("N"); locationBalance.QuantityOnHand += quantityChange; locationBalance.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        if (quantityChange > 0) item.UnitCost = RoundCurrency(((priorQuantity * item.UnitCost) + (quantityChange * request.UnitCost)) / item.QuantityOnHand);
+        db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, OccurredOn = request.OccurredOn, TransactionType = quantityChange > 0 ? "Adjustment increase" : "Adjustment decrease", QuantityChange = quantityChange, UnitCost = effectiveUnitCost, TotalCost = quantityChange > 0 ? totalCost : -totalCost, Reference = request.Reference.Trim(), JournalEntryId = posting.Id!.Value });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The inventory location changed while the adjustment was posting. Refresh and try again."); }
+        await transaction.CommitAsync(cancellationToken); return TransactionResult.Success(posting.Id!.Value);
     }
 
     private sealed record PayrollTimecardExpansion(PostEmployeePayrollRunRequest? Request, IReadOnlyList<PayrollTimecard> Timecards, string ErrorMessage)

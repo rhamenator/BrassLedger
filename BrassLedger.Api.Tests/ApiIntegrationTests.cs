@@ -133,6 +133,56 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task InventoryLocationApi_SeparatesConfigurationFromMovement_AndTransfersWithoutPosting()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var purchasing = await CreateAuthenticatedClientAsync(isolatedFactory, "operations");
+        using var warehouse = await CreateAuthenticatedClientAsync(isolatedFactory, "warehouse");
+        using var sales = await CreateAuthenticatedClientAsync(isolatedFactory, "sales");
+        var before = await purchasing.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var item = before!.Operations.InventoryItems.Single(candidate => candidate.Sku == "RM-220");
+        var main = Assert.Single(before.Operations.Warehouses!, candidate => candidate.IsDefault);
+        var mainBin = Assert.Single(main.Bins, candidate => candidate.IsDefault);
+        var journalCount = before.GeneralLedger.RecentEntries.Count;
+        var reference = $"XFER-API-{Guid.NewGuid():N}";
+
+        var warehouseRequest = new SaveInventoryWarehouseRequest(null, "EAST", "East distribution", "100 River Road", "", "Detroit", "MI", "48201", "US", false, true);
+        Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync("/api/inventory/warehouses", warehouseRequest)).StatusCode);
+        var warehouseResponse = await purchasing.PostAsJsonAsync("/api/inventory/warehouses", warehouseRequest);
+        Assert.Equal(HttpStatusCode.Created, warehouseResponse.StatusCode);
+        var warehouseResult = await warehouseResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var configured = await purchasing.GetFromJsonAsync<OperationsWorkspace>("/api/operations");
+        var east = Assert.Single(configured!.Warehouses!, candidate => candidate.Id == warehouseResult!.Id);
+        var eastStock = Assert.Single(east.Bins, candidate => candidate.IsDefault);
+
+        var binRequest = new SaveInventoryBinRequest(null, east.Id, "PICK", "Primary picking", false, true);
+        Assert.Equal(HttpStatusCode.Forbidden, (await sales.PostAsJsonAsync("/api/inventory/bins", binRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await purchasing.PostAsJsonAsync("/api/inventory/bins", binRequest)).StatusCode);
+
+        var transferRequest = new TransferInventoryRequest(item.Id, main.Id, mainBin.Id, east.Id, eastStock.Id, 2m, new DateOnly(2026, 8, 26), reference, "Stage eastern orders");
+        Assert.Equal(HttpStatusCode.Forbidden, (await purchasing.PostAsJsonAsync("/api/inventory/transfers", transferRequest)).StatusCode);
+        var transferResponse = await warehouse.PostAsJsonAsync("/api/inventory/transfers", transferRequest);
+        Assert.Equal(HttpStatusCode.Created, transferResponse.StatusCode);
+        var transferResult = await transferResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        Assert.Equal(HttpStatusCode.BadRequest, (await warehouse.PostAsJsonAsync("/api/inventory/transfers", transferRequest)).StatusCode);
+
+        var moved = await warehouse.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        Assert.Equal(item.QuantityOnHand, moved!.Operations.InventoryItems.Single(candidate => candidate.Id == item.Id).QuantityOnHand);
+        Assert.Equal(journalCount, moved.GeneralLedger.RecentEntries.Count);
+        var transfer = Assert.Single(moved.Operations.InventoryTransfers!, candidate => candidate.Id == transferResult!.Id);
+        Assert.Equal("Posted", transfer.Status);
+        var movedEast = Assert.Single(moved.Operations.Warehouses!, candidate => candidate.Id == east.Id);
+        Assert.Equal(2m, movedEast.Bins.Single(candidate => candidate.Id == eastStock.Id).Balances.Single(candidate => candidate.InventoryItemId == item.Id).QuantityOnHand);
+
+        var staleReversal = new ReverseInventoryTransferRequest(transfer.Id, new DateOnly(2026, 8, 26), "Stale API reversal", "stale-token");
+        Assert.Equal(HttpStatusCode.BadRequest, (await warehouse.PostAsJsonAsync($"/api/inventory/transfers/{transfer.Id}/reversal", staleReversal)).StatusCode);
+        var reversal = new ReverseInventoryTransferRequest(transfer.Id, new DateOnly(2026, 8, 26), "Return staged inventory", transfer.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.OK, (await warehouse.PostAsJsonAsync($"/api/inventory/transfers/{transfer.Id}/reversal", reversal)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await warehouse.PostAsJsonAsync($"/api/inventory/transfers/{transfer.Id}/reversal", reversal)).StatusCode);
+        Assert.Equal("Reversed", Assert.Single((await warehouse.GetFromJsonAsync<OperationsWorkspace>("/api/operations"))!.InventoryTransfers!, candidate => candidate.Id == transfer.Id).Status);
+    }
+
+    [Fact]
     public async Task SalesFulfillmentApi_SeparatesSalesWarehouseAndReceivables_AndPreservesShipmentProvenance()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();

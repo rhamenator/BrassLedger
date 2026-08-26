@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("7", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("8", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -71,6 +71,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826054520_AddSalesFulfillment';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826070149_AddSalesQuotes';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826073212_AddSalesOrderChangeControls';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -101,13 +102,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("7", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("8", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826054520_AddSalesFulfillment';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826070149_AddSalesQuotes';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826073212_AddSalesOrderChangeControls';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -335,6 +337,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826054520_AddSalesFulfillment';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826070149_AddSalesQuotes';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826073212_AddSalesOrderChangeControls';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('AccountingSchedules') WHERE name = 'DisposalJournalEntryId';"));
     }
 
@@ -361,6 +364,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("20260826054520_AddSalesFulfillment", await verified.Database.GetAppliedMigrationsAsync());
         Assert.Contains("20260826070149_AddSalesQuotes", await verified.Database.GetAppliedMigrationsAsync());
         Assert.Contains("20260826073212_AddSalesOrderChangeControls", await verified.Database.GetAppliedMigrationsAsync());
+        Assert.Contains("20260826082201_AddInventoryLocations", await verified.Database.GetAppliedMigrationsAsync());
         Assert.Empty(await verified.SalesQuotes.ToListAsync());
     }
 
@@ -1522,14 +1526,69 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using var before = await factory.CreateDbContextAsync();
         var item = await before.InventoryItems.FirstAsync(); var originalQuantity = item.QuantityOnHand;
+        var originalLocation = await before.InventoryLocationBalances.SingleAsync(balance => balance.InventoryItemId == item.Id);
         var result = await transactions.RecordInventoryAdjustmentAsync(new RecordInventoryAdjustmentRequest(item.Id, new DateOnly(2026, 5, 16), 3m, 12m, "INV-ADJ-1", "Cycle count increase"));
         Assert.True(result.Succeeded, result.ErrorMessage);
         await using var after = await factory.CreateDbContextAsync();
         Assert.Equal(originalQuantity + 3m, (await after.InventoryItems.SingleAsync(candidate => candidate.Id == item.Id)).QuantityOnHand);
         var movement = await after.InventoryTransactions.SingleAsync(transaction => transaction.JournalEntryId == result.Id);
-        Assert.Equal(36m, movement.TotalCost);
+        Assert.Equal(36m, movement.TotalCost); Assert.Equal(originalLocation.WarehouseId, movement.WarehouseId); Assert.Equal(originalLocation.BinId, movement.BinId);
+        Assert.Equal(originalLocation.QuantityOnHand + 3m, await after.InventoryLocationBalances.Where(balance => balance.Id == originalLocation.Id).Select(balance => balance.QuantityOnHand).SingleAsync());
         var lines = await after.JournalEntryLines.Where(line => line.JournalEntryId == result.Id).ToListAsync();
         Assert.Equal(lines.Sum(line => line.Debit), lines.Sum(line => line.Credit));
+    }
+
+    [Fact]
+    public async Task InventoryLocations_AdoptBalancesTransferWithoutPostingAndEnforceReservedStock()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>(); var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; Guid customerId; Guid itemId; Guid mainWarehouseId; Guid mainBinId; Guid foreignWarehouseId; Guid foreignBinId; decimal companyQuantity; int journalCount;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(company => company.Id).SingleAsync(); customerId = await db.Customers.Select(customer => customer.Id).FirstAsync(); var item = await db.InventoryItems.SingleAsync(candidate => candidate.Sku == "RM-220"); itemId = item.Id; companyQuantity = item.QuantityOnHand; journalCount = await db.JournalEntries.CountAsync();
+            var main = await db.InventoryWarehouses.SingleAsync(warehouse => warehouse.CompanyId == companyId && warehouse.IsDefault); mainWarehouseId = main.Id; mainBinId = await db.InventoryBins.Where(bin => bin.WarehouseId == main.Id && bin.IsDefault).Select(bin => bin.Id).SingleAsync();
+            Assert.Equal(item.QuantityOnHand, (await db.InventoryLocationBalances.Where(balance => balance.InventoryItemId == item.Id).Select(balance => balance.QuantityOnHand).ToListAsync()).Sum());
+            Assert.All(await db.InventoryTransactions.Where(movement => movement.CompanyId == companyId).ToListAsync(), movement => { Assert.NotNull(movement.WarehouseId); Assert.NotNull(movement.BinId); });
+            var foreignCompanyId = Guid.NewGuid(); foreignWarehouseId = Guid.NewGuid(); foreignBinId = Guid.NewGuid();
+            db.Companies.Add(new Company { Id = foreignCompanyId, Name = "Foreign inventory company", LegalName = "Foreign inventory company", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            db.InventoryWarehouses.Add(new InventoryWarehouse { Id = foreignWarehouseId, CompanyId = foreignCompanyId, Code = "FOREIGN", Name = "Foreign warehouse", IsDefault = true, DefaultMarker = "DEFAULT", IsActive = true });
+            db.InventoryBins.Add(new InventoryBin { Id = foreignBinId, CompanyId = foreignCompanyId, WarehouseId = foreignWarehouseId, Code = "STOCK", Name = "Foreign stock", IsDefault = true, DefaultMarker = "DEFAULT", IsActive = true });
+            await db.SaveChangesAsync();
+        }
+        void ActAs(params string[] permissions) { var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()) }; claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
+
+        ActAs(BrassLedgerPermissions.FulfillmentManage); Assert.False((await transactions.SaveInventoryWarehouseAsync(new(null, "EAST", "East warehouse", "", "", "", "", "", "US", false, true))).Succeeded);
+        ActAs(BrassLedgerPermissions.PurchasingManage); var warehouseResult = await transactions.SaveInventoryWarehouseAsync(new(null, "EAST", "East warehouse", "", "", "Detroit", "MI", "48201", "US", false, true)); Assert.True(warehouseResult.Succeeded, warehouseResult.ErrorMessage);
+        Assert.False((await transactions.SaveInventoryWarehouseAsync(new(foreignWarehouseId, "STOLEN", "Cross-company edit", "", "", "", "", "", "US", false, true, ""))).Succeeded);
+        Guid eastBinId; string eastWarehouseToken; await using (var db = await factory.CreateDbContextAsync()) { eastBinId = await db.InventoryBins.Where(bin => bin.WarehouseId == warehouseResult.Id && bin.IsDefault).Select(bin => bin.Id).SingleAsync(); eastWarehouseToken = await db.InventoryWarehouses.Where(warehouse => warehouse.Id == warehouseResult.Id).Select(warehouse => warehouse.ConcurrencyToken).SingleAsync(); }
+        Assert.False((await transactions.SaveInventoryWarehouseAsync(new(warehouseResult.Id, "EAST", "Stale edit", "", "", "Detroit", "MI", "48201", "US", false, true, "stale-token"))).Succeeded);
+        Assert.True((await transactions.SaveInventoryWarehouseAsync(new(warehouseResult.Id, "EAST", "East distribution", "1 East Road", "", "Detroit", "MI", "48201", "US", false, true, eastWarehouseToken))).Succeeded);
+        Assert.False((await transactions.TransferInventoryAsync(new(itemId, mainWarehouseId, mainBinId, warehouseResult.Id!.Value, eastBinId, 5m, new DateOnly(2026, 8, 25), "XFER-LOC-1", "Stage eastern orders"))).Succeeded);
+        ActAs(BrassLedgerPermissions.FulfillmentManage); Assert.False((await transactions.TransferInventoryAsync(new(itemId, mainWarehouseId, mainBinId, foreignWarehouseId, foreignBinId, 1m, new DateOnly(2026, 8, 25), "XFER-FOREIGN", "Cross-company destination"))).Succeeded);
+        var transfer = await transactions.TransferInventoryAsync(new(itemId, mainWarehouseId, mainBinId, warehouseResult.Id.Value, eastBinId, 5m, new DateOnly(2026, 8, 25), "XFER-LOC-1", "Stage eastern orders")); Assert.True(transfer.Succeeded, transfer.ErrorMessage);
+        string transferToken; await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(companyQuantity, await db.InventoryItems.Where(item => item.Id == itemId).Select(item => item.QuantityOnHand).SingleAsync()); Assert.Equal(journalCount, await db.JournalEntries.CountAsync());
+            Assert.Equal(5m, await db.InventoryLocationBalances.Where(balance => balance.InventoryItemId == itemId && balance.BinId == eastBinId).Select(balance => balance.QuantityOnHand).SingleAsync()); Assert.Equal(2, await db.InventoryTransactions.CountAsync(movement => movement.InventoryTransferId == transfer.Id && movement.JournalEntryId == null));
+            transferToken = await db.InventoryTransfers.Where(candidate => candidate.Id == transfer.Id).Select(candidate => candidate.ConcurrencyToken).SingleAsync();
+        }
+        ActAs(BrassLedgerPermissions.PurchasingManage); string currentEastToken; await using (var db = await factory.CreateDbContextAsync()) currentEastToken = await db.InventoryWarehouses.Where(warehouse => warehouse.Id == warehouseResult.Id).Select(warehouse => warehouse.ConcurrencyToken).SingleAsync();
+        var deactivateStockedWarehouse = await transactions.SaveInventoryWarehouseAsync(new(warehouseResult.Id, "EAST", "East distribution", "1 East Road", "", "Detroit", "MI", "48201", "US", false, false, currentEastToken)); Assert.False(deactivateStockedWarehouse.Succeeded); Assert.Contains("stock", deactivateStockedWarehouse.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(BrassLedgerPermissions.FulfillmentManage);
+        Assert.False((await transactions.ReverseInventoryTransferAsync(new(transfer.Id!.Value, new DateOnly(2026, 8, 25), "Stale", "stale-token"))).Succeeded);
+        Assert.True((await transactions.ReverseInventoryTransferAsync(new(transfer.Id.Value, new DateOnly(2026, 8, 25), "Return staging stock", transferToken))).Succeeded);
+        var staged = await transactions.TransferInventoryAsync(new(itemId, mainWarehouseId, mainBinId, warehouseResult.Id.Value, eastBinId, 4m, new DateOnly(2026, 8, 26), "XFER-LOC-2", "Stage allocated order")); Assert.True(staged.Succeeded, staged.ErrorMessage);
+
+        ActAs(BrassLedgerPermissions.SalesManage); var orderResult = await transactions.SaveSalesOrderAsync(new(null, customerId, "SO-LOC-1", new DateOnly(2026, 8, 26), null, "East fulfillment", [new SalesOrderLineRequest(itemId, "Located fasteners", 4m, 20m, 0m, 0m, "4000")])); Assert.True(orderResult.Succeeded, orderResult.ErrorMessage);
+        Guid orderLineId; string orderToken; await using (var db = await factory.CreateDbContextAsync()) { var order = await db.SalesOrders.SingleAsync(candidate => candidate.Id == orderResult.Id); orderLineId = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).Select(line => line.Id).SingleAsync(); Assert.True((await transactions.ApproveSalesOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded); orderToken = await db.SalesOrders.Where(candidate => candidate.Id == order.Id).Select(candidate => candidate.ConcurrencyToken).SingleAsync(); }
+        ActAs(BrassLedgerPermissions.FulfillmentManage); var allocation = await transactions.AllocateSalesOrderAsync(new(orderResult.Id!.Value, [new AllocateSalesOrderLineRequest(orderLineId, 4m)], orderToken, warehouseResult.Id.Value, eastBinId)); Assert.True(allocation.Succeeded, allocation.ErrorMessage);
+        var reservedTransfer = await transactions.TransferInventoryAsync(new(itemId, warehouseResult.Id.Value, eastBinId, mainWarehouseId, mainBinId, 1m, new DateOnly(2026, 8, 26), "XFER-LOC-RESERVED", "Would consume reserved stock")); Assert.False(reservedTransfer.Succeeded); Assert.Contains("unreserved", reservedTransfer.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(BrassLedgerPermissions.PurchasingManage); var reservedAdjustment = await transactions.RecordInventoryAdjustmentAsync(new(itemId, new DateOnly(2026, 8, 26), -1m, 1m, "ADJ-LOC-RESERVED", "Would consume reserved stock", warehouseResult.Id.Value, eastBinId)); Assert.False(reservedAdjustment.Succeeded); Assert.Contains("reserved", reservedAdjustment.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(BrassLedgerPermissions.FulfillmentManage);
+        await using (var db = await factory.CreateDbContextAsync()) orderToken = await db.SalesOrders.Where(order => order.Id == orderResult.Id).Select(order => order.ConcurrencyToken).SingleAsync();
+        var shipment = await transactions.ShipSalesOrderAsync(new(orderResult.Id.Value, "SHIP-LOC-1", new DateOnly(2026, 8, 27), [new ShipSalesOrderLineRequest(orderLineId, 2m)], orderToken)); Assert.True(shipment.Succeeded, shipment.ErrorMessage);
+        await using var after = await factory.CreateDbContextAsync(); var postedShipment = await after.InventoryShipments.SingleAsync(candidate => candidate.Id == shipment.Id); Assert.Equal(warehouseResult.Id, postedShipment.WarehouseId); Assert.Equal(eastBinId, postedShipment.BinId); Assert.Equal(2m, await after.InventoryLocationBalances.Where(balance => balance.InventoryItemId == itemId && balance.BinId == eastBinId).Select(balance => balance.QuantityOnHand).SingleAsync()); Assert.Equal(companyQuantity - 2m, await after.InventoryItems.Where(item => item.Id == itemId).Select(item => item.QuantityOnHand).SingleAsync());
     }
 
     [Fact]
@@ -1543,6 +1602,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var before = await factory.CreateDbContextAsync();
         var vendor = await before.Vendors.FirstAsync();
         var item = await before.InventoryItems.FirstAsync();
+        var priorLocation = await before.InventoryLocationBalances.SingleAsync(balance => balance.InventoryItemId == item.Id);
         var priorQuantity = item.QuantityOnHand;
         var priorCost = item.UnitCost;
         var inventoryBalance = await before.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.InventoryAsset).Select(account => account.CurrentBalance).SingleAsync();
@@ -1583,6 +1643,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal(priorQuantity + 2m, receivedItem.QuantityOnHand);
             Assert.Equal(decimal.Round(((priorQuantity * priorCost) + 40m) / (priorQuantity + 2m), 2, MidpointRounding.AwayFromZero), receivedItem.UnitCost);
             Assert.Equal(40m, receipt.TotalAmount);
+            Assert.Equal(priorLocation.WarehouseId, receipt.WarehouseId); Assert.Equal(priorLocation.BinId, receipt.BinId);
+            Assert.Equal(priorLocation.QuantityOnHand + 2m, await receiptDb.InventoryLocationBalances.Where(balance => balance.Id == priorLocation.Id).Select(balance => balance.QuantityOnHand).SingleAsync());
             Assert.Equal(inventoryBalance + 40m, await receiptDb.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.InventoryAsset).Select(account => account.CurrentBalance).SingleAsync());
             Assert.Equal(grniBalance + 40m, await receiptDb.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.GoodsReceivedNotInvoiced).Select(account => account.CurrentBalance).SingleAsync());
         }

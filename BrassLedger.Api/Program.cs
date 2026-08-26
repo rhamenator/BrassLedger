@@ -839,6 +839,33 @@ api.MapPost("/inventory-adjustments", async (RecordInventoryAdjustmentRequest re
     var result = await service.RecordInventoryAdjustmentAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-adjustments/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["inventory"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
 
+api.MapPost("/inventory/warehouses", async (SaveInventoryWarehouseRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveInventoryWarehouseAsync(request, cancellationToken);
+    return result.Succeeded
+        ? request.Id.HasValue ? Results.Ok(result) : Results.Created($"/api/inventory/warehouses/{result.Id}", result)
+        : Results.ValidationProblem(new Dictionary<string, string[]> { ["warehouse"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/inventory/bins", async (SaveInventoryBinRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveInventoryBinAsync(request, cancellationToken);
+    return result.Succeeded
+        ? request.Id.HasValue ? Results.Ok(result) : Results.Created($"/api/inventory/bins/{result.Id}", result)
+        : Results.ValidationProblem(new Dictionary<string, string[]> { ["bin"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/inventory/transfers", async (TransferInventoryRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.TransferInventoryAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory/transfers/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["transfer"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
+api.MapPost("/inventory/transfers/{inventoryTransferId:guid}/reversal", async (Guid inventoryTransferId, ReverseInventoryTransferRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryTransferId != inventoryTransferId) return Results.BadRequest(new { error = "inventory_transfer_id_mismatch" });
+    var result = await service.ReverseInventoryTransferAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["transfer"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
 api.MapPost("/sales-quotes", async (SaveSalesQuoteRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveSalesQuoteAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/sales-quotes/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["salesQuote"] = [result.ErrorMessage] });

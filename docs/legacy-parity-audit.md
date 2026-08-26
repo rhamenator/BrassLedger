@@ -16,7 +16,7 @@ explicit non-targets.
 
 ## Remaining parity work
 
-- pick-pack documents, backorders, returns, warehouses/bins/lots/serials, landed costs, and FIFO layers (quote lines and conversion, sales-order lines, reservation, partial shipment, moving-average COGS, and shipment-derived invoicing are implemented)
+- pick-pack documents, backorders, returns, lots/serials, landed costs, and FIFO layers (warehouses/bins with transfers and location-aware receiving/reservation/shipping, quote lines and conversion, sales-order lines, partial shipment, moving-average COGS, and shipment-derived invoicing are implemented)
 - purchase requisition documents, receipt/bill variance approval, supplier returns, and landed-cost allocation
 - payment application and bank reconciliation workflows rather than summaries
 - payroll earning/deduction lines, pay runs, liabilities, and posting

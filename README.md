@@ -55,6 +55,7 @@ Module-by-module usage links:
 - Payables: [docs/user-guide.md#payables](docs/user-guide.md#payables)
 - Operations, including controlled quote-to-order conversion: [docs/user-guide.md#operations](docs/user-guide.md#operations)
 - Purchasing and inventory receiving: [docs/purchasing-guide.md](docs/purchasing-guide.md)
+- Inventory warehouses, bins, and transfers: [docs/inventory-locations-guide.md](docs/inventory-locations-guide.md)
 - Sales orders and inventory fulfillment: [docs/sales-fulfillment-guide.md](docs/sales-fulfillment-guide.md)
 - Payroll: [docs/user-guide.md#payroll](docs/user-guide.md#payroll)
 - Payroll workflow and federal calculation: [docs/payroll-guide.md](docs/payroll-guide.md)

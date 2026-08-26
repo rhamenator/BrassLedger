@@ -174,6 +174,7 @@ public static class ServiceCollectionExtensions
         await EnsureAccountEmailLookupHashesAsync(dbContext, cancellationToken);
         await BrassLedgerSeedData.SeedAsync(dbContext, passwordHasher, bootstrapOptions, cancellationToken);
         await DefaultAccountingSetup.EnsureMinimumSetupAsync(dbContext, cancellationToken);
+        await DefaultInventorySetup.EnsureAsync(dbContext, cancellationToken);
     }
 
     private static async Task MigrateDatabaseAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
@@ -291,6 +292,12 @@ public static class ServiceCollectionExtensions
             return await HasTableAsync(dbContext, "SalesOrderAmendments", cancellationToken)
                 && await HasColumnAsync(dbContext, "SalesOrderLines", "CancelledQuantity", cancellationToken)
                 && await HasColumnAsync(dbContext, "SalesOrders", "CancellationReason", cancellationToken);
+        if (migrationId.EndsWith("_AddInventoryLocations", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "InventoryWarehouses", cancellationToken)
+                && await HasTableAsync(dbContext, "InventoryBins", cancellationToken)
+                && await HasTableAsync(dbContext, "InventoryLocationBalances", cancellationToken)
+                && await HasTableAsync(dbContext, "InventoryTransfers", cancellationToken)
+                && await HasColumnAsync(dbContext, "InventoryTransactions", "WarehouseId", cancellationToken);
         return false;
     }
 

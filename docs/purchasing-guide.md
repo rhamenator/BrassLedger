@@ -4,7 +4,7 @@ BrassLedger provides a controlled purchase-order-to-pay workflow for stocked inv
 
 ## Accounting flow
 
-A receipt posts its accepted value as a debit to the configured **Inventory asset** control account and a credit to **Goods received not invoiced (GRNI)**. The inventory item's quantity and moving-average unit cost change in the same database transaction. The selling price is independent and is never overwritten by receiving or count adjustments.
+A receipt posts its accepted value as a debit to the configured **Inventory asset** control account and a credit to **Goods received not invoiced (GRNI)**. The selected warehouse/bin balance, inventory item's aggregate quantity, and moving-average unit cost change in the same database transaction. The selling price is independent and is never overwritten by receiving or count adjustments.
 
 An exact invoice match posts a debit to GRNI and a credit to the configured **Accounts payable** control account, creates an open vendor bill, and updates the vendor subledger. The resulting bill uses the normal payment, credit, and reporting workflows. BrassLedger rejects a receipt whose quantity exceeds the unreceived order quantity and rejects a receipt or match based on a stale concurrency token.
 
@@ -20,4 +20,4 @@ All postings enforce company isolation, active vendors and items, closed account
 
 ## Current boundary
 
-This workflow intentionally supports exact receipt-level matching and moving-average valuation. Price/quantity variance approval, landed-cost allocation, warehouses, bins, lots, serial numbers, FIFO layers, purchase requisitions as separate documents, and supplier returns remain separate production-readiness work. Do not represent those capabilities as implemented.
+This workflow intentionally supports exact receipt-level matching, warehouse/bin receiving, and moving-average valuation. Price/quantity variance approval, landed-cost allocation, lots, serial numbers, FIFO layers, purchase requisitions as separate documents, and supplier returns remain separate production-readiness work. Do not represent those capabilities as implemented.

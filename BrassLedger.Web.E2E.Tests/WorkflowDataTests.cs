@@ -85,6 +85,19 @@ public sealed class WorkflowDataTests
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task InventoryLocations_CanBeConfiguredEditedTransferredAndReversed(BrowserKind browserKind)
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync("warehouse");
+        var operations = new OperationsPage(session);
+        await operations.OpenAsync();
+        await operations.ConfigureEditTransferAndReverseInventoryAsync($"E{suffix}", $"XFER-E2E-{suffix}");
+        await session.AssertNoUiFailuresAsync("inventory-location configuration, transfer, and reversal");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task PurchaseOrder_PreparationApprovalReceiptAndBillMatch_WorkAcrossSeparatedRoles(BrowserKind browserKind)
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];

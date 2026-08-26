@@ -134,6 +134,9 @@ public sealed partial class AccountingTransactionService
         var itemIds = orderLines.Where(line => requestedIds.Contains(line.Id)).Select(line => line.InventoryItemId).ToArray();
         var items = await db.InventoryItems.Where(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
         if (items.Count != itemIds.Distinct().Count()) return TransactionResult.Failure("One or more purchase-order items are no longer active in this company.");
+        var location = await ResolveInventoryLocationAsync(db, companyId, request.WarehouseId, request.BinId, cancellationToken); if (location is null) return TransactionResult.Failure("Select an active receiving warehouse and bin.");
+        var locationBalances = new Dictionary<Guid, InventoryLocationBalance>();
+        foreach (var itemId in itemIds.Distinct()) locationBalances[itemId] = await GetOrCreateInventoryLocationBalanceAsync(db, companyId, itemId, location.Value.Warehouse.Id, location.Value.Bin.Id, cancellationToken);
         var total = requestedLines.Sum(requested =>
         {
             var line = orderLines.Single(candidate => candidate.Id == requested.PurchaseOrderLineId);
@@ -153,6 +156,8 @@ public sealed partial class AccountingTransactionService
             Id = receiptId,
             CompanyId = companyId,
             PurchaseOrderId = order.Id,
+            WarehouseId = location.Value.Warehouse.Id,
+            BinId = location.Value.Bin.Id,
             ReceiptNumber = receiptNumber,
             ReceivedOn = request.ReceivedOn,
             TotalAmount = total,
@@ -173,11 +178,14 @@ public sealed partial class AccountingTransactionService
             var resultingQuantity = priorQuantity + quantity;
             var resultingCost = RoundCurrency(((priorQuantity * priorCost) + (quantity * orderLine.UnitCost)) / resultingQuantity);
             item.QuantityOnHand = resultingQuantity;
+            item.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            locationBalances[item.Id].QuantityOnHand += quantity;
+            locationBalances[item.Id].ConcurrencyToken = Guid.NewGuid().ToString("N");
             item.UnitCost = resultingCost;
             orderLine.ReceivedQuantity += quantity;
             var lineTotal = RoundCurrency(quantity * orderLine.UnitCost);
             db.InventoryReceiptLines.Add(new InventoryReceiptLine { Id = Guid.NewGuid(), InventoryReceiptId = receipt.Id, PurchaseOrderLineId = orderLine.Id, InventoryItemId = item.Id, Sequence = ++sequence, Quantity = quantity, UnitCost = orderLine.UnitCost, LineTotal = lineTotal, PriorQuantityOnHand = priorQuantity, PriorUnitCost = priorCost, ResultingUnitCost = resultingCost });
-            db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, OccurredOn = request.ReceivedOn, TransactionType = "Purchase receipt", QuantityChange = quantity, UnitCost = orderLine.UnitCost, TotalCost = lineTotal, Reference = receiptNumber, JournalEntryId = posting.Id.Value });
+            db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, OccurredOn = request.ReceivedOn, TransactionType = "Purchase receipt", QuantityChange = quantity, UnitCost = orderLine.UnitCost, TotalCost = lineTotal, Reference = receiptNumber, JournalEntryId = posting.Id.Value });
         }
         order.Status = orderLines.All(line => line.ReceivedQuantity == line.OrderedQuantity) ? "Received" : "PartiallyReceived";
         order.ConcurrencyToken = Guid.NewGuid().ToString("N");
@@ -289,8 +297,16 @@ public sealed partial class AccountingTransactionService
         var itemIds = receiptLines.Select(line => line.InventoryItemId).ToArray();
         var items = await db.InventoryItems.Where(item => item.CompanyId == companyId && itemIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
         if (items.Count != itemIds.Distinct().Count()) return TransactionResult.Failure("One or more received inventory items could not be found.");
+        var location = await ResolveInventoryLocationAsync(db, companyId, receipt.WarehouseId, receipt.BinId, cancellationToken); if (location is null) return TransactionResult.Failure("The receipt warehouse or bin is unavailable.");
+        var locationBalances = new Dictionary<Guid, InventoryLocationBalance>();
+        foreach (var itemId in itemIds.Distinct()) locationBalances[itemId] = await GetOrCreateInventoryLocationBalanceAsync(db, companyId, itemId, location.Value.Warehouse.Id, location.Value.Bin.Id, cancellationToken);
         if (receiptLines.Any(line => items[line.InventoryItemId].QuantityOnHand != line.PriorQuantityOnHand + line.Quantity || items[line.InventoryItemId].UnitCost != line.ResultingUnitCost))
             return TransactionResult.Failure("This receipt is no longer the latest valuation event for every item. Post a dated compensating inventory adjustment instead of reversing historical stock movement.");
+        foreach (var itemGroup in receiptLines.GroupBy(line => line.InventoryItemId))
+        {
+            var reserved = await db.SalesOrderLines.Where(line => line.InventoryItemId == itemGroup.Key && line.AllocationWarehouseId == location.Value.Warehouse.Id && line.AllocationBinId == location.Value.Bin.Id).Select(line => line.AllocatedQuantity).ToListAsync(cancellationToken);
+            if (locationBalances[itemGroup.Key].QuantityOnHand - itemGroup.Sum(line => line.Quantity) < reserved.Sum()) return TransactionResult.Failure("The receiving bin does not have enough unreserved stock to reverse this receipt. Post a compensating transfer or adjustment instead.");
+        }
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var reversal = await PostInverseAsync(db, companyId, receipt.JournalEntryId, request.ReversalDate, $"REV-{receipt.ReceiptNumber}", request.Reason.Trim(), receipt.Id, "InventoryReceiptReversal", null, cancellationToken, "Purchasing");
@@ -301,9 +317,12 @@ public sealed partial class AccountingTransactionService
         {
             var item = items[line.InventoryItemId];
             item.QuantityOnHand = line.PriorQuantityOnHand;
+            item.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            locationBalances[item.Id].QuantityOnHand -= line.Quantity;
+            locationBalances[item.Id].ConcurrencyToken = Guid.NewGuid().ToString("N");
             item.UnitCost = line.PriorUnitCost;
             poLines[line.PurchaseOrderLineId].ReceivedQuantity -= line.Quantity;
-            db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, OccurredOn = request.ReversalDate, TransactionType = "Purchase receipt reversal", QuantityChange = -line.Quantity, UnitCost = line.UnitCost, TotalCost = -line.LineTotal, Reference = $"REV-{receipt.ReceiptNumber}", JournalEntryId = reversal.Id!.Value });
+            db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, OccurredOn = request.ReversalDate, TransactionType = "Purchase receipt reversal", QuantityChange = -line.Quantity, UnitCost = line.UnitCost, TotalCost = -line.LineTotal, Reference = $"REV-{receipt.ReceiptNumber}", JournalEntryId = reversal.Id!.Value });
         }
         receipt.Status = "Reversed";
         receipt.ReversalJournalEntryId = reversal.Id;

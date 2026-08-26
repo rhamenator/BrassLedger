@@ -1568,6 +1568,51 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("IntegrationSyncRuns");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryBin", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefaultMarker")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WarehouseId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("WarehouseId", "DefaultMarker")
+                        .IsUnique();
+
+                    b.ToTable("InventoryBins");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1575,6 +1620,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
@@ -1609,10 +1659,54 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("InventoryItems");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryLocationBalance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BinId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("QuantityOnHand")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BinId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("InventoryItemId", "BinId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "WarehouseId", "InventoryItemId");
+
+                    b.ToTable("InventoryLocationBalances");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryReceipt", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("BinId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("CompanyId")
@@ -1666,13 +1760,20 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("WarehouseId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("BinId");
 
                     b.HasIndex("JournalEntryId");
 
                     b.HasIndex("PurchaseOrderId");
 
                     b.HasIndex("ReversalJournalEntryId");
+
+                    b.HasIndex("WarehouseId");
 
                     b.HasIndex("CompanyId", "ReceiptNumber")
                         .IsUnique();
@@ -1742,6 +1843,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("BinId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("TEXT");
 
@@ -1796,7 +1900,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("WarehouseId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("BinId");
 
                     b.HasIndex("JournalEntryId");
 
@@ -1806,6 +1915,8 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.HasIndex("SalesOrderId");
+
+                    b.HasIndex("WarehouseId");
 
                     b.HasIndex("CompanyId", "ShipmentNumber")
                         .IsUnique();
@@ -1863,13 +1974,19 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("BinId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("InventoryItemId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("JournalEntryId")
+                    b.Property<Guid?>("InventoryTransferId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("JournalEntryId")
                         .HasColumnType("TEXT");
 
                     b.Property<DateOnly>("OccurredOn")
@@ -1895,11 +2012,177 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("WarehouseId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("BinId");
+
+                    b.HasIndex("InventoryTransferId");
+
+                    b.HasIndex("WarehouseId");
 
                     b.HasIndex("CompanyId", "InventoryItemId", "OccurredOn");
 
                     b.ToTable("InventoryTransactions");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryTransfer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DestinationBinId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DestinationWarehouseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("ReversalDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReversalReason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ReversedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReversedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceBinId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWarehouseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("TransferDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("TransferredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("TransferredByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DestinationBinId");
+
+                    b.HasIndex("DestinationWarehouseId");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("SourceBinId");
+
+                    b.HasIndex("SourceWarehouseId");
+
+                    b.HasIndex("CompanyId", "Reference")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "InventoryItemId", "TransferDate");
+
+                    b.ToTable("InventoryTransfers");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryWarehouse", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AddressLine1")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AddressLine2")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("City")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CountryCode")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefaultMarker")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PostalCode")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StateOrProvince")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "DefaultMarker")
+                        .IsUnique();
+
+                    b.ToTable("InventoryWarehouses");
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.JournalEntry", b =>
@@ -4591,6 +4874,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("AllocationBinId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AllocationWarehouseId")
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("CancelledQuantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("TEXT");
@@ -4644,6 +4933,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AllocationBinId");
+
+                    b.HasIndex("AllocationWarehouseId");
 
                     b.HasIndex("InventoryItemId");
 
@@ -5910,8 +6203,43 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryBin", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryWarehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryLocationBalance", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryBin", null)
+                        .WithMany()
+                        .HasForeignKey("BinId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryWarehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryReceipt", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryBin", null)
+                        .WithMany()
+                        .HasForeignKey("BinId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
                         .WithMany()
                         .HasForeignKey("JournalEntryId")
@@ -5927,6 +6255,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
                         .WithMany()
                         .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryWarehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -5953,6 +6286,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryShipment", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryBin", null)
+                        .WithMany()
+                        .HasForeignKey("BinId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
                         .WithMany()
                         .HasForeignKey("JournalEntryId")
@@ -5974,6 +6312,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasForeignKey("SalesOrderId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryWarehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryShipmentLine", b =>
@@ -5993,6 +6336,57 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.SalesOrderLine", null)
                         .WithMany()
                         .HasForeignKey("SalesOrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryTransaction", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryBin", null)
+                        .WithMany()
+                        .HasForeignKey("BinId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryTransfer", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryTransferId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryWarehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.InventoryTransfer", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryBin", null)
+                        .WithMany()
+                        .HasForeignKey("DestinationBinId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryWarehouse", null)
+                        .WithMany()
+                        .HasForeignKey("DestinationWarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryBin", null)
+                        .WithMany()
+                        .HasForeignKey("SourceBinId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryWarehouse", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWarehouseId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
@@ -6331,6 +6725,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesOrderLine", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryBin", null)
+                        .WithMany()
+                        .HasForeignKey("AllocationBinId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.InventoryWarehouse", null)
+                        .WithMany()
+                        .HasForeignKey("AllocationWarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
                         .WithMany()
                         .HasForeignKey("InventoryItemId")

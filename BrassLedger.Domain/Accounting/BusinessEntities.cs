@@ -253,13 +253,16 @@ public sealed class InventoryTransaction
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
     public Guid InventoryItemId { get; set; }
+    public Guid? WarehouseId { get; set; }
+    public Guid? BinId { get; set; }
     public DateOnly OccurredOn { get; set; }
     public string TransactionType { get; set; } = string.Empty;
     public decimal QuantityChange { get; set; }
     public decimal UnitCost { get; set; }
     public decimal TotalCost { get; set; }
     public string Reference { get; set; } = string.Empty;
-    public Guid JournalEntryId { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? InventoryTransferId { get; set; }
 }
 
 public sealed class AccessRole
@@ -634,6 +637,73 @@ public sealed class InventoryItem
     public decimal QuantityOnHand { get; set; }
     public decimal ReorderPoint { get; set; }
     public bool IsActive { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class InventoryWarehouse
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string AddressLine1 { get; set; } = string.Empty;
+    public string AddressLine2 { get; set; } = string.Empty;
+    public string City { get; set; } = string.Empty;
+    public string StateOrProvince { get; set; } = string.Empty;
+    public string PostalCode { get; set; } = string.Empty;
+    public string CountryCode { get; set; } = "US";
+    public bool IsDefault { get; set; }
+    public string? DefaultMarker { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class InventoryBin
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid WarehouseId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool IsDefault { get; set; }
+    public string? DefaultMarker { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class InventoryLocationBalance
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public Guid WarehouseId { get; set; }
+    public Guid BinId { get; set; }
+    public decimal QuantityOnHand { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class InventoryTransfer
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public Guid SourceWarehouseId { get; set; }
+    public Guid SourceBinId { get; set; }
+    public Guid DestinationWarehouseId { get; set; }
+    public Guid DestinationBinId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public DateOnly TransferDate { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string Status { get; set; } = "Posted";
+    public Guid? TransferredByUserId { get; set; }
+    public DateTimeOffset TransferredAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class SalesQuote
@@ -706,6 +776,8 @@ public sealed class SalesOrderLine
     public string Description { get; set; } = string.Empty;
     public decimal OrderedQuantity { get; set; }
     public decimal AllocatedQuantity { get; set; }
+    public Guid? AllocationWarehouseId { get; set; }
+    public Guid? AllocationBinId { get; set; }
     public decimal ShippedQuantity { get; set; }
     public decimal CancelledQuantity { get; set; }
     public decimal ReturnedQuantity { get; set; }
@@ -734,6 +806,8 @@ public sealed class InventoryShipment
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
     public Guid SalesOrderId { get; set; }
+    public Guid? WarehouseId { get; set; }
+    public Guid? BinId { get; set; }
     public string ShipmentNumber { get; set; } = string.Empty;
     public DateOnly ShippedOn { get; set; }
     public string Status { get; set; } = "Posted";
@@ -799,6 +873,8 @@ public sealed class InventoryReceipt
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
     public Guid PurchaseOrderId { get; set; }
+    public Guid? WarehouseId { get; set; }
+    public Guid? BinId { get; set; }
     public string ReceiptNumber { get; set; } = string.Empty;
     public DateOnly ReceivedOn { get; set; }
     public string Status { get; set; } = "Posted";

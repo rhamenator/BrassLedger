@@ -12,8 +12,8 @@ An approved quote can be converted exactly once and only on or before its expira
 
 1. A user with **Sales orders** permission saves a draft containing the customer, dates, items, quantities, prices, line discounts, line tax, and revenue distributions.
 2. Sales approval authorizes fulfillment but does not reserve or move inventory.
-3. A user with **Order fulfillment** permission sets the total reservation on each unshipped line. Availability subtracts reservations held by other orders. Setting zero releases a reservation.
-4. The warehouse ships only reserved quantities. Partial shipments leave the remaining reservation and order balance open.
+3. A user with **Order fulfillment** permission selects a warehouse/bin and sets the total reservation on each unshipped line. Availability subtracts reservations held by other orders in that bin. Setting zero releases a reservation.
+4. The warehouse ships only reserved quantities from the recorded bin. Partial shipments leave the remaining reservation and order balance open.
 5. A user with **Receivables** permission creates one invoice from each uninvoiced posted shipment. The invoice retains its order, shipment, shipment-line, order-line, item, and revenue-account provenance.
 
 Sales, fulfillment, and receivables permissions are intentionally separate. Administrators can combine them when staffing requires it, but a warehouse operator cannot approve prices or post accounts receivable merely because that person can move stock.
@@ -46,4 +46,4 @@ Older prerelease databases may contain sales-order headers with no authoritative
 
 ## Current boundary
 
-This workflow covers line-based quotes, approval, withdrawal, expiration-aware one-time conversion, line-based sales orders, approval, auditable amendment/reapproval, open-quantity cancellation, reservations, partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Pick/pack documents, explicit backorder scheduling, customer return authorization and credit/refund coordination, warehouses/bins/lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.
+This workflow covers line-based quotes, approval, withdrawal, expiration-aware one-time conversion, line-based sales orders, approval, auditable amendment/reapproval, open-quantity cancellation, warehouse/bin reservations, partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Pick/pack documents, explicit backorder scheduling, customer return authorization and credit/refund coordination, lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.

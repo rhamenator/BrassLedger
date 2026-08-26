@@ -26,6 +26,62 @@ public sealed class OperationsPage
         Assert.Contains("Compression Fitting Kit", content);
     }
 
+    public async Task ConfigureEditTransferAndReverseInventoryAsync(string warehouseCode, string transferReference)
+    {
+        await _session.Page.GetByText("Add warehouse", new() { Exact = true }).ClickAsync();
+        await _session.Page.GetByLabel("Warehouse code").FillAsync(warehouseCode);
+        await _session.Page.GetByLabel("Warehouse name").FillAsync("Browser distribution center");
+        await _session.Page.GetByLabel("Warehouse address line 1").FillAsync("100 Browser Way");
+        await _session.Page.GetByLabel("Warehouse city").FillAsync("Detroit");
+        await _session.Page.GetByLabel("Warehouse state or province").FillAsync("MI");
+        await _session.Page.GetByLabel("Warehouse postal code").FillAsync("48201");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save warehouse" }).ClickAsync();
+        await _session.Page.GetByText("Warehouse and default stock bin created.", new() { Exact = true }).WaitForAsync();
+        var locationRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory locations" }).Locator("tr").Filter(new() { HasTextString = warehouseCode });
+        Assert.Contains("100 Browser Way", await locationRow.InnerTextAsync());
+
+        await locationRow.GetByRole(AriaRole.Button, new() { Name = "Edit warehouse" }).ClickAsync();
+        var warehouseName = _session.Page.GetByLabel("Warehouse name");
+        await Assertions.Expect(warehouseName).ToHaveValueAsync("Browser distribution center");
+        await warehouseName.FillAsync("Browser fulfillment center");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save warehouse" }).ClickAsync();
+        await _session.Page.GetByText("Warehouse updated.", new() { Exact = true }).WaitForAsync();
+        locationRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory locations" }).Locator("tr").Filter(new() { HasTextString = warehouseCode });
+        await Assertions.Expect(locationRow).ToContainTextAsync("Browser fulfillment center");
+
+        await _session.Page.GetByText("Add bin", new() { Exact = true }).ClickAsync();
+        await _session.Page.GetByLabel("Bin warehouse").SelectOptionAsync(new SelectOptionValue { Label = $"{warehouseCode} — Browser fulfillment center" });
+        await _session.Page.GetByLabel("Bin code").FillAsync("PICK");
+        await _session.Page.GetByLabel("Bin name").FillAsync("Browser picking bin");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save bin" }).ClickAsync();
+        await _session.Page.GetByText("Inventory bin created.", new() { Exact = true }).WaitForAsync();
+        var binRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory locations" }).Locator("tr").Filter(new() { HasTextString = "PICK — Browser picking bin" });
+        await binRow.GetByRole(AriaRole.Button, new() { Name = "Edit bin" }).ClickAsync();
+        var binName = _session.Page.GetByLabel("Bin name"); await Assertions.Expect(binName).ToHaveValueAsync("Browser picking bin"); await binName.FillAsync("Primary browser picking");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save bin" }).ClickAsync();
+        await _session.Page.GetByText("Inventory bin updated.", new() { Exact = true }).WaitForAsync();
+        binRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory locations" }).Locator("tr").Filter(new() { HasTextString = "PICK" });
+        await Assertions.Expect(binRow).ToContainTextAsync("Primary browser picking");
+
+        await _session.Page.GetByText("Transfer stock", new() { Exact = true }).ClickAsync();
+        await _session.Page.GetByLabel("Transfer inventory item").SelectOptionAsync(new SelectOptionValue { Label = "RM-220 — Steel Fastener Pack" });
+        await _session.Page.GetByLabel("Transfer source bin").SelectOptionAsync(new SelectOptionValue { Label = "MAIN/STOCK" });
+        await _session.Page.GetByLabel("Transfer destination bin").SelectOptionAsync(new SelectOptionValue { Label = $"{warehouseCode}/PICK" });
+        await _session.Page.GetByLabel("Transfer quantity").FillAsync("1");
+        await _session.Page.GetByLabel("Transfer reference").FillAsync(transferReference);
+        await _session.Page.GetByLabel("Transfer reason").FillAsync("Browser-tested replenishment");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post transfer" }).ClickAsync();
+        await _session.Page.GetByText("Inventory transfer posted.", new() { Exact = true }).WaitForAsync();
+        var transferRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory transfers" }).Locator("tr").Filter(new() { HasTextString = transferReference });
+        Assert.Contains($"MAIN/STOCK → {warehouseCode}/PICK", await transferRow.InnerTextAsync());
+        await transferRow.GetByRole(AriaRole.Button, new() { Name = "Reverse" }).ClickAsync();
+        await _session.Page.GetByLabel("Transfer reversal reason").FillAsync("Browser-tested return to source");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Confirm transfer reversal" }).ClickAsync();
+        await _session.Page.GetByText("Inventory transfer reversed.", new() { Exact = true }).WaitForAsync();
+        transferRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory transfers" }).Locator("tr").Filter(new() { HasTextString = transferReference });
+        Assert.Contains("Reversed", await transferRow.InnerTextAsync());
+    }
+
     public async Task PreparePurchaseOrderAsync(string orderNumber)
     {
         await _session.Page.GetByLabel("Purchase order vendor").SelectOptionAsync(new SelectOptionValue { Index = 1 });
