@@ -4768,6 +4768,17 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset?>("RejectedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RejectedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RejectionReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<DateOnly?>("ReversalDate")
                         .HasColumnType("date");
 
@@ -4898,6 +4909,49 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsUnique();
 
                     b.ToTable("PayrollRunEmployeeLines");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PayrollRunRevision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("PayrollRunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("RevisionNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("SavedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SavedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("StatusBeforeRevision")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PayrollRunId", "RevisionNumber")
+                        .IsUnique();
+
+                    b.ToTable("PayrollRunRevisions");
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PayrollSsaOriginalWageFile", b =>
@@ -8888,6 +8942,15 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("BrassLedger.Domain.Accounting.PayrollRun", null)
+                        .WithMany()
+                        .HasForeignKey("PayrollRunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.PayrollRunRevision", b =>
+                {
                     b.HasOne("BrassLedger.Domain.Accounting.PayrollRun", null)
                         .WithMany()
                         .HasForeignKey("PayrollRunId")

@@ -35,15 +35,6 @@ public sealed record ReverseBankTransferRequest(Guid BankTransferId, DateOnly Re
 public sealed record CreateReconciliationAdjustmentRequest(Guid BankAccountId, DateOnly AdjustmentDate, decimal Amount, string OffsetAccountNumber, string Reference, string Description);
 public sealed record ReverseReconciliationAdjustmentRequest(Guid AdjustmentId, DateOnly ReversalDate, string Reason);
 public sealed record ReopenBankReconciliationRequest(Guid ReconciliationId, string Reason);
-public sealed record PostPayrollRunRequest(
-    Guid BankAccountId,
-    DateOnly PayDate,
-    string Reference,
-    decimal GrossPayroll,
-    decimal? NetPay = null,
-    decimal? EmployeeWithholdings = null,
-    decimal? EmployerPayrollTaxes = null,
-    string TaxJurisdiction = "Federal");
 public sealed record PayrollW2ReportingInput(
     decimal SocialSecurityTips = 0,
     decimal CashTipsReported = 0,
@@ -60,11 +51,12 @@ public sealed record PayrollLiabilityPaymentApplicationInput(Guid PayrollLiabili
 public sealed record RecordPayrollLiabilityPaymentRequest(Guid BankAccountId, DateOnly PaymentDate, string Reference, string Payee, string Method, IReadOnlyList<PayrollLiabilityPaymentApplicationInput> Applications);
 public sealed record ReversePayrollLiabilityPaymentRequest(Guid PaymentId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record EmployeePayrollInput(Guid EmployeeId, decimal GrossPay, IReadOnlyList<PayrollEarningInput>? Earnings = null, IReadOnlyList<PayrollDeductionInput>? Deductions = null);
-public sealed record PostEmployeePayrollRunRequest(Guid BankAccountId, DateOnly PayDate, string Reference, IReadOnlyList<EmployeePayrollInput> Employees, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null, string RunType = "Regular", IReadOnlyList<Guid>? ApprovedTimecardIds = null);
+public sealed record PostEmployeePayrollRunRequest(Guid BankAccountId, DateOnly PayDate, string Reference, IReadOnlyList<EmployeePayrollInput> Employees, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null, string RunType = "Regular", IReadOnlyList<Guid>? ApprovedTimecardIds = null, Guid? Id = null, string ConcurrencyToken = "");
 public sealed record PayrollTaxEstimate(string ObligationCode, string JurisdictionCode, string JurisdictionName, string TaxType, decimal TaxableWages, decimal YearToDateTaxableWagesBefore, decimal EmployeeAmount, decimal EmployerAmount, Guid? TaxRuleSetId, Guid? TaxContentPackageId, string ContentVersion, string Source, string CalculationTraceJson);
 public sealed record EmployeePayrollEstimate(Guid EmployeeId, string EmployeeName, string WorkState, string FilingStatus, decimal GrossPay, decimal PreTaxDeductions, decimal EmployeeWithholdings, decimal PostTaxDeductions, decimal EmployerPayrollTaxes, decimal NetPay, decimal YearToDateGrossBefore = 0, IReadOnlyList<PayrollTaxEstimate>? Taxes = null, decimal EmployerBenefitContributions = 0, IReadOnlyList<PayrollDeductionInput>? Deductions = null);
 public sealed record PayrollRunEstimate(decimal GrossPayroll, decimal PreTaxDeductions, decimal EmployeeWithholdings, decimal PostTaxDeductions, decimal EmployerPayrollTaxes, decimal NetPay, IReadOnlyList<EmployeePayrollEstimate> Employees, decimal EmployerBenefitContributions = 0);
 public sealed record ApprovePayrollRunRequest(Guid PayrollRunId, string ConcurrencyToken);
+public sealed record RejectPayrollRunRequest(Guid PayrollRunId, string Reason, string ConcurrencyToken);
 public sealed record PostApprovedPayrollRunRequest(Guid PayrollRunId, string ConcurrencyToken);
 public sealed record CancelPayrollRunRequest(Guid PayrollRunId, string Reason, string ConcurrencyToken);
 public sealed record ReversePayrollRunRequest(Guid PayrollRunId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
@@ -209,14 +201,14 @@ public interface IAccountingTransactionService
     Task<TransactionResult> CreateReconciliationAdjustmentAsync(CreateReconciliationAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReverseReconciliationAdjustmentAsync(ReverseReconciliationAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReopenBankReconciliationAsync(ReopenBankReconciliationRequest request, CancellationToken cancellationToken = default);
-    Task<TransactionResult> PostPayrollRunAsync(PostPayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<PayrollRunEstimate?> PreviewEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default);
+    Task<PostEmployeePayrollRunRequest?> GetEmployeePayrollRunDraftAsync(Guid payrollRunId, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveEmployeePayrollRunDraftAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApprovePayrollRunAsync(ApprovePayrollRunRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RejectPayrollRunAsync(RejectPayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> PostApprovedPayrollRunAsync(PostApprovedPayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> CancelPayrollRunAsync(CancelPayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReversePayrollRunAsync(ReversePayrollRunRequest request, CancellationToken cancellationToken = default);
-    Task<TransactionResult> PostEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveEmployeePayrollSetupAsync(SaveEmployeePayrollSetupRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveEmployeeEmploymentDetailsAsync(SaveEmployeeEmploymentDetailsRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollTimecardDraftAsync(SavePayrollTimecardDraftRequest request, CancellationToken cancellationToken = default);

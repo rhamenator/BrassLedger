@@ -1635,6 +1635,9 @@ public sealed class PayrollRun
     public DateTimeOffset PreparedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
     public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public string RejectionReason { get; set; } = string.Empty;
     public Guid? PostedByUserId { get; set; }
     public DateTimeOffset? PostedAtUtc { get; set; }
     public Guid? CancelledByUserId { get; set; }
@@ -1647,6 +1650,19 @@ public sealed class PayrollRun
     public string CalculationWarningsJson { get; set; } = "[]";
     public string TaxContentSnapshotJson { get; set; } = "[]";
     public string ConcurrencyToken { get; set; } = string.Empty;
+}
+
+public sealed class PayrollRunRevision
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid PayrollRunId { get; set; }
+    public int RevisionNumber { get; set; }
+    public string StatusBeforeRevision { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string PayloadJson { get; set; } = string.Empty;
+    public Guid? SavedByUserId { get; set; }
+    public DateTimeOffset SavedAtUtc { get; set; }
 }
 
 public sealed class PayrollJurisdictionRule

@@ -90,6 +90,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
         var request = new SaveJournalEntryDraftRequest(null, new DateOnly(2026, 8, 26), "CSRF-REJECT", "Must not save", [new("1000", 1m, 0m, "Cash"), new("4000", 0m, 1m, "Revenue")]);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/journal-entries", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/payroll-runs", new { bankAccountId = Guid.NewGuid(), payDate = "2026-08-26", reference = "DIRECT-PAYROLL", grossPayroll = 100m })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/payroll-runs/employee", new { bankAccountId = Guid.NewGuid(), payDate = "2026-08-26", reference = "DIRECT-EMPLOYEE-PAYROLL", employees = Array.Empty<object>() })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/journal-entry-drafts", request)).StatusCode);
         Assert.DoesNotContain((await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace"))!.GeneralLedger.RecentEntries, entry => entry.Reference == request.Reference);
 
@@ -1000,7 +1002,11 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     public async Task PayrollApi_PreservesDraftApprovalPostingAndReversalWorkflow()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
+        await EnsureControllerCloneAsync(isolatedFactory, "payroll-reviewer-api", "payroll");
+        await EnsureControllerCloneAsync(isolatedFactory, "payroll-poster-api", "payroll");
         using var client = await CreateAuthenticatedClientAsync(isolatedFactory, "payroll");
+        using var reviewer = await CreateAuthenticatedClientAsync(isolatedFactory, "payroll-reviewer-api");
+        using var poster = await CreateAuthenticatedClientAsync(isolatedFactory, "payroll-poster-api");
         var before = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         Assert.NotNull(before);
         var employee = before!.Payroll.Employees.First();
@@ -1044,11 +1050,24 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(bank.CurrentBalance, workspace.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/payroll-runs/post", new PostApprovedPayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
 
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-runs/approve", new ApprovePayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/payroll-runs/reject", new RejectPayrollRunRequest(run.Id, "Self-review must fail.", run.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await reviewer.PostAsJsonAsync("/api/payroll-runs/reject", new RejectPayrollRunRequest(run.Id, "Stale review.", "stale-token"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reviewer.PostAsJsonAsync("/api/payroll-runs/reject", new RejectPayrollRunRequest(run.Id, "Confirm the approved timecard and resubmit.", run.ConcurrencyToken))).StatusCode);
+        workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == run.Id);
+        Assert.Equal(("Rejected", "Confirm the approved timecard and resubmit."), (run.Status, run.RejectionReason));
+        var correction = await client.GetFromJsonAsync<PostEmployeePayrollRunRequest>($"/api/payroll-runs/{run.Id}/draft");
+        Assert.NotNull(correction); Assert.Equal(run.Id, correction!.Id); Assert.Contains(timecard.Id, correction.ApprovedTimecardIds!);
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/payroll-runs/drafts", correction)).StatusCode);
+        workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == run.Id);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/payroll-runs/approve", new ApprovePayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reviewer.PostAsJsonAsync("/api/payroll-runs/approve", new ApprovePayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
         workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == run.Id);
         Assert.Equal("Approved", run.Status);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/payroll-runs/post", new PostApprovedPayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await reviewer.PostAsJsonAsync("/api/payroll-runs/post", new PostApprovedPayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await poster.PostAsJsonAsync("/api/payroll-runs/post", new PostApprovedPayrollRunRequest(run.Id, run.ConcurrencyToken))).StatusCode);
 
         workspace = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
         run = workspace!.Payroll.Runs!.Single(candidate => candidate.Id == run.Id);
@@ -1539,13 +1558,13 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         return client;
     }
 
-    private static async Task EnsureControllerCloneAsync(BrassLedgerApiFactory factory, string userName)
+    private static async Task EnsureControllerCloneAsync(BrassLedgerApiFactory factory, string userName, string sourceUserName = "controller")
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
         if (await db.Users.AnyAsync(user => user.UserName == userName)) return;
-        var source = await db.Users.SingleAsync(user => user.UserName == "controller");
+        var source = await db.Users.SingleAsync(user => user.UserName == sourceUserName);
         var clone = new AppUser
         {
             Id = Guid.NewGuid(),

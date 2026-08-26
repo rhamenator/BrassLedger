@@ -137,7 +137,9 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             ("e2e-ap-approver", "Payables Approver"),
             ("e2e-ap-poster", "Payables Poster"),
             ("e2e-journal-reviewer", "Controller"),
-            ("e2e-journal-poster", "Controller")
+            ("e2e-journal-poster", "Controller"),
+            ("e2e-payroll-reviewer", "Payroll Approver"),
+            ("e2e-payroll-poster", "Payroll Poster")
         })
         {
             await using var command = connection.CreateCommand();

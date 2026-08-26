@@ -1407,49 +1407,6 @@ public sealed partial class AccountingTransactionService(
         return TransactionResult.Success(reconciliation.Id);
     }
 
-    public async Task<TransactionResult> PostPayrollRunAsync(PostPayrollRunRequest request, CancellationToken cancellationToken = default)
-    {
-        if (!HasPermission(BrassLedgerPermissions.PayrollPost)) return TransactionResult.Failure("You are not authorized to post payroll runs.");
-        if (request.GrossPayroll <= 0) return TransactionResult.Failure("Gross payroll must be greater than zero.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        var jurisdiction = string.IsNullOrWhiteSpace(request.TaxJurisdiction) ? "Federal" : request.TaxJurisdiction.Trim();
-        var taxProfiles = await db.TaxProfiles.Where(profile => profile.CompanyId == companyId && profile.EffectiveOn <= request.PayDate && (profile.Jurisdiction == "Federal" || profile.Jurisdiction == jurisdiction)).ToListAsync(cancellationToken);
-        if ((request.EmployeeWithholdings is null || request.EmployerPayrollTaxes is null) && taxProfiles.Count == 0)
-            return TransactionResult.Failure("Configure effective payroll tax profiles for the selected jurisdiction before posting payroll without tax overrides.");
-        var calculatedEmployeeWithholdings = RoundCurrency(request.GrossPayroll * taxProfiles.Where(profile => profile.TaxType.Contains("withholding", StringComparison.OrdinalIgnoreCase)).Sum(profile => profile.Rate));
-        var calculatedEmployerPayrollTaxes = RoundCurrency(request.GrossPayroll * taxProfiles.Where(profile => !profile.TaxType.Contains("withholding", StringComparison.OrdinalIgnoreCase)).Sum(profile => profile.Rate));
-        var employeeWithholdings = request.EmployeeWithholdings ?? calculatedEmployeeWithholdings;
-        var employerPayrollTaxes = request.EmployerPayrollTaxes ?? calculatedEmployerPayrollTaxes;
-        var netPay = request.NetPay ?? request.GrossPayroll - employeeWithholdings;
-        if (netPay < 0 || employeeWithholdings < 0 || employerPayrollTaxes < 0)
-            return TransactionResult.Failure("Payroll amounts must be non-negative.");
-        if (RoundCurrency(netPay + employeeWithholdings) != RoundCurrency(request.GrossPayroll))
-            return TransactionResult.Failure("Net pay plus employee withholdings must equal gross payroll.");
-        var bank = await db.BankAccounts.SingleOrDefaultAsync(x => x.Id == request.BankAccountId && x.CompanyId == companyId, cancellationToken);
-        if (bank is null) return TransactionResult.Failure("Payroll funding account not found.");
-        if (bank.CurrentBalance < netPay) return TransactionResult.Failure("Payroll funding account does not have sufficient book balance for net pay.");
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var payrollExpense = request.GrossPayroll + employerPayrollTaxes;
-        var liabilities = employeeWithholdings + employerPayrollTaxes;
-        var lines = new List<JournalLineRequest>
-        {
-            new(OperationalRoleReference(AccountingAccountRoles.PayrollExpense), payrollExpense, 0, "Gross payroll and employer taxes"),
-            new(await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken), 0, netPay, "Net payroll funding")
-        };
-        if (liabilities > 0) lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.PayrollLiabilities), 0, liabilities, "Payroll liabilities"));
-        var posting = await PostAsync(db, companyId, request.PayDate, "Payroll", request.Reference, "Payroll run",
-            lines, cancellationToken, bank.Id, allowControlAccounts: true, resolveOperationalRoles: true);
-        if (!posting.Succeeded) return posting;
-        bank.CurrentBalance -= netPay;
-        bank.UnreconciledAmount += netPay;
-        bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        try { await db.SaveChangesAsync(cancellationToken); }
-        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The payroll funding account changed while this run was posting. Refresh and try again."); }
-        await transaction.CommitAsync(cancellationToken);
-        return posting;
-    }
-
     public async Task<PayrollRunEstimate?> PreviewEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default)
     {
         if (!HasPermission(BrassLedgerPermissions.PayrollPrepare)) return null;
@@ -1463,17 +1420,29 @@ public sealed partial class AccountingTransactionService(
         return await CalculateEmployeePayrollAsync(db, companyId, expansion.Request, cancellationToken);
     }
 
-    public async Task<TransactionResult> PostEmployeePayrollRunAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default)
+    public async Task<PostEmployeePayrollRunRequest?> GetEmployeePayrollRunDraftAsync(Guid payrollRunId, CancellationToken cancellationToken = default)
     {
-        if (!HasPermission(BrassLedgerPermissions.PayrollPrepare) || !HasPermission(BrassLedgerPermissions.PayrollApprove) || !HasPermission(BrassLedgerPermissions.PayrollPost))
-            return TransactionResult.Failure("You are not authorized to prepare, approve, and post payroll in one operation. Use the separated payroll workflow.");
-        var draft = await SaveEmployeePayrollRunDraftAsync(request, cancellationToken);
-        if (!draft.Succeeded) return draft;
-        var token = await GetPayrollRunConcurrencyTokenAsync(draft.Id!.Value, cancellationToken);
-        var approval = await ApprovePayrollRunAsync(new ApprovePayrollRunRequest(draft.Id.Value, token), cancellationToken);
-        if (!approval.Succeeded) return approval;
-        token = await GetPayrollRunConcurrencyTokenAsync(draft.Id.Value, cancellationToken);
-        return await PostApprovedPayrollRunAsync(new PostApprovedPayrollRunRequest(draft.Id.Value, token), cancellationToken);
+        if (!HasPermission(BrassLedgerPermissions.PayrollPrepare)) return null;
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var run = await db.PayrollRuns.SingleOrDefaultAsync(candidate => candidate.Id == payrollRunId && candidate.CompanyId == companyId && (candidate.Status == "Draft" || candidate.Status == "Rejected"), cancellationToken);
+        if (run is null) return null;
+        var employeeLines = await db.PayrollRunEmployeeLines.Where(line => line.PayrollRunId == run.Id).OrderBy(line => line.EmployeeId).ToListAsync(cancellationToken);
+        var lineIds = employeeLines.Select(line => line.Id).ToArray();
+        var earnings = await db.PayrollEarningLines.Where(line => lineIds.Contains(line.PayrollRunEmployeeLineId)).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
+        var deductions = await db.PayrollDeductionLines.Where(line => lineIds.Contains(line.PayrollRunEmployeeLineId)).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
+        var timecardIds = await db.PayrollTimecards.Where(card => card.CompanyId == companyId && card.PayrollRunId == run.Id).OrderBy(card => card.PeriodStart).Select(card => card.Id).ToArrayAsync(cancellationToken);
+        var employees = employeeLines.Select(line =>
+        {
+            var explicitEarnings = earnings.Where(earning => earning.PayrollRunEmployeeLineId == line.Id && earning.PayrollTimeEntryId is null)
+                .Select(earning => new PayrollEarningInput(earning.EarningCode, earning.EarningType, earning.Hours, earning.Rate, earning.Amount, earning.IsTaxable, earning.WorkedOn, earning.WorkState, earning.WorkCounty, earning.WorkCity, earning.WorkSchoolDistrict, W2Reporting: ParseW2Reporting(earning.W2ReportingJson))).ToArray();
+            var explicitDeductions = deductions.Where(deduction => deduction.PayrollRunEmployeeLineId == line.Id && deduction.PayrollDeductionPlanId is null && deduction.EmployeePayrollDeductionElectionId is null && deduction.DeductionCode is not ("RECURRING-PRE-TAX" or "RECURRING-POST-TAX"))
+                .Select(deduction => new PayrollDeductionInput(deduction.DeductionCode, deduction.DeductionType, deduction.EmployeeAmount, deduction.EmployerAmount, deduction.IsPreTax, deduction.LiabilityAccountNumber, deduction.ExemptFromFederalIncomeTax, deduction.ExemptFromFica, deduction.ExemptFromFuta, RequestedEmployeeAmount: deduction.RequestedEmployeeAmount, LimitApplied: deduction.LimitApplied, LimitRuleCode: deduction.LimitRuleCode, CalculationTraceJson: deduction.CalculationTraceJson)).ToArray();
+            var hasTimecardEarnings = earnings.Any(earning => earning.PayrollRunEmployeeLineId == line.Id && earning.PayrollTimeEntryId is not null);
+            var grossPay = explicitEarnings.Length > 0 ? RoundCurrency(explicitEarnings.Sum(earning => earning.Amount)) : hasTimecardEarnings ? 0m : line.GrossPay;
+            return new EmployeePayrollInput(line.EmployeeId, grossPay, explicitEarnings, explicitDeductions);
+        }).ToArray();
+        return new PostEmployeePayrollRunRequest(run.BankAccountId, run.PayDate, run.Reference, employees, run.PeriodStart, run.PeriodEnd, run.RunType, timecardIds, run.Id, run.ConcurrencyToken);
     }
 
     public async Task<TransactionResult> SaveEmployeePayrollRunDraftAsync(PostEmployeePayrollRunRequest request, CancellationToken cancellationToken = default)
@@ -1498,6 +1467,14 @@ public sealed partial class AccountingTransactionService(
         if (runType is not ("Regular" or "OffCycle" or "Correction" or "Adjustment")) return TransactionResult.Failure("Payroll run type must be Regular, OffCycle, Correction, or Adjustment.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        PayrollRun? existingRun = null;
+        if (request.Id.HasValue)
+        {
+            existingRun = await db.PayrollRuns.SingleOrDefaultAsync(run => run.Id == request.Id.Value && run.CompanyId == companyId, cancellationToken);
+            if (existingRun is null) return TransactionResult.Failure("Payroll draft not found.");
+            if (existingRun.Status is not ("Draft" or "Rejected")) return TransactionResult.Failure("Only draft or rejected payroll runs can be corrected.");
+            if (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(existingRun.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll draft changed after it was displayed. Refresh before correcting it.");
+        }
         var defaultPayrollLiabilityAccount = await ResolveOperationalAccountNumberAsync(db, companyId, AccountingAccountRoles.PayrollLiabilities, cancellationToken);
         if (string.IsNullOrWhiteSpace(defaultPayrollLiabilityAccount)) return TransactionResult.Failure("Configure an active payroll liabilities operational account before preparing payroll.");
         if (await IsPayrollPeriodLockedAsync(db, companyId, request.PayDate, cancellationToken)) return TransactionResult.Failure("Reopen the approved payroll filing or closed payroll period before preparing payroll for this pay date.");
@@ -1508,7 +1485,7 @@ public sealed partial class AccountingTransactionService(
         var deductionLiabilityAccounts = expandedRequest.Employees.SelectMany(employee => employee.Deductions ?? []).Select(deduction => NormalizeLiabilityAccountNumber(deduction.LiabilityAccountNumber, defaultPayrollLiabilityAccount)).Append(defaultPayrollLiabilityAccount).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var validLiabilityAccountCount = await db.Accounts.CountAsync(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Liability && deductionLiabilityAccounts.Contains(account.Number), cancellationToken);
         if (validLiabilityAccountCount != deductionLiabilityAccounts.Length) return TransactionResult.Failure("Every payroll deduction liability account must be an active liability account in this company.");
-        if (await db.PayrollRuns.AnyAsync(run => run.CompanyId == companyId && run.Reference == request.Reference.Trim(), cancellationToken))
+        if (await db.PayrollRuns.AnyAsync(run => run.CompanyId == companyId && run.Reference == request.Reference.Trim() && run.Id != request.Id, cancellationToken))
             return TransactionResult.Failure("Payroll run reference already exists.");
         var estimate = await CalculateEmployeePayrollAsync(db, companyId, expandedRequest, cancellationToken);
         if (estimate is null) return TransactionResult.Failure("Each payroll employee must be active and have applicable effective Federal or work-state tax profiles.");
@@ -1529,8 +1506,32 @@ public sealed partial class AccountingTransactionService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var contentSnapshot = await db.TaxContentPackages.Where(package => package.CompanyId == companyId && package.Status == "Approved" && package.EffectiveOn <= request.PayDate).OrderBy(package => package.PackageCode).ThenBy(package => package.Version).Select(package => new { package.PackageCode, package.Version, package.EffectiveOn, package.MinimumEngineVersion }).ToListAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        var run = new PayrollRun { Id = Guid.NewGuid(), CompanyId = companyId, BankAccountId = bank.Id, PayDate = request.PayDate, PeriodStart = periodStart, PeriodEnd = periodEnd, RunType = runType, Status = "Draft", Reference = request.Reference.Trim(), GrossPayroll = estimate.GrossPayroll, PreTaxDeductions = estimate.PreTaxDeductions, EmployeeWithholdings = estimate.EmployeeWithholdings, PostTaxDeductions = estimate.PostTaxDeductions, EmployerPayrollTaxes = estimate.EmployerPayrollTaxes, EmployerBenefitContributions = estimate.EmployerBenefitContributions, NetPay = estimate.NetPay, PreparedByUserId = ResolveUserId(), PreparedAtUtc = now, TaxContentSnapshotJson = System.Text.Json.JsonSerializer.Serialize(contentSnapshot), ConcurrencyToken = Guid.NewGuid().ToString("N") };
-        db.PayrollRuns.Add(run);
+        var run = existingRun ?? new PayrollRun { Id = Guid.NewGuid(), CompanyId = companyId };
+        object? priorRevision = null;
+        if (existingRun is not null)
+        {
+            var priorEmployeeLines = await db.PayrollRunEmployeeLines.Where(line => line.PayrollRunId == run.Id).ToListAsync(cancellationToken);
+            var priorLineIds = priorEmployeeLines.Select(line => line.Id).ToArray();
+            var priorEarnings = await db.PayrollEarningLines.Where(line => priorLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
+            var priorDeductions = await db.PayrollDeductionLines.Where(line => priorLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
+            var priorTaxes = await db.PayrollTaxLines.Where(line => priorLineIds.Contains(line.PayrollRunEmployeeLineId)).ToListAsync(cancellationToken);
+            var priorTimecardIds = await db.PayrollTimecards.Where(card => card.CompanyId == companyId && card.PayrollRunId == run.Id).Select(card => card.Id).ToArrayAsync(cancellationToken);
+            priorRevision = new { run.BankAccountId, run.PayDate, run.PeriodStart, run.PeriodEnd, run.RunType, run.Status, run.Reference, run.GrossPayroll, run.PreTaxDeductions, run.EmployeeWithholdings, run.PostTaxDeductions, run.EmployerPayrollTaxes, run.EmployerBenefitContributions, run.NetPay, run.PreparedByUserId, run.PreparedAtUtc, run.ApprovedByUserId, run.ApprovedAtUtc, run.RejectedByUserId, run.RejectedAtUtc, run.RejectionReason, run.TaxContentSnapshotJson, employeeLines = priorEmployeeLines, earnings = priorEarnings, deductions = priorDeductions, taxes = priorTaxes, timecardIds = priorTimecardIds };
+            var revisionNumber = (await db.PayrollRunRevisions.Where(revision => revision.PayrollRunId == run.Id).Select(revision => (int?)revision.RevisionNumber).MaxAsync(cancellationToken) ?? 0) + 1;
+            db.PayrollRunRevisions.Add(new PayrollRunRevision { Id = Guid.NewGuid(), CompanyId = companyId, PayrollRunId = run.Id, RevisionNumber = revisionNumber, StatusBeforeRevision = run.Status, Reason = string.IsNullOrWhiteSpace(run.RejectionReason) ? "Draft corrected before approval" : run.RejectionReason, PayloadJson = JsonSerializer.Serialize(priorRevision), SavedByUserId = ResolveUserId(), SavedAtUtc = now });
+            db.PayrollRunEmployeeLines.RemoveRange(priorEmployeeLines);
+            var selectedTimecardIds = expansion.Timecards.Select(card => card.Id).ToHashSet();
+            var releasedTimecards = await db.PayrollTimecards.Where(card => card.CompanyId == companyId && card.PayrollRunId == run.Id && !selectedTimecardIds.Contains(card.Id)).ToListAsync(cancellationToken);
+            foreach (var timecard in releasedTimecards)
+            {
+                timecard.Status = "Approved";
+                timecard.PayrollRunId = null;
+                timecard.ConcurrencyToken = Guid.NewGuid().ToString("N");
+                AddTimecardAudit(db, companyId, "payroll-timecard.released", timecard, new { correctedPayrollRunId = run.Id, run.Reference });
+            }
+        }
+        else db.PayrollRuns.Add(run);
+        run.BankAccountId = bank.Id; run.PayDate = request.PayDate; run.PeriodStart = periodStart; run.PeriodEnd = periodEnd; run.RunType = runType; run.Status = "Draft"; run.Reference = request.Reference.Trim(); run.GrossPayroll = estimate.GrossPayroll; run.PreTaxDeductions = estimate.PreTaxDeductions; run.EmployeeWithholdings = estimate.EmployeeWithholdings; run.PostTaxDeductions = estimate.PostTaxDeductions; run.EmployerPayrollTaxes = estimate.EmployerPayrollTaxes; run.EmployerBenefitContributions = estimate.EmployerBenefitContributions; run.NetPay = estimate.NetPay; run.PreparedByUserId = ResolveUserId(); run.PreparedAtUtc = now; run.ApprovedByUserId = null; run.ApprovedAtUtc = null; run.RejectedByUserId = null; run.RejectedAtUtc = null; run.RejectionReason = string.Empty; run.TaxContentSnapshotJson = JsonSerializer.Serialize(contentSnapshot); run.ConcurrencyToken = Guid.NewGuid().ToString("N");
         foreach (var estimateLine in estimate.Employees)
         {
             var employee = runEmployees[estimateLine.EmployeeId];
@@ -1550,7 +1551,7 @@ public sealed partial class AccountingTransactionService(
             timecard.ConcurrencyToken = Guid.NewGuid().ToString("N");
             AddTimecardAudit(db, companyId, "payroll-timecard.consumed", timecard, new { payrollRunId = run.Id, run.Reference });
         }
-        AddPayrollAudit(db, companyId, "payroll-run.prepared", run, new { run.PeriodStart, run.PeriodEnd, run.RunType, employeeCount = estimate.Employees.Count, run.GrossPayroll, run.NetPay });
+        AddPayrollAudit(db, companyId, priorRevision is null ? "payroll-run.prepared" : "payroll-run.revised", run, new { run.PeriodStart, run.PeriodEnd, run.RunType, employeeCount = estimate.Employees.Count, run.GrossPayroll, run.NetPay, priorRevisionPreserved = priorRevision is not null });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("An approved timecard or payroll record changed while the draft was being prepared. Refresh and review the payroll again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("Payroll draft could not be saved because the reference was already used, a time entry was already consumed, or its data changed. Refresh and try again."); }
@@ -1567,10 +1568,37 @@ public sealed partial class AccountingTransactionService(
         if (run is null) return TransactionResult.Failure("Payroll run not found.");
         if (run.Status != "Draft") return TransactionResult.Failure("Only a draft payroll run can be approved.");
         if (!string.Equals(run.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll run changed after it was opened. Refresh and review it again.");
-        run.Status = "Approved"; run.ApprovedByUserId = ResolveUserId(); run.ApprovedAtUtc = DateTimeOffset.UtcNow; run.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        var approvingUserId = ResolveUserId();
+        if (approvingUserId.HasValue && run.PreparedByUserId == approvingUserId)
+            return TransactionResult.Failure("The person who prepared a payroll run cannot approve it.");
+        run.Status = "Approved"; run.ApprovedByUserId = approvingUserId; run.ApprovedAtUtc = DateTimeOffset.UtcNow; run.ConcurrencyToken = Guid.NewGuid().ToString("N");
         AddPayrollAudit(db, companyId, "payroll-run.approved", run, new { run.GrossPayroll, run.EmployeeWithholdings, run.NetPay });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The payroll run changed while it was being approved. Refresh and try again."); }
+        return TransactionResult.Success(run.Id);
+    }
+
+    public async Task<TransactionResult> RejectPayrollRunAsync(RejectPayrollRunRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.PayrollApprove)) return TransactionResult.Failure("You are not authorized to reject payroll runs.");
+        if (string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A payroll rejection reason is required.");
+        if (request.Reason.Trim().Length > 1000) return TransactionResult.Failure("The payroll rejection reason cannot exceed 1,000 characters.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var run = await db.PayrollRuns.SingleOrDefaultAsync(candidate => candidate.Id == request.PayrollRunId && candidate.CompanyId == companyId, cancellationToken);
+        if (run is null) return TransactionResult.Failure("Payroll run not found.");
+        if (run.Status is not ("Draft" or "Approved")) return TransactionResult.Failure("Only an unposted draft or approved payroll run can be rejected.");
+        if (!string.Equals(run.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll run changed after it was displayed. Refresh before rejecting it.");
+        var rejectingUserId = ResolveUserId();
+        if (rejectingUserId.HasValue && run.PreparedByUserId == rejectingUserId) return TransactionResult.Failure("The person who prepared a payroll run cannot reject it as its reviewer.");
+        run.Status = "Rejected";
+        run.RejectedByUserId = rejectingUserId;
+        run.RejectedAtUtc = DateTimeOffset.UtcNow;
+        run.RejectionReason = request.Reason.Trim();
+        run.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddPayrollAudit(db, companyId, "payroll-run.rejected", run, new { run.RejectionReason, run.RejectedAtUtc, run.ApprovedByUserId, run.ApprovedAtUtc });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The payroll run changed while it was being rejected. Refresh and try again."); }
         return TransactionResult.Success(run.Id);
     }
 
@@ -1583,6 +1611,9 @@ public sealed partial class AccountingTransactionService(
         if (run is null) return TransactionResult.Failure("Payroll run not found.");
         if (run.Status != "Approved") return TransactionResult.Failure("Only an approved payroll run can be posted.");
         if (!string.Equals(run.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll run changed after it was approved. Refresh and review it again.");
+        var postingUserId = ResolveUserId();
+        if (postingUserId.HasValue && run.ApprovedByUserId == postingUserId)
+            return TransactionResult.Failure("The person who approved a payroll run cannot post it.");
         if (await IsPayrollPeriodLockedAsync(db, companyId, run.PayDate, cancellationToken)) return TransactionResult.Failure("Reopen the approved payroll filing or closed payroll period before posting payroll for this pay date.");
         var bank = await db.BankAccounts.SingleOrDefaultAsync(account => account.Id == run.BankAccountId && account.CompanyId == companyId, cancellationToken);
         if (bank is null) return TransactionResult.Failure("Payroll funding account not found.");
@@ -1651,7 +1682,7 @@ public sealed partial class AccountingTransactionService(
             });
         }
         if (RoundCurrency(employeeLines.Sum(line => line.NetPay)) != run.NetPay) return TransactionResult.Failure("Employee payments do not reconcile to payroll net pay.");
-        run.Status = "Posted"; run.JournalEntryId = posting.Id; run.PostedByUserId = ResolveUserId(); run.PostedAtUtc = DateTimeOffset.UtcNow; run.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        run.Status = "Posted"; run.JournalEntryId = posting.Id; run.PostedByUserId = postingUserId; run.PostedAtUtc = DateTimeOffset.UtcNow; run.ConcurrencyToken = Guid.NewGuid().ToString("N");
         var depositSchedule = await db.PayrollDepositScheduleConfigurations.SingleOrDefaultAsync(configuration => configuration.CompanyId == companyId && configuration.JurisdictionCode == "US" && configuration.ReturnFormCode == "941" && configuration.TaxYear == run.PayDate.Year && configuration.IsActive && configuration.IsApproved, cancellationToken);
         if (depositSchedule is not null) await PayrollDepositDueDateCalculator.RecalculateYearAsync(db, companyId, depositSchedule, cancellationToken);
         bank.CurrentBalance -= run.NetPay; bank.UnreconciledAmount += run.NetPay; bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
@@ -1670,7 +1701,7 @@ public sealed partial class AccountingTransactionService(
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var run = await db.PayrollRuns.SingleOrDefaultAsync(candidate => candidate.Id == request.PayrollRunId && candidate.CompanyId == companyId, cancellationToken);
         if (run is null) return TransactionResult.Failure("Payroll run not found.");
-        if (run.Status != "Draft") return TransactionResult.Failure("Only a draft payroll run can be cancelled. Posted payroll must be reversed.");
+        if (run.Status is not ("Draft" or "Rejected")) return TransactionResult.Failure("Only a draft or rejected payroll run can be cancelled. Posted payroll must be reversed.");
         if (!string.Equals(run.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payroll run changed after it was opened. Refresh and review it again.");
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -2098,7 +2129,7 @@ public sealed partial class AccountingTransactionService(
         var timecards = await db.PayrollTimecards.Where(card => card.CompanyId == companyId && selectedIds.Contains(card.Id)).ToListAsync(cancellationToken);
         if (timecards.Count != selectedIds.Length)
             return PayrollTimecardExpansion.Failure("One or more selected timecards do not exist in this company.");
-        if (timecards.Any(card => card.Status != "Approved" || card.PayrollRunId is not null))
+        if (timecards.Any(card => !(card.Status == "Approved" && card.PayrollRunId is null) && !(request.Id.HasValue && card.Status == "Consumed" && card.PayrollRunId == request.Id)))
             return PayrollTimecardExpansion.Failure("Every selected timecard must be approved and not already assigned to a payroll run.");
 
         var requestedEmployeeIds = request.Employees.Select(employee => employee.EmployeeId).ToHashSet();
@@ -2115,7 +2146,7 @@ public sealed partial class AccountingTransactionService(
         if (await db.PayrollEarningLines
             .Where(line => line.PayrollTimeEntryId != null && entryIds.Contains(line.PayrollTimeEntryId.Value))
             .Join(db.PayrollRunEmployeeLines, earning => earning.PayrollRunEmployeeLineId, employeeLine => employeeLine.Id, (_, employeeLine) => employeeLine.PayrollRunId)
-            .Join(db.PayrollRuns.Where(run => run.Status != "Cancelled"), runId => runId, run => run.Id, (_, _) => true)
+            .Join(db.PayrollRuns.Where(run => run.Status != "Cancelled" && run.Id != request.Id), runId => runId, run => run.Id, (_, _) => true)
             .AnyAsync(cancellationToken))
             return PayrollTimecardExpansion.Failure("One or more selected time entries have already been used by another payroll run.");
 

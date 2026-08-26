@@ -362,6 +362,13 @@ public static class ServiceCollectionExtensions
             return await HasColumnAsync(dbContext, "JournalEntries", "RejectedByUserId", cancellationToken)
                 && await HasColumnAsync(dbContext, "JournalEntries", "RejectedAtUtc", cancellationToken)
                 && await HasColumnAsync(dbContext, "JournalEntries", "DecisionReason", cancellationToken);
+        if (migrationId.EndsWith("_AddControlledPayrollReview", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "PayrollRuns", "RejectedByUserId", cancellationToken)
+                && await HasColumnAsync(dbContext, "PayrollRuns", "RejectedAtUtc", cancellationToken)
+                && await HasColumnAsync(dbContext, "PayrollRuns", "RejectionReason", cancellationToken)
+                && await HasTableAsync(dbContext, "PayrollRunRevisions", cancellationToken)
+                && await HasColumnAsync(dbContext, "PayrollRunRevisions", "PayloadJson", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_PayrollRunRevisions_PayrollRunId_RevisionNumber", cancellationToken);
         return false;
     }
 

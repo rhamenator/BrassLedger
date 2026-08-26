@@ -4,17 +4,20 @@
 
 BrassLedger payroll uses a durable subledger workflow. A calculation preview is read-only. **Save reviewed draft** preserves the pay period, employees, earnings, deductions, tax lines, year-to-date inputs, rule versions, and source trace without changing cash or the general ledger.
 
-A draft must move through these states:
+A run moves through these controlled states:
 
 1. `Draft` — prepared details can be reviewed; no financial posting exists.
-2. `Approved` — the reviewed calculation is locked for posting.
-3. `Posted` — a balanced payroll journal and funding-account movement exist.
-4. `Reversed` — the original remains in history and a linked equal-and-opposite journal records the correction.
-5. `Cancelled` — a draft was rejected before posting; its calculation and audit history remain, and any assigned approved timecards are released for a replacement draft.
+2. `Rejected` — a reviewer returned the unposted run with a required reason. The preparer can correct the same run identity and resubmit it.
+3. `Approved` — the reviewed calculation is locked for posting.
+4. `Posted` — a balanced payroll journal and funding-account movement exist.
+5. `Reversed` — the original remains in history and a linked equal-and-opposite journal records the correction.
+6. `Cancelled` — a draft or rejected run was abandoned before posting; its calculation and audit history remain, and assigned approved timecards are released.
 
-Preparation, approval, posting, reversal, general payroll maintenance, and access to protected employee fields are separate permissions. A stale browser or API request is rejected by the payroll run's concurrency token. Payroll cannot post into a closed accounting period, and a reconciled payroll journal cannot be reversed until its bank reconciliation is reopened.
+Preparation, approval, posting, reversal, general payroll maintenance, and access to protected employee fields are separate permissions. The preparer cannot approve or reject their own run, and the approver cannot post it. The former aggregate direct-posting operation and the prepare/approve/post convenience operation are intentionally unavailable; UI and API clients must use the durable workflow. A stale browser or API request is rejected by the payroll run's concurrency token. Payroll cannot post into a closed accounting period, and a reconciled payroll journal cannot be reversed until its bank reconciliation is reopened.
 
-Cancelling requires the payroll-reversal permission, a current concurrency token, and a reason. It is valid only for a draft. The cancellation and release of every source timecard occur in one transaction. Cancelled earning lines retain their original source-entry links for review, but they do not prevent those entries from feeding one later active payroll run.
+Review rejection requires payroll-approval permission, a current concurrency token, and a reason of at most 1,000 characters. Correcting a draft or rejected run retains its identity, recalculates its detailed earnings, deductions, and taxes, clears the current decision, and stores the complete prior header and line set as an encrypted, numbered, immutable revision. Selected consumed timecards remain linked to the same run; removed timecards are released atomically. The correction screen restores detailed ad-hoc earnings, work locations, deductions, and source timecards instead of reducing the prior calculation to an unexplained total.
+
+Cancelling requires the payroll-reversal permission, a current concurrency token, and a reason. It is valid only for a draft or rejected run. The cancellation and release of every source timecard occur in one transaction. Cancelled earning lines retain their original source-entry links for review, but they do not prevent those entries from feeding one later active payroll run.
 
 ## Employee and earning setup
 

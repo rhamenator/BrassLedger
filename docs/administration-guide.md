@@ -90,6 +90,8 @@ Ordinary customer invoices and vendor bills have separate **Preparer**, **Approv
 
 Ordinary general journals use the same three-stage control: a preparer saves or corrects a draft, a different reviewer approves or rejects it, and someone other than that approver posts it. Rejection requires a reason and current concurrency token. Correction revises the same journal identity, returns it to Draft, clears the current decision, and preserves the prior values and lines in immutable audit evidence. Source-workflow journals remain editable only through their originating receivables, payables, inventory, payroll, banking, or schedule workflow. The direct general-journal posting API and public application-service operations are intentionally unavailable. QuickBooks CSV journal imports create drafts, and journal export excludes drafts, approvals awaiting posting, rejections, and reversals.
 
+Payroll uses the same controlled actor separation. A preparer cannot approve or reject their own run, and an approver cannot post it. Reviewers may reject a draft or approved-but-unposted run with a required reason. Preparers correct and resubmit the same run identity; every prior employee, earning, deduction, tax, source-timecard, and calculation snapshot is retained in an encrypted numbered revision. The legacy aggregate posting API and single-call prepare/approve/post operation are intentionally unavailable.
+
 The equivalent API is `GET` and antiforgery-protected `PUT /api/accounting/operational-account-roles`. The caller needs both user-administration and ledger-management authority and must submit the displayed current account ID plus explicit confirmation. A stale request is rejected rather than overwriting a later administrator's choice.
 
 ## Accounting schedules

@@ -411,23 +411,11 @@ api.MapPut("/bank-accounts/ledger-mapping", async (UpdateBankLedgerMappingReques
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["bankAccount"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 
-api.MapPost("/payroll-runs", async (PostPayrollRunRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
-{
-    var result = await service.PostPayrollRunAsync(request, cancellationToken);
-    return result.Succeeded ? Results.Created($"/api/payroll-runs/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payroll"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll, BrassLedgerAuthorizationPolicies.ApprovePayroll, BrassLedgerAuthorizationPolicies.PostPayroll);
-
 api.MapPost("/payroll-runs/employee-preview", async (PostEmployeePayrollRunRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.PreviewEmployeePayrollRunAsync(request, cancellationToken);
     return result is null ? Results.ValidationProblem(new Dictionary<string, string[]> { ["payroll"] = ["Provide active employees, positive gross pay, and applicable tax profiles."] }) : Results.Ok(result);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll);
-
-api.MapPost("/payroll-runs/employee", async (PostEmployeePayrollRunRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
-{
-    var result = await service.PostEmployeePayrollRunAsync(request, cancellationToken);
-    return result.Succeeded ? Results.Created($"/api/payroll-runs/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payroll"] = [result.ErrorMessage] });
-}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll, BrassLedgerAuthorizationPolicies.ApprovePayroll, BrassLedgerAuthorizationPolicies.PostPayroll);
 
 api.MapPost("/payroll-runs/drafts", async (PostEmployeePayrollRunRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
@@ -440,6 +428,18 @@ api.MapPost("/payroll-runs/approve", async (ApprovePayrollRunRequest request, IA
     var result = await service.ApprovePayrollRunAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payroll"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApprovePayroll);
+
+api.MapPost("/payroll-runs/reject", async (RejectPayrollRunRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.RejectPayrollRunAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["payroll"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApprovePayroll);
+
+api.MapGet("/payroll-runs/{payrollRunId:guid}/draft", async (Guid payrollRunId, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.GetEmployeePayrollRunDraftAsync(payrollRunId, cancellationToken);
+    return result is null ? Results.NotFound() : Results.Ok(result);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PreparePayroll);
 
 api.MapPost("/payroll-runs/post", async (PostApprovedPayrollRunRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {

@@ -299,9 +299,22 @@ else
                 <div class="field-group"><label class="field-label">Run reference</label><InputText aria-label="Payroll run reference" class="field-input" @bind-Value="RunForm.Reference" /></div>
                 <div class="field-group"><label class="field-label">Funding account</label><InputSelect aria-label="Payroll funding account" class="field-input" @bind-Value="RunForm.BankAccountId"><option value="@Guid.Empty">Select bank account</option>@foreach (var bank in Workspace.Treasury.BankAccounts) { <option value="@bank.Id">@bank.Name — @bank.CurrentBalance.ToString("C")</option> }</InputSelect></div>
             </div>
-            <table class="data-table"><thead><tr><th>Employee</th><th>Work state</th><th>Gross pay</th></tr></thead><tbody>@foreach (var employee in Workspace.Payroll.Employees.Where(employee => employee.IsActive)) { var employeeId = employee.Id; <tr><td>@employee.FullName</td><td>@employee.State</td><td><input type="number" min="0" step="0.01" aria-label="@($"Gross pay for {employee.FullName}")" class="field-input" value="@RunLines[employeeId].ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetRunLine(employeeId, args.Value)" /></td></tr> }</tbody></table>
+            <table class="data-table"><thead><tr><th>Employee</th><th>Work state</th><th>Gross pay</th></tr></thead><tbody>@foreach (var employee in Workspace.Payroll.Employees.Where(employee => employee.IsActive)) { var employeeId = employee.Id; <tr><td>@employee.FullName</td><td>@employee.State</td><td><input type="number" min="0" step="0.01" aria-label="@($"Gross pay for {employee.FullName}")" class="field-input" value="@RunLines[employeeId].ToString(System.Globalization.CultureInfo.InvariantCulture)" disabled="@(RunForm.Id.HasValue && CorrectionInputs.TryGetValue(employeeId, out var correctionInput) && correctionInput.Earnings?.Count > 0)" @onchange="args => SetRunLine(employeeId, args.Value)" /></td></tr> }</tbody></table>
+            @if (RunForm.Id.HasValue && CorrectionInputs.Count > 0)
+            {
+                <p class="page-intro">The detailed earnings and ad-hoc deductions below came from the rejected revision. Source-timecard earnings remain controlled by the selected timecards.</p>
+                @foreach (var employeeInput in CorrectionInputs.Values.Where(input => input.Earnings?.Count > 0 || input.Deductions?.Count > 0))
+                {
+                    var employeeName = Workspace.Payroll.Employees.First(employee => employee.Id == employeeInput.EmployeeId).FullName;
+                    <fieldset><legend>@employeeName correction detail</legend>
+                    @if (employeeInput.Earnings?.Count > 0) { <div class="table-scroll"><table class="data-table"><thead><tr><th>Earning</th><th>Work date</th><th>Work location</th><th>Amount</th></tr></thead><tbody>@for (var index = 0; index < employeeInput.Earnings.Count; index++) { var earningIndex = index; var earning = employeeInput.Earnings[index]; <tr><td>@earning.EarningCode — @earning.EarningType</td><td>@(earning.WorkedOn?.ToString("MMM d, yyyy") ?? "—")</td><td>@string.Join(", ", new[] { earning.WorkCity, earning.WorkCounty, earning.WorkState }.Where(value => !string.IsNullOrWhiteSpace(value)))</td><td><input type="number" min="0" step="0.01" aria-label="@($"{employeeName} {earning.EarningCode} corrected amount")" class="field-input" value="@earning.Amount.ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetCorrectionEarningAmount(employeeInput.EmployeeId, earningIndex, args.Value)" /></td></tr> }</tbody></table></div> }
+                    @if (employeeInput.Deductions?.Count > 0) { <div class="table-scroll"><table class="data-table"><thead><tr><th>Ad-hoc deduction</th><th>Treatment</th><th>Employee amount</th><th>Employer amount</th></tr></thead><tbody>@for (var index = 0; index < employeeInput.Deductions.Count; index++) { var deductionIndex = index; var deduction = employeeInput.Deductions[index]; <tr><td>@deduction.DeductionCode — @deduction.DeductionType</td><td>@(deduction.IsPreTax ? "Pre-tax" : "Post-tax")</td><td><input type="number" min="0" step="0.01" aria-label="@($"{employeeName} {deduction.DeductionCode} corrected employee amount")" class="field-input" value="@deduction.EmployeeAmount.ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetCorrectionDeductionAmount(employeeInput.EmployeeId, deductionIndex, true, args.Value)" /></td><td><input type="number" min="0" step="0.01" aria-label="@($"{employeeName} {deduction.DeductionCode} corrected employer amount")" class="field-input" value="@deduction.EmployerAmount.ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetCorrectionDeductionAmount(employeeInput.EmployeeId, deductionIndex, false, args.Value)" /></td></tr> }</tbody></table></div> }
+                    </fieldset>
+                }
+            }
             <button class="action-secondary" type="submit">Preview payroll</button>
-            @if (Preview is not null) { <button class="action-primary" type="button" @onclick="SavePayrollDraftAsync">Save reviewed draft</button> }</EditForm>
+            @if (Preview is not null) { <button class="action-primary" type="button" @onclick="SavePayrollDraftAsync">@(RunForm.Id.HasValue ? "Save corrected draft" : "Save reviewed draft")</button> }
+            @if (RunForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetPayrollEditor">Cancel correction</button> }</EditForm>
             @if (Preview is not null)
             {
                 <table class="data-table"><thead><tr><th>Employee</th><th>Gross</th><th>Pre-tax benefits</th><th>Withholding</th><th>Post-tax benefits</th><th>Employer taxes</th><th>Employer benefits</th><th>Net pay</th></tr></thead><tbody>@foreach (var line in Preview.Employees) { <tr><td>@line.EmployeeName (@line.WorkState)</td><td>@line.GrossPay.ToString("C")</td><td>@line.PreTaxDeductions.ToString("C")</td><td>@line.EmployeeWithholdings.ToString("C")</td><td>@line.PostTaxDeductions.ToString("C")</td><td>@line.EmployerPayrollTaxes.ToString("C")</td><td>@line.EmployerBenefitContributions.ToString("C")</td><td>@line.NetPay.ToString("C")</td></tr> }</tbody></table>
@@ -315,16 +328,18 @@ else
 
         <section class="panel">
             <h2>Payroll run workflow</h2>
-            <p class="page-intro">Drafts do not affect cash or the ledger. Approve after review, post only when funding is ready, and use reversal to preserve the original run and create an equal-and-opposite journal.</p>
+            <p class="page-intro">Drafts do not affect cash or the ledger. A preparer cannot approve their own work, and an approver cannot post it. Rejected runs retain the reviewer’s reason and an encrypted copy of every prior calculation when corrected.</p>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="payrollReviewReasonContext"><div class="field-group"><label class="field-label">Reviewer rejection reason</label><InputText aria-label="Payroll rejection reason" class="field-input" @bind-Value="PayrollReviewReason" /></div></Authorized></AuthorizeView>
             <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollReverseReasonContext"><div class="field-group"><label class="field-label">Cancellation / reversal reason</label><InputText aria-label="Payroll cancellation or reversal reason" class="field-input" @bind-Value="ReversalReason" /></div></Authorized></AuthorizeView>
             @if (Workspace.Payroll.Runs?.Count > 0)
             {
                 <table class="data-table"><thead><tr><th>Reference</th><th>Period</th><th>Pay date</th><th>Type</th><th>Status</th><th>Gross</th><th>Withholding</th><th>Employer tax</th><th>Employer benefits</th><th>Net</th><th>Action</th></tr></thead><tbody>
                 @foreach (var run in Workspace.Payroll.Runs)
                 {
-                    <tr><td>@run.Reference</td><td>@run.PeriodStart.ToString("MMM d")–@run.PeriodEnd.ToString("MMM d, yyyy")</td><td>@run.PayDate.ToString("MMM d, yyyy")</td><td>@run.RunType</td><td>@run.Status</td><td>@run.GrossPayroll.ToString("C")</td><td>@run.EmployeeWithholdings.ToString("C")</td><td>@run.EmployerPayrollTaxes.ToString("C")</td><td>@run.EmployerBenefitContributions.ToString("C")</td><td>@run.NetPay.ToString("C")</td><td>
-                        @if (run.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="payrollApproveContext"><button class="action-secondary" type="button" @onclick="async () => await ApprovePayrollAsync(run)">Approve</button></Authorized></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollCancelContext"><button class="action-secondary" type="button" @onclick="async () => await CancelPayrollAsync(run)">Cancel</button></Authorized></AuthorizeView> }
-                        else if (run.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostPayroll"><Authorized Context="payrollPostContext"><button class="action-primary" type="button" @onclick="async () => await PostApprovedPayrollAsync(run)">Post</button></Authorized></AuthorizeView> }
+                    <tr><td>@run.Reference</td><td>@run.PeriodStart.ToString("MMM d")–@run.PeriodEnd.ToString("MMM d, yyyy")</td><td>@run.PayDate.ToString("MMM d, yyyy")</td><td>@run.RunType</td><td>@run.Status@if (!string.IsNullOrWhiteSpace(run.RejectionReason)) { <br /><span class="muted-copy">@run.RejectionReason</span> }</td><td>@run.GrossPayroll.ToString("C")</td><td>@run.EmployeeWithholdings.ToString("C")</td><td>@run.EmployerPayrollTaxes.ToString("C")</td><td>@run.EmployerBenefitContributions.ToString("C")</td><td>@run.NetPay.ToString("C")</td><td>
+                        @if (run.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="payrollApproveContext"><button class="action-secondary" type="button" @onclick="async () => await ApprovePayrollAsync(run)">Approve</button><button class="action-secondary" type="button" @onclick="async () => await RejectPayrollAsync(run)">Reject</button></Authorized></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollCancelContext"><button class="action-secondary" type="button" @onclick="async () => await CancelPayrollAsync(run)">Cancel</button></Authorized></AuthorizeView> }
+                        else if (run.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApprovePayroll"><Authorized Context="payrollApprovedRejectContext"><button class="action-secondary" type="button" @onclick="async () => await RejectPayrollAsync(run)">Reject</button></Authorized></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostPayroll"><Authorized Context="payrollPostContext"><button class="action-primary" type="button" @onclick="async () => await PostApprovedPayrollAsync(run)">Post</button></Authorized></AuthorizeView> }
+                        else if (run.Status == "Rejected") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PreparePayroll"><Authorized Context="payrollCorrectContext"><button class="action-primary" type="button" @onclick="async () => await LoadPayrollCorrectionAsync(run)">Correct</button></Authorized></AuthorizeView><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollRejectedCancelContext"><button class="action-secondary" type="button" @onclick="async () => await CancelPayrollAsync(run)">Cancel</button></Authorized></AuthorizeView> }
                         else if (run.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayroll"><Authorized Context="payrollReverseContext"><button class="action-secondary" type="button" @onclick="async () => await ReversePayrollAsync(run)">Reverse</button></Authorized></AuthorizeView> }
                         @if (run.Status is "Posted" or "Reversed") { <button class="action-secondary" type="button" @onclick="() => LoadPayrollRegisterAsync(run.Id)">View register</button> }
                     </td></tr>
@@ -612,6 +627,7 @@ else
     private string? StatusMessage;
     private PayrollRunEditor RunForm { get; } = new();
     private readonly Dictionary<Guid, decimal> RunLines = [];
+    private readonly Dictionary<Guid, EmployeePayrollInput> CorrectionInputs = [];
     private readonly Dictionary<Guid, EmployeePayrollEditor> EmployeeSetups = [];
     private PayrollTimecardEditor TimecardForm = new();
     private string TimecardVoidReason = string.Empty;
@@ -646,10 +662,12 @@ else
     private string SsaOriginalValidationEvidence = string.Empty;
     private string SsaOriginalValidationNotes = string.Empty;
     private bool CanManagePayroll;
+    private bool CanAccessPayrollSensitiveData;
     private static readonly string[] DeductionCategories = ["Medical", "Dental", "Vision", "HSA", "HealthFSA", "DependentCareFSA", "Retirement401k", "Retirement403b", "Retirement457", "RetirementSimpleIra", "RetirementSepIra", "RetirementRoth", "LifeInsurance", "DisabilityInsurance", "Transit", "Parking", "UnionDues", "CharitableContribution", "EmployeeLoan", "ChildSupport", "Alimony", "OrdinaryGarnishment", "TaxLevy", "BankruptcyOrder", "FederalAgencyDebt", "PtoPurchase", "Other"];
     private string FilingReopenReason = string.Empty;
     private string CorrectionVoidReason = string.Empty;
     private string ReversalReason = string.Empty;
+    private string PayrollReviewReason = string.Empty;
     private JurisdictionRuleEditor JurisdictionRuleForm { get; } = new();
     private Guid SelectedPayrollSetupEmployeeId;
     private Guid SelectedEmployeeId;
@@ -682,9 +700,10 @@ else
         DeductionPlanForm.LiabilityAccountNumber = DefaultPayrollLiabilityAccountNumber;
         var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         CanManagePayroll = authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage);
-        if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)) { PayrollFilings = (await PayrollFilingService.GetFilingsAsync()).ToList(); PayrollFilingCorrections = (await PayrollFilingService.GetCorrectionsAsync()).ToList(); SsaWageFiles = await SsaWageFileService.GetAsync(); SsaOriginalWageFiles = await SsaOriginalWageFileService.GetAsync(); }
-        if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)) PaymentFileWorkspace = await PayrollPaymentFileService.GetAsync();
-        if (authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData) && authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage)) DeductionConfiguration = await PayrollDeductionConfigurationService.GetAsync();
+        CanAccessPayrollSensitiveData = authenticationState.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData);
+        if (CanAccessPayrollSensitiveData) { PayrollFilings = (await PayrollFilingService.GetFilingsAsync()).ToList(); PayrollFilingCorrections = (await PayrollFilingService.GetCorrectionsAsync()).ToList(); SsaWageFiles = await SsaWageFileService.GetAsync(); SsaOriginalWageFiles = await SsaOriginalWageFileService.GetAsync(); }
+        if (CanAccessPayrollSensitiveData) PaymentFileWorkspace = await PayrollPaymentFileService.GetAsync();
+        if (CanAccessPayrollSensitiveData && CanManagePayroll) DeductionConfiguration = await PayrollDeductionConfigurationService.GetAsync();
         if (CanManagePayroll) { DepositScheduleWorkspace = await PayrollDepositScheduleService.GetAsync(); DisasterReliefWorkspace = await PayrollDisasterReliefService.GetAsync(); }
         PayrollClosePeriods = (await PayrollFilingService.GetClosePeriodsAsync()).ToList();
         foreach (var employee in Workspace.Payroll.Employees)
@@ -905,8 +924,8 @@ else
     private PostEmployeePayrollRunRequest BuildRequest()
     {
         var selectedEmployeeIds = (Workspace?.Payroll.Timecards ?? []).Where(card => SelectedApprovedTimecardIds.Contains(card.Id)).Select(card => card.EmployeeId).ToHashSet();
-        var employees = RunLines.Where(line => line.Value > 0 || selectedEmployeeIds.Contains(line.Key)).Select(line => new EmployeePayrollInput(line.Key, line.Value)).ToArray();
-        return new PostEmployeePayrollRunRequest(RunForm.BankAccountId, RunForm.PayDate, RunForm.Reference, employees, RunForm.PeriodStart, RunForm.PeriodEnd, RunForm.RunType, SelectedApprovedTimecardIds.ToArray());
+        var employees = RunLines.Where(line => line.Value > 0 || selectedEmployeeIds.Contains(line.Key)).Select(line => CorrectionInputs.TryGetValue(line.Key, out var correction) ? correction with { GrossPay = line.Value } : new EmployeePayrollInput(line.Key, line.Value)).ToArray();
+        return new PostEmployeePayrollRunRequest(RunForm.BankAccountId, RunForm.PayDate, RunForm.Reference, employees, RunForm.PeriodStart, RunForm.PeriodEnd, RunForm.RunType, SelectedApprovedTimecardIds.ToArray(), RunForm.Id, RunForm.ConcurrencyToken);
     }
     private void SetRunLine(Guid employeeId, object? value)
     {
@@ -914,6 +933,23 @@ else
         {
             RunLines[employeeId] = amount;
         }
+    }
+    private void SetCorrectionEarningAmount(Guid employeeId, int index, object? value)
+    {
+        if (!decimal.TryParse(value?.ToString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var amount) || !CorrectionInputs.TryGetValue(employeeId, out var employee) || employee.Earnings is null) return;
+        var earnings = employee.Earnings.ToArray();
+        earnings[index] = earnings[index] with { Amount = amount };
+        CorrectionInputs[employeeId] = employee with { GrossPay = earnings.Sum(earning => earning.Amount), Earnings = earnings };
+        RunLines[employeeId] = earnings.Sum(earning => earning.Amount);
+        Preview = null;
+    }
+    private void SetCorrectionDeductionAmount(Guid employeeId, int index, bool employeeAmount, object? value)
+    {
+        if (!decimal.TryParse(value?.ToString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var amount) || !CorrectionInputs.TryGetValue(employeeId, out var employee) || employee.Deductions is null) return;
+        var deductions = employee.Deductions.ToArray();
+        deductions[index] = employeeAmount ? deductions[index] with { EmployeeAmount = amount, RequestedEmployeeAmount = amount } : deductions[index] with { EmployerAmount = amount };
+        CorrectionInputs[employeeId] = employee with { Deductions = deductions };
+        Preview = null;
     }
     private async Task PreviewPayrollAsync()
     {
@@ -924,13 +960,38 @@ else
     {
         var result = await TransactionService.SaveEmployeePayrollRunDraftAsync(BuildRequest());
         StatusMessage = result.Succeeded ? "Payroll draft saved. It has not changed the ledger or funding account." : result.ErrorMessage;
-        if (result.Succeeded) { Preview = null; SelectedApprovedTimecardIds.Clear(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+        if (result.Succeeded) { ResetPayrollEditor(); Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     }
     private async Task ApprovePayrollAsync(PayrollRunSnapshot run)
     {
         var result = await TransactionService.ApprovePayrollRunAsync(new ApprovePayrollRunRequest(run.Id, run.ConcurrencyToken));
         StatusMessage = result.Succeeded ? "Payroll run approved and ready for posting." : result.ErrorMessage;
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+    private async Task RejectPayrollAsync(PayrollRunSnapshot run)
+    {
+        if (string.IsNullOrWhiteSpace(PayrollReviewReason)) { StatusMessage = "Enter a reviewer reason before rejecting payroll."; return; }
+        var result = await TransactionService.RejectPayrollRunAsync(new RejectPayrollRunRequest(run.Id, PayrollReviewReason, run.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Payroll rejected and returned to its preparer for correction." : result.ErrorMessage;
+        if (result.Succeeded) PayrollReviewReason = string.Empty;
+        Workspace = await WorkspaceService.GetWorkspaceAsync();
+    }
+    private async Task LoadPayrollCorrectionAsync(PayrollRunSnapshot run)
+    {
+        var draft = await TransactionService.GetEmployeePayrollRunDraftAsync(run.Id);
+        if (draft is null) { StatusMessage = "The payroll draft is no longer available for correction."; return; }
+        RunForm.Id = draft.Id; RunForm.ConcurrencyToken = draft.ConcurrencyToken; RunForm.BankAccountId = draft.BankAccountId; RunForm.PayDate = draft.PayDate; RunForm.PeriodStart = draft.PeriodStart ?? draft.PayDate; RunForm.PeriodEnd = draft.PeriodEnd ?? draft.PayDate; RunForm.RunType = draft.RunType; RunForm.Reference = draft.Reference;
+        foreach (var employeeId in RunLines.Keys.ToArray()) RunLines[employeeId] = 0m;
+        CorrectionInputs.Clear();
+        foreach (var employee in draft.Employees) { CorrectionInputs[employee.EmployeeId] = employee; RunLines[employee.EmployeeId] = employee.Earnings?.Count > 0 ? employee.Earnings.Sum(earning => earning.Amount) : employee.GrossPay; }
+        SelectedApprovedTimecardIds.Clear();
+        foreach (var timecardId in draft.ApprovedTimecardIds ?? []) SelectedApprovedTimecardIds.Add(timecardId);
+        Preview = await TransactionService.PreviewEmployeePayrollRunAsync(draft);
+        StatusMessage = "Loaded the rejected payroll and its source timecards for correction.";
+    }
+    private void ResetPayrollEditor()
+    {
+        RunForm.Id = null; RunForm.ConcurrencyToken = string.Empty; Preview = null; SelectedApprovedTimecardIds.Clear(); CorrectionInputs.Clear();
     }
     private async Task PostApprovedPayrollAsync(PayrollRunSnapshot run)
     {
@@ -939,9 +1000,12 @@ else
         Workspace = await WorkspaceService.GetWorkspaceAsync();
         if (result.Succeeded)
         {
-            PaymentFileForm.PayrollRunId = run.Id;
-            PaymentFileForm.EffectiveEntryDate = run.PayDate;
-            await RefreshPaymentFilesAsync();
+            if (CanAccessPayrollSensitiveData)
+            {
+                PaymentFileForm.PayrollRunId = run.Id;
+                PaymentFileForm.EffectiveEntryDate = run.PayDate;
+                await RefreshPaymentFilesAsync();
+            }
             if (CanManagePayroll) await RefreshDepositSchedulesAsync();
         }
     }
@@ -1015,7 +1079,7 @@ else
         if (result.Succeeded) Workspace = await WorkspaceService.GetWorkspaceAsync();
     }
 
-    private sealed class PayrollRunEditor { public Guid BankAccountId { get; set; } public DateOnly PayDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly PeriodStart { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(-13)); public DateOnly PeriodEnd { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string RunType { get; set; } = "Regular"; public string Reference { get; set; } = $"PR-{DateTime.Today:yyyyMMdd}"; }
+    private sealed class PayrollRunEditor { public Guid? Id { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; public Guid BankAccountId { get; set; } public DateOnly PayDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly PeriodStart { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(-13)); public DateOnly PeriodEnd { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string RunType { get; set; } = "Regular"; public string Reference { get; set; } = $"PR-{DateTime.Today:yyyyMMdd}"; }
     private sealed class PayrollFilingEditor { public string FormCode { get; set; } = "941"; public int TaxYear { get; set; } = 2026; public int Quarter { get; set; } = ((DateTime.Today.Month - 1) / 3) + 1; }
     private sealed class Form941CorrectionEditor { public Guid? Id { get; set; } public Guid OriginalPayrollFilingId { get; set; } public string Process { get; set; } = "Adjustment"; public DateOnly DiscoveredOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Explanation { get; set; } = string.Empty; public string FederalWithholdingCorrectionType { get; set; } = "None"; public string EmployeeCertificationCode { get; set; } = "UnderreportedOnly"; public string EmployeeCertificationEvidenceReference { get; set; } = string.Empty; public bool WageStatementsCorrected { get; set; } public string WageStatementEvidenceReference { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; }
     private sealed class W2CorrectionEditor { public Guid? Id { get; set; } public Guid OriginalPayrollFilingId { get; set; } public DateOnly DiscoveredOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Explanation { get; set; } = string.Empty; public bool EmployeeStatementsFurnished { get; set; } public string EmployeeStatementEvidenceReference { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; }

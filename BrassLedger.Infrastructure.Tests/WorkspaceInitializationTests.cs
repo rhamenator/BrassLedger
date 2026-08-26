@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("19", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("20", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -83,6 +83,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826160416_ScopeSubledgerVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826164319_AddSubledgerRejectionWorkflow';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826172628_AddControlledJournalReview';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826181954_AddControlledPayrollReview';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -113,7 +114,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("19", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("20", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -132,6 +133,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826160416_ScopeSubledgerVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826164319_AddSubledgerRejectionWorkflow';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826172628_AddControlledJournalReview';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826181954_AddControlledPayrollReview';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -1875,16 +1877,22 @@ public sealed class WorkspaceInitializationTests : IDisposable
         using var scope = services.CreateScope();
         var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         var before = await workspaceService.GetWorkspaceAsync();
         var bank = before.Treasury.BankAccounts.Single(account => account.LedgerAccountNumber == "1010");
+        var employee = before.Payroll.Employees.First();
+        var request = new PostEmployeePayrollRunRequest(bank.Id, new DateOnly(2026, 5, 15), "PAY-CALCULATED", [new EmployeePayrollInput(employee.Id, 1_000m)]);
+        var preview = await transactions.PreviewEmployeePayrollRunAsync(request);
+        Assert.NotNull(preview);
 
-        var result = await transactions.PostPayrollRunAsync(new PostPayrollRunRequest(bank.Id, new DateOnly(2026, 5, 15), "PAY-CALCULATED", 1_000m));
+        var result = await PostEmployeePayrollThroughWorkflowAsync(transactions, factory, request);
 
         Assert.True(result.Succeeded, result.ErrorMessage);
         var after = await workspaceService.GetWorkspaceAsync();
-        Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "2200").Balance + 226m, after.GeneralLedger.Accounts.Single(account => account.Number == "2200").Balance);
-        Assert.Equal(bank.CurrentBalance - 780m, after.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
-        Assert.Contains(after.GeneralLedger.RecentEntries, entry => entry.SourceModule == "Payroll" && entry.TotalAmount == 1_006m);
+        var liabilityTotal = preview!.PreTaxDeductions + preview.EmployeeWithholdings + preview.PostTaxDeductions + preview.EmployerPayrollTaxes + preview.EmployerBenefitContributions;
+        Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "2200").Balance + liabilityTotal, after.GeneralLedger.Accounts.Single(account => account.Number == "2200").Balance);
+        Assert.Equal(bank.CurrentBalance - preview.NetPay, after.Treasury.BankAccounts.Single(account => account.Id == bank.Id).CurrentBalance);
+        Assert.Contains(after.GeneralLedger.RecentEntries, entry => entry.SourceModule == "Payroll" && entry.TotalAmount == preview.GrossPayroll + preview.EmployerPayrollTaxes + preview.EmployerBenefitContributions);
     }
 
     [Fact]
@@ -2770,7 +2778,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(91.75m, line.EmployerPayrollTaxes); // $76.50 employer FICA plus FUTA and Arizona SUI capped at $500.
         Assert.Equal(783.50m, line.NetPay);
 
-        var result = await transactions.PostEmployeePayrollRunAsync(request);
+        var result = await PostEmployeePayrollThroughWorkflowAsync(transactions, factory, request);
         Assert.True(result.Succeeded, result.ErrorMessage);
         await using var verification = await factory.CreateDbContextAsync();
         var run = await verification.PayrollRuns.SingleAsync(run => run.Id == result.Id);
@@ -2925,6 +2933,87 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task PayrollWorkflow_EnforcesSeparationRejectsAndPreservesEncryptedCorrections()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var setupDb = await factory.CreateDbContextAsync();
+        var companyId = await setupDb.Companies.Select(company => company.Id).FirstAsync();
+        var employeeId = await setupDb.Employees.Where(employee => employee.CompanyId == companyId && employee.IsActive).Select(employee => employee.Id).FirstAsync();
+        var bankId = await setupDb.BankAccounts.Where(bank => bank.CompanyId == companyId).Select(bank => bank.Id).FirstAsync();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        void ActAs(Guid userId, params string[] permissions)
+        {
+            var claims = new List<System.Security.Claims.Claim>
+            {
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString())
+            };
+            claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+        async Task<PayrollRun> LoadRunAsync(Guid id)
+        {
+            await using var db = await factory.CreateDbContextAsync();
+            return await db.PayrollRuns.AsNoTracking().SingleAsync(run => run.Id == id);
+        }
+
+        var preparerId = Guid.NewGuid(); var reviewerId = Guid.NewGuid(); var posterId = Guid.NewGuid();
+        ActAs(preparerId, BrassLedgerPermissions.PayrollPrepare);
+        var saved = await transactions.SaveEmployeePayrollRunDraftAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 6, 19), "PR-SOD-CORRECT-1", [new EmployeePayrollInput(employeeId, 1_000m)]));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        var run = await LoadRunAsync(saved.Id!.Value);
+
+        ActAs(preparerId, BrassLedgerPermissions.PayrollApprove);
+        var selfApproval = await transactions.ApprovePayrollRunAsync(new(run.Id, run.ConcurrencyToken));
+        Assert.False(selfApproval.Succeeded); Assert.Contains("prepared", selfApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var selfRejection = await transactions.RejectPayrollRunAsync(new(run.Id, "I prepared this run.", run.ConcurrencyToken));
+        Assert.False(selfRejection.Succeeded); Assert.Contains("prepared", selfRejection.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        ActAs(reviewerId, BrassLedgerPermissions.PayrollApprove);
+        var staleRejection = await transactions.RejectPayrollRunAsync(new(run.Id, "Correct gross pay.", "stale-token"));
+        Assert.False(staleRejection.Succeeded); Assert.Contains("changed", staleRejection.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var rejected = await transactions.RejectPayrollRunAsync(new(run.Id, "Correct gross pay and resubmit.", run.ConcurrencyToken));
+        Assert.True(rejected.Succeeded, rejected.ErrorMessage);
+
+        ActAs(preparerId, BrassLedgerPermissions.PayrollPrepare);
+        var correction = await transactions.GetEmployeePayrollRunDraftAsync(run.Id);
+        Assert.NotNull(correction); Assert.Equal("Correct gross pay and resubmit.", (await LoadRunAsync(run.Id)).RejectionReason);
+        var correctedEmployee = correction!.Employees.Single();
+        var revised = await transactions.SaveEmployeePayrollRunDraftAsync(correction with { Employees = [correctedEmployee with { GrossPay = 1_200m, Earnings = correctedEmployee.Earnings?.Select(earning => earning with { Amount = 1_200m }).ToArray() }] });
+        Assert.True(revised.Succeeded, revised.ErrorMessage); Assert.Equal(run.Id, revised.Id);
+        run = await LoadRunAsync(run.Id);
+        Assert.Equal(("Draft", 1_200m), (run.Status, run.GrossPayroll));
+
+        await using (var verification = await factory.CreateDbContextAsync())
+        {
+            var revision = await verification.PayrollRunRevisions.SingleAsync(item => item.PayrollRunId == run.Id);
+            Assert.Equal((1, "Rejected", "Correct gross pay and resubmit."), (revision.RevisionNumber, revision.StatusBeforeRevision, revision.Reason));
+            Assert.Contains("\"GrossPayroll\":1000", revision.PayloadJson, StringComparison.Ordinal);
+            await verification.Database.OpenConnectionAsync();
+            await using var command = verification.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "SELECT PayloadJson FROM PayrollRunRevisions WHERE Id = $id";
+            var parameter = command.CreateParameter(); parameter.ParameterName = "$id"; parameter.Value = revision.Id; command.Parameters.Add(parameter);
+            Assert.StartsWith("enc::", (await command.ExecuteScalarAsync())?.ToString());
+            var actions = await verification.BusinessAuditEntries.Where(entry => entry.EntityId == run.Id).Select(entry => entry.Action).ToListAsync();
+            Assert.Contains("payroll-run.rejected", actions); Assert.Contains("payroll-run.revised", actions);
+        }
+
+        ActAs(reviewerId, BrassLedgerPermissions.PayrollApprove);
+        Assert.True((await transactions.ApprovePayrollRunAsync(new(run.Id, run.ConcurrencyToken))).Succeeded);
+        run = await LoadRunAsync(run.Id);
+        ActAs(reviewerId, BrassLedgerPermissions.PayrollPost);
+        var selfPosting = await transactions.PostApprovedPayrollRunAsync(new(run.Id, run.ConcurrencyToken));
+        Assert.False(selfPosting.Succeeded); Assert.Contains("approved", selfPosting.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(posterId, BrassLedgerPermissions.PayrollPost);
+        var posted = await transactions.PostApprovedPayrollRunAsync(new(run.Id, run.ConcurrencyToken));
+        Assert.True(posted.Succeeded, posted.ErrorMessage);
+    }
+
+    [Fact]
     public async Task PayrollFilings_ReconcileProtectDataDetectSourceChangesAndLockClosedPeriods()
     {
         using var services = CreateServiceProvider();
@@ -2932,13 +3021,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         using var scope = services.CreateScope();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
         var filings = scope.ServiceProvider.GetRequiredService<IPayrollFilingService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
         var employee = workspace.Payroll.Employees.First();
         var bankId = workspace.Treasury.BankAccounts.Single(account => account.LedgerAccountNumber == "1010").Id;
         var protectedDetails = await transactions.SaveEmployeeEmploymentDetailsAsync(new SaveEmployeeEmploymentDetailsRequest(employee.Id, "1 Main St", "", "85001", "Maricopa", "", "Maricopa", "", new DateOnly(2024, 1, 1), null, 25m, 37.5m, false, "", "123-45-6789", "", "", ConcurrencyToken: employee.ConcurrencyToken, AddressCity: "Phoenix", AddressState: "AZ"));
         Assert.True(protectedDetails.Succeeded, protectedDetails.ErrorMessage);
 
-        var firstRun = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 4, 10), "FILING-Q2-1", [new EmployeePayrollInput(employee.Id, 1_000m,
+        var firstRun = await PostEmployeePayrollThroughWorkflowAsync(transactions, factory, new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 4, 10), "FILING-Q2-1", [new EmployeePayrollInput(employee.Id, 1_000m,
         [
             new PayrollEarningInput("REG", "Regular", 0, 0, 800m),
             new PayrollEarningInput("TIPS", "Tips", 0, 0, 100m, W2Reporting: new(100m, 100m, TreasuryTippedOccupationCodes: ["101"])),
@@ -2954,7 +3044,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(draft.Data.GetProperty("WagesTipsAndOtherCompensation").GetDecimal() > 0);
         Assert.Equal(draft.Data.GetProperty("TotalTaxesBeforeAdjustments").GetDecimal(), draft.Data.GetProperty("BalanceDue").GetDecimal());
 
-        var changedSource = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 5, 8), "FILING-Q2-2", [new EmployeePayrollInput(employee.Id, 750m)], new DateOnly(2026, 4, 26), new DateOnly(2026, 5, 2)));
+        var changedSource = await PostEmployeePayrollThroughWorkflowAsync(transactions, factory, new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 5, 8), "FILING-Q2-2", [new EmployeePayrollInput(employee.Id, 750m)], new DateOnly(2026, 4, 26), new DateOnly(2026, 5, 2)));
         Assert.True(changedSource.Succeeded, changedSource.ErrorMessage);
         var staleApproval = await filings.ApproveAsync(new ApprovePayrollFilingRequest(draft.Id, draft.ConcurrencyToken));
         Assert.False(staleApproval.Succeeded);
@@ -2976,7 +3066,6 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var approvedFiling = await filings.GetFilingAsync(draft.Id);
         Assert.False((await filings.ReopenFilingAsync(new ReopenPayrollFilingRequest(draft.Id, "Correction required", approvedFiling!.ConcurrencyToken))).Succeeded);
 
-        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using (var db = await factory.CreateDbContextAsync())
         {
             await db.Database.OpenConnectionAsync();
@@ -3021,7 +3110,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             command.CommandText = "SELECT DataJson FROM PayrollFilingCorrections WHERE Id = $id"; var parameter = command.CreateParameter(); parameter.ParameterName = "$id"; parameter.Value = correction.Id; command.Parameters.Add(parameter);
             Assert.StartsWith("enc::", (await command.ExecuteScalarAsync())?.ToString());
         }
-        var additionalCorrectionRun = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 6, 12), "FILING-Q2-CORRECTION-2", [new EmployeePayrollInput(employee.Id, 2_000m,
+        var additionalCorrectionRun = await PostEmployeePayrollThroughWorkflowAsync(transactions, factory, new PostEmployeePayrollRunRequest(bankId, new DateOnly(2026, 6, 12), "FILING-Q2-CORRECTION-2", [new EmployeePayrollInput(employee.Id, 2_000m,
         [
             new PayrollEarningInput("REG", "Regular", 0, 0, 1_800m),
             new PayrollEarningInput("TIPS", "Tips", 0, 0, 100m, W2Reporting: new(100m, 100m, TreasuryTippedOccupationCodes: ["101"])),
@@ -3568,7 +3657,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var preview = await transactions.PreviewEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(workspace.Treasury.BankAccounts.First().Id, new DateOnly(2026, 5, 15), "PACKAGE-TEST", [new EmployeePayrollInput(employee.Id, 1_000m)]));
         Assert.NotNull(preview);
         Assert.Equal(176.50m, Assert.Single(preview!.Employees).EmployeeWithholdings); // Content rule replaces FIT only; employee FICA remains independently applicable.
-        var posting = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(workspace.Treasury.BankAccounts.First().Id, new DateOnly(2026, 5, 15), "PACKAGE-POST", [new EmployeePayrollInput(employee.Id, 1_000m)]));
+        var posting = await PostEmployeePayrollThroughWorkflowAsync(transactions, factory, new PostEmployeePayrollRunRequest(workspace.Treasury.BankAccounts.First().Id, new DateOnly(2026, 5, 15), "PACKAGE-POST", [new EmployeePayrollInput(employee.Id, 1_000m)]));
         Assert.True(posting.Succeeded, posting.ErrorMessage);
         await using var verification = await factory.CreateDbContextAsync();
         Assert.Contains("US-TEST", (await verification.PayrollRuns.SingleAsync(run => run.Id == posting.Id)).TaxContentSnapshotJson);
@@ -3590,6 +3679,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
         var employee = workspace.Payroll.Employees.First();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         var setup = await transactions.SaveEmployeePayrollSetupAsync(new SaveEmployeePayrollSetupRequest(employee.Id, "Single", 3, 0m, 0m, 0m, "NY", "New York City", "NY", "New York City", "Weekly"));
         Assert.True(setup.Succeeded, setup.ErrorMessage);
 
@@ -3756,6 +3846,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         using var scope = services.CreateScope();
         var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         var before = await workspaceService.GetWorkspaceAsync();
         var vendor = before.Payables.Vendors.First();
         var operatingBank = before.Treasury.BankAccounts.First();
@@ -3768,8 +3859,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
             billResult.Id!.Value, operatingBank.Id, new DateOnly(2026, 5, 2), 100m, "CHK-TEST-1"));
         Assert.True(paymentResult.Succeeded, paymentResult.ErrorMessage);
 
-        var payrollResult = await transactions.PostPayrollRunAsync(new PostPayrollRunRequest(
-            payrollBank.Id, new DateOnly(2026, 5, 3), "PAY-TEST-1", 250m, 200m, 50m, 25m));
+        var payrollEmployee = before.Payroll.Employees.First();
+        var payrollRequest = new PostEmployeePayrollRunRequest(payrollBank.Id, new DateOnly(2026, 5, 3), "PAY-TEST-1", [new EmployeePayrollInput(payrollEmployee.Id, 250m)]);
+        var payrollPreview = await transactions.PreviewEmployeePayrollRunAsync(payrollRequest);
+        Assert.NotNull(payrollPreview);
+        var payrollResult = await PostEmployeePayrollThroughWorkflowAsync(transactions, dbContextFactory, payrollRequest);
         Assert.True(payrollResult.Succeeded, payrollResult.ErrorMessage);
 
         var beforeReconciliation = await workspaceService.GetWorkspaceAsync();
@@ -3781,10 +3875,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var after = await workspaceService.GetWorkspaceAsync();
         Assert.Equal(before.Payables.OpenBalance, after.Payables.OpenBalance);
         Assert.Equal(0m, after.Treasury.BankAccounts.Single(bank => bank.Id == reconcileBank.Id).UnreconciledAmount);
-        Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "2200").Balance + 75m, after.GeneralLedger.Accounts.Single(account => account.Number == "2200").Balance);
+        var payrollLiabilityTotal = payrollPreview!.PreTaxDeductions + payrollPreview.EmployeeWithholdings + payrollPreview.PostTaxDeductions + payrollPreview.EmployerPayrollTaxes + payrollPreview.EmployerBenefitContributions;
+        Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "2200").Balance + payrollLiabilityTotal, after.GeneralLedger.Accounts.Single(account => account.Number == "2200").Balance);
         Assert.Contains(after.GeneralLedger.RecentEntries, entry => entry.Description == "Vendor payment");
-        Assert.Contains(after.GeneralLedger.RecentEntries, entry => entry.SourceModule == "Payroll" && entry.TotalAmount == 275m);
-        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        Assert.Contains(after.GeneralLedger.RecentEntries, entry => entry.SourceModule == "Payroll" && entry.TotalAmount == payrollPreview.GrossPayroll + payrollPreview.EmployerPayrollTaxes + payrollPreview.EmployerBenefitContributions);
         await using var db = await dbContextFactory.CreateDbContextAsync();
         var reconciliation = await db.BankReconciliations.SingleAsync(item => item.BankAccountId == reconcileBank.Id);
         Assert.Equal(reconcileBank.CurrentBalance, reconciliation.StatementClosingBalance);
@@ -3996,7 +4090,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         db.PayrollDepositScheduleConfigurations.Add(new PayrollDepositScheduleConfiguration { Id = Guid.NewGuid(), CompanyId = employee.CompanyId, TaxYear = 2026, ScheduleType = "Monthly", LookbackLiability = 40000m, LookbackPeriodStart = new DateOnly(2024, 7, 1), LookbackPeriodEnd = new DateOnly(2025, 6, 30), MonthlyThreshold = 50000m, NextDayThreshold = 100000m, LegalHolidaysJson = "[\"2026-09-07\"]", OfficialRulesUrl = "https://www.irs.gov/publications/p15", OfficialCalendarUrl = "https://www.irs.gov/publications/p509", SourceRetrievedOn = new DateOnly(2026, 8, 25), IsApproved = true, IsActive = true, ConcurrencyToken = Guid.NewGuid().ToString("N") });
         await db.SaveChangesAsync();
         var bank = await db.BankAccounts.FirstAsync(item => item.CompanyId == employee.CompanyId);
-        var payroll = await transactions.PostEmployeePayrollRunAsync(new PostEmployeePayrollRunRequest(bank.Id, new DateOnly(2026, 8, 28), "PR-ACH-1", [new EmployeePayrollInput(employee.Id, 1000m)], new DateOnly(2026, 8, 22), new DateOnly(2026, 8, 28)));
+        var payroll = await PostEmployeePayrollThroughWorkflowAsync(transactions, factory, new PostEmployeePayrollRunRequest(bank.Id, new DateOnly(2026, 8, 28), "PR-ACH-1", [new EmployeePayrollInput(employee.Id, 1000m)], new DateOnly(2026, 8, 22), new DateOnly(2026, 8, 28)));
         Assert.True(payroll.Succeeded, payroll.ErrorMessage);
         var federalDueDates = await db.PayrollLiabilities.Where(item => item.PayrollRunId == payroll.Id && item.JurisdictionCode == "US").Select(item => item.DueDate).Distinct().ToListAsync();
         Assert.Equal([new DateOnly(2026, 9, 15)], federalDueDates);
@@ -4192,6 +4286,23 @@ public sealed class WorkspaceInitializationTests : IDisposable
         if (!draft.Succeeded) return draft;
         var approval = await transactions.ApproveSubledgerDocumentAsync(draft.Id!.Value);
         return approval.Succeeded ? await transactions.PostApprovedSubledgerDocumentAsync(draft.Id.Value) : approval;
+    }
+
+    private static async Task<TransactionResult> PostEmployeePayrollThroughWorkflowAsync(
+        IAccountingTransactionService transactions,
+        IDbContextFactory<BrassLedgerDbContext> factory,
+        PostEmployeePayrollRunRequest request)
+    {
+        var draft = await transactions.SaveEmployeePayrollRunDraftAsync(request);
+        if (!draft.Succeeded) return draft;
+        string token;
+        await using (var db = await factory.CreateDbContextAsync())
+            token = await db.PayrollRuns.Where(run => run.Id == draft.Id).Select(run => run.ConcurrencyToken).SingleAsync();
+        var approval = await transactions.ApprovePayrollRunAsync(new ApprovePayrollRunRequest(draft.Id!.Value, token));
+        if (!approval.Succeeded) return approval;
+        await using (var db = await factory.CreateDbContextAsync())
+            token = await db.PayrollRuns.Where(run => run.Id == draft.Id).Select(run => run.ConcurrencyToken).SingleAsync();
+        return await transactions.PostApprovedPayrollRunAsync(new PostApprovedPayrollRunRequest(draft.Id.Value, token));
     }
 
     private static void AddFederalLiability(BrassLedgerDbContext db, Employee employee, DateOnly payDate, string reference, decimal amount)

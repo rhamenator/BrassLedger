@@ -16,6 +16,7 @@ public sealed class PayrollWorkflowTests
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task Payroll_PostingProducesReconciledRegisterAndPayStatement(BrowserKind browserKind)
     {
+        await _fixture.CreateSubledgerWorkflowUsersAsync();
         await using var session = await _fixture.CreateSessionAsync(browserKind);
         await session.SignInAsync("payroll");
         await session.GotoAsync("/payroll");
@@ -60,10 +61,38 @@ public sealed class PayrollWorkflowTests
 
         var runRow = session.Page.Locator("table.data-table tbody tr").Filter(new() { HasTextString = reference });
         await runRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
-        await session.Page.GetByText("Payroll run approved and ready for posting.", new() { Exact = true }).WaitForAsync();
+        await session.Page.GetByText("The person who prepared a payroll run cannot approve it.", new() { Exact = true }).WaitForAsync();
+        await using (var reviewerSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await reviewerSession.SignInAsync("e2e-payroll-reviewer"); await reviewerSession.GotoAsync("/payroll"); await reviewerSession.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
+            var reviewerRow = reviewerSession.Page.Locator("table.data-table tbody tr").Filter(new() { HasTextString = reference });
+            await reviewerSession.Page.GetByLabel("Payroll rejection reason").FillAsync("Confirm the employee earnings before posting.");
+            await reviewerRow.GetByRole(AriaRole.Button, new() { Name = "Reject", Exact = true }).ClickAsync();
+            await reviewerSession.Page.GetByText("Payroll rejected and returned to its preparer for correction.", new() { Exact = true }).WaitForAsync();
+        }
+        await session.GotoAsync("/payroll"); await session.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
         runRow = session.Page.Locator("table.data-table tbody tr").Filter(new() { HasTextString = reference });
-        await runRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
-        await session.Page.GetByText("Approved payroll posted to the ledger.", new() { Exact = true }).WaitForAsync();
+        await Assertions.Expect(runRow).ToContainTextAsync("Confirm the employee earnings before posting.");
+        await runRow.GetByRole(AriaRole.Button, new() { Name = "Correct", Exact = true }).ClickAsync();
+        await session.Page.GetByText("Loaded the rejected payroll and its source timecards for correction.", new() { Exact = true }).WaitForAsync();
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Preview payroll", Exact = true }).ClickAsync();
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Save corrected draft", Exact = true }).ClickAsync();
+        await session.Page.GetByText("Payroll draft saved. It has not changed the ledger or funding account.", new() { Exact = true }).WaitForAsync();
+        await using (var reviewerSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await reviewerSession.SignInAsync("e2e-payroll-reviewer"); await reviewerSession.GotoAsync("/payroll"); await reviewerSession.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
+            var reviewerRow = reviewerSession.Page.Locator("table.data-table tbody tr").Filter(new() { HasTextString = reference });
+            await reviewerRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+            await reviewerSession.Page.GetByText("Payroll run approved and ready for posting.", new() { Exact = true }).WaitForAsync();
+        }
+        await using (var posterSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await posterSession.SignInAsync("e2e-payroll-poster"); await posterSession.GotoAsync("/payroll"); await posterSession.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
+            var posterRow = posterSession.Page.Locator("table.data-table tbody tr").Filter(new() { HasTextString = reference });
+            await posterRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+            Assert.Equal("Approved payroll posted to the ledger.", await WaitForStatusChangeAsync(posterSession.Page, string.Empty));
+        }
+        await session.GotoAsync("/payroll"); await session.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
         var liabilitySection = session.Page.GetByRole(AriaRole.Heading, new() { Name = "Payroll liabilities", Exact = true }).Locator("..");
         var federalLiabilityRows = liabilitySection.Locator("table.data-table tbody tr").Filter(new() { HasTextString = "Federal" });
         Assert.True(await federalLiabilityRows.CountAsync() > 0);

@@ -48,6 +48,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddSubledgerRejectionWorkflow` adds the reviewer identity, rejection time, and reason retained by invoice and vendor-bill workflows. Existing rows receive an empty reason and remain otherwise unchanged. Lost-history adoption requires all three columns before recording the migration as present. Downgrade is prohibited because removing them could delete review decisions and their audit provenance; restore a verified pre-upgrade backup instead.
 
+`AddControlledPayrollReview` adds payroll rejection evidence and an encrypted, numbered revision table that preserves every corrected calculation. Existing payroll runs receive an empty rejection reason and otherwise remain unchanged. Lost-history adoption requires all rejection columns, the revision table, its encrypted payload column, and its unique run/revision index. Downgrade is prohibited because it could delete reviewer decisions and historical employee calculations; restore a verified pre-upgrade backup instead.
+
 ## Verification
 
 At minimum, run:
