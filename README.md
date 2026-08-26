@@ -88,7 +88,7 @@ The current application includes:
 - RFC 6238 authenticator MFA, hashed one-use recovery codes, bounded login challenges, replay prevention, MFA lockout, configurable privileged-role enforcement, and controlled administrator-assisted recovery
 - expiring one-use operator invitations, verified-email enrollment, enumeration-resistant password recovery, protected SMTP outbox delivery, and administrative retry visibility
 - protection of sensitive fields at rest with ASP.NET Core Data Protection
-- QuickBooks Online OAuth with protected rotating tokens, company validation, confirmed revocation, and dry-run-first inbound account/customer/vendor synchronization
+- QuickBooks Online OAuth with protected rotating tokens, expiring cross-instance credential-operation leases, company validation, confirmed revocation, and dry-run-first inbound account/customer/vendor synchronization
 - persisted application key material under `App_Data\keys`
 - security headers in the web application and API
 - first-run administrator setup through the built-in setup flow for non-development installs

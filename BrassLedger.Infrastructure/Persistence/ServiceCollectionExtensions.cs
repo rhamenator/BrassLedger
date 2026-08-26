@@ -33,8 +33,9 @@ public static class ServiceCollectionExtensions
     internal const string SecurityEmailActionValiditySchemaVersion = "2026082508-security-email-action-validity";
     internal const string NamedUserSessionSchemaVersion = "2026082509-named-user-sessions";
     internal const string QuickBooksOAuthSchemaVersion = "2026082510-quickbooks-oauth-connections";
-    internal const string CurrentSchemaVersion = "2026082511-external-entity-sync";
-    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, SecurityEmailActionValiditySchemaVersion, NamedUserSessionSchemaVersion, QuickBooksOAuthSchemaVersion, CurrentSchemaVersion];
+    internal const string ExternalEntitySyncSchemaVersion = "2026082511-external-entity-sync";
+    internal const string CurrentSchemaVersion = "2026082512-quickbooks-credential-operation-leases";
+    private static readonly HashSet<string> SupportedSchemaVersions = [BaselineSchemaVersion, W2ReportingSchemaVersion, AccountingInterchangeSchemaVersion, MultiFactorAuthenticationSchemaVersion, PrivilegedRoleMfaSchemaVersion, AccountRecoverySchemaVersion, AccountEmailLookupSchemaVersion, SecurityEmailActionValiditySchemaVersion, NamedUserSessionSchemaVersion, QuickBooksOAuthSchemaVersion, ExternalEntitySyncSchemaVersion, CurrentSchemaVersion];
 
     public static IServiceCollection AddBrassLedgerInfrastructure(
         this IServiceCollection services,
@@ -304,8 +305,10 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {NamedUserSessionSchemaVersion} is recorded without prerequisite {SecurityEmailActionValiditySchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (applied.Contains(QuickBooksOAuthSchemaVersion) && !applied.Contains(NamedUserSessionSchemaVersion))
             throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {QuickBooksOAuthSchemaVersion} is recorded without prerequisite {NamedUserSessionSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
-        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(QuickBooksOAuthSchemaVersion))
-            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {QuickBooksOAuthSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(ExternalEntitySyncSchemaVersion) && !applied.Contains(QuickBooksOAuthSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {ExternalEntitySyncSchemaVersion} is recorded without prerequisite {QuickBooksOAuthSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
+        if (applied.Contains(CurrentSchemaVersion) && !applied.Contains(ExternalEntitySyncSchemaVersion))
+            throw new InvalidOperationException($"The BrassLedger schema ledger is inconsistent: {CurrentSchemaVersion} is recorded without prerequisite {ExternalEntitySyncSchemaVersion}. Restore a verified backup or repair the ledger under controlled support supervision.");
         if (!applied.Contains(BaselineSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, BaselineSchemaVersion, "Established the ordered schema ledger after upgrading any pre-ledger database to the current model.", async () =>
             {
@@ -342,8 +345,11 @@ public static class ServiceCollectionExtensions
         if (!applied.Contains(QuickBooksOAuthSchemaVersion))
             await ApplySchemaVersionAsync(dbContext, QuickBooksOAuthSchemaVersion, "Added one-use QuickBooks OAuth authorization state and credential concurrency metadata.", () => EnsureQuickBooksOAuthSchemaAsync(dbContext, cancellationToken), cancellationToken);
 
+        if (!applied.Contains(ExternalEntitySyncSchemaVersion))
+            await ApplySchemaVersionAsync(dbContext, ExternalEntitySyncSchemaVersion, "Added durable external-entity links and auditable dry-run or committed synchronization history.", () => EnsureExternalEntitySyncSchemaAsync(dbContext, cancellationToken), cancellationToken);
+
         if (!applied.Contains(CurrentSchemaVersion))
-            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added durable external-entity links and auditable dry-run or committed synchronization history.", () => EnsureExternalEntitySyncSchemaAsync(dbContext, cancellationToken), cancellationToken);
+            await ApplySchemaVersionAsync(dbContext, CurrentSchemaVersion, "Added expiring distributed leases for QuickBooks credential-mutating operations.", () => EnsureQuickBooksCredentialOperationLeaseSchemaAsync(dbContext, cancellationToken), cancellationToken);
     }
 
     private static async Task ApplySchemaVersionAsync(BrassLedgerDbContext dbContext, string version, string description, Func<Task> apply, CancellationToken cancellationToken)
@@ -561,6 +567,24 @@ public static class ServiceCollectionExtensions
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_ExternalEntityLinks_IntegrationConnectionId_EntityType_LocalEntityId" ON "ExternalEntityLinks" ("IntegrationConnectionId", "EntityType", "LocalEntityId");""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE TABLE IF NOT EXISTS "IntegrationSyncRuns" ("Id" uuid NOT NULL PRIMARY KEY, "CompanyId" uuid NOT NULL, "IntegrationConnectionId" uuid NOT NULL, "ProviderCode" text NOT NULL, "EntityType" text NOT NULL, "Direction" text NOT NULL, "IsDryRun" boolean NOT NULL, "Status" text NOT NULL, "FetchedCount" integer NOT NULL, "CreatedCount" integer NOT NULL, "UpdatedCount" integer NOT NULL, "UnchangedCount" integer NOT NULL, "ConflictCount" integer NOT NULL, "RejectedCount" integer NOT NULL, "SnapshotSha256" text NOT NULL, "DetailJson" text NOT NULL, "InitiatedByUserId" uuid NULL, "StartedAtUtc" timestamptz NOT NULL, "CompletedAtUtc" timestamptz NOT NULL);""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_IntegrationSyncRuns_CompanyId_IntegrationConnectionId_CompletedAtUtc" ON "IntegrationSyncRuns" ("CompanyId", "IntegrationConnectionId", "CompletedAtUtc");""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureQuickBooksCredentialOperationLeaseSchemaAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsSqlite())
+        {
+            await EnsureSqliteColumnAsync(dbContext, "IntegrationConnections", "CredentialOperationLeaseId", "ALTER TABLE \"IntegrationConnections\" ADD COLUMN \"CredentialOperationLeaseId\" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "IntegrationConnections", "CredentialOperation", "ALTER TABLE \"IntegrationConnections\" ADD COLUMN \"CredentialOperation\" TEXT NOT NULL DEFAULT '';", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "IntegrationConnections", "CredentialOperationLeaseExpiresAtUtc", "ALTER TABLE \"IntegrationConnections\" ADD COLUMN \"CredentialOperationLeaseExpiresAtUtc\" TEXT NULL;", cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsNpgsql())
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "IntegrationConnections" ADD COLUMN IF NOT EXISTS "CredentialOperationLeaseId" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "IntegrationConnections" ADD COLUMN IF NOT EXISTS "CredentialOperation" text NOT NULL DEFAULT '';""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE "IntegrationConnections" ADD COLUMN IF NOT EXISTS "CredentialOperationLeaseExpiresAtUtc" timestamptz NULL;""", cancellationToken);
         }
     }
 

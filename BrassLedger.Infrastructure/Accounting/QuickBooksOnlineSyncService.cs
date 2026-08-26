@@ -327,6 +327,9 @@ public sealed class QuickBooksOnlineSyncService(
         var connection = await db.IntegrationConnections.AsNoTracking().SingleOrDefaultAsync(candidate => candidate.Id == connectionId && candidate.CompanyId == companyId && candidate.ProviderCode == ProviderCode, cancellationToken);
         if (connection is null) return new(null, null, null, "QuickBooks connection not found.");
         if (connection.Status != "Connected") return new(connection, null, null, "Validate or reconnect the QuickBooks company before synchronizing.");
+        if (!string.IsNullOrWhiteSpace(connection.CredentialOperationLeaseId)
+            && (!connection.CredentialOperationLeaseExpiresAtUtc.HasValue || connection.CredentialOperationLeaseExpiresAtUtc > timeProvider.GetUtcNow()))
+            return new(connection, null, null, "Another application instance is changing the QuickBooks authorization. Wait for that operation to finish before synchronizing.");
         try
         {
             var credentials = JsonSerializer.Deserialize<TokenEnvelope>(connection.CredentialsJson);

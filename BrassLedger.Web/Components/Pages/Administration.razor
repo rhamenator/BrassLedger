@@ -323,14 +323,14 @@ else
                                         <td>@connection.Status</td>
                                         <td>@(connection.LastValidatedAtUtc?.LocalDateTime.ToString("g") ?? "Not validated")</td>
                                         <td>
-                                            @if (connection.Status is not "Disconnected") { <button class="action-secondary" type="button" @onclick="() => ValidateQuickBooksAsync(connection.Id)">Validate</button> }
+                                            @if (connection.Status is "Connected" or "ValidationFailed") { <button class="action-secondary" type="button" @onclick="() => ValidateQuickBooksAsync(connection.Id)">Validate</button> }
                                             @if (connection.Status == "Connected")
                                             {
                                                 <button class="action-secondary" type="button" @onclick="() => RunQuickBooksSyncAsync(connection.Id, true)">Preview import</button>
                                                 <button class="action-primary" type="button" disabled="@(!HasCurrentQuickBooksPreview(connection.Id))" @onclick="() => RunQuickBooksSyncAsync(connection.Id, false)">Import previewed snapshot</button>
                                             }
                                             <button class="action-secondary" type="button" @onclick="() => ReconnectQuickBooksAsync(connection)">Reconnect</button>
-                                            @if (connection.Status is not "Disconnected")
+                                            @if (HasQuickBooksAuthorization(connection))
                                             {
                                                 @if (PendingQuickBooksDisconnectId == connection.Id)
                                                 {
@@ -556,6 +556,7 @@ else
 
     private bool HasCurrentQuickBooksPreview(Guid connectionId) => QuickBooksPreviewSnapshots.ContainsKey(QuickBooksPreviewKey(connectionId));
     private string QuickBooksPreviewKey(Guid connectionId) => $"{connectionId:N}:{QuickBooksSyncEntity}";
+    private static bool HasQuickBooksAuthorization(IntegrationConnectionSnapshot connection) => connection.Status is "Connected" or "ValidationFailed" or "ReauthorizationRequired" or "DisconnectPending";
 
     private async Task DisconnectQuickBooksAsync(Guid connectionId)
     {

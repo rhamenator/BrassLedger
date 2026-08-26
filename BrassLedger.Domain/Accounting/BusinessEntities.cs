@@ -190,6 +190,9 @@ public sealed class IntegrationConnection
     public string CredentialsJson { get; set; } = "{}";
     public DateTimeOffset? LastValidatedAtUtc { get; set; }
     public int CredentialVersion { get; set; }
+    public string CredentialOperationLeaseId { get; set; } = string.Empty;
+    public string CredentialOperation { get; set; } = string.Empty;
+    public DateTimeOffset? CredentialOperationLeaseExpiresAtUtc { get; set; }
 }
 
 public sealed class OAuthAuthorizationAttempt

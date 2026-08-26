@@ -58,8 +58,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(File.Exists(databasePath));
         await using var connection = new SqliteConnection($"Data Source={databasePath}");
         await connection.OpenAsync();
-        Assert.Equal("11", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.StartsWith("2026082511-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
+        Assert.Equal("12", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.StartsWith("2026082512-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("11", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("12", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -101,10 +101,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082511-%' OR "VersionId" LIKE '2026082510-%' OR "VersionId" LIKE '2026082509-%' OR "VersionId" LIKE '2026082508-%' OR "VersionId" LIKE '2026082507-%' OR "VersionId" LIKE '2026082506-%' OR "VersionId" LIKE '2026082505-%' OR "VersionId" LIKE '2026082504-%' OR "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082512-%' OR "VersionId" LIKE '2026082511-%' OR "VersionId" LIKE '2026082510-%' OR "VersionId" LIKE '2026082509-%' OR "VersionId" LIKE '2026082508-%' OR "VersionId" LIKE '2026082507-%' OR "VersionId" LIKE '2026082506-%' OR "VersionId" LIKE '2026082505-%' OR "VersionId" LIKE '2026082504-%' OR "VersionId" LIKE '2026082503-%' OR "VersionId" LIKE '2026082502-%';
                 DROP TABLE "UserSessions";
                 DROP TABLE "OAuthAuthorizationAttempts";
                 ALTER TABLE "IntegrationConnections" DROP COLUMN "CredentialVersion";
+                ALTER TABLE "IntegrationConnections" DROP COLUMN "CredentialOperationLeaseId";
+                ALTER TABLE "IntegrationConnections" DROP COLUMN "CredentialOperation";
+                ALTER TABLE "IntegrationConnections" DROP COLUMN "CredentialOperationLeaseExpiresAtUtc";
                 DROP TABLE "ExternalEntityLinks";
                 DROP TABLE "IntegrationSyncRuns";
                 ALTER TABLE "PayrollEarningLines" DROP COLUMN "W2ReportingJson";
@@ -116,13 +119,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("11", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("12", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollEarningLines') WHERE name = 'W2ReportingJson';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaRecoveryCodes';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'UserSessions';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'OAuthAuthorizationAttempts';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('IntegrationConnections') WHERE name = 'CredentialVersion';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('IntegrationConnections') WHERE name = 'CredentialOperationLeaseId';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('IntegrationConnections') WHERE name = 'CredentialOperationLeaseExpiresAtUtc';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ExternalEntityLinks';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'IntegrationSyncRuns';"));
         Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
@@ -139,10 +144,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082511-%' OR "VersionId" LIKE '2026082510-%' OR "VersionId" LIKE '2026082509-%' OR "VersionId" LIKE '2026082508-%' OR "VersionId" LIKE '2026082507-%' OR "VersionId" LIKE '2026082506-%' OR "VersionId" LIKE '2026082505-%' OR "VersionId" LIKE '2026082504-%';
+                DELETE FROM "BrassLedgerSchemaVersions" WHERE "VersionId" LIKE '2026082512-%' OR "VersionId" LIKE '2026082511-%' OR "VersionId" LIKE '2026082510-%' OR "VersionId" LIKE '2026082509-%' OR "VersionId" LIKE '2026082508-%' OR "VersionId" LIKE '2026082507-%' OR "VersionId" LIKE '2026082506-%' OR "VersionId" LIKE '2026082505-%' OR "VersionId" LIKE '2026082504-%';
                 DROP TABLE "UserSessions";
                 DROP TABLE "OAuthAuthorizationAttempts";
                 ALTER TABLE "IntegrationConnections" DROP COLUMN "CredentialVersion";
+                ALTER TABLE "IntegrationConnections" DROP COLUMN "CredentialOperationLeaseId";
+                ALTER TABLE "IntegrationConnections" DROP COLUMN "CredentialOperation";
+                ALTER TABLE "IntegrationConnections" DROP COLUMN "CredentialOperationLeaseExpiresAtUtc";
                 DROP TABLE "ExternalEntityLinks";
                 DROP TABLE "IntegrationSyncRuns";
                 DROP TABLE "SecurityEmailOutboxMessages";
@@ -167,7 +175,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
-        Assert.Equal("11", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
+        Assert.Equal("12", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('Users') WHERE name = 'MfaSecret';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('AccessRoles') WHERE name = 'RequiresMfa';"));
@@ -1341,10 +1349,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using var db = await dbContextFactory.CreateDbContextAsync();
         var postedLines = await (from line in db.JournalEntryLines
-                                          join entry in db.JournalEntries on line.JournalEntryId equals entry.Id
-                                          join account in db.Accounts on line.AccountId equals account.Id
-                                          where entry.Reference == "DEP-BANK-MAP-1"
-                                          select new { account.Number, entry.BankAccountId }).ToListAsync();
+                                 join entry in db.JournalEntries on line.JournalEntryId equals entry.Id
+                                 join account in db.Accounts on line.AccountId equals account.Id
+                                 where entry.Reference == "DEP-BANK-MAP-1"
+                                 select new { account.Number, entry.BankAccountId }).ToListAsync();
         Assert.Contains(postedLines, line => line.Number == "1010");
         Assert.DoesNotContain(postedLines, line => line.Number == "1000");
         Assert.All(postedLines, line => Assert.Equal(payrollBank.Id, line.BankAccountId));

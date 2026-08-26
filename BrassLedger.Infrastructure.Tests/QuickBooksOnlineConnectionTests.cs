@@ -97,7 +97,9 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
             var stored = await db.IntegrationConnections.SingleAsync(connection => connection.Id == connectionId);
             Assert.Contains("access-token-two", stored.CredentialsJson, StringComparison.Ordinal);
             Assert.DoesNotContain("access-token-one", stored.CredentialsJson, StringComparison.Ordinal);
-            Assert.Equal(2, stored.CredentialVersion);
+            Assert.Equal(4, stored.CredentialVersion);
+            Assert.Equal(string.Empty, stored.CredentialOperationLeaseId);
+            Assert.Null(stored.CredentialOperationLeaseExpiresAtUtc);
         }
 
         provider.RevocationSucceeds = false;
@@ -108,6 +110,8 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
             var retained = await db.IntegrationConnections.SingleAsync(connection => connection.Id == connectionId);
             Assert.Equal("DisconnectPending", retained.Status);
             Assert.Contains("refresh-token-two", retained.CredentialsJson, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, retained.CredentialOperationLeaseId);
+            Assert.Null(retained.CredentialOperationLeaseExpiresAtUtc);
         }
 
         provider.RevocationSucceeds = true;
@@ -119,10 +123,73 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
             var removed = await db.IntegrationConnections.SingleAsync(connection => connection.Id == connectionId);
             Assert.Equal("Disconnected", removed.Status);
             Assert.Equal("{}", removed.CredentialsJson);
+            Assert.Equal(string.Empty, removed.CredentialOperationLeaseId);
             Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.connected" && audit.EntityId == connectionId);
             Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.disconnect_failed" && audit.EntityId == connectionId && !audit.DetailJson.Contains("refresh-token", StringComparison.Ordinal));
             Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.disconnected" && audit.EntityId == connectionId);
         }
+    }
+
+    [Fact]
+    public async Task CredentialOperationLease_BlocksConcurrentProviderCallsRecoversExpiryAndReleasesAfterFailure()
+    {
+        var provider = new FakeQuickBooksOnlineClient();
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+        var connectionId = await ConnectAsync(scope.ServiceProvider);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var reconnectStart = await service.BeginAuthorizationAsync(new(connectionId, "ignored", "Sandbox"));
+        var reconnectState = QueryHelpers.ParseQuery(new Uri(reconnectStart.AuthorizationUrl!).Query)["state"].ToString();
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var connection = await db.IntegrationConnections.SingleAsync(candidate => candidate.Id == connectionId);
+            connection.CredentialOperationLeaseId = "other-instance-lease";
+            connection.CredentialOperation = "Refresh";
+            connection.CredentialOperationLeaseExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(1);
+            connection.CredentialVersion++;
+            await db.SaveChangesAsync();
+        }
+
+        var blockedReconnect = await service.CompleteAuthorizationAsync(new(reconnectState, "blocked-code", "123456789", null, null));
+        Assert.False(blockedReconnect.Succeeded);
+        Assert.Equal(1, provider.ExchangeCodeCount);
+
+        var contended = await service.RefreshConnectionAsync(connectionId);
+        Assert.False(contended.Succeeded);
+        Assert.Contains("another application instance", contended.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, provider.RefreshCount);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var connection = await db.IntegrationConnections.SingleAsync(candidate => candidate.Id == connectionId);
+            connection.CredentialOperationLeaseExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync();
+        }
+
+        provider.RefreshSucceeds = false;
+        var providerFailure = await service.RefreshConnectionAsync(connectionId);
+        Assert.False(providerFailure.Succeeded);
+        Assert.Equal(1, provider.RefreshCount);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var connection = await db.IntegrationConnections.SingleAsync(candidate => candidate.Id == connectionId);
+            Assert.Equal("Connected", connection.Status);
+            Assert.Equal(string.Empty, connection.CredentialOperationLeaseId);
+            Assert.Null(connection.CredentialOperationLeaseExpiresAtUtc);
+            var audits = await db.BusinessAuditEntries.Where(entry => entry.EntityId == connectionId).ToArrayAsync();
+            Assert.Contains(audits, audit => audit.Action == "integration.credential_operation_lease_recovered");
+            Assert.Contains(audits, audit => audit.Action == "integration.token_refresh_failed");
+        }
+
+        provider.RefreshSucceeds = true;
+        var retry = await service.RefreshConnectionAsync(connectionId);
+        Assert.True(retry.Succeeded, retry.ErrorMessage);
+        Assert.Equal(2, provider.RefreshCount);
     }
 
     [Fact]
@@ -166,7 +233,13 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         Assert.Equal(0, provider.ExchangeCodeCount);
 
         await using var verified = await factory.CreateDbContextAsync();
-        Assert.False(await verified.IntegrationConnections.AnyAsync(connection => connection.ProviderCode == "quickbooks-online"));
+        var pendingConnections = await verified.IntegrationConnections.Where(connection => connection.ProviderCode == "quickbooks-online").ToArrayAsync();
+        Assert.Equal(2, pendingConnections.Length);
+        Assert.All(pendingConnections, connection =>
+        {
+            Assert.Equal("AuthorizationPending", connection.Status);
+            Assert.Equal("{}", connection.CredentialsJson);
+        });
         Assert.Contains(await verified.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.oauth_denied");
     }
 
@@ -182,7 +255,12 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
 
         var first = await service.BeginAuthorizationAsync(new(null, "Superseded books", "Sandbox"));
-        var second = await service.BeginAuthorizationAsync(new(null, "Superseded books", "Sandbox"));
+        var duplicate = await service.BeginAuthorizationAsync(new(null, "Superseded books", "Sandbox"));
+        Assert.False(duplicate.Succeeded);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var connectionId = await db.IntegrationConnections.Where(connection => connection.Name == "Superseded books").Select(connection => connection.Id).SingleAsync();
+        var second = await service.BeginAuthorizationAsync(new(connectionId, "Superseded books", "Sandbox"));
         var firstState = QueryHelpers.ParseQuery(new Uri(first.AuthorizationUrl!).Query)["state"].ToString();
         var secondState = QueryHelpers.ParseQuery(new Uri(second.AuthorizationUrl!).Query)["state"].ToString();
 
@@ -192,6 +270,60 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         Assert.False(staleCallback.Succeeded);
         Assert.True(currentCallback.Succeeded, currentCallback.ErrorMessage);
         Assert.Equal(1, provider.ExchangeCodeCount);
+    }
+
+    [Fact]
+    public async Task OAuthReconnect_UsesDistributedLeaseAndAtomicallyReplacesProtectedGrant()
+    {
+        var provider = new FakeQuickBooksOnlineClient();
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+        var connectionId = await ConnectAsync(scope.ServiceProvider);
+
+        var reconnect = await service.BeginAuthorizationAsync(new(connectionId, "ignored", "Sandbox"));
+        var state = QueryHelpers.ParseQuery(new Uri(reconnect.AuthorizationUrl!).Query)["state"].ToString();
+        var completion = await service.CompleteAuthorizationAsync(new(state, "reconnect-code", "123456789", null, null));
+
+        Assert.True(completion.Succeeded, completion.ErrorMessage);
+        Assert.Equal(connectionId, completion.ConnectionId);
+        Assert.Equal(2, provider.ExchangeCodeCount);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var connection = await db.IntegrationConnections.SingleAsync(candidate => candidate.Id == connectionId);
+        Assert.Contains("access-token-reconnected", connection.CredentialsJson, StringComparison.Ordinal);
+        Assert.Contains("refresh-token-reconnected", connection.CredentialsJson, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, connection.CredentialOperationLeaseId);
+        Assert.Null(connection.CredentialOperationLeaseExpiresAtUtc);
+        Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.EntityId == connectionId && audit.Action == "integration.credential_operation_lease_acquired" && audit.DetailJson.Contains("Reconnect", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task OAuthCallback_RevokesIssuedGrantWhenCompanyValidationFails()
+    {
+        var provider = new FakeQuickBooksOnlineClient { CompanyValidationSucceeds = false };
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+
+        var start = await service.BeginAuthorizationAsync(new(null, "Invalid company", "Sandbox"));
+        var state = QueryHelpers.ParseQuery(new Uri(start.AuthorizationUrl!).Query)["state"].ToString();
+        var completion = await service.CompleteAuthorizationAsync(new(state, "issued-code", "123456789", null, null));
+
+        Assert.False(completion.Succeeded);
+        Assert.Equal("refresh-token-one", provider.LastRevokedToken);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var pending = await db.IntegrationConnections.SingleAsync(connection => connection.ProviderCode == "quickbooks-online");
+        Assert.Equal("AuthorizationPending", pending.Status);
+        Assert.Equal("{}", pending.CredentialsJson);
+        Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), audit => audit.Action == "integration.oauth_unused_grant_revoked");
     }
 
     [Fact]
@@ -511,9 +643,12 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
     private sealed class FakeQuickBooksOnlineClient : IQuickBooksOnlineClient
     {
         public int ExchangeCodeCount { get; private set; }
+        public int RefreshCount { get; private set; }
         public string LastRefreshToken { get; private set; } = string.Empty;
         public string LastRevokedToken { get; private set; } = string.Empty;
+        public bool RefreshSucceeds { get; set; } = true;
         public bool RevocationSucceeds { get; set; } = true;
+        public bool CompanyValidationSucceeds { get; set; } = true;
         public Dictionary<string, List<QuickBooksRemoteEntity>> Entities { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public string BuildAuthorizationUrl(string state) => QueryHelpers.AddQueryString("https://appcenter.intuit.com/connect/oauth2", new Dictionary<string, string?>
@@ -528,13 +663,18 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         public Task<QuickBooksTokenResponse> ExchangeAuthorizationCodeAsync(string code, CancellationToken cancellationToken = default)
         {
             ExchangeCodeCount++;
-            return Task.FromResult(new QuickBooksTokenResponse(true, string.Empty, "access-token-one", "refresh-token-one", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400));
+            return Task.FromResult(ExchangeCodeCount == 1
+                ? new QuickBooksTokenResponse(true, string.Empty, "access-token-one", "refresh-token-one", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400)
+                : new QuickBooksTokenResponse(true, string.Empty, "access-token-reconnected", "refresh-token-reconnected", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400));
         }
 
         public Task<QuickBooksTokenResponse> RefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
         {
+            RefreshCount++;
             LastRefreshToken = refreshToken;
-            return Task.FromResult(new QuickBooksTokenResponse(true, string.Empty, "access-token-two", "refresh-token-two", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400));
+            return Task.FromResult(RefreshSucceeds
+                ? new QuickBooksTokenResponse(true, string.Empty, "access-token-two", "refresh-token-two", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400)
+                : new QuickBooksTokenResponse(false, "temporarily_unavailable", string.Empty, string.Empty, string.Empty, string.Empty, 0, 0));
         }
 
         public Task<QuickBooksProviderResult> RevokeTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
@@ -545,7 +685,9 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
 
         public Task<QuickBooksCompanyInfoResponse> GetCompanyInfoAsync(string environment, string realmId, string accessToken, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(new QuickBooksCompanyInfoResponse(true, string.Empty, "Acme QuickBooks", "Acme QuickBooks LLC", "US"));
+            return Task.FromResult(CompanyValidationSucceeds
+                ? new QuickBooksCompanyInfoResponse(true, string.Empty, "Acme QuickBooks", "Acme QuickBooks LLC", "US")
+                : new QuickBooksCompanyInfoResponse(false, "company_validation_failed", string.Empty, string.Empty, string.Empty));
         }
 
         public Task<QuickBooksEntityQueryResponse> QueryEntitiesAsync(string environment, string realmId, string accessToken, string entityType, CancellationToken cancellationToken = default) =>
