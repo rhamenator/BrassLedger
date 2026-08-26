@@ -162,27 +162,54 @@ public sealed class OperationsPage
 
     public async Task AllocateAndShipSalesOrderAsync(string orderNumber, string shipmentNumber, decimal shipmentQuantity = 2m)
     {
+        var quantityText = shipmentQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var pickNumber = $"PICK-{shipmentNumber}";
+        var packingSlipNumber = $"PACK-{shipmentNumber}";
         var row = SalesOrderRow(orderNumber);
         await row.GetByRole(AriaRole.Button, new() { Name = "Allocate" }).ClickAsync();
         await _session.Page.GetByLabel("Allocate RM-220 quantity").FillAsync("2");
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save allocation" }).ClickAsync();
         await _session.Page.GetByText("Inventory allocation saved.", new() { Exact = true }).WaitForAsync();
+
         row = SalesOrderRow(orderNumber);
-        await row.GetByRole(AriaRole.Button, new() { Name = "Ship" }).ClickAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Create pick" }).ClickAsync();
+        await _session.Page.GetByLabel("Inventory pick number").FillAsync(pickNumber);
+        await _session.Page.GetByLabel("Pick RM-220 quantity").FillAsync(quantityText);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Create pick ticket" }).ClickAsync();
+        await _session.Page.GetByText($"Pick ticket {pickNumber} created.", new() { Exact = true }).WaitForAsync();
+
+        var pickRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory picks" }).Locator("tr").Filter(new() { HasTextString = pickNumber });
+        await pickRow.GetByRole(AriaRole.Button, new() { Name = "Complete pick" }).ClickAsync();
+        await _session.Page.GetByLabel("Picked RM-220 quantity").FillAsync(quantityText);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Complete pick ticket" }).ClickAsync();
+        await _session.Page.GetByText($"Pick ticket {pickNumber} completed.", new() { Exact = true }).WaitForAsync();
+
+        pickRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory picks" }).Locator("tr").Filter(new() { HasTextString = pickNumber });
+        await pickRow.GetByRole(AriaRole.Button, new() { Name = "Pack" }).ClickAsync();
+        await _session.Page.GetByLabel("Inventory packing slip number").FillAsync(packingSlipNumber);
+        await _session.Page.GetByLabel("Pack RM-220 quantity").FillAsync(quantityText);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Create packing slip" }).ClickAsync();
+        await _session.Page.GetByText($"Packing slip {packingSlipNumber} created.", new() { Exact = true }).WaitForAsync();
+
+        var packingRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory packing slips" }).Locator("tr").Filter(new() { HasTextString = packingSlipNumber });
+        await packingRow.GetByRole(AriaRole.Button, new() { Name = "Ship packing slip" }).ClickAsync();
         await _session.Page.GetByLabel("Inventory shipment number").FillAsync(shipmentNumber);
-        await _session.Page.GetByLabel("Ship RM-220 quantity").FillAsync(shipmentQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var packedShipmentQuantity = decimal.Parse(await _session.Page.GetByLabel("Ship RM-220 quantity").InputValueAsync(), System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(shipmentQuantity, packedShipmentQuantity);
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post shipment" }).ClickAsync();
         await _session.Page.GetByText("Customer shipment posted; inventory and COGS were updated.", new() { Exact = true }).WaitForAsync();
+        packingRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory packing slips" }).Locator("tr").Filter(new() { HasTextString = packingSlipNumber });
+        await Assertions.Expect(packingRow).ToContainTextAsync("Shipped");
     }
 
     public async Task InvoiceShipmentAsync(string shipmentNumber, string invoiceNumber)
     {
-        var row = _session.Page.Locator("tr").Filter(new() { HasTextString = shipmentNumber });
+        var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber });
         await row.GetByRole(AriaRole.Button, new() { Name = "Create invoice" }).ClickAsync();
         await _session.Page.GetByLabel("Shipment invoice number").FillAsync(invoiceNumber);
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post shipment invoice" }).ClickAsync();
         await _session.Page.GetByText("Shipment invoice posted to receivables.", new() { Exact = true }).WaitForAsync();
-        row = _session.Page.Locator("tr").Filter(new() { HasTextString = shipmentNumber });
+        row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber });
         Assert.Contains("Invoiced", await row.InnerTextAsync());
     }
 

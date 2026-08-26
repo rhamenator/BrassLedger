@@ -918,6 +918,41 @@ api.MapPost("/sales-orders/{salesOrderId:guid}/allocation", async (Guid salesOrd
     var result = await service.AllocateSalesOrderAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["allocation"] = [result.ErrorMessage] });
 }).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
 
+api.MapPost("/sales-orders/{salesOrderId:guid}/picks", async (Guid salesOrderId, CreateInventoryPickRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesOrderId != salesOrderId) return Results.BadRequest(new { error = "sales_order_id_mismatch" }); var result = await service.CreateInventoryPickAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-picks/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["pick"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
+api.MapPost("/inventory-picks/{inventoryPickId:guid}/completion", async (Guid inventoryPickId, CompleteInventoryPickRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryPickId != inventoryPickId) return Results.BadRequest(new { error = "inventory_pick_id_mismatch" }); var result = await service.CompleteInventoryPickAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["pick"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
+api.MapPost("/inventory-picks/{inventoryPickId:guid}/cancellation", async (Guid inventoryPickId, CancelInventoryPickRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryPickId != inventoryPickId) return Results.BadRequest(new { error = "inventory_pick_id_mismatch" }); var result = await service.CancelInventoryPickAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["pick"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
+api.MapPost("/inventory-picks/{inventoryPickId:guid}/packing-slips", async (Guid inventoryPickId, PackInventoryPickRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryPickId != inventoryPickId) return Results.BadRequest(new { error = "inventory_pick_id_mismatch" }); var result = await service.PackInventoryPickAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/inventory-packing-slips/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["packingSlip"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
+api.MapPost("/inventory-packing-slips/{inventoryPackingSlipId:guid}/cancellation", async (Guid inventoryPackingSlipId, CancelInventoryPackingSlipRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.InventoryPackingSlipId != inventoryPackingSlipId) return Results.BadRequest(new { error = "inventory_packing_slip_id_mismatch" }); var result = await service.CancelInventoryPackingSlipAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["packingSlip"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.FulfillmentManage));
+
+api.MapPost("/sales-orders/{salesOrderId:guid}/backorders", async (Guid salesOrderId, PromiseSalesOrderBackorderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesOrderId != salesOrderId) return Results.BadRequest(new { error = "sales_order_id_mismatch" }); var result = await service.PromiseSalesOrderBackorderAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/sales-order-backorders/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["backorder"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
+api.MapPost("/sales-order-backorders/{salesOrderBackorderPromiseId:guid}/cancellation", async (Guid salesOrderBackorderPromiseId, CancelSalesOrderBackorderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.SalesOrderBackorderPromiseId != salesOrderBackorderPromiseId) return Results.BadRequest(new { error = "sales_order_backorder_id_mismatch" }); var result = await service.CancelSalesOrderBackorderAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["backorder"] = [result.ErrorMessage] });
+}).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.SalesManage));
+
 api.MapPost("/sales-orders/{salesOrderId:guid}/shipments", async (Guid salesOrderId, ShipSalesOrderRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     if (request.SalesOrderId != salesOrderId) return Results.BadRequest(new { error = "sales_order_id_mismatch" });

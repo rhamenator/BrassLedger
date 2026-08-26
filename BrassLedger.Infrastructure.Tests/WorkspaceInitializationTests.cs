@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("8", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("9", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -72,6 +72,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826070149_AddSalesQuotes';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826073212_AddSalesOrderChangeControls';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826090933_AddPickPackBackorders';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -102,7 +103,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("8", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("9", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -110,6 +111,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826070149_AddSalesQuotes';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826073212_AddSalesOrderChangeControls';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826090933_AddPickPackBackorders';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -338,6 +340,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826070149_AddSalesQuotes';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826073212_AddSalesOrderChangeControls';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826090933_AddPickPackBackorders';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('AccountingSchedules') WHERE name = 'DisposalJournalEntryId';"));
     }
 
@@ -365,6 +368,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("20260826070149_AddSalesQuotes", await verified.Database.GetAppliedMigrationsAsync());
         Assert.Contains("20260826073212_AddSalesOrderChangeControls", await verified.Database.GetAppliedMigrationsAsync());
         Assert.Contains("20260826082201_AddInventoryLocations", await verified.Database.GetAppliedMigrationsAsync());
+        Assert.Contains("20260826090933_AddPickPackBackorders", await verified.Database.GetAppliedMigrationsAsync());
         Assert.Empty(await verified.SalesQuotes.ToListAsync());
     }
 
@@ -1589,6 +1593,123 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using (var db = await factory.CreateDbContextAsync()) orderToken = await db.SalesOrders.Where(order => order.Id == orderResult.Id).Select(order => order.ConcurrencyToken).SingleAsync();
         var shipment = await transactions.ShipSalesOrderAsync(new(orderResult.Id.Value, "SHIP-LOC-1", new DateOnly(2026, 8, 27), [new ShipSalesOrderLineRequest(orderLineId, 2m)], orderToken)); Assert.True(shipment.Succeeded, shipment.ErrorMessage);
         await using var after = await factory.CreateDbContextAsync(); var postedShipment = await after.InventoryShipments.SingleAsync(candidate => candidate.Id == shipment.Id); Assert.Equal(warehouseResult.Id, postedShipment.WarehouseId); Assert.Equal(eastBinId, postedShipment.BinId); Assert.Equal(2m, await after.InventoryLocationBalances.Where(balance => balance.InventoryItemId == itemId && balance.BinId == eastBinId).Select(balance => balance.QuantityOnHand).SingleAsync()); Assert.Equal(companyQuantity - 2m, await after.InventoryItems.Where(item => item.Id == itemId).Select(item => item.QuantityOnHand).SingleAsync());
+    }
+
+    [Fact]
+    public async Task PickPackAndBackorders_PreserveCommitmentsProvenanceAndReversibleShipmentState()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope(); var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>(); var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>(); var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; Guid customerId; Guid itemId; await using (var db = await factory.CreateDbContextAsync()) { companyId = await db.Companies.Select(company => company.Id).SingleAsync(); customerId = await db.Customers.Where(customer => customer.CompanyId == companyId).Select(customer => customer.Id).FirstAsync(); itemId = await db.InventoryItems.Where(item => item.CompanyId == companyId && item.Sku == "RM-220").Select(item => item.Id).SingleAsync(); }
+        void ActAsCompany(Guid activeCompanyId, params string[] permissions) { var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, activeCompanyId.ToString()) }; claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
+        void ActAs(params string[] permissions) => ActAsCompany(companyId, permissions);
+        var today = DateOnly.FromDateTime(DateTime.Today); ActAs(BrassLedgerPermissions.SalesManage); var saved = await transactions.SaveSalesOrderAsync(new(null, customerId, "SO-PICK-1", today, today.AddDays(1), "Pick and pack", [new SalesOrderLineRequest(itemId, "Picked fasteners", 5m, 20m, 0m, 0m, "4000")])); Assert.True(saved.Succeeded, saved.ErrorMessage);
+        Guid lineId; string orderToken; await using (var db = await factory.CreateDbContextAsync()) { var order = await db.SalesOrders.SingleAsync(candidate => candidate.Id == saved.Id); Assert.True((await transactions.ApproveSalesOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded); lineId = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).Select(line => line.Id).SingleAsync(); orderToken = await db.SalesOrders.Where(candidate => candidate.Id == order.Id).Select(candidate => candidate.ConcurrencyToken).SingleAsync(); }
+        ActAs(BrassLedgerPermissions.FulfillmentManage); Assert.False((await transactions.PromiseSalesOrderBackorderAsync(new(saved.Id!.Value, lineId, 4m, today.AddDays(4), "Await replenishment", orderToken))).Succeeded);
+        ActAs(BrassLedgerPermissions.SalesManage); var backorderResult = await transactions.PromiseSalesOrderBackorderAsync(new(saved.Id!.Value, lineId, 4m, today.AddDays(4), "Await replenishment", orderToken)); Assert.True(backorderResult.Succeeded, backorderResult.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
+        var secondBackorderResult = await transactions.PromiseSalesOrderBackorderAsync(new(saved.Id.Value, lineId, 1m, today.AddDays(5), "Second replenishment promise", orderToken)); Assert.True(secondBackorderResult.Succeeded, secondBackorderResult.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
+        ActAs(BrassLedgerPermissions.FulfillmentManage); var allocation = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new AllocateSalesOrderLineRequest(lineId, 3m)], orderToken)); Assert.True(allocation.Succeeded, allocation.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) { var promise = await db.SalesOrderBackorderPromises.SingleAsync(candidate => candidate.Id == backorderResult.Id); Assert.Equal("PartiallyFulfilled", promise.Status); Assert.Equal(3m, promise.FulfilledQuantity); orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync(); }
+        var releasedAllocation = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new AllocateSalesOrderLineRequest(lineId, 2m)], orderToken)); Assert.True(releasedAllocation.Succeeded, releasedAllocation.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) { var promise = await db.SalesOrderBackorderPromises.SingleAsync(candidate => candidate.Id == backorderResult.Id); Assert.Equal("PartiallyFulfilled", promise.Status); Assert.Equal(2m, promise.FulfilledQuantity); orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync(); }
+        var restoredAllocation = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new AllocateSalesOrderLineRequest(lineId, 3m)], orderToken)); Assert.True(restoredAllocation.Succeeded, restoredAllocation.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) { Assert.Equal(3m, await db.SalesOrderBackorderPromises.Where(candidate => candidate.Id == backorderResult.Id).Select(candidate => candidate.FulfilledQuantity).SingleAsync()); orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync(); }
+        var fullyAllocated = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new AllocateSalesOrderLineRequest(lineId, 5m)], orderToken)); Assert.True(fullyAllocated.Succeeded, fullyAllocated.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) { Assert.Equal(4m, await db.SalesOrderBackorderPromises.Where(candidate => candidate.Id == backorderResult.Id).Select(candidate => candidate.FulfilledQuantity).SingleAsync()); Assert.Equal(1m, await db.SalesOrderBackorderPromises.Where(candidate => candidate.Id == secondBackorderResult.Id).Select(candidate => candidate.FulfilledQuantity).SingleAsync()); orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync(); }
+        var partiallyReleased = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new AllocateSalesOrderLineRequest(lineId, 3m)], orderToken)); Assert.True(partiallyReleased.Succeeded, partiallyReleased.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) { Assert.Equal(3m, await db.SalesOrderBackorderPromises.Where(candidate => candidate.Id == backorderResult.Id).Select(candidate => candidate.FulfilledQuantity).SingleAsync()); Assert.Equal(0m, await db.SalesOrderBackorderPromises.Where(candidate => candidate.Id == secondBackorderResult.Id).Select(candidate => candidate.FulfilledQuantity).SingleAsync()); Assert.Equal("Open", await db.SalesOrderBackorderPromises.Where(candidate => candidate.Id == secondBackorderResult.Id).Select(candidate => candidate.Status).SingleAsync()); orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync(); }
+        var pickResult = await transactions.CreateInventoryPickAsync(new(saved.Id.Value, "PICK-1", today, [new CreateInventoryPickLineRequest(lineId, 2m)], orderToken)); Assert.True(pickResult.Succeeded, pickResult.ErrorMessage);
+        Guid pickLineId; string pickToken; await using (var db = await factory.CreateDbContextAsync()) { var pick = await db.InventoryPicks.SingleAsync(candidate => candidate.Id == pickResult.Id); pickToken = pick.ConcurrencyToken; pickLineId = await db.InventoryPickLines.Where(line => line.InventoryPickId == pick.Id).Select(line => line.Id).SingleAsync(); orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync(); }
+        var belowPick = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new AllocateSalesOrderLineRequest(lineId, 1m)], orderToken)); Assert.False(belowPick.Succeeded); Assert.Contains("commitment", belowPick.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False((await transactions.CompleteInventoryPickAsync(new(pickResult.Id!.Value, [new CompleteInventoryPickLineRequest(pickLineId, 2m)], "stale-token"))).Succeeded); var completed = await transactions.CompleteInventoryPickAsync(new(pickResult.Id.Value, [new CompleteInventoryPickLineRequest(pickLineId, 2m)], pickToken)); Assert.True(completed.Succeeded, completed.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) pickToken = await db.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.ConcurrencyToken).SingleAsync(); var firstPackResult = await transactions.PackInventoryPickAsync(new(pickResult.Id.Value, "PACK-1", today, [new PackInventoryPickLineRequest(pickLineId, 1m)], pickToken)); Assert.True(firstPackResult.Succeeded, firstPackResult.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) pickToken = await db.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.ConcurrencyToken).SingleAsync(); var secondPackResult = await transactions.PackInventoryPickAsync(new(pickResult.Id.Value, "PACK-2", today, [new PackInventoryPickLineRequest(pickLineId, 1m)], pickToken)); Assert.True(secondPackResult.Succeeded, secondPackResult.ErrorMessage);
+        string firstPackToken; string secondPackToken; await using (var db = await factory.CreateDbContextAsync()) { firstPackToken = await db.InventoryPackingSlips.Where(pack => pack.Id == firstPackResult.Id).Select(pack => pack.ConcurrencyToken).SingleAsync(); secondPackToken = await db.InventoryPackingSlips.Where(pack => pack.Id == secondPackResult.Id).Select(pack => pack.ConcurrencyToken).SingleAsync(); orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync(); }
+        Assert.False((await transactions.ShipSalesOrderAsync(new(saved.Id.Value, "SHIP-DIRECT-BLOCKED", today.AddDays(1), [new ShipSalesOrderLineRequest(lineId, 1m)], orderToken))).Succeeded); var mismatch = await transactions.ShipSalesOrderAsync(new(saved.Id.Value, "SHIP-PACK-MISMATCH", today.AddDays(1), [new ShipSalesOrderLineRequest(lineId, 2m)], orderToken, firstPackResult.Id, firstPackToken)); Assert.False(mismatch.Succeeded); Assert.Contains("exactly", mismatch.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var firstShipment = await transactions.ShipSalesOrderAsync(new(saved.Id.Value, "SHIP-PACK-1", today.AddDays(1), [new ShipSalesOrderLineRequest(lineId, 1m)], orderToken, firstPackResult.Id, firstPackToken)); Assert.True(firstShipment.Succeeded, firstShipment.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) { orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync(); Assert.Equal("Packed", await db.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.Status).SingleAsync()); }
+        var secondShipment = await transactions.ShipSalesOrderAsync(new(saved.Id.Value, "SHIP-PACK-2", today.AddDays(2), [new ShipSalesOrderLineRequest(lineId, 1m)], orderToken, secondPackResult.Id, secondPackToken)); Assert.True(secondShipment.Succeeded, secondShipment.ErrorMessage);
+        string secondShipmentToken; await using (var db = await factory.CreateDbContextAsync()) { var shipment = await db.InventoryShipments.SingleAsync(candidate => candidate.Id == secondShipment.Id); Assert.Equal(secondPackResult.Id, shipment.InventoryPackingSlipId); Assert.Equal("Shipped", await db.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.Status).SingleAsync()); secondShipmentToken = shipment.ConcurrencyToken; }
+        var reversed = await transactions.ReverseInventoryShipmentAsync(new(secondShipment.Id!.Value, today.AddDays(2), "Packing correction", secondShipmentToken)); Assert.True(reversed.Succeeded, reversed.ErrorMessage);
+        string restoredPackTokenForReship; await using (var db = await factory.CreateDbContextAsync()) { restoredPackTokenForReship = await db.InventoryPackingSlips.Where(pack => pack.Id == secondPackResult.Id).Select(pack => pack.ConcurrencyToken).SingleAsync(); orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync(); }
+        var reshipped = await transactions.ShipSalesOrderAsync(new(saved.Id.Value, "SHIP-PACK-2-REPOST", today.AddDays(3), [new ShipSalesOrderLineRequest(lineId, 1m)], orderToken, secondPackResult.Id, restoredPackTokenForReship)); Assert.True(reshipped.Succeeded, reshipped.ErrorMessage);
+        var workspaceAfterReship = (await workspaceService.GetWorkspaceAsync()).Operations; var reshippedPack = Assert.Single(workspaceAfterReship.InventoryPackingSlips ?? [], pack => pack.Id == secondPackResult.Id); Assert.Equal(reshipped.Id, reshippedPack.InventoryShipmentId); Assert.Equal(2, (workspaceAfterReship.InventoryShipments ?? []).Count(shipment => shipment.InventoryPackingSlipId == secondPackResult.Id));
+        Guid foreignCompanyId; string restoredPackToken; string promiseToken;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal("Shipped", await db.InventoryPackingSlips.Where(pack => pack.Id == secondPackResult.Id).Select(pack => pack.Status).SingleAsync()); Assert.Equal("Shipped", await db.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.Status).SingleAsync());
+            restoredPackToken = await db.InventoryPackingSlips.Where(pack => pack.Id == secondPackResult.Id).Select(pack => pack.ConcurrencyToken).SingleAsync(); promiseToken = await db.SalesOrderBackorderPromises.Where(candidate => candidate.Id == backorderResult.Id).Select(candidate => candidate.ConcurrencyToken).SingleAsync();
+            foreignCompanyId = Guid.NewGuid(); db.Companies.Add(new Company { Id = foreignCompanyId, Name = "Foreign pick company", LegalName = "Foreign pick company", BaseCurrency = "USD", FiscalYearStartMonth = 1 }); await db.SaveChangesAsync();
+        }
+        ActAsCompany(foreignCompanyId, BrassLedgerPermissions.FulfillmentManage, BrassLedgerPermissions.SalesManage);
+        var foreignPick = await transactions.CompleteInventoryPickAsync(new(pickResult.Id!.Value, [new CompleteInventoryPickLineRequest(pickLineId, 1m)], pickToken)); Assert.False(foreignPick.Succeeded); Assert.Contains("not found", foreignPick.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var foreignPack = await transactions.CancelInventoryPackingSlipAsync(new(secondPackResult.Id!.Value, "Cross-company attempt", restoredPackToken)); Assert.False(foreignPack.Succeeded); Assert.Contains("not found", foreignPack.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var foreignBackorder = await transactions.CancelSalesOrderBackorderAsync(new(backorderResult.Id!.Value, "Cross-company attempt", promiseToken)); Assert.False(foreignBackorder.Succeeded); Assert.Contains("not found", foreignBackorder.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var foreignWorkspace = (await workspaceService.GetWorkspaceAsync()).Operations; Assert.Empty(foreignWorkspace.InventoryPicks ?? []); Assert.Empty(foreignWorkspace.InventoryPackingSlips ?? []); Assert.Empty(foreignWorkspace.BackorderPromises ?? []);
+        ActAs(BrassLedgerPermissions.FulfillmentManage); Assert.False((await transactions.CancelSalesOrderBackorderAsync(new(backorderResult.Id.Value, "Unauthorized", promiseToken))).Succeeded); ActAs(BrassLedgerPermissions.SalesManage); Assert.True((await transactions.CancelSalesOrderBackorderAsync(new(backorderResult.Id.Value, "Customer accepted partial supply", promiseToken))).Succeeded); await using (var db = await factory.CreateDbContextAsync()) { var secondPromise = await db.SalesOrderBackorderPromises.SingleAsync(candidate => candidate.Id == secondBackorderResult.Id); Assert.True((await transactions.CancelSalesOrderBackorderAsync(new(secondPromise.Id, "Remaining promise cancelled", secondPromise.ConcurrencyToken))).Succeeded); }
+    }
+
+    [Fact]
+    public async Task PickPackCancellation_ReleasesAllocationCommitmentsOnlyAfterAuditedDocumentCancellation()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; Guid customerId; Guid itemId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            customerId = await db.Customers.Where(customer => customer.CompanyId == companyId).Select(customer => customer.Id).FirstAsync();
+            itemId = await db.InventoryItems.Where(item => item.CompanyId == companyId && item.Sku == "RM-220").Select(item => item.Id).SingleAsync();
+        }
+        void ActAs(string permission) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)
+            ], "test"))
+        };
+
+        var today = new DateOnly(2026, 8, 26);
+        ActAs(BrassLedgerPermissions.SalesManage);
+        var saved = await transactions.SaveSalesOrderAsync(new(null, customerId, "SO-PICK-CANCEL", today, null, "Cancellation controls", [new SalesOrderLineRequest(itemId, "Cancelled pick", 2m, 20m, 0m, 0m, "4000")]));
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        Guid lineId; string orderToken;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var order = await db.SalesOrders.SingleAsync(candidate => candidate.Id == saved.Id); lineId = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).Select(line => line.Id).SingleAsync();
+            Assert.True((await transactions.ApproveSalesOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded);
+            orderToken = await db.SalesOrders.Where(candidate => candidate.Id == order.Id).Select(candidate => candidate.ConcurrencyToken).SingleAsync();
+        }
+        ActAs(BrassLedgerPermissions.FulfillmentManage);
+        Assert.True((await transactions.AllocateSalesOrderAsync(new(saved.Id!.Value, [new AllocateSalesOrderLineRequest(lineId, 2m)], orderToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
+        var pickResult = await transactions.CreateInventoryPickAsync(new(saved.Id.Value, "PICK-CANCEL", today, [new CreateInventoryPickLineRequest(lineId, 2m)], orderToken));
+        Assert.True(pickResult.Succeeded, pickResult.ErrorMessage);
+        Guid pickLineId; string pickToken;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            pickLineId = await db.InventoryPickLines.Where(line => line.InventoryPickId == pickResult.Id).Select(line => line.Id).SingleAsync(); pickToken = await db.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.ConcurrencyToken).SingleAsync();
+        }
+        Assert.True((await transactions.CompleteInventoryPickAsync(new(pickResult.Id!.Value, [new CompleteInventoryPickLineRequest(pickLineId, 2m)], pickToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) pickToken = await db.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.ConcurrencyToken).SingleAsync();
+        var packResult = await transactions.PackInventoryPickAsync(new(pickResult.Id.Value, "PACK-CANCEL", today, [new PackInventoryPickLineRequest(pickLineId, 2m)], pickToken));
+        Assert.True(packResult.Succeeded, packResult.ErrorMessage);
+        string packToken;
+        await using (var db = await factory.CreateDbContextAsync()) { packToken = await db.InventoryPackingSlips.Where(pack => pack.Id == packResult.Id).Select(pack => pack.ConcurrencyToken).SingleAsync(); pickToken = await db.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.ConcurrencyToken).SingleAsync(); }
+        var blockedPickCancellation = await transactions.CancelInventoryPickAsync(new(pickResult.Id.Value, "Cannot skip packing cancellation", pickToken)); Assert.False(blockedPickCancellation.Succeeded); Assert.Contains("unpacked", blockedPickCancellation.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False((await transactions.CancelInventoryPackingSlipAsync(new(packResult.Id!.Value, "Stale cancellation", "stale-token"))).Succeeded);
+        Assert.True((await transactions.CancelInventoryPackingSlipAsync(new(packResult.Id.Value, "Customer cancelled before shipment", packToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) pickToken = await db.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.ConcurrencyToken).SingleAsync();
+        Assert.True((await transactions.CancelInventoryPickAsync(new(pickResult.Id.Value, "Release warehouse commitment", pickToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) orderToken = await db.SalesOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
+        var released = await transactions.AllocateSalesOrderAsync(new(saved.Id.Value, [new AllocateSalesOrderLineRequest(lineId, 0m)], orderToken)); Assert.True(released.Succeeded, released.ErrorMessage);
+        await using var after = await factory.CreateDbContextAsync(); Assert.Equal("Cancelled", await after.InventoryPicks.Where(pick => pick.Id == pickResult.Id).Select(pick => pick.Status).SingleAsync()); Assert.Equal("Cancelled", await after.InventoryPackingSlips.Where(pack => pack.Id == packResult.Id).Select(pack => pack.Status).SingleAsync()); Assert.Equal(0m, await after.SalesOrderLines.Where(line => line.Id == lineId).Select(line => line.AllocatedQuantity).SingleAsync());
+        Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "inventory-pick.cancelled" && audit.EntityId == pickResult.Id); Assert.Contains(await after.BusinessAuditEntries.ToListAsync(), audit => audit.Action == "inventory-packing-slip.cancelled" && audit.EntityId == packResult.Id);
     }
 
     [Fact]

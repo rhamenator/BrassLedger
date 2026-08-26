@@ -806,6 +806,7 @@ public sealed class InventoryShipment
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
     public Guid SalesOrderId { get; set; }
+    public Guid? InventoryPackingSlipId { get; set; }
     public Guid? WarehouseId { get; set; }
     public Guid? BinId { get; set; }
     public string ShipmentNumber { get; set; } = string.Empty;
@@ -821,6 +822,86 @@ public sealed class InventoryShipment
     public DateTimeOffset? ReversedAtUtc { get; set; }
     public DateOnly? ReversalDate { get; set; }
     public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class InventoryPick
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid SalesOrderId { get; set; }
+    public Guid WarehouseId { get; set; }
+    public Guid BinId { get; set; }
+    public string PickNumber { get; set; } = string.Empty;
+    public DateOnly PickDate { get; set; }
+    public string Status { get; set; } = "Draft";
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? CompletedByUserId { get; set; }
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class InventoryPickLine
+{
+    public Guid Id { get; set; }
+    public Guid InventoryPickId { get; set; }
+    public Guid SalesOrderLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public int Sequence { get; set; }
+    public decimal RequestedQuantity { get; set; }
+    public decimal PickedQuantity { get; set; }
+}
+
+public sealed class InventoryPackingSlip
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid SalesOrderId { get; set; }
+    public Guid InventoryPickId { get; set; }
+    public Guid WarehouseId { get; set; }
+    public Guid BinId { get; set; }
+    public string PackingSlipNumber { get; set; } = string.Empty;
+    public DateOnly PackedOn { get; set; }
+    public string Status { get; set; } = "Packed";
+    public Guid? PackedByUserId { get; set; }
+    public DateTimeOffset PackedAtUtc { get; set; }
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class InventoryPackingSlipLine
+{
+    public Guid Id { get; set; }
+    public Guid InventoryPackingSlipId { get; set; }
+    public Guid InventoryPickLineId { get; set; }
+    public Guid SalesOrderLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public int Sequence { get; set; }
+    public decimal Quantity { get; set; }
+}
+
+public sealed class SalesOrderBackorderPromise
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid SalesOrderId { get; set; }
+    public Guid SalesOrderLineId { get; set; }
+    public decimal PromisedQuantity { get; set; }
+    public decimal FulfilledQuantity { get; set; }
+    public DateOnly PromisedShipOn { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string Status { get; set; } = "Open";
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 

@@ -259,8 +259,10 @@ else
                                     @if (CanManageSales && order.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => ApproveSalesOrderAsync(order)">Approve</button> }
                                     @if (CanManageSales && order.SalesQuoteId is null && order.Status is ("Approved" or "Allocated") && (order.Lines ?? []).All(line => line.ShippedQuantity == 0m && line.InvoicedQuantity == 0m && line.ReturnedQuantity == 0m && line.CancelledQuantity == 0m)) { <button class="action-secondary" type="button" @onclick="() => BeginSalesOrderAmendment(order)">Amend</button> }
                                     @if (CanManageSales && order.Status is ("Draft" or "Approved" or "Allocated" or "PartiallyShipped") && (order.Lines ?? []).Any(line => line.OrderedQuantity > line.ShippedQuantity + line.CancelledQuantity)) { <button class="action-secondary" type="button" @onclick="() => BeginSalesOrderCancellation(order)">Cancel open quantity</button> }
+                                    @if (CanManageSales && order.Status is ("Approved" or "Allocated" or "PartiallyShipped") && HasUnpromisedBackorderDemand(order)) { <button class="action-secondary" type="button" @onclick="() => BeginBackorderPromise(order)">Promise backorder</button> }
                                     @if (CanFulfillSales && order.Status is "Approved" or "Allocated" or "PartiallyShipped") { <button class="action-secondary" type="button" @onclick="() => BeginAllocation(order)">Allocate</button> }
-                                    @if (CanFulfillSales && (order.Lines ?? []).Any(line => line.AllocatedQuantity > 0m)) { <button class="action-secondary" type="button" @onclick="() => BeginShipment(order)">Ship</button> }
+                                    @if (CanFulfillSales && HasUncommittedPickAllocation(order)) { <button class="action-secondary" type="button" @onclick="() => BeginInventoryPick(order)">Create pick</button> }
+                                    @if (CanFulfillSales && HasDirectShipmentQuantity(order)) { <button class="action-secondary" type="button" @onclick="() => BeginShipment(order)">Ship</button> }
                                 </td>
                             </tr>
                         }
@@ -291,6 +293,41 @@ else
             </div></EditForm></section>
         }
 
+        @if (CanManageSales && SalesBackorderForm is not null)
+        {
+            <section class="panel"><h2>Promise backorder for @SalesBackorderForm.OrderNumber</h2><p class="page-intro">Promise only open demand that is not already allocated or covered by another outstanding promise.</p><EditForm Model="SalesBackorderForm" OnValidSubmit="PromiseBackorderAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Order line</label><InputSelect aria-label="Backorder sales order line" class="field-input" @bind-Value="SalesBackorderForm.SalesOrderLineId"><option value="@Guid.Empty">Select line</option>@foreach (var line in SalesBackorderForm.Lines) { <option value="@line.SalesOrderLineId">@line.Sku — available demand @line.AvailableDemand</option> }</InputSelect></div><div class="field-group"><label class="field-label">Quantity</label><InputNumber aria-label="Backorder promised quantity" class="field-input" @bind-Value="SalesBackorderForm.Quantity" /></div><div class="field-group"><label class="field-label">Promised ship date</label><InputDate aria-label="Backorder promised ship date" class="field-input" @bind-Value="SalesBackorderForm.PromisedShipOn" /></div><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Backorder promise reason" class="field-input" @bind-Value="SalesBackorderForm.Reason" /></div><button class="action-primary" type="submit">Save backorder promise</button><button class="action-secondary" type="button" @onclick="CancelBackorderPromise">Cancel</button></div></EditForm></section>
+        }
+
+        @if (CanFulfillSales && InventoryPickForm is not null)
+        {
+            <section class="panel"><h2>Create pick for @InventoryPickForm.OrderNumber</h2><EditForm Model="InventoryPickForm" OnValidSubmit="CreateInventoryPickAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Pick number</label><InputText aria-label="Inventory pick number" class="field-input" @bind-Value="InventoryPickForm.PickNumber" /></div><div class="field-group"><label class="field-label">Pick date</label><InputDate aria-label="Inventory pick date" class="field-input" @bind-Value="InventoryPickForm.PickDate" /></div>@foreach (var line in InventoryPickForm.Lines) { <div class="field-group"><label class="field-label">@line.Sku — allocated @line.AllocatedQuantity</label><InputNumber aria-label="@($"Pick {line.Sku} quantity")" class="field-input" @bind-Value="line.Quantity" /></div> }<button class="action-primary" type="submit">Create pick ticket</button><button class="action-secondary" type="button" @onclick="CancelInventoryPickCreation">Cancel</button></div></EditForm></section>
+        }
+
+        @if (CanFulfillSales && InventoryPickCompletionForm is not null)
+        {
+            <section class="panel"><h2>Complete pick @InventoryPickCompletionForm.PickNumber</h2><EditForm Model="InventoryPickCompletionForm" OnValidSubmit="CompleteInventoryPickAsync"><div class="auth-form">@foreach (var line in InventoryPickCompletionForm.Lines) { <div class="field-group"><label class="field-label">@line.Sku — requested @line.RequestedQuantity</label><InputNumber aria-label="@($"Picked {line.Sku} quantity")" class="field-input" @bind-Value="line.PickedQuantity" /></div> }<button class="action-primary" type="submit">Complete pick ticket</button><button class="action-secondary" type="button" @onclick="CancelInventoryPickCompletion">Cancel</button></div></EditForm></section>
+        }
+
+        @if (CanFulfillSales && InventoryPackForm is not null)
+        {
+            <section class="panel"><h2>Pack @InventoryPackForm.PickNumber</h2><EditForm Model="InventoryPackForm" OnValidSubmit="PackInventoryPickAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Packing-slip number</label><InputText aria-label="Inventory packing slip number" class="field-input" @bind-Value="InventoryPackForm.PackingSlipNumber" /></div><div class="field-group"><label class="field-label">Packed on</label><InputDate aria-label="Inventory packed date" class="field-input" @bind-Value="InventoryPackForm.PackedOn" /></div>@foreach (var line in InventoryPackForm.Lines) { <div class="field-group"><label class="field-label">@line.Sku — unpacked @line.AvailableQuantity</label><InputNumber aria-label="@($"Pack {line.Sku} quantity")" class="field-input" @bind-Value="line.Quantity" /></div> }<button class="action-primary" type="submit">Create packing slip</button><button class="action-secondary" type="button" @onclick="CancelInventoryPacking">Cancel</button></div></EditForm></section>
+        }
+
+        <section class="panel"><h2>Pick tickets and packing slips</h2><p class="page-intro">Pick tickets commit an exact bin. Packing slips can split a completed pick into multiple shipments, and each packed shipment must match its slip exactly.</p><table class="data-table" aria-label="Inventory picks"><thead><tr><th>Pick</th><th>Order</th><th>Location</th><th>Status</th><th>Progress</th><th>Action</th></tr></thead><tbody>@foreach (var pick in Workspace.Operations.InventoryPicks ?? []) { <tr><td>@pick.PickNumber</td><td>@pick.OrderNumber</td><td>@pick.Location</td><td>@pick.Status</td><td>@string.Join(", ", pick.Lines.Select(line => $"{line.Sku}: {line.PickedQuantity}/{line.RequestedQuantity} picked, {line.PackedQuantity} packed"))</td><td>@if (CanFulfillSales && pick.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => BeginInventoryPickCompletion(pick)">Complete pick</button> } @if (CanFulfillSales && pick.Status is "Picked" or "PartiallyPacked") { <button class="action-secondary" type="button" @onclick="() => BeginInventoryPacking(pick)">Pack</button> } @if (CanFulfillSales && pick.Status is "Draft" or "Picked") { <button class="action-secondary" type="button" @onclick="() => BeginPickCancellation(pick)">Cancel pick</button> }</td></tr> }</tbody></table>
+            <table class="data-table" aria-label="Inventory packing slips"><thead><tr><th>Packing slip</th><th>Pick</th><th>Order</th><th>Date</th><th>Status</th><th>Contents</th><th>Action</th></tr></thead><tbody>@foreach (var pack in Workspace.Operations.InventoryPackingSlips ?? []) { <tr><td>@pack.PackingSlipNumber</td><td>@((Workspace.Operations.InventoryPicks ?? []).SingleOrDefault(pick => pick.Id == pack.InventoryPickId)?.PickNumber)</td><td>@pack.OrderNumber</td><td>@pack.PackedOn.ToString("MMM d, yyyy")</td><td>@pack.Status</td><td>@string.Join(", ", pack.Lines.Select(line => $"{line.Sku}: {line.Quantity}"))</td><td>@if (CanFulfillSales && pack.Status == "Packed") { <button class="action-secondary" type="button" @onclick="() => BeginPackedShipment(pack)">Ship packing slip</button> <button class="action-secondary" type="button" @onclick="() => BeginPackingSlipCancellation(pack)">Cancel packing slip</button> }</td></tr> }</tbody></table>
+        </section>
+
+        <section class="panel"><h2>Backorder promises</h2><table class="data-table" aria-label="Sales backorder promises"><thead><tr><th>Order</th><th>Item</th><th>Promised</th><th>Fulfilled</th><th>Ship by</th><th>Status</th><th>Reason</th><th>Action</th></tr></thead><tbody>@foreach (var backorder in Workspace.Operations.BackorderPromises ?? []) { <tr><td>@backorder.OrderNumber</td><td>@backorder.Sku</td><td>@backorder.PromisedQuantity</td><td>@backorder.FulfilledQuantity</td><td>@backorder.PromisedShipOn.ToString("MMM d, yyyy")</td><td>@backorder.Status</td><td>@backorder.Reason</td><td>@if (CanManageSales && backorder.Status is "Open" or "PartiallyFulfilled") { <button class="action-secondary" type="button" @onclick="() => BeginBackorderCancellation(backorder)">Cancel promise</button> }</td></tr> }</tbody></table></section>
+
+        @if (FulfillmentCancellationForm is not null)
+        {
+            <section class="panel"><h2>Cancel @FulfillmentCancellationForm.DocumentLabel</h2><EditForm Model="FulfillmentCancellationForm" OnValidSubmit="CancelFulfillmentDocumentAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Fulfillment document cancellation reason" class="field-input" @bind-Value="FulfillmentCancellationForm.Reason" /></div><button class="action-primary" type="submit">Confirm document cancellation</button><button class="action-secondary" type="button" @onclick="DismissFulfillmentCancellation">Keep document</button></div></EditForm></section>
+        }
+        @if (BackorderCancellationForm is not null)
+        {
+            <section class="panel"><h2>Cancel backorder promise for @BackorderCancellationForm.OrderNumber</h2><EditForm Model="BackorderCancellationForm" OnValidSubmit="CancelBackorderAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Backorder cancellation reason" class="field-input" @bind-Value="BackorderCancellationForm.Reason" /></div><button class="action-primary" type="submit">Confirm backorder cancellation</button><button class="action-secondary" type="button" @onclick="DismissBackorderCancellation">Keep promise</button></div></EditForm></section>
+        }
+
         @if (CanFulfillSales && ShipmentForm is not null)
         {
             <section class="panel"><h2>Ship @ShipmentForm.SalesOrderNumber</h2><p class="page-intro">Only reserved quantities can ship. Posting relieves on-hand inventory and debits cost of goods sold at current average cost.</p><EditForm Model="ShipmentForm" OnValidSubmit="PostShipmentAsync"><div class="auth-form">
@@ -302,7 +339,7 @@ else
         }
 
         <section class="panel"><h2>Customer shipments and invoicing</h2><p class="page-intro">Warehouse posting relieves inventory and COGS. Receivables then creates one invoice from the exact shipped quantities; void that invoice before reversing a shipment.</p>
-            <table class="data-table"><thead><tr><th>Shipment</th><th>Sales order</th><th>Location</th><th>Date</th><th>Status</th><th>Cost</th><th>Invoice</th><th>Action</th></tr></thead><tbody>
+            <table class="data-table" aria-label="Customer shipments"><thead><tr><th>Shipment</th><th>Sales order</th><th>Location</th><th>Date</th><th>Status</th><th>Cost</th><th>Invoice</th><th>Action</th></tr></thead><tbody>
                 @foreach (var shipment in Workspace.Operations.InventoryShipments ?? [])
                 {
                     <tr><td>@shipment.ShipmentNumber</td><td>@shipment.SalesOrderNumber</td><td>@shipment.Location</td><td>@shipment.ShippedOn.ToString("MMM d, yyyy")</td><td>@shipment.Status</td><td>@shipment.TotalCost.ToString("C")</td><td>@(shipment.SalesInvoiceId.HasValue ? "Invoiced" : "Uninvoiced")</td><td>
@@ -433,6 +470,12 @@ else
     private SalesOrderCancellationEditor? SalesOrderCancellationForm;
     private PurchaseOrderEditor PurchaseOrderForm { get; } = new();
     private SalesAllocationEditor? AllocationForm;
+    private InventoryPickEditor? InventoryPickForm;
+    private InventoryPickCompletionEditor? InventoryPickCompletionForm;
+    private InventoryPackEditor? InventoryPackForm;
+    private SalesBackorderEditor? SalesBackorderForm;
+    private FulfillmentDocumentCancellationEditor? FulfillmentCancellationForm;
+    private BackorderCancellationEditor? BackorderCancellationForm;
     private SalesShipmentEditor? ShipmentForm;
     private ShipmentInvoiceEditor? ShipmentInvoiceForm;
     private ShipmentReversalEditor? ShipmentReversalForm;
@@ -534,11 +577,130 @@ else
     {
         var form = AllocationForm!; var bin = FindBin(form.BinId); var result = await TransactionService.AllocateSalesOrderAsync(new AllocateSalesOrderRequest(form.SalesOrderId, form.Lines.Select(line => new AllocateSalesOrderLineRequest(line.SalesOrderLineId, line.Quantity)).ToArray(), form.ConcurrencyToken, bin?.WarehouseId, bin?.Id)); StatusMessage = result.Succeeded ? "Inventory allocation saved." : result.ErrorMessage; if (result.Succeeded) { AllocationForm = null; await ReloadAsync(); }
     }
-    private void BeginShipment(SalesOrderSnapshot order) => ShipmentForm = new SalesShipmentEditor(order.Id, order.OrderNumber, order.ConcurrencyToken, (order.Lines ?? []).Where(line => line.AllocatedQuantity > 0m).Select(line => new SalesShipmentLineEditor(line.Id, line.Sku, line.AllocatedQuantity)).ToList());
+    private void BeginBackorderPromise(SalesOrderSnapshot order)
+    {
+        var outstandingByLine = (Workspace?.Operations.BackorderPromises ?? [])
+            .Where(promise => promise.SalesOrderId == order.Id && promise.Status is "Open" or "PartiallyFulfilled")
+            .GroupBy(promise => promise.SalesOrderLineId)
+            .ToDictionary(group => group.Key, group => group.Sum(promise => promise.OutstandingQuantity));
+        var lines = (order.Lines ?? [])
+            .Select(line => new SalesBackorderLineEditor(line.Id, line.Sku, line.OrderedQuantity - line.ShippedQuantity - line.CancelledQuantity - line.AllocatedQuantity - outstandingByLine.GetValueOrDefault(line.Id)))
+            .Where(line => line.AvailableDemand > 0m)
+            .ToList();
+        SalesBackorderForm = new SalesBackorderEditor(order.Id, order.OrderNumber, order.ConcurrencyToken, lines);
+    }
+    private bool HasUnpromisedBackorderDemand(SalesOrderSnapshot order)
+    {
+        var outstandingByLine = (Workspace?.Operations.BackorderPromises ?? [])
+            .Where(promise => promise.SalesOrderId == order.Id && promise.Status is "Open" or "PartiallyFulfilled")
+            .GroupBy(promise => promise.SalesOrderLineId)
+            .ToDictionary(group => group.Key, group => group.Sum(promise => promise.OutstandingQuantity));
+        return (order.Lines ?? []).Any(line => line.OrderedQuantity - line.ShippedQuantity - line.CancelledQuantity - line.AllocatedQuantity - outstandingByLine.GetValueOrDefault(line.Id) > 0m);
+    }
+    private void CancelBackorderPromise() => SalesBackorderForm = null;
+    private async Task PromiseBackorderAsync()
+    {
+        var form = SalesBackorderForm!;
+        var result = await TransactionService.PromiseSalesOrderBackorderAsync(new PromiseSalesOrderBackorderRequest(form.SalesOrderId, form.SalesOrderLineId, form.Quantity, form.PromisedShipOn, form.Reason, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? $"Backorder promise saved for sales order {form.OrderNumber}." : result.ErrorMessage;
+        if (result.Succeeded) { SalesBackorderForm = null; await ReloadAsync(); }
+    }
+    private void BeginInventoryPick(SalesOrderSnapshot order)
+    {
+        var committedByLine = PickCommitments(order.Id);
+        var lines = (order.Lines ?? [])
+            .Select(line => new InventoryPickLineEditor(line.Id, line.Sku, Math.Max(0m, line.AllocatedQuantity - committedByLine.GetValueOrDefault(line.Id))))
+            .Where(line => line.AllocatedQuantity > 0m)
+            .ToList();
+        InventoryPickForm = new InventoryPickEditor(order.Id, order.OrderNumber, order.ConcurrencyToken, lines);
+    }
+    private bool HasUncommittedPickAllocation(SalesOrderSnapshot order)
+    {
+        var commitments = PickCommitments(order.Id);
+        return (order.Lines ?? []).Any(line => line.AllocatedQuantity > commitments.GetValueOrDefault(line.Id));
+    }
+    private bool HasDirectShipmentQuantity(SalesOrderSnapshot order)
+    {
+        var commitments = PickCommitments(order.Id);
+        return (order.Lines ?? []).Any(line => line.AllocatedQuantity > 0m && commitments.GetValueOrDefault(line.Id) == 0m);
+    }
+    private Dictionary<Guid, decimal> PickCommitments(Guid orderId) => (Workspace?.Operations.InventoryPicks ?? [])
+        .Where(pick => pick.SalesOrderId == orderId && pick.Status is not ("Cancelled" or "Shipped"))
+        .SelectMany(pick => pick.Lines.Select(line => new { line.SalesOrderLineId, Quantity = pick.Status == "Draft" ? line.RequestedQuantity : line.PickedQuantity }))
+        .GroupBy(line => line.SalesOrderLineId)
+        .ToDictionary(group => group.Key, group => group.Sum(line => line.Quantity));
+    private void CancelInventoryPickCreation() => InventoryPickForm = null;
+    private async Task CreateInventoryPickAsync()
+    {
+        var form = InventoryPickForm!;
+        var result = await TransactionService.CreateInventoryPickAsync(new CreateInventoryPickRequest(form.SalesOrderId, form.PickNumber, form.PickDate, form.Lines.Where(line => line.Quantity > 0m).Select(line => new CreateInventoryPickLineRequest(line.SalesOrderLineId, line.Quantity)).ToArray(), form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? $"Pick ticket {form.PickNumber} created." : result.ErrorMessage;
+        if (result.Succeeded) { InventoryPickForm = null; await ReloadAsync(); }
+    }
+    private void BeginInventoryPickCompletion(InventoryPickSnapshot pick) => InventoryPickCompletionForm = new InventoryPickCompletionEditor(pick.Id, pick.PickNumber, pick.ConcurrencyToken, pick.Lines.Select(line => new InventoryPickCompletionLineEditor(line.Id, line.Sku, line.RequestedQuantity)).ToList());
+    private void CancelInventoryPickCompletion() => InventoryPickCompletionForm = null;
+    private async Task CompleteInventoryPickAsync()
+    {
+        var form = InventoryPickCompletionForm!;
+        var result = await TransactionService.CompleteInventoryPickAsync(new CompleteInventoryPickRequest(form.InventoryPickId, form.Lines.Select(line => new CompleteInventoryPickLineRequest(line.InventoryPickLineId, line.PickedQuantity)).ToArray(), form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? $"Pick ticket {form.PickNumber} completed." : result.ErrorMessage;
+        if (result.Succeeded) { InventoryPickCompletionForm = null; await ReloadAsync(); }
+    }
+    private void BeginInventoryPacking(InventoryPickSnapshot pick)
+    {
+        var packedByLine = (Workspace?.Operations.InventoryPackingSlips ?? [])
+            .Where(pack => pack.InventoryPickId == pick.Id && pack.Status != "Cancelled")
+            .SelectMany(pack => pack.Lines)
+            .GroupBy(line => line.InventoryPickLineId)
+            .ToDictionary(group => group.Key, group => group.Sum(line => line.Quantity));
+        InventoryPackForm = new InventoryPackEditor(pick.Id, pick.PickNumber, pick.ConcurrencyToken, pick.Lines
+            .Select(line => new InventoryPackLineEditor(line.Id, line.Sku, Math.Max(0m, line.PickedQuantity - packedByLine.GetValueOrDefault(line.Id))))
+            .Where(line => line.AvailableQuantity > 0m)
+            .ToList());
+    }
+    private void CancelInventoryPacking() => InventoryPackForm = null;
+    private async Task PackInventoryPickAsync()
+    {
+        var form = InventoryPackForm!;
+        var result = await TransactionService.PackInventoryPickAsync(new PackInventoryPickRequest(form.InventoryPickId, form.PackingSlipNumber, form.PackedOn, form.Lines.Where(line => line.Quantity > 0m).Select(line => new PackInventoryPickLineRequest(line.InventoryPickLineId, line.Quantity)).ToArray(), form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? $"Packing slip {form.PackingSlipNumber} created." : result.ErrorMessage;
+        if (result.Succeeded) { InventoryPackForm = null; await ReloadAsync(); }
+    }
+    private void BeginPickCancellation(InventoryPickSnapshot pick) => FulfillmentCancellationForm = FulfillmentDocumentCancellationEditor.ForPick(pick.Id, pick.PickNumber, pick.ConcurrencyToken);
+    private void BeginPackingSlipCancellation(InventoryPackingSlipSnapshot pack) => FulfillmentCancellationForm = FulfillmentDocumentCancellationEditor.ForPackingSlip(pack.Id, pack.PackingSlipNumber, pack.ConcurrencyToken);
+    private void DismissFulfillmentCancellation() => FulfillmentCancellationForm = null;
+    private async Task CancelFulfillmentDocumentAsync()
+    {
+        var form = FulfillmentCancellationForm!;
+        var result = form.IsPick
+            ? await TransactionService.CancelInventoryPickAsync(new CancelInventoryPickRequest(form.DocumentId, form.Reason, form.ConcurrencyToken))
+            : await TransactionService.CancelInventoryPackingSlipAsync(new CancelInventoryPackingSlipRequest(form.DocumentId, form.Reason, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? $"{form.DocumentLabel} cancelled." : result.ErrorMessage;
+        if (result.Succeeded) { FulfillmentCancellationForm = null; await ReloadAsync(); }
+    }
+    private void BeginBackorderCancellation(SalesOrderBackorderPromiseSnapshot promise) => BackorderCancellationForm = new BackorderCancellationEditor(promise.Id, promise.OrderNumber, promise.ConcurrencyToken);
+    private void DismissBackorderCancellation() => BackorderCancellationForm = null;
+    private async Task CancelBackorderAsync()
+    {
+        var form = BackorderCancellationForm!;
+        var result = await TransactionService.CancelSalesOrderBackorderAsync(new CancelSalesOrderBackorderRequest(form.PromiseId, form.Reason, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? $"Backorder promise for {form.OrderNumber} cancelled." : result.ErrorMessage;
+        if (result.Succeeded) { BackorderCancellationForm = null; await ReloadAsync(); }
+    }
+    private void BeginShipment(SalesOrderSnapshot order)
+    {
+        var commitments = PickCommitments(order.Id);
+        ShipmentForm = new SalesShipmentEditor(order.Id, order.OrderNumber, order.ConcurrencyToken, (order.Lines ?? []).Where(line => line.AllocatedQuantity > 0m && commitments.GetValueOrDefault(line.Id) == 0m).Select(line => new SalesShipmentLineEditor(line.Id, line.Sku, line.AllocatedQuantity)).ToList());
+    }
+    private void BeginPackedShipment(InventoryPackingSlipSnapshot pack)
+    {
+        var orderToken = Workspace?.Operations.SalesOrders.SingleOrDefault(order => order.Id == pack.SalesOrderId)?.ConcurrencyToken ?? "";
+        ShipmentForm = new SalesShipmentEditor(pack.SalesOrderId, pack.OrderNumber, orderToken, pack.Lines.Select(line => new SalesShipmentLineEditor(line.SalesOrderLineId, line.Sku, line.Quantity)).ToList(), pack.Id, pack.ConcurrencyToken, pack.PackedOn);
+    }
     private void CancelShipment() => ShipmentForm = null;
     private async Task PostShipmentAsync()
     {
-        var form = ShipmentForm!; var result = await TransactionService.ShipSalesOrderAsync(new ShipSalesOrderRequest(form.SalesOrderId, form.ShipmentNumber, form.ShippedOn, form.Lines.Where(line => line.Quantity > 0m).Select(line => new ShipSalesOrderLineRequest(line.SalesOrderLineId, line.Quantity)).ToArray(), form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Customer shipment posted; inventory and COGS were updated." : result.ErrorMessage; if (result.Succeeded) { ShipmentForm = null; await ReloadAsync(); }
+        var form = ShipmentForm!; var result = await TransactionService.ShipSalesOrderAsync(new ShipSalesOrderRequest(form.SalesOrderId, form.ShipmentNumber, form.ShippedOn, form.Lines.Where(line => line.Quantity > 0m).Select(line => new ShipSalesOrderLineRequest(line.SalesOrderLineId, line.Quantity)).ToArray(), form.ConcurrencyToken, form.InventoryPackingSlipId, form.PackingSlipConcurrencyToken)); StatusMessage = result.Succeeded ? "Customer shipment posted; inventory and COGS were updated." : result.ErrorMessage; if (result.Succeeded) { ShipmentForm = null; await ReloadAsync(); }
     }
     private void BeginShipmentInvoice(InventoryShipmentSnapshot shipment) => ShipmentInvoiceForm = new ShipmentInvoiceEditor(shipment.Id, shipment.ShipmentNumber, shipment.ConcurrencyToken, shipment.ShippedOn);
     private void CancelShipmentInvoice() => ShipmentInvoiceForm = null;
@@ -602,7 +764,83 @@ else
     private sealed class SalesOrderCancellationEditor(Guid salesOrderId, string orderNumber, string concurrencyToken) { public Guid SalesOrderId { get; } = salesOrderId; public string OrderNumber { get; } = orderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = ""; }
     private sealed class SalesAllocationEditor(Guid salesOrderId, string salesOrderNumber, string concurrencyToken, List<SalesAllocationLineEditor> lines) { public Guid SalesOrderId { get; } = salesOrderId; public string SalesOrderNumber { get; } = salesOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public Guid BinId { get; set; } public List<SalesAllocationLineEditor> Lines { get; } = lines; }
     private sealed class SalesAllocationLineEditor(Guid salesOrderLineId, string sku, decimal unshippedQuantity, decimal quantity) { public Guid SalesOrderLineId { get; } = salesOrderLineId; public string Sku { get; } = sku; public decimal UnshippedQuantity { get; } = unshippedQuantity; public decimal Quantity { get; set; } = quantity; }
-    private sealed class SalesShipmentEditor(Guid salesOrderId, string salesOrderNumber, string concurrencyToken, List<SalesShipmentLineEditor> lines) { public Guid SalesOrderId { get; } = salesOrderId; public string SalesOrderNumber { get; } = salesOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string ShipmentNumber { get; set; } = $"SHIP-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly ShippedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public List<SalesShipmentLineEditor> Lines { get; } = lines; }
+    private sealed class SalesBackorderEditor
+    {
+        public SalesBackorderEditor(Guid salesOrderId, string orderNumber, string concurrencyToken, List<SalesBackorderLineEditor> lines)
+        {
+            SalesOrderId = salesOrderId; OrderNumber = orderNumber; ConcurrencyToken = concurrencyToken; Lines = lines;
+            SalesOrderLineId = lines.FirstOrDefault()?.SalesOrderLineId ?? Guid.Empty;
+            Quantity = lines.FirstOrDefault()?.AvailableDemand ?? 0m;
+        }
+        public Guid SalesOrderId { get; }
+        public string OrderNumber { get; }
+        public string ConcurrencyToken { get; }
+        public List<SalesBackorderLineEditor> Lines { get; }
+        public Guid SalesOrderLineId { get; set; }
+        public decimal Quantity { get; set; }
+        public DateOnly PromisedShipOn { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(7));
+        public string Reason { get; set; } = "Awaiting inventory replenishment";
+    }
+    private sealed record SalesBackorderLineEditor(Guid SalesOrderLineId, string Sku, decimal AvailableDemand);
+    private sealed class InventoryPickEditor(Guid salesOrderId, string orderNumber, string concurrencyToken, List<InventoryPickLineEditor> lines)
+    {
+        public Guid SalesOrderId { get; } = salesOrderId;
+        public string OrderNumber { get; } = orderNumber;
+        public string ConcurrencyToken { get; } = concurrencyToken;
+        public string PickNumber { get; set; } = $"PICK-{DateTime.Now:yyyyMMddHHmm}";
+        public DateOnly PickDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public List<InventoryPickLineEditor> Lines { get; } = lines;
+    }
+    private sealed class InventoryPickLineEditor(Guid salesOrderLineId, string sku, decimal allocatedQuantity)
+    {
+        public Guid SalesOrderLineId { get; } = salesOrderLineId;
+        public string Sku { get; } = sku;
+        public decimal AllocatedQuantity { get; } = allocatedQuantity;
+        public decimal Quantity { get; set; } = allocatedQuantity;
+    }
+    private sealed class InventoryPickCompletionEditor(Guid inventoryPickId, string pickNumber, string concurrencyToken, List<InventoryPickCompletionLineEditor> lines)
+    {
+        public Guid InventoryPickId { get; } = inventoryPickId;
+        public string PickNumber { get; } = pickNumber;
+        public string ConcurrencyToken { get; } = concurrencyToken;
+        public List<InventoryPickCompletionLineEditor> Lines { get; } = lines;
+    }
+    private sealed class InventoryPickCompletionLineEditor(Guid inventoryPickLineId, string sku, decimal requestedQuantity)
+    {
+        public Guid InventoryPickLineId { get; } = inventoryPickLineId;
+        public string Sku { get; } = sku;
+        public decimal RequestedQuantity { get; } = requestedQuantity;
+        public decimal PickedQuantity { get; set; } = requestedQuantity;
+    }
+    private sealed class InventoryPackEditor(Guid inventoryPickId, string pickNumber, string concurrencyToken, List<InventoryPackLineEditor> lines)
+    {
+        public Guid InventoryPickId { get; } = inventoryPickId;
+        public string PickNumber { get; } = pickNumber;
+        public string ConcurrencyToken { get; } = concurrencyToken;
+        public string PackingSlipNumber { get; set; } = $"PACK-{DateTime.Now:yyyyMMddHHmm}";
+        public DateOnly PackedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public List<InventoryPackLineEditor> Lines { get; } = lines;
+    }
+    private sealed class InventoryPackLineEditor(Guid inventoryPickLineId, string sku, decimal availableQuantity)
+    {
+        public Guid InventoryPickLineId { get; } = inventoryPickLineId;
+        public string Sku { get; } = sku;
+        public decimal AvailableQuantity { get; } = availableQuantity;
+        public decimal Quantity { get; set; } = availableQuantity;
+    }
+    private sealed class FulfillmentDocumentCancellationEditor
+    {
+        private FulfillmentDocumentCancellationEditor(Guid documentId, string documentLabel, string concurrencyToken, bool isPick) { DocumentId = documentId; DocumentLabel = documentLabel; ConcurrencyToken = concurrencyToken; IsPick = isPick; }
+        public static FulfillmentDocumentCancellationEditor ForPick(Guid id, string number, string token) => new(id, $"pick {number}", token, true);
+        public static FulfillmentDocumentCancellationEditor ForPackingSlip(Guid id, string number, string token) => new(id, $"packing slip {number}", token, false);
+        public Guid DocumentId { get; }
+        public string DocumentLabel { get; }
+        public string ConcurrencyToken { get; }
+        public bool IsPick { get; }
+        public string Reason { get; set; } = "";
+    }
+    private sealed class BackorderCancellationEditor(Guid promiseId, string orderNumber, string concurrencyToken) { public Guid PromiseId { get; } = promiseId; public string OrderNumber { get; } = orderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = ""; }
+    private sealed class SalesShipmentEditor(Guid salesOrderId, string salesOrderNumber, string concurrencyToken, List<SalesShipmentLineEditor> lines, Guid? inventoryPackingSlipId = null, string packingSlipConcurrencyToken = "", DateOnly? earliestShipmentDate = null) { public Guid SalesOrderId { get; } = salesOrderId; public string SalesOrderNumber { get; } = salesOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public Guid? InventoryPackingSlipId { get; } = inventoryPackingSlipId; public string PackingSlipConcurrencyToken { get; } = packingSlipConcurrencyToken; public string ShipmentNumber { get; set; } = $"SHIP-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly ShippedOn { get; set; } = earliestShipmentDate.HasValue && earliestShipmentDate.Value > DateOnly.FromDateTime(DateTime.Today) ? earliestShipmentDate.Value : DateOnly.FromDateTime(DateTime.Today); public List<SalesShipmentLineEditor> Lines { get; } = lines; }
     private sealed class SalesShipmentLineEditor(Guid salesOrderLineId, string sku, decimal allocatedQuantity) { public Guid SalesOrderLineId { get; } = salesOrderLineId; public string Sku { get; } = sku; public decimal AllocatedQuantity { get; } = allocatedQuantity; public decimal Quantity { get; set; } = allocatedQuantity; }
     private sealed class ShipmentInvoiceEditor(Guid inventoryShipmentId, string shipmentNumber, string concurrencyToken, DateOnly shippedOn) { public Guid InventoryShipmentId { get; } = inventoryShipmentId; public string ShipmentNumber { get; } = shipmentNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string InvoiceNumber { get; set; } = $"INV-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly InvoiceDate { get; set; } = DateOnly.FromDateTime(DateTime.Today) < shippedOn ? shippedOn : DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = (DateOnly.FromDateTime(DateTime.Today) < shippedOn ? shippedOn : DateOnly.FromDateTime(DateTime.Today)).AddDays(30); public string Description { get; set; } = $"Invoice for shipment {shipmentNumber}"; }
     private sealed class ShipmentReversalEditor(Guid inventoryShipmentId, string shipmentNumber, string concurrencyToken, DateOnly shippedOn) { public Guid InventoryShipmentId { get; } = inventoryShipmentId; public string ShipmentNumber { get; } = shipmentNumber; public string ConcurrencyToken { get; } = concurrencyToken; public DateOnly ReversalDate { get; set; } = DateOnly.FromDateTime(DateTime.Today) < shippedOn ? shippedOn : DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = ""; }

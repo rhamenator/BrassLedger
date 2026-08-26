@@ -10,7 +10,7 @@ Default or stock-bearing locations cannot be deactivated. Locations with active 
 
 ## Location-aware stock activity
 
-Adjustments and purchase receipts accept an explicit warehouse/bin. When omitted, the active default is used for backward-compatible requests. Sales allocation reserves a precise bin, and shipment posting can consume only the bin recorded on its order lines. A shipment cannot combine lines allocated in different locations. Receipt and shipment reversals return stock to their original location.
+Adjustments and purchase receipts accept an explicit warehouse/bin. When omitted, the active default is used for backward-compatible requests. Sales allocation reserves a precise bin, and a pick ticket commits quantity from that exact location. An allocation cannot be reduced below active pick commitments. Packing and shipment preserve the pick location, and shipment posting can consume only the bin recorded on its order lines. A shipment cannot combine lines allocated in different locations. Receipt and shipment reversals return stock to their original location.
 
 The item-level `QuantityOnHand` remains the accounting aggregate and must equal the sum of every bin balance for that item. Mutations update both levels atomically and use optimistic concurrency on the item and location balances.
 
@@ -25,4 +25,4 @@ The pair nets to zero quantity and value, does not change the company item total
 
 ## Operational checks
 
-Before live use, confirm the default warehouse/bin and addresses, transfer staged quantities into each location, and reconcile each item total to its displayed bin balances. Review `inventory-warehouse.saved`, `inventory-bin.saved`, `inventory-transfer.posted`, and `inventory-transfer.reversed` business-audit events. Locations currently model ordinary fungible stock; pick/pack documents, backorder promises, lots, serial numbers, and FIFO layers are separate capabilities.
+Before live use, confirm the default warehouse/bin and addresses, transfer staged quantities into each location, and reconcile each item total to its displayed bin balances. Review `inventory-warehouse.saved`, `inventory-bin.saved`, `inventory-transfer.*`, `inventory-pick.*`, `inventory-packing-slip.*`, and `inventory-shipment.*` business-audit events. Locations currently model ordinary fungible stock; lots, serial numbers, and FIFO layers remain separate capabilities.

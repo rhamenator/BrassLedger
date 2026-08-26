@@ -100,6 +100,41 @@ public sealed class InventoryLocationConcurrencyTests
             await verify.Entry(await verify.InventoryItems.SingleAsync(item => item.Id == itemId)).ReloadAsync();
             var finalBalances = await verify.InventoryLocationBalances.Where(balance => balance.CompanyId == companyId && balance.InventoryItemId == itemId).AsNoTracking().Select(balance => balance.QuantityOnHand).ToListAsync();
             Assert.All(finalBalances, balance => Assert.True(balance >= 0m)); Assert.Equal(companyQuantity, finalBalances.Sum());
+
+            Guid pickRaceOrderId;
+            using (var salesScope = provider.CreateScope())
+            {
+                SetCompanyContext(salesScope, companyId, BrassLedgerPermissions.SalesManage);
+                var sales = salesScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+                var saved = await sales.SaveSalesOrderAsync(new(null, customerId, "SO-RACE-PICK", new DateOnly(2026, 8, 26), null, "Pick commitment race", [new SalesOrderLineRequest(itemId, "Concurrent pick", 2m, 1m, 0m, 0m, "4000")]));
+                Assert.True(saved.Succeeded, saved.ErrorMessage); pickRaceOrderId = saved.Id!.Value;
+                var factory = salesScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync(); var order = await db.SalesOrders.SingleAsync(candidate => candidate.Id == pickRaceOrderId);
+                var approved = await sales.ApproveSalesOrderAsync(new(order.Id, order.ConcurrencyToken)); Assert.True(approved.Succeeded, approved.ErrorMessage);
+            }
+            Guid pickRaceLineId; string pickRaceOrderToken;
+            using (var fulfillmentScope = provider.CreateScope())
+            {
+                SetCompanyContext(fulfillmentScope, companyId, BrassLedgerPermissions.FulfillmentManage); var fulfillment = fulfillmentScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>(); var factory = fulfillmentScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+                pickRaceLineId = await db.SalesOrderLines.Where(line => line.SalesOrderId == pickRaceOrderId).Select(line => line.Id).SingleAsync(); pickRaceOrderToken = await db.SalesOrders.Where(order => order.Id == pickRaceOrderId).Select(order => order.ConcurrencyToken).SingleAsync();
+                var allocated = await fulfillment.AllocateSalesOrderAsync(new(pickRaceOrderId, [new AllocateSalesOrderLineRequest(pickRaceLineId, 2m)], pickRaceOrderToken, mainWarehouseId, mainBinId)); Assert.True(allocated.Succeeded, allocated.ErrorMessage);
+                pickRaceOrderToken = await db.SalesOrders.Where(order => order.Id == pickRaceOrderId).Select(order => order.ConcurrencyToken).SingleAsync();
+            }
+            using var firstPickScope = provider.CreateScope(); using var secondPickScope = provider.CreateScope();
+            var firstPickTask = Task.Run(async () => { SetCompanyContext(firstPickScope, companyId, BrassLedgerPermissions.FulfillmentManage); return await firstPickScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().CreateInventoryPickAsync(new(pickRaceOrderId, "PICK-RACE-A", new DateOnly(2026, 8, 26), [new CreateInventoryPickLineRequest(pickRaceLineId, 1.5m)], pickRaceOrderToken)); });
+            var secondPickTask = Task.Run(async () => { SetCompanyContext(secondPickScope, companyId, BrassLedgerPermissions.FulfillmentManage); return await secondPickScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().CreateInventoryPickAsync(new(pickRaceOrderId, "PICK-RACE-B", new DateOnly(2026, 8, 26), [new CreateInventoryPickLineRequest(pickRaceLineId, 1.5m)], pickRaceOrderToken)); });
+            var pickResults = await Task.WhenAll(firstPickTask, secondPickTask); Assert.Single(pickResults, result => result.Succeeded); Assert.Single(pickResults, result => !result.Succeeded);
+            Guid winningPickId = pickResults.Single(result => result.Succeeded).Id!.Value; Guid winningPickLineId; string winningPickToken;
+            using (var completionScope = provider.CreateScope())
+            {
+                SetCompanyContext(completionScope, companyId, BrassLedgerPermissions.FulfillmentManage); var factory = completionScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync(); winningPickLineId = await db.InventoryPickLines.Where(line => line.InventoryPickId == winningPickId).Select(line => line.Id).SingleAsync(); winningPickToken = await db.InventoryPicks.Where(pick => pick.Id == winningPickId).Select(pick => pick.ConcurrencyToken).SingleAsync();
+                var completed = await completionScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().CompleteInventoryPickAsync(new(winningPickId, [new CompleteInventoryPickLineRequest(winningPickLineId, 1.5m)], winningPickToken)); Assert.True(completed.Succeeded, completed.ErrorMessage);
+                winningPickToken = await db.InventoryPicks.Where(pick => pick.Id == winningPickId).Select(pick => pick.ConcurrencyToken).SingleAsync();
+            }
+            using var firstPackScope = provider.CreateScope(); using var secondPackScope = provider.CreateScope();
+            var firstPackTask = Task.Run(async () => { SetCompanyContext(firstPackScope, companyId, BrassLedgerPermissions.FulfillmentManage); return await firstPackScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().PackInventoryPickAsync(new(winningPickId, "PACK-RACE-A", new DateOnly(2026, 8, 26), [new PackInventoryPickLineRequest(winningPickLineId, 1m)], winningPickToken)); });
+            var secondPackTask = Task.Run(async () => { SetCompanyContext(secondPackScope, companyId, BrassLedgerPermissions.FulfillmentManage); return await secondPackScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().PackInventoryPickAsync(new(winningPickId, "PACK-RACE-B", new DateOnly(2026, 8, 26), [new PackInventoryPickLineRequest(winningPickLineId, 1m)], winningPickToken)); });
+            var packResults = await Task.WhenAll(firstPackTask, secondPackTask); Assert.Single(packResults, result => result.Succeeded); Assert.Single(packResults, result => !result.Succeeded);
+            await using var raceVerify = await verifyFactory.CreateDbContextAsync(); Assert.Equal(1.5m, await raceVerify.InventoryPickLines.Where(line => line.InventoryPickId == winningPickId).Select(line => line.PickedQuantity).SingleAsync()); Assert.Equal(1m, await raceVerify.InventoryPackingSlipLines.Where(line => line.InventoryPickLineId == winningPickLineId).SumAsync(line => line.Quantity));
         }
         finally
         {

@@ -59,6 +59,10 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("Prepare sales order", cut.Markup);
         Assert.NotNull(cut.Find("select[aria-label='Sales order customer']"));
         Assert.NotNull(cut.Find("select[aria-label='Sales order line 1 item']"));
+        Assert.NotNull(cut.Find("table[aria-label='Inventory picks']"));
+        Assert.NotNull(cut.Find("table[aria-label='Inventory packing slips']"));
+        Assert.NotNull(cut.Find("table[aria-label='Sales backorder promises']"));
+        Assert.Contains("Pick tickets commit an exact bin", cut.Markup);
         Assert.Contains("Customer shipments and invoicing", cut.Markup);
     }
 }
@@ -139,6 +143,13 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> AmendSalesOrderAsync(AmendSalesOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SalesOrderId));
     public Task<TransactionResult> CancelSalesOrderAsync(CancelSalesOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SalesOrderId));
     public Task<TransactionResult> AllocateSalesOrderAsync(AllocateSalesOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SalesOrderId));
+    public Task<TransactionResult> CreateInventoryPickAsync(CreateInventoryPickRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> CompleteInventoryPickAsync(CompleteInventoryPickRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryPickId));
+    public Task<TransactionResult> CancelInventoryPickAsync(CancelInventoryPickRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryPickId));
+    public Task<TransactionResult> PackInventoryPickAsync(PackInventoryPickRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> CancelInventoryPackingSlipAsync(CancelInventoryPackingSlipRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryPackingSlipId));
+    public Task<TransactionResult> PromiseSalesOrderBackorderAsync(PromiseSalesOrderBackorderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> CancelSalesOrderBackorderAsync(CancelSalesOrderBackorderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SalesOrderBackorderPromiseId));
     public Task<TransactionResult> ShipSalesOrderAsync(ShipSalesOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> InvoiceInventoryShipmentAsync(InvoiceInventoryShipmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> ReverseInventoryShipmentAsync(ReverseInventoryShipmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.InventoryShipmentId));

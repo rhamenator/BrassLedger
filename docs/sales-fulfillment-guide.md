@@ -12,9 +12,11 @@ An approved quote can be converted exactly once and only on or before its expira
 
 1. A user with **Sales orders** permission saves a draft containing the customer, dates, items, quantities, prices, line discounts, line tax, and revenue distributions.
 2. Sales approval authorizes fulfillment but does not reserve or move inventory.
-3. A user with **Order fulfillment** permission selects a warehouse/bin and sets the total reservation on each unshipped line. Availability subtracts reservations held by other orders in that bin. Setting zero releases a reservation.
-4. The warehouse ships only reserved quantities from the recorded bin. Partial shipments leave the remaining reservation and order balance open.
-5. A user with **Receivables** permission creates one invoice from each uninvoiced posted shipment. The invoice retains its order, shipment, shipment-line, order-line, item, and revenue-account provenance.
+3. Sales can record a quantity and promised ship date for unallocated demand. An allocation fulfills the oldest outstanding promises first and retains the promise history.
+4. A user with **Order fulfillment** permission selects a warehouse/bin and sets the total reservation on each unshipped line. Availability subtracts reservations held by other orders in that bin. Setting zero releases a reservation unless an active pick has committed that quantity.
+5. The warehouse creates a pick ticket against one exact bin, reports the quantity actually picked, and can divide the completed pick across multiple packing slips. A packing slip cannot exceed the picked-but-unpacked quantity.
+6. Shipping a packing slip requires the exact slip quantities and retains the packing-slip link on the shipment. Direct shipment remains available for allocated quantities that have no active pick commitment. Partial shipments leave the remaining reservation and order balance open.
+7. A user with **Receivables** permission creates one invoice from each uninvoiced posted shipment. The invoice retains its order, packing, shipment, shipment-line, order-line, item, and revenue-account provenance.
 
 Sales, fulfillment, and receivables permissions are intentionally separate. Administrators can combine them when staffing requires it, but a warehouse operator cannot approve prices or post accounts receivable merely because that person can move stock.
 
@@ -23,6 +25,8 @@ Sales, fulfillment, and receivables permissions are intentionally separate. Admi
 An approved or allocated order can be amended only before any shipment, invoice, return, or cancellation history exists. Quote-derived commercial terms cannot be amended. An amendment requires a reason, stores immutable before-and-after JSON with a sequential revision number, releases all reservations, replaces the reviewed lines atomically, and returns the order to `Draft`. Sales must approve it again before the warehouse can reserve or ship anything.
 
 Sales may cancel every still-open quantity on a draft, approved, allocated, or partially shipped order. Cancellation requires a reason, releases reservations, records cancelled quantity per line, and never changes posted shipments or invoices. A completely unshipped order becomes `Cancelled`. A partially fulfilled order becomes `ClosedPendingInvoice` until every retained shipment is invoiced, then `Closed`. The retained order total, discounts, and tax are prorated from the approved line terms; final shipment invoicing receives the rounding remainder. If all retained shipments were already invoiced separately, the retained total uses their actual active invoice amounts so independently rounded documents still reconcile. Reversing an uninvoiced shipment after cancellation converts its formerly shipped quantity to cancelled demand rather than reopening it for allocation.
+
+Active pick and packing documents must be cancelled before commercial order cancellation. Draft or completed unpacked picks and unshipped packing slips require a cancellation reason and remain in the audit history. A shipped packing slip cannot be cancelled; reverse its uninvoiced shipment first. Outstanding backorder promises may be cancelled separately by Sales, and cancelling the order automatically closes any remaining promises.
 
 ## Accounting
 
@@ -36,7 +40,7 @@ The selling price and moving-average cost remain independent. A shipment never c
 
 Do not edit shipment or invoice journals. An invoiced shipment cannot be physically reversed. First void its fully open, unapplied invoice through the normal controlled invoice-void workflow. That clears the shipment's invoice link and restores its uninvoiced quantities while retaining the invoice, its provenance, and all journals. Reversing that invoice void restores the exact link and quantities.
 
-An uninvoiced shipment can be reversed only when it is still the latest valuation event for every affected item. BrassLedger posts an inverse COGS/inventory journal, restores on-hand and reserved quantities, and retains the original shipment. If a later valuation event exists, use a dated customer-return or compensating inventory workflow instead of rewriting history.
+An uninvoiced shipment can be reversed only when it is still the latest valuation event for every affected item. BrassLedger posts an inverse COGS/inventory journal, restores on-hand and reserved quantities, and retains the original shipment. A packing-backed reversal restores the packing slip to `Packed` and recomputes its pick status so the same physical package can be shipped again. If a later valuation event exists, use a dated customer-return or compensating inventory workflow instead of rewriting history.
 
 All operations enforce company isolation, closed periods, active customers/items/accounts, customer credit limits, unique document numbers, optimistic concurrency, balanced entries, and immutable audit events.
 
@@ -46,4 +50,4 @@ Older prerelease databases may contain sales-order headers with no authoritative
 
 ## Current boundary
 
-This workflow covers line-based quotes, approval, withdrawal, expiration-aware one-time conversion, line-based sales orders, approval, auditable amendment/reapproval, open-quantity cancellation, warehouse/bin reservations, partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Pick/pack documents, explicit backorder scheduling, customer return authorization and credit/refund coordination, lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.
+This workflow covers line-based quotes, approval, withdrawal, expiration-aware one-time conversion, line-based sales orders, approval, auditable amendment/reapproval, open-quantity cancellation, dated backorder promises, warehouse/bin reservations, partial picks, multiple packing slips, packing-backed or direct partial shipments, moving-average COGS, shipment-derived invoices, and controlled shipment correction. Customer return authorization and credit/refund coordination, lots/serials, and FIFO valuation remain separate production-readiness work. Do not advertise those capabilities as implemented.

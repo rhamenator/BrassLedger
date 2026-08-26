@@ -118,10 +118,14 @@ public sealed partial class AccountingTransactionService
         var orderLines = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
         if (requestedLines.Any(requested => orderLines.All(line => line.Id != requested.SalesOrderLineId))) return TransactionResult.Failure("Every allocation line must belong to this sales order.");
         var requestedById = requestedLines.ToDictionary(line => line.SalesOrderLineId, line => RoundQuantity(line.Quantity));
+        var priorAllocatedById = orderLines.Where(line => requestedById.ContainsKey(line.Id)).ToDictionary(line => line.Id, line => line.AllocatedQuantity);
         foreach (var line in orderLines.Where(line => requestedById.ContainsKey(line.Id)))
         {
             if (requestedById[line.Id] > line.OrderedQuantity - line.ShippedQuantity - line.CancelledQuantity) return TransactionResult.Failure($"Allocation exceeds the open, uncancelled quantity for line {line.Sequence}.");
         }
+        var requestedLineIds = requestedById.Keys.ToArray();
+        var pickCommitments = await (from pickLine in db.InventoryPickLines join pick in db.InventoryPicks on pickLine.InventoryPickId equals pick.Id where pick.CompanyId == companyId && pick.SalesOrderId == order.Id && pick.Status != "Cancelled" && pick.Status != "Shipped" && requestedLineIds.Contains(pickLine.SalesOrderLineId) select new { pickLine.SalesOrderLineId, Quantity = pick.Status == "Draft" ? pickLine.RequestedQuantity : pickLine.PickedQuantity }).ToListAsync(cancellationToken);
+        foreach (var line in orderLines.Where(line => requestedById.ContainsKey(line.Id))) if (requestedById[line.Id] < pickCommitments.Where(commitment => commitment.SalesOrderLineId == line.Id).Sum(commitment => commitment.Quantity)) return TransactionResult.Failure($"Allocation cannot be reduced below active pick or pack commitments for line {line.Sequence}.");
         var existingAllocationLocations = orderLines.Where(line => requestedById.ContainsKey(line.Id) && line.AllocatedQuantity > 0m && line.AllocationWarehouseId.HasValue && line.AllocationBinId.HasValue).Select(line => new { WarehouseId = line.AllocationWarehouseId!.Value, BinId = line.AllocationBinId!.Value }).Distinct().ToArray();
         if (!request.WarehouseId.HasValue && !request.BinId.HasValue && existingAllocationLocations.Length > 1 && requestedById.Values.Any(quantity => quantity > 0m)) return TransactionResult.Failure("Select a warehouse and bin when changing lines that currently span multiple locations.");
         var requestedWarehouseId = request.WarehouseId ?? (existingAllocationLocations.Length == 1 ? existingAllocationLocations[0].WarehouseId : null);
@@ -150,10 +154,29 @@ public sealed partial class AccountingTransactionService
             line.AllocationWarehouseId = line.AllocatedQuantity > 0m ? location.Value.Warehouse.Id : null;
             line.AllocationBinId = line.AllocatedQuantity > 0m ? location.Value.Bin.Id : null;
         }
+        var backorders = (await db.SalesOrderBackorderPromises.Where(backorder => backorder.CompanyId == companyId && requestedLineIds.Contains(backorder.SalesOrderLineId) && backorder.Status != "Cancelled").ToListAsync(cancellationToken)).OrderBy(backorder => backorder.PromisedShipOn).ThenBy(backorder => backorder.CreatedAtUtc).ToList();
+        var priorBackorderState = backorders.ToDictionary(backorder => backorder.Id, backorder => (backorder.FulfilledQuantity, backorder.Status));
+        foreach (var lineId in requestedLineIds)
+        {
+            var newlyAllocated = Math.Max(0m, requestedById[lineId] - priorAllocatedById[lineId]);
+            foreach (var backorder in backorders.Where(candidate => candidate.SalesOrderLineId == lineId))
+            {
+                if (newlyAllocated <= 0m) break;
+                var applied = Math.Min(newlyAllocated, backorder.PromisedQuantity - backorder.FulfilledQuantity); if (applied <= 0m) continue;
+                backorder.FulfilledQuantity += applied; newlyAllocated -= applied; backorder.Status = backorder.FulfilledQuantity == backorder.PromisedQuantity ? "Fulfilled" : "PartiallyFulfilled"; backorder.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            }
+            var releasedAllocation = Math.Max(0m, priorAllocatedById[lineId] - requestedById[lineId]);
+            foreach (var backorder in backorders.Where(candidate => candidate.SalesOrderLineId == lineId && candidate.FulfilledQuantity > 0m).Reverse())
+            {
+                var released = Math.Min(releasedAllocation, backorder.FulfilledQuantity); if (released <= 0m) break;
+                backorder.FulfilledQuantity -= released; releasedAllocation -= released; backorder.Status = backorder.FulfilledQuantity == 0m ? "Open" : "PartiallyFulfilled"; backorder.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            }
+        }
         foreach (var balance in locationBalances.Values.Concat(priorLocationBalances).DistinctBy(balance => balance.Id)) balance.ConcurrencyToken = Guid.NewGuid().ToString("N");
         order.Status = orderLines.Any(line => line.ShippedQuantity > 0m) ? "PartiallyShipped" : orderLines.Any(line => line.AllocatedQuantity > 0m) ? "Allocated" : "Approved";
         order.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        AddSalesFulfillmentAudit(db, companyId, "sales-order.inventory.allocated", nameof(SalesOrder), order.Id, new { order.OrderNumber, warehouse = location.Value.Warehouse.Code, bin = location.Value.Bin.Code, allocations = requestedLines });
+        var backorderTransitions = backorders.Where(backorder => priorBackorderState[backorder.Id] != (backorder.FulfilledQuantity, backorder.Status)).Select(backorder => new { backorder.Id, priorFulfilledQuantity = priorBackorderState[backorder.Id].FulfilledQuantity, priorStatus = priorBackorderState[backorder.Id].Status, backorder.FulfilledQuantity, backorder.Status }).ToArray();
+        AddSalesFulfillmentAudit(db, companyId, "sales-order.inventory.allocated", nameof(SalesOrder), order.Id, new { order.OrderNumber, warehouse = location.Value.Warehouse.Code, bin = location.Value.Bin.Code, allocations = requestedLines, backorderTransitions });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The sales order or inventory allocation changed concurrently. Refresh and try again."); }
         return TransactionResult.Success(order.Id);
@@ -177,6 +200,20 @@ public sealed partial class AccountingTransactionService
         var orderLines = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
         var requestedIds = requestedLines.Select(line => line.SalesOrderLineId).ToArray();
         if (orderLines.Count(line => requestedIds.Contains(line.Id)) != requestedIds.Length) return TransactionResult.Failure("Every shipment line must belong to this sales order.");
+        InventoryPackingSlip? packingSlip = null; InventoryPick? packingPick = null;
+        if (request.InventoryPackingSlipId.HasValue)
+        {
+            packingSlip = await db.InventoryPackingSlips.SingleOrDefaultAsync(pack => pack.CompanyId == companyId && pack.Id == request.InventoryPackingSlipId.Value, cancellationToken); if (packingSlip is null) return TransactionResult.Failure("Packing slip not found.");
+            if (packingSlip.SalesOrderId != order.Id || packingSlip.Status != "Packed") return TransactionResult.Failure("Only an unshipped packing slip for this sales order can be shipped."); if (!string.Equals(packingSlip.ConcurrencyToken, request.PackingSlipConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The packing slip changed after it was opened. Refresh and review it again."); if (request.ShippedOn < packingSlip.PackedOn) return TransactionResult.Failure("The shipment date cannot precede the packing date.");
+            var packingLines = await db.InventoryPackingSlipLines.Where(line => line.InventoryPackingSlipId == packingSlip.Id).ToListAsync(cancellationToken); var packedByOrderLine = packingLines.ToDictionary(line => line.SalesOrderLineId, line => line.Quantity); var requestedByOrderLine = requestedLines.ToDictionary(line => line.SalesOrderLineId, line => RoundQuantity(line.Quantity));
+            if (packedByOrderLine.Count != requestedByOrderLine.Count || packedByOrderLine.Any(line => !requestedByOrderLine.TryGetValue(line.Key, out var quantity) || quantity != line.Value)) return TransactionResult.Failure("Shipment lines must exactly match the packing slip.");
+            packingPick = await db.InventoryPicks.SingleAsync(pick => pick.Id == packingSlip.InventoryPickId, cancellationToken);
+        }
+        else
+        {
+            var committed = await (from pickLine in db.InventoryPickLines join pick in db.InventoryPicks on pickLine.InventoryPickId equals pick.Id where pick.CompanyId == companyId && pick.SalesOrderId == order.Id && pick.Status != "Cancelled" && pick.Status != "Shipped" && requestedIds.Contains(pickLine.SalesOrderLineId) select pickLine.Id).AnyAsync(cancellationToken);
+            if (committed) return TransactionResult.Failure("Ship committed pick quantities from their packing slip, or cancel the pick before direct shipment.");
+        }
         foreach (var requested in requestedLines)
         {
             var line = orderLines.Single(candidate => candidate.Id == requested.SalesOrderLineId);
@@ -185,6 +222,7 @@ public sealed partial class AccountingTransactionService
         var allocationLocations = orderLines.Where(line => requestedIds.Contains(line.Id)).Select(line => new { line.AllocationWarehouseId, line.AllocationBinId }).Distinct().ToArray();
         if (allocationLocations.Length != 1 || !allocationLocations[0].AllocationWarehouseId.HasValue || !allocationLocations[0].AllocationBinId.HasValue) return TransactionResult.Failure("Every shipment line must be allocated from the same warehouse and bin.");
         var location = await ResolveInventoryLocationAsync(db, companyId, allocationLocations[0].AllocationWarehouseId, allocationLocations[0].AllocationBinId, cancellationToken); if (location is null) return TransactionResult.Failure("The allocated warehouse or bin is no longer active.");
+        if (packingSlip is not null && (packingSlip.WarehouseId != location.Value.Warehouse.Id || packingSlip.BinId != location.Value.Bin.Id)) return TransactionResult.Failure("The packing slip location no longer matches the order allocation.");
         var itemIds = orderLines.Where(line => requestedIds.Contains(line.Id)).Select(line => line.InventoryItemId).ToArray();
         var items = await db.InventoryItems.Where(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
         if (items.Count != itemIds.Distinct().Count()) return TransactionResult.Failure("One or more allocated items are no longer active in this company.");
@@ -204,7 +242,7 @@ public sealed partial class AccountingTransactionService
             [new(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), totalCost, 0m, "Cost of goods sold"), new(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), 0m, totalCost, "Inventory shipped")],
             cancellationToken, allowControlAccounts: true, sourceDocumentId: shipmentId, sourceDocumentType: "InventoryShipment", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
-        var shipment = new InventoryShipment { Id = shipmentId, CompanyId = companyId, SalesOrderId = order.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, ShipmentNumber = shipmentNumber, ShippedOn = request.ShippedOn, TotalCost = totalCost, JournalEntryId = posting.Id!.Value, ShippedByUserId = ResolveUserId(), ShippedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        var shipment = new InventoryShipment { Id = shipmentId, CompanyId = companyId, SalesOrderId = order.Id, InventoryPackingSlipId = packingSlip?.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, ShipmentNumber = shipmentNumber, ShippedOn = request.ShippedOn, TotalCost = totalCost, JournalEntryId = posting.Id!.Value, ShippedByUserId = ResolveUserId(), ShippedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.InventoryShipments.Add(shipment);
         var sequence = 0;
         foreach (var requested in requestedLines.OrderBy(line => orderLines.Single(candidate => candidate.Id == line.SalesOrderLineId).Sequence))
@@ -223,8 +261,14 @@ public sealed partial class AccountingTransactionService
             db.InventoryShipmentLines.Add(new InventoryShipmentLine { Id = Guid.NewGuid(), InventoryShipmentId = shipment.Id, SalesOrderLineId = orderLine.Id, InventoryItemId = item.Id, Sequence = ++sequence, Quantity = quantity, UnitCost = item.UnitCost, TotalCost = cost });
             db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, OccurredOn = request.ShippedOn, TransactionType = "Customer shipment", QuantityChange = -quantity, UnitCost = item.UnitCost, TotalCost = -cost, Reference = shipmentNumber, JournalEntryId = posting.Id.Value });
         }
+        if (packingSlip is not null && packingPick is not null)
+        {
+            packingSlip.Status = "Shipped"; packingSlip.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            var otherPacks = await db.InventoryPackingSlips.Where(pack => pack.InventoryPickId == packingPick.Id && pack.Id != packingSlip.Id && pack.Status != "Cancelled").ToListAsync(cancellationToken); var pickLines = await db.InventoryPickLines.Where(line => line.InventoryPickId == packingPick.Id).ToListAsync(cancellationToken); var otherPackIds = otherPacks.Select(pack => pack.Id).ToArray(); var otherPackLines = otherPackIds.Length == 0 ? [] : await db.InventoryPackingSlipLines.Where(line => otherPackIds.Contains(line.InventoryPackingSlipId)).ToListAsync(cancellationToken); var currentPackLines = await db.InventoryPackingSlipLines.Where(line => line.InventoryPackingSlipId == packingSlip.Id).ToListAsync(cancellationToken); var allPackedLines = otherPackLines.Concat(currentPackLines).ToArray(); var fullyPacked = pickLines.All(line => allPackedLines.Where(packed => packed.InventoryPickLineId == line.Id).Sum(packed => packed.Quantity) == line.PickedQuantity);
+            packingPick.Status = fullyPacked && otherPacks.All(pack => pack.Status == "Shipped") ? "Shipped" : fullyPacked ? "Packed" : "PartiallyPacked"; packingPick.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        }
         UpdateSalesOrderFulfillmentStatus(order, orderLines);
-        AddSalesFulfillmentAudit(db, companyId, "inventory-shipment.posted", nameof(InventoryShipment), shipment.Id, new { shipment.ShipmentNumber, order.Id, order.OrderNumber, warehouse = location.Value.Warehouse.Code, bin = location.Value.Bin.Code, shipment.TotalCost, lineCount = requestedLines.Length });
+        AddSalesFulfillmentAudit(db, companyId, "inventory-shipment.posted", nameof(InventoryShipment), shipment.Id, new { shipment.ShipmentNumber, order.Id, order.OrderNumber, packingSlipId = packingSlip?.Id, packingSlipNumber = packingSlip?.PackingSlipNumber, warehouse = location.Value.Warehouse.Code, bin = location.Value.Bin.Code, shipment.TotalCost, lineCount = requestedLines.Length });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The sales order or inventory changed while the shipment was posting. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The shipment number or fulfillment quantities changed concurrently. Refresh and try again."); }
@@ -332,6 +376,7 @@ public sealed partial class AccountingTransactionService
             : null;
         var items = await db.InventoryItems.Where(item => item.CompanyId == companyId && shipmentLines.Select(line => line.InventoryItemId).Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
         if (orderLines.Count(line => shipmentLines.Any(shipmentLine => shipmentLine.SalesOrderLineId == line.Key)) != shipmentLines.Count || items.Count != shipmentLines.Select(line => line.InventoryItemId).Distinct().Count()) return TransactionResult.Failure("Shipment source data is incomplete.");
+        var packingSlip = shipment.InventoryPackingSlipId.HasValue ? await db.InventoryPackingSlips.SingleOrDefaultAsync(pack => pack.CompanyId == companyId && pack.Id == shipment.InventoryPackingSlipId.Value, cancellationToken) : null; if (shipment.InventoryPackingSlipId.HasValue && packingSlip is null) return TransactionResult.Failure("Shipment packing-slip provenance is incomplete.");
         var locationBalances = new Dictionary<Guid, InventoryLocationBalance>();
         foreach (var itemId in shipmentLines.Select(line => line.InventoryItemId).Distinct()) locationBalances[itemId] = await GetOrCreateInventoryLocationBalanceAsync(db, companyId, itemId, location.Value.Warehouse.Id, location.Value.Bin.Id, cancellationToken);
 
@@ -350,6 +395,19 @@ public sealed partial class AccountingTransactionService
             if (order.CancelledAtUtc.HasValue) orderLine.CancelledQuantity += line.Quantity;
             else { orderLine.AllocatedQuantity += line.Quantity; orderLine.AllocationWarehouseId = location.Value.Warehouse.Id; orderLine.AllocationBinId = location.Value.Bin.Id; }
             db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, OccurredOn = request.ReversalDate, TransactionType = "Customer shipment reversal", QuantityChange = line.Quantity, UnitCost = line.UnitCost, TotalCost = line.TotalCost, Reference = $"REV-{shipment.ShipmentNumber}", JournalEntryId = reversal.Id!.Value });
+        }
+        if (packingSlip is not null)
+        {
+            var pick = await db.InventoryPicks.SingleAsync(candidate => candidate.Id == packingSlip.InventoryPickId, cancellationToken);
+            if (order.CancelledAtUtc.HasValue)
+            {
+                packingSlip.Status = "Cancelled"; packingSlip.CancelledByUserId = ResolveUserId(); packingSlip.CancelledAtUtc = DateTimeOffset.UtcNow; packingSlip.CancellationReason = "Order was cancelled before the shipment reversal."; pick.Status = "Cancelled"; pick.CancelledByUserId = ResolveUserId(); pick.CancelledAtUtc = DateTimeOffset.UtcNow; pick.CancellationReason = "Order was cancelled before the shipment reversal.";
+            }
+            else
+            {
+                packingSlip.Status = "Packed"; var pickLines = await db.InventoryPickLines.Where(line => line.InventoryPickId == pick.Id).ToListAsync(cancellationToken); var activePacks = await db.InventoryPackingSlips.Where(pack => pack.InventoryPickId == pick.Id && pack.Status != "Cancelled").ToListAsync(cancellationToken); var activePackIds = activePacks.Select(pack => pack.Id).ToArray(); var activePackLines = await db.InventoryPackingSlipLines.Where(line => activePackIds.Contains(line.InventoryPackingSlipId)).ToListAsync(cancellationToken); var fullyPacked = pickLines.All(line => activePackLines.Where(packed => packed.InventoryPickLineId == line.Id).Sum(packed => packed.Quantity) == line.PickedQuantity); pick.Status = fullyPacked ? "Packed" : "PartiallyPacked";
+            }
+            packingSlip.ConcurrencyToken = Guid.NewGuid().ToString("N"); pick.ConcurrencyToken = Guid.NewGuid().ToString("N");
         }
         if (order.CancelledAtUtc.HasValue) order.TotalAmount = CalculateRetainedSalesOrderTotal(orderLines.Values, activeInvoiceTotals);
         shipment.Status = "Reversed";

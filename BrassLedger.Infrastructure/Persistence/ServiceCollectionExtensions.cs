@@ -298,6 +298,13 @@ public static class ServiceCollectionExtensions
                 && await HasTableAsync(dbContext, "InventoryLocationBalances", cancellationToken)
                 && await HasTableAsync(dbContext, "InventoryTransfers", cancellationToken)
                 && await HasColumnAsync(dbContext, "InventoryTransactions", "WarehouseId", cancellationToken);
+        if (migrationId.EndsWith("_AddPickPackBackorders", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "InventoryPicks", cancellationToken)
+                && await HasTableAsync(dbContext, "InventoryPickLines", cancellationToken)
+                && await HasTableAsync(dbContext, "InventoryPackingSlips", cancellationToken)
+                && await HasTableAsync(dbContext, "InventoryPackingSlipLines", cancellationToken)
+                && await HasTableAsync(dbContext, "SalesOrderBackorderPromises", cancellationToken)
+                && await HasColumnAsync(dbContext, "InventoryShipments", "InventoryPackingSlipId", cancellationToken);
         return false;
     }
 

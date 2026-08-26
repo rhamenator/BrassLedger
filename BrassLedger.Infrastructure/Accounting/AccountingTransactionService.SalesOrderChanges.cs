@@ -29,6 +29,7 @@ public sealed partial class AccountingTransactionService
         if (!string.Equals(order.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The sales order changed after it was opened. Refresh and review it again.");
         var existingLines = await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
         if (existingLines.Any(line => line.ShippedQuantity != 0m || line.InvoicedQuantity != 0m || line.ReturnedQuantity != 0m || line.CancelledQuantity != 0m)) return TransactionResult.Failure("An order with shipment, invoice, return, or cancellation history cannot be amended. Use a compensating workflow.");
+        if (await db.InventoryPicks.AnyAsync(pick => pick.SalesOrderId == order.Id, cancellationToken) || await db.SalesOrderBackorderPromises.AnyAsync(backorder => backorder.SalesOrderId == order.Id, cancellationToken)) return TransactionResult.Failure("An order with pick, pack, or backorder-promise history cannot be amended. Cancel the open demand or create a replacement order.");
         var itemIds = requestedLines.Select(line => line.InventoryItemId).ToArray();
         if (await db.InventoryItems.CountAsync(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id), cancellationToken) != itemIds.Length) return TransactionResult.Failure("Every amended item must be active in the current company.");
         var revenueNumbers = requestedLines.Select(line => line.RevenueAccountNumber.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -91,6 +92,8 @@ public sealed partial class AccountingTransactionService
         var cancellations = lines.Select(line => new { Line = line, Quantity = line.OrderedQuantity - line.ShippedQuantity - line.CancelledQuantity }).Where(item => item.Quantity > 0m).ToArray();
         if (cancellations.Length == 0) return TransactionResult.Failure("The sales order has no open quantity to cancel.");
         var activeInvoiceTotals = await LoadActiveSalesOrderInvoiceTotalsAsync(db, companyId, lines.Select(line => line.Id), cancellationToken);
+        if (await db.InventoryPicks.AnyAsync(pick => pick.SalesOrderId == order.Id && pick.Status != "Cancelled" && pick.Status != "Shipped", cancellationToken) || await db.InventoryPackingSlips.AnyAsync(pack => pack.SalesOrderId == order.Id && pack.Status == "Packed", cancellationToken)) return TransactionResult.Failure("Cancel every active pick and packing slip before cancelling open order quantity.");
+        var openBackorders = await db.SalesOrderBackorderPromises.Where(backorder => backorder.CompanyId == companyId && backorder.SalesOrderId == order.Id && backorder.Status != "Cancelled").ToListAsync(cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var beforeTotal = order.TotalAmount;
@@ -98,13 +101,16 @@ public sealed partial class AccountingTransactionService
         {
             cancellation.Line.CancelledQuantity += cancellation.Quantity;
             cancellation.Line.AllocatedQuantity = 0m;
+            cancellation.Line.AllocationWarehouseId = null;
+            cancellation.Line.AllocationBinId = null;
         }
+        foreach (var backorder in openBackorders) { backorder.Status = "Cancelled"; backorder.CancelledByUserId = ResolveUserId(); backorder.CancelledAtUtc = DateTimeOffset.UtcNow; backorder.CancellationReason = request.Reason.Trim(); backorder.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
         order.TotalAmount = CalculateRetainedSalesOrderTotal(lines, activeInvoiceTotals);
         order.CancelledByUserId = ResolveUserId();
         order.CancelledAtUtc = DateTimeOffset.UtcNow;
         order.CancellationReason = request.Reason.Trim();
         UpdateSalesOrderFulfillmentStatus(order, lines);
-        AddSalesFulfillmentAudit(db, companyId, "sales-order.cancelled", nameof(SalesOrder), order.Id, new { order.OrderNumber, order.Status, order.CancellationReason, beforeTotal, order.TotalAmount, lines = cancellations.Select(item => new { item.Line.Sequence, item.Quantity }) });
+        AddSalesFulfillmentAudit(db, companyId, "sales-order.cancelled", nameof(SalesOrder), order.Id, new { order.OrderNumber, order.Status, order.CancellationReason, beforeTotal, order.TotalAmount, lines = cancellations.Select(item => new { item.Line.Sequence, item.Quantity }), cancelledBackorderIds = openBackorders.Select(backorder => backorder.Id) });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The sales order changed while it was being cancelled. Refresh and try again."); }
         await transaction.CommitAsync(cancellationToken);
