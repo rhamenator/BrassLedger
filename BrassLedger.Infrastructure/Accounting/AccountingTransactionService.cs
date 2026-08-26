@@ -587,7 +587,11 @@ public sealed partial class AccountingTransactionService(
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         if (!await db.Vendors.AnyAsync(x => x.Id == request.VendorId && x.CompanyId == companyId, cancellationToken)) return TransactionResult.Failure("Vendor not found.");
-        if (await db.VendorBills.AnyAsync(x => x.CompanyId == companyId && x.BillNumber == request.BillNumber.Trim(), cancellationToken)) return TransactionResult.Failure("Bill number already exists.");
+        var billNumber = request.BillNumber.Trim();
+        if (await db.VendorBills.AnyAsync(x => x.CompanyId == companyId && x.VendorId == request.VendorId && x.BillNumber == billNumber, cancellationToken)
+            || await db.PurchaseInvoiceMatches.AnyAsync(x => x.CompanyId == companyId && x.VendorId == request.VendorId && x.BillNumber == billNumber, cancellationToken)
+            || await db.LandedCostAllocations.AnyAsync(x => x.CompanyId == companyId && x.VendorId == request.VendorId && x.BillNumber == billNumber, cancellationToken))
+            return TransactionResult.Failure("Bill number already exists for this vendor.");
         var expenseNumbers = (requestedLines.Length == 0 ? [request.ExpenseAccountNumber] : requestedLines.Select(line => line.ExpenseAccountNumber)).Select(number => number?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (expenseNumbers.Any(string.IsNullOrWhiteSpace)) return TransactionResult.Failure("Every bill line requires an expense account.");
         var validExpenseAccountCount = await db.Accounts.CountAsync(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Expense && !account.IsControlAccount && expenseNumbers.Contains(account.Number), cancellationToken);
@@ -611,7 +615,7 @@ public sealed partial class AccountingTransactionService(
         var posting = await PostAsync(db, companyId, request.BillDate, "Accounts Payable", request.BillNumber, request.Description,
             postingLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: billId, sourceDocumentType: "VendorBill", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
-        var bill = new VendorBill { Id = billId, CompanyId = companyId, VendorId = request.VendorId, BillNumber = request.BillNumber.Trim(), BillDate = request.BillDate, DueDate = request.DueDate, Status = "Open", TotalAmount = total, BalanceDue = total, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        var bill = new VendorBill { Id = billId, CompanyId = companyId, VendorId = request.VendorId, BillNumber = billNumber, BillDate = request.BillDate, DueDate = request.DueDate, Status = "Open", TotalAmount = total, BalanceDue = total, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.VendorBills.Add(bill);
         if (lineAmounts.Length > 0)
         {

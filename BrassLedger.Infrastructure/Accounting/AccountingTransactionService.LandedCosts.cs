@@ -65,11 +65,14 @@ public sealed partial class AccountingTransactionService
                 item => item.CompanyId == companyId && item.AllocationNumber == allocationNumber && item.Id != request.Id,
                 cancellationToken))
             return TransactionResult.Failure("Landed-cost allocation number already exists.");
-        if (await db.VendorBills.AnyAsync(item => item.CompanyId == companyId && item.BillNumber == billNumber, cancellationToken)
+        if (await db.VendorBills.AnyAsync(item => item.CompanyId == companyId && item.VendorId == request.VendorId && item.BillNumber == billNumber, cancellationToken)
             || await db.LandedCostAllocations.AnyAsync(
-                item => item.CompanyId == companyId && item.BillNumber == billNumber && item.Id != request.Id,
+                item => item.CompanyId == companyId && item.VendorId == request.VendorId && item.BillNumber == billNumber && item.Id != request.Id,
+                cancellationToken)
+            || await db.PurchaseInvoiceMatches.AnyAsync(
+                item => item.CompanyId == companyId && item.VendorId == request.VendorId && item.BillNumber == billNumber,
                 cancellationToken))
-            return TransactionResult.Failure("Vendor bill number already exists.");
+            return TransactionResult.Failure("Vendor bill number already exists for this vendor.");
 
         var receiptLines = await db.InventoryReceiptLines
             .Where(line => line.InventoryReceiptId == receipt.Id && line.Quantity > line.ReturnedQuantity)
@@ -403,9 +406,9 @@ public sealed partial class AccountingTransactionService
         if (receipt.Status != "Posted")
             return TransactionResult.Failure("The source receipt is no longer posted. Return the allocation to draft and review it again.");
         if (await db.VendorBills.AnyAsync(
-                item => item.CompanyId == companyId && item.BillNumber == allocation.BillNumber,
+                item => item.CompanyId == companyId && item.VendorId == allocation.VendorId && item.BillNumber == allocation.BillNumber,
                 cancellationToken))
-            return TransactionResult.Failure("Vendor bill number already exists.");
+            return TransactionResult.Failure("Vendor bill number already exists for this vendor.");
 
         var charges = await db.LandedCostCharges
             .Where(charge => charge.LandedCostAllocationId == allocation.Id)

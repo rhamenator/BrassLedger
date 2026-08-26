@@ -3228,10 +3228,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasIndex("CompanyId", "AllocationNumber")
                         .IsUnique();
 
-                    b.HasIndex("CompanyId", "BillNumber")
-                        .IsUnique();
-
                     b.HasIndex("CompanyId", "InventoryReceiptId", "Status");
+
+                    b.HasIndex("CompanyId", "VendorId", "BillNumber")
+                        .IsUnique();
 
                     b.ToTable("LandedCostAllocations");
                 });
@@ -5610,10 +5610,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasIndex("VendorId");
 
-                    b.HasIndex("CompanyId", "BillNumber")
-                        .IsUnique();
-
                     b.HasIndex("CompanyId", "InventoryReceiptId", "Status");
+
+                    b.HasIndex("CompanyId", "VendorId", "BillNumber")
+                        .IsUnique();
 
                     b.ToTable("PurchaseInvoiceMatches");
                 });
@@ -7910,7 +7910,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasIndex("PurchaseOrderId");
 
-                    b.HasIndex("CompanyId", "BillNumber")
+                    b.HasIndex("CompanyId", "VendorId", "BillNumber")
                         .IsUnique();
 
                     b.ToTable("VendorBills");

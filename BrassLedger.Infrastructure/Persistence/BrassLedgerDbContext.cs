@@ -867,7 +867,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<Vendor>().HasIndex(x => new { x.CompanyId, x.VendorNumber }).IsUnique();
         modelBuilder.Entity<SalesInvoice>().HasIndex(x => new { x.CompanyId, x.InvoiceNumber }).IsUnique();
         modelBuilder.Entity<SalesInvoiceLine>().HasIndex(x => new { x.SalesInvoiceId, x.Sequence }).IsUnique();
-        modelBuilder.Entity<VendorBill>().HasIndex(x => new { x.CompanyId, x.BillNumber }).IsUnique();
+        modelBuilder.Entity<VendorBill>().HasIndex(x => new { x.CompanyId, x.VendorId, x.BillNumber }).IsUnique();
         modelBuilder.Entity<VendorBill>().HasIndex(x => x.InventoryReceiptId);
         modelBuilder.Entity<VendorBillLine>().HasIndex(x => new { x.VendorBillId, x.Sequence }).IsUnique();
         modelBuilder.Entity<SubledgerPayment>().HasIndex(x => new { x.CompanyId, x.Direction, x.Reference }).IsUnique();
@@ -912,12 +912,12 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SupplierReturnShipmentLine>().HasIndex(x => new { x.SupplierReturnShipmentId, x.SupplierReturnAuthorizationLineId }).IsUnique();
         modelBuilder.Entity<SupplierReturnCreditApplication>().HasIndex(x => new { x.CompanyId, x.SupplierReturnShipmentId, x.Status });
         modelBuilder.Entity<SupplierReturnCreditRefund>().HasIndex(x => new { x.CompanyId, x.Reference }).IsUnique();
-        modelBuilder.Entity<PurchaseInvoiceMatch>().HasIndex(x => new { x.CompanyId, x.BillNumber }).IsUnique();
+        modelBuilder.Entity<PurchaseInvoiceMatch>().HasIndex(x => new { x.CompanyId, x.VendorId, x.BillNumber }).IsUnique();
         modelBuilder.Entity<PurchaseInvoiceMatch>().HasIndex(x => new { x.CompanyId, x.InventoryReceiptId, x.Status });
         modelBuilder.Entity<PurchaseInvoiceMatchLine>().HasIndex(x => new { x.PurchaseInvoiceMatchId, x.Sequence }).IsUnique();
         modelBuilder.Entity<PurchaseInvoiceMatchLine>().HasIndex(x => new { x.PurchaseInvoiceMatchId, x.InventoryReceiptLineId }).IsUnique();
         modelBuilder.Entity<LandedCostAllocation>().HasIndex(x => new { x.CompanyId, x.AllocationNumber }).IsUnique();
-        modelBuilder.Entity<LandedCostAllocation>().HasIndex(x => new { x.CompanyId, x.BillNumber }).IsUnique();
+        modelBuilder.Entity<LandedCostAllocation>().HasIndex(x => new { x.CompanyId, x.VendorId, x.BillNumber }).IsUnique();
         modelBuilder.Entity<LandedCostAllocation>().HasIndex(x => new { x.CompanyId, x.InventoryReceiptId, x.Status });
         modelBuilder.Entity<LandedCostCharge>().HasIndex(x => new { x.LandedCostAllocationId, x.Sequence }).IsUnique();
         modelBuilder.Entity<LandedCostAllocationLine>().HasIndex(x => new { x.LandedCostAllocationId, x.Sequence }).IsUnique();

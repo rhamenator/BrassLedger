@@ -345,6 +345,10 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "VendorBillLines", "AccrualAmount", cancellationToken)
                 && await HasColumnAsync(dbContext, "SupplierReturnShipmentLines", "InvoicedQuantity", cancellationToken)
                 && await HasColumnAsync(dbContext, "SupplierReturnShipmentLines", "GrniReductionAmount", cancellationToken);
+        if (migrationId.EndsWith("_ScopeVendorBillNumbersByVendor", StringComparison.Ordinal))
+            return await HasIndexAsync(dbContext, "IX_VendorBills_CompanyId_VendorId_BillNumber", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_PurchaseInvoiceMatches_CompanyId_VendorId_BillNumber", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_LandedCostAllocations_CompanyId_VendorId_BillNumber", cancellationToken);
         return false;
     }
 
@@ -376,6 +380,18 @@ public static class ServiceCollectionExtensions
             command.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{tableName.Replace("'", "''", StringComparison.Ordinal)}') WHERE name = @column;";
             var column = command.CreateParameter(); column.ParameterName = "@column"; column.Value = columnName; command.Parameters.Add(column);
         }
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
+    }
+
+    private static async Task<bool> HasIndexAsync(BrassLedgerDbContext dbContext, string indexName, CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.Transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandText = dbContext.Database.IsNpgsql()
+            ? "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname = @name;"
+            : "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = @name;";
+        var parameter = command.CreateParameter(); parameter.ParameterName = "@name"; parameter.Value = indexName; command.Parameters.Add(parameter);
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
     }
 

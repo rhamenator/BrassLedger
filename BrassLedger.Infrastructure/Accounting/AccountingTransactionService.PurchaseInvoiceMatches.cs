@@ -51,12 +51,15 @@ public sealed partial class AccountingTransactionService
             cancellationToken);
         var billNumber = request.BillNumber.Trim();
         if (await db.VendorBills.AnyAsync(
-                bill => bill.CompanyId == companyId && bill.BillNumber == billNumber,
+                bill => bill.CompanyId == companyId && bill.VendorId == vendor.Id && bill.BillNumber == billNumber,
                 cancellationToken)
             || await db.PurchaseInvoiceMatches.AnyAsync(
-                match => match.CompanyId == companyId && match.BillNumber == billNumber && match.Id != request.Id,
+                match => match.CompanyId == companyId && match.VendorId == vendor.Id && match.BillNumber == billNumber && match.Id != request.Id,
+                cancellationToken)
+            || await db.LandedCostAllocations.AnyAsync(
+                allocation => allocation.CompanyId == companyId && allocation.VendorId == vendor.Id && allocation.BillNumber == billNumber,
                 cancellationToken))
-            return TransactionResult.Failure("Vendor bill number already exists.");
+            return TransactionResult.Failure("Vendor bill number already exists for this vendor.");
 
         var receiptLines = await db.InventoryReceiptLines
             .Where(line => line.InventoryReceiptId == receipt.Id)
@@ -424,9 +427,9 @@ public sealed partial class AccountingTransactionService
         if (receipt.Status != "Posted")
             return TransactionResult.Failure("The source receipt is no longer posted. Return the invoice match to draft and review it again.");
         if (await db.VendorBills.AnyAsync(
-                bill => bill.CompanyId == companyId && bill.BillNumber == match.BillNumber,
+                bill => bill.CompanyId == companyId && bill.VendorId == match.VendorId && bill.BillNumber == match.BillNumber,
                 cancellationToken))
-            return TransactionResult.Failure("Vendor bill number already exists.");
+            return TransactionResult.Failure("Vendor bill number already exists for this vendor.");
 
         var lines = await db.PurchaseInvoiceMatchLines
             .Where(line => line.PurchaseInvoiceMatchId == match.Id)

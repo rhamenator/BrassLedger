@@ -15,7 +15,7 @@ SQLite and PostgreSQL have separate versioned migrations for this schema. Existi
 Verification completed on 2026-08-26:
 
 - Release solution build: succeeded with zero warnings and zero errors.
-- SQLite/default infrastructure suite: 177 tests passed; five PostgreSQL-only tests were skipped in that run.
+- SQLite/default infrastructure suite: 178 tests passed; five PostgreSQL-only tests were skipped in that run.
 - Disposable PostgreSQL 16 infrastructure suite: 182 of 182 tests passed with zero skips.
 - API integration suite: 32 of 32 tests passed.
 - Web component suite: 7 of 7 tests passed.
@@ -23,6 +23,7 @@ Verification completed on 2026-08-26:
 - SQLite and PostgreSQL EF model-drift checks: no pending model changes.
 - NuGet direct and transitive vulnerability scan: no known vulnerable packages from the configured source.
 - Cross-invoice supplier-return regression: passed for a return spanning two supplier invoices with different prices, followed by exact reversal.
+- Vendor invoice-number scope regression: two vendors can use the same external number, while a duplicate for one vendor is rejected. Fresh, lost-history adoption, and destructive-downgrade checks pass on SQLite; the PostgreSQL fresh/upgrade/adoption migration test also passes.
 
 The browser test host launches the already-built web assembly directly. This avoids nested MSBuild worker failures and ensures browser tests exercise the same Debug or Release output produced by their build.
 
