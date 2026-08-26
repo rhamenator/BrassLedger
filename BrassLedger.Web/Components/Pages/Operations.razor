@@ -532,12 +532,57 @@ else
                 {
                     <tr><td>@receipt.ReceiptNumber</td><td>@receipt.PurchaseOrderNumber</td><td>@receipt.Location</td><td>@receipt.ReceivedOn.ToString("MMM d, yyyy")</td><td>@receipt.Status</td><td>@receipt.TotalAmount.ToString("C")</td><td>@(receipt.VendorBillId.HasValue ? "Matched" : "Unmatched")</td><td>
                         @if (CanManagePurchasing && receipt.Status == "Posted" && AvailableSupplierReturnLines(receipt).Count > 0) { <button class="action-secondary" type="button" @onclick="() => BeginSupplierReturn(receipt)">Return to supplier</button> }
+                        @if (CanManagePayables && receipt.Status == "Posted") { <button class="action-secondary" type="button" @onclick="() => BeginLandedCost(receipt)">Allocate landed cost</button> }
                         @if (CanManagePurchasing && receipt.Status == "Posted" && !receipt.VendorBillId.HasValue) { @if (CanMatchReceiptBills) { <button class="action-secondary" type="button" @onclick="() => BeginBillMatch(receipt)">Create matched bill</button> }<button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, false)">Reverse receipt</button> }
                         @if (CanMatchReceiptBills && receipt.Status == "Posted" && receipt.VendorBillId.HasValue) { <button class="action-secondary" type="button" @onclick="() => BeginCorrection(receipt, true)">Void matched bill</button> }
                     </td></tr>
                 }
             </tbody></table>
         </section>
+
+        @if (CanManagePayables && LandedCostForm is not null)
+        {
+            <section class="panel"><h2>@(LandedCostForm.Id.HasValue ? "Edit" : "Prepare") landed cost for receipt @LandedCostForm.ReceiptNumber</h2><p class="page-intro">Payables records the supplier charges and allocation basis. Purchasing must approve the draft before Payables can capitalize it into inventory and post the vendor bill.</p><EditForm Model="LandedCostForm" OnValidSubmit="SaveLandedCostAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Landed-cost vendor</label><InputSelect aria-label="Landed cost vendor" class="field-input" @bind-Value="LandedCostForm.VendorId"><option value="@Guid.Empty">Select vendor</option>@foreach (var vendor in Workspace.Payables.Vendors) { <option value="@vendor.Id">@vendor.VendorNumber — @vendor.Name</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Allocation number</label><InputText aria-label="Landed cost allocation number" class="field-input" @bind-Value="LandedCostForm.AllocationNumber" /></div>
+                <div class="field-group"><label class="field-label">Vendor bill number</label><InputText aria-label="Landed cost bill number" class="field-input" @bind-Value="LandedCostForm.BillNumber" /></div>
+                <div class="field-group"><label class="field-label">Bill date</label><InputDate aria-label="Landed cost bill date" class="field-input" @bind-Value="LandedCostForm.BillDate" /></div>
+                <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Landed cost due date" class="field-input" @bind-Value="LandedCostForm.DueDate" /></div>
+                <div class="field-group"><label class="field-label">Allocation method</label><InputSelect aria-label="Landed cost allocation method" class="field-input" @bind-Value="LandedCostForm.AllocationMethod"><option value="ReceiptValue">Receipt value</option><option value="Quantity">Quantity</option><option value="Manual">Manual</option></InputSelect></div>
+                <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Landed cost description" class="field-input" @bind-Value="LandedCostForm.Description" /></div>
+                @for (var index = 0; index < LandedCostForm.Charges.Count; index++)
+                {
+                    var chargeIndex = index; var charge = LandedCostForm.Charges[chargeIndex];
+                    <fieldset class="field-group"><legend>Charge @(chargeIndex + 1)</legend><label class="field-label">Type</label><InputSelect aria-label="@($"Landed cost charge {chargeIndex + 1} type")" class="field-input" @bind-Value="charge.ChargeType">@foreach (var type in LandedCostChargeTypes) { <option value="@type">@type</option> }</InputSelect><label class="field-label">Description</label><InputText aria-label="@($"Landed cost charge {chargeIndex + 1} description")" class="field-input" @bind-Value="charge.Description" /><label class="field-label">Amount</label><InputNumber aria-label="@($"Landed cost charge {chargeIndex + 1} amount")" class="field-input" @bind-Value="charge.Amount" />@if (LandedCostForm.Charges.Count > 1) { <button class="action-secondary" type="button" @onclick="() => RemoveLandedCostCharge(chargeIndex)">Remove charge</button> }</fieldset>
+                }
+                <button class="action-secondary" type="button" @onclick="AddLandedCostCharge">Add charge</button>
+                @if (LandedCostForm.AllocationMethod == "Manual")
+                {
+                    <p class="page-intro">Manual line amounts must include every retained receipt line and equal the total charges exactly.</p>
+                    @foreach (var line in LandedCostForm.Lines) { <div class="field-group"><label class="field-label">@line.Sku allocation</label><InputNumber aria-label="@($"Landed cost {line.Sku} allocation")" class="field-input" @bind-Value="line.AllocatedAmount" /></div> }
+                }
+                <button class="action-primary" type="submit">Save landed-cost draft</button><button class="action-secondary" type="button" @onclick="CancelLandedCostEdit">Cancel</button>
+            </div></EditForm></section>
+        }
+
+        @if (LandedCostDecisionForm is not null)
+        {
+            <section class="panel"><h2>@LandedCostDecisionForm.Title</h2><EditForm Model="LandedCostDecisionForm" OnValidSubmit="CompleteLandedCostDecisionAsync"><div class="auth-form">@if (LandedCostDecisionForm.NeedsDate) { <div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Landed cost reversal date" class="field-input" @bind-Value="LandedCostDecisionForm.ActionDate" /></div> }<div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Landed cost action reason" class="field-input" @bind-Value="LandedCostDecisionForm.Reason" /></div><button class="action-primary" type="submit">Confirm</button><button class="action-secondary" type="button" @onclick="CancelLandedCostDecision">Cancel</button></div></EditForm></section>
+        }
+
+        <section class="panel"><h2>Landed-cost allocations</h2><p class="page-intro">Freight and import charges remain tied to their source receipt, approval, vendor bill, journal, and inventory valuation. Reversals preserve the original history.</p><div class="table-scroll"><table class="data-table" aria-label="Landed cost allocations"><thead><tr><th>Allocation</th><th>Receipt</th><th>Vendor bill</th><th>Method</th><th>Total</th><th>Status</th><th>Review</th><th>Action</th></tr></thead><tbody>
+            @foreach (var allocation in Workspace.Operations.LandedCostAllocations ?? [])
+            {
+                <tr><td>@allocation.AllocationNumber</td><td>@allocation.ReceiptNumber</td><td>@allocation.VendorName — @allocation.BillNumber</td><td>@allocation.AllocationMethod</td><td>@allocation.TotalAmount.ToString("C")</td><td>@allocation.Status</td><td>@allocation.DecisionReason @allocation.CancellationReason</td><td>
+                    @if (CanManagePayables && allocation.Status is "Draft" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => EditLandedCost(allocation)">Edit</button> }
+                    @if (CanManagePayables && allocation.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => SubmitLandedCostAsync(allocation)">Submit</button> }
+                    @if (CanManagePurchasing && allocation.Status == "Submitted") { <button class="action-secondary" type="button" @onclick='() => BeginLandedCostDecision(allocation, "Approve")'>Approve</button><button class="action-secondary" type="button" @onclick='() => BeginLandedCostDecision(allocation, "Reject")'>Reject</button> }
+                    @if (CanManagePayables && allocation.Status == "Approved") { <button class="action-primary" type="button" @onclick="() => PostLandedCostAsync(allocation)">Post allocation</button> }
+                    @if (CanManagePayables && allocation.Status is "Draft" or "Submitted" or "Approved" or "Rejected") { <button class="action-secondary" type="button" @onclick='() => BeginLandedCostDecision(allocation, "Cancel")'>Cancel</button> }
+                    @if (CanManagePurchasing && CanReverseTransactions && allocation.Status == "Posted") { <button class="action-secondary" type="button" @onclick='() => BeginLandedCostDecision(allocation, "Reverse")'>Reverse</button> }
+                </td></tr>
+            }
+        </tbody></table></div></section>
 
         @if (CanManagePurchasing && SupplierReturnAuthorizationForm is not null)
         {
@@ -645,6 +690,9 @@ else
     private SupplierReturnCancellationEditor? SupplierReturnCancellationForm;
     private SupplierReturnCreditSettlementEditor? SupplierReturnCreditSettlementForm;
     private SupplierReturnReversalEditor? SupplierReturnReversalForm;
+    private LandedCostEditor? LandedCostForm;
+    private LandedCostDecisionEditor? LandedCostDecisionForm;
+    private static readonly string[] LandedCostChargeTypes = ["Freight", "CustomsDuty", "Brokerage", "Insurance", "Handling", "PortFees", "Inspection", "Storage", "Demurrage", "Other"];
     private bool CanManageRequisitions;
     private bool CanManagePurchasing;
     private bool CanManagePayables;
@@ -980,6 +1028,45 @@ else
     {
         var form = SupplierReturnReversalForm!; var result = form.Kind switch { "Shipment" => await TransactionService.ReverseSupplierReturnShipmentAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)), "Application" => await TransactionService.ReverseSupplierReturnCreditApplicationAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)), _ => await TransactionService.ReverseSupplierReturnCreditRefundAsync(new(form.DocumentId, form.ReversalDate, form.Reason, form.ConcurrencyToken)) }; StatusMessage = result.Succeeded ? $"Supplier-return {form.Kind.ToLowerInvariant()} reversed." : result.ErrorMessage; if (result.Succeeded) { SupplierReturnReversalForm = null; await ReloadAsync(); }
     }
+    private void BeginLandedCost(InventoryReceiptSnapshot receipt) => LandedCostForm = LandedCostEditor.Create(receipt);
+    private void EditLandedCost(LandedCostAllocationSnapshot allocation)
+    {
+        var receipt = (Workspace?.Operations.InventoryReceipts ?? []).Single(item => item.Id == allocation.InventoryReceiptId);
+        LandedCostForm = LandedCostEditor.Edit(allocation, receipt);
+    }
+    private void CancelLandedCostEdit() => LandedCostForm = null;
+    private void AddLandedCostCharge() => LandedCostForm?.Charges.Add(new("Other", "Additional landed cost", 0m));
+    private void RemoveLandedCostCharge(int index) => LandedCostForm?.Charges.RemoveAt(index);
+    private async Task SaveLandedCostAsync()
+    {
+        var form = LandedCostForm!;
+        var result = await TransactionService.SaveLandedCostAllocationAsync(new(form.Id, form.InventoryReceiptId, form.VendorId, form.AllocationNumber, form.BillNumber, form.BillDate, form.DueDate, form.AllocationMethod, form.Description, form.Charges.Select(charge => new LandedCostChargeRequest(charge.ChargeType, charge.Description, charge.Amount)).ToArray(), form.AllocationMethod == "Manual" ? form.Lines.Select(line => new LandedCostManualLineRequest(line.InventoryReceiptLineId, line.AllocatedAmount)).ToArray() : null, form.ReceiptConcurrencyToken, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? $"Landed-cost allocation {form.AllocationNumber} saved as a draft." : result.ErrorMessage;
+        if (result.Succeeded) { LandedCostForm = null; await ReloadAsync(); }
+    }
+    private async Task SubmitLandedCostAsync(LandedCostAllocationSnapshot allocation)
+    {
+        var result = await TransactionService.SubmitLandedCostAllocationAsync(new(allocation.Id, allocation.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Landed-cost allocation {allocation.AllocationNumber} submitted to Purchasing." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync();
+    }
+    private void BeginLandedCostDecision(LandedCostAllocationSnapshot allocation, string action) => LandedCostDecisionForm = new(allocation.Id, allocation.AllocationNumber, allocation.BillDate, allocation.ConcurrencyToken, action);
+    private void CancelLandedCostDecision() => LandedCostDecisionForm = null;
+    private async Task CompleteLandedCostDecisionAsync()
+    {
+        var form = LandedCostDecisionForm!;
+        var result = form.Action switch
+        {
+            "Approve" => await TransactionService.DecideLandedCostAllocationAsync(new(form.LandedCostAllocationId, true, form.Reason, form.ConcurrencyToken)),
+            "Reject" => await TransactionService.DecideLandedCostAllocationAsync(new(form.LandedCostAllocationId, false, form.Reason, form.ConcurrencyToken)),
+            "Cancel" => await TransactionService.CancelLandedCostAllocationAsync(new(form.LandedCostAllocationId, form.Reason, form.ConcurrencyToken)),
+            _ => await TransactionService.ReverseLandedCostAllocationAsync(new(form.LandedCostAllocationId, form.ActionDate, form.Reason, form.ConcurrencyToken))
+        };
+        StatusMessage = result.Succeeded ? $"Landed-cost allocation {form.AllocationNumber} {form.PastTense}." : result.ErrorMessage;
+        if (result.Succeeded) { LandedCostDecisionForm = null; await ReloadAsync(); }
+    }
+    private async Task PostLandedCostAsync(LandedCostAllocationSnapshot allocation)
+    {
+        var result = await TransactionService.PostLandedCostAllocationAsync(new(allocation.Id, allocation.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Landed-cost allocation {allocation.AllocationNumber} posted to inventory and accounts payable." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync();
+    }
     private void BeginBillMatch(InventoryReceiptSnapshot receipt) => BillMatchForm = new BillMatchEditor(receipt.Id, receipt.ReceiptNumber, receipt.ConcurrencyToken);
     private void CancelBillMatch() => BillMatchForm = null;
     private async Task MatchBillAsync()
@@ -1145,6 +1232,26 @@ else
         public static SupplierReturnReversalEditor ForApplication(Guid id, string label, string token, DateOnly date) => new(id, label, token, "Application", date);
         public static SupplierReturnReversalEditor ForRefund(Guid id, string label, string token, DateOnly date) => new(id, label, token, "Refund", date);
         public Guid DocumentId { get; } public string DocumentLabel { get; } public string ConcurrencyToken { get; } public string Kind { get; } public DateOnly ReversalDate { get; set; } public string Reason { get; set; } = "";
+    }
+    private sealed class LandedCostEditor
+    {
+        private LandedCostEditor(InventoryReceiptSnapshot receipt) { InventoryReceiptId = receipt.Id; ReceiptNumber = receipt.ReceiptNumber; ReceiptConcurrencyToken = receipt.ConcurrencyToken; var today = DateOnly.FromDateTime(DateTime.Today); BillDate = today < receipt.ReceivedOn ? receipt.ReceivedOn : today; DueDate = BillDate.AddDays(30); Lines = receipt.Lines.Where(line => line.Quantity > line.ReturnedQuantity).Select(line => new LandedCostLineEditor(line.Id, line.Sku, 0m)).ToList(); }
+        public static LandedCostEditor Create(InventoryReceiptSnapshot receipt) => new(receipt);
+        public static LandedCostEditor Edit(LandedCostAllocationSnapshot allocation, InventoryReceiptSnapshot receipt)
+        {
+            var editor = new LandedCostEditor(receipt) { Id = allocation.Id, VendorId = allocation.VendorId, AllocationNumber = allocation.AllocationNumber, BillNumber = allocation.BillNumber, BillDate = allocation.BillDate, DueDate = allocation.DueDate, AllocationMethod = allocation.AllocationMethod, Description = allocation.Description, ConcurrencyToken = allocation.ConcurrencyToken };
+            editor.Charges.Clear(); editor.Charges.AddRange(allocation.Charges.Select(charge => new LandedCostChargeEditor(charge.ChargeType, charge.Description, charge.Amount)));
+            foreach (var line in editor.Lines) line.AllocatedAmount = allocation.Lines.SingleOrDefault(item => item.InventoryReceiptLineId == line.InventoryReceiptLineId)?.AllocatedAmount ?? 0m;
+            return editor;
+        }
+        public Guid? Id { get; set; } public Guid InventoryReceiptId { get; } public string ReceiptNumber { get; } public string ReceiptConcurrencyToken { get; } public string ConcurrencyToken { get; set; } = ""; public Guid VendorId { get; set; } public string AllocationNumber { get; set; } = $"LC-{DateTime.Now:yyyyMMddHHmm}"; public string BillNumber { get; set; } = $"LCB-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly BillDate { get; set; } public DateOnly DueDate { get; set; } public string AllocationMethod { get; set; } = "ReceiptValue"; public string Description { get; set; } = "Capitalized freight and import costs"; public List<LandedCostChargeEditor> Charges { get; } = [new("Freight", "Inbound freight", 0m)]; public List<LandedCostLineEditor> Lines { get; }
+    }
+    private sealed class LandedCostChargeEditor(string chargeType, string description, decimal amount) { public string ChargeType { get; set; } = chargeType; public string Description { get; set; } = description; public decimal Amount { get; set; } = amount; }
+    private sealed class LandedCostLineEditor(Guid inventoryReceiptLineId, string sku, decimal allocatedAmount) { public Guid InventoryReceiptLineId { get; } = inventoryReceiptLineId; public string Sku { get; } = sku; public decimal AllocatedAmount { get; set; } = allocatedAmount; }
+    private sealed class LandedCostDecisionEditor
+    {
+        public LandedCostDecisionEditor(Guid landedCostAllocationId, string allocationNumber, DateOnly billDate, string concurrencyToken, string action) { LandedCostAllocationId = landedCostAllocationId; AllocationNumber = allocationNumber; ConcurrencyToken = concurrencyToken; Action = action; var today = DateOnly.FromDateTime(DateTime.Today); ActionDate = today < billDate ? billDate : today; }
+        public Guid LandedCostAllocationId { get; } public string AllocationNumber { get; } public string ConcurrencyToken { get; } public string Action { get; } public bool NeedsDate => Action == "Reverse"; public string Title => $"{Action} landed-cost allocation {AllocationNumber}"; public string PastTense => Action switch { "Approve" => "approved", "Reject" => "rejected", "Cancel" => "cancelled", _ => "reversed" }; public DateOnly ActionDate { get; set; } public string Reason { get; set; } = "";
     }
     private sealed class BillMatchEditor(Guid inventoryReceiptId, string receiptNumber, string concurrencyToken) { public Guid InventoryReceiptId { get; } = inventoryReceiptId; public string ReceiptNumber { get; } = receiptNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string BillNumber { get; set; } = $"BILL-{DateTime.Now:yyyyMMddHHmm}"; public DateOnly BillDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); public string Description { get; set; } = "Inventory receipt vendor bill"; }
     private sealed class PurchaseCorrectionEditor(Guid inventoryReceiptId, string receiptNumber, string concurrencyToken, bool voidBill) { public Guid InventoryReceiptId { get; } = inventoryReceiptId; public string ReceiptNumber { get; } = receiptNumber; public string ConcurrencyToken { get; } = concurrencyToken; public bool VoidBill { get; } = voidBill; public DateOnly CorrectionDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = ""; }

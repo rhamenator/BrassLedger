@@ -107,6 +107,8 @@ public sealed class WorkflowDataTests
         var billNumber = $"BILL-E2E-{suffix}";
         var returnNumber = $"SRA-E2E-{suffix}";
         var returnShipmentNumber = $"SRS-E2E-{suffix}";
+        var landedCostNumber = $"LC-E2E-{suffix}";
+        var landedCostBillNumber = $"LCB-E2E-{suffix}";
         await using (var preparerSession = await _fixture.CreateSessionAsync(browserKind))
         {
             await preparerSession.SignInAsync("requisition");
@@ -121,8 +123,18 @@ public sealed class WorkflowDataTests
         await purchasing.OpenAsync();
         await purchasing.ApproveAndConvertPurchaseRequisitionAsync(requisitionNumber, orderNumber);
         await purchasing.ApproveReceiveAndMatchAsync(orderNumber, receiptNumber, billNumber);
+        await using (var payablesPreparationSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await payablesPreparationSession.SignInAsync("controller"); var payablesPreparation = new OperationsPage(payablesPreparationSession); await payablesPreparation.OpenAsync(); await payablesPreparation.PrepareLandedCostAsync(receiptNumber, landedCostNumber, landedCostBillNumber); await payablesPreparationSession.AssertNoUiFailuresAsync("landed-cost preparation and submission");
+        }
+        await purchasing.OpenAsync(); await purchasing.ApproveLandedCostAsync(landedCostNumber);
+        await using (var payablesPostingSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await payablesPostingSession.SignInAsync("controller"); var payablesPosting = new OperationsPage(payablesPostingSession); await payablesPosting.OpenAsync(); await payablesPosting.PostLandedCostAsync(landedCostNumber); await payablesPostingSession.AssertNoUiFailuresAsync("landed-cost posting");
+        }
+        await purchasing.OpenAsync();
         await purchasing.AuthorizeAndShipSupplierReturnAsync(receiptNumber, returnNumber, returnShipmentNumber);
-        await purchasingSession.AssertNoUiFailuresAsync("purchase-order approval, receipt, invoice match, and supplier return");
+        await purchasingSession.AssertNoUiFailuresAsync("purchase-order approval, receipt, invoice match, landed-cost review, and supplier return");
     }
 
     [Theory]

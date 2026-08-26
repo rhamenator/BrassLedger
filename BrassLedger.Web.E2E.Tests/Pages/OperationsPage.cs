@@ -291,6 +291,37 @@ public sealed class OperationsPage
         var shipmentRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Supplier return shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber }); await Assertions.Expect(shipmentRow).ToContainTextAsync("Vendor credit"); await Assertions.Expect(shipmentRow).ToContainTextAsync("Posted");
     }
 
+    public async Task PrepareLandedCostAsync(string receiptNumber, string allocationNumber, string billNumber)
+    {
+        var receiptRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Inventory receipts" }).Locator("tr").Filter(new() { HasTextString = receiptNumber });
+        await receiptRow.GetByRole(AriaRole.Button, new() { Name = "Allocate landed cost" }).ClickAsync();
+        await _session.Page.GetByLabel("Landed cost vendor").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Landed cost allocation number").FillAsync(allocationNumber);
+        await _session.Page.GetByLabel("Landed cost bill number").FillAsync(billNumber);
+        await _session.Page.GetByLabel("Landed cost charge 1 amount").FillAsync("12.50");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save landed-cost draft" }).ClickAsync();
+        await _session.Page.GetByText($"Landed-cost allocation {allocationNumber} saved as a draft.", new() { Exact = true }).WaitForAsync();
+        var row = LandedCostRow(allocationNumber); await row.GetByRole(AriaRole.Button, new() { Name = "Submit" }).ClickAsync();
+        await _session.Page.GetByText($"Landed-cost allocation {allocationNumber} submitted to Purchasing.", new() { Exact = true }).WaitForAsync();
+    }
+
+    public async Task ApproveLandedCostAsync(string allocationNumber)
+    {
+        var row = LandedCostRow(allocationNumber); await row.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
+        await _session.Page.GetByLabel("Landed cost action reason").FillAsync("Browser review of freight invoice and allocation");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Confirm" }).ClickAsync();
+        await _session.Page.GetByText($"Landed-cost allocation {allocationNumber} approved.", new() { Exact = true }).WaitForAsync();
+    }
+
+    public async Task PostLandedCostAsync(string allocationNumber)
+    {
+        var row = LandedCostRow(allocationNumber); await row.GetByRole(AriaRole.Button, new() { Name = "Post allocation" }).ClickAsync();
+        await _session.Page.GetByText($"Landed-cost allocation {allocationNumber} posted to inventory and accounts payable.", new() { Exact = true }).WaitForAsync();
+        row = LandedCostRow(allocationNumber); await Assertions.Expect(row).ToContainTextAsync("Posted"); await Assertions.Expect(row).ToContainTextAsync("$12.50");
+    }
+
+    private ILocator LandedCostRow(string allocationNumber) => _session.Page.GetByRole(AriaRole.Table, new() { Name = "Landed cost allocations" }).Locator("tr").Filter(new() { HasTextString = allocationNumber });
+
     private ILocator SalesOrderRow(string orderNumber) =>
         _session.Page.GetByRole(AriaRole.Table, new() { Name = "Sales orders" }).Locator("tr").Filter(new()
         {

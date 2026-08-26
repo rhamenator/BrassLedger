@@ -16,13 +16,23 @@ An exact invoice match posts a debit to GRNI and a credit to the configured **Ac
 
 ## Supplier returns and vendor credits
 
-Use **Return to supplier** on a posted receipt to authorize exact quantities from its immutable receipt lines. Authorization reserves those quantities but does not move stock or post accounting. A return may then be shipped in one or more parts from the warehouse/bin that physically contains the goods. Shipment removes unreserved stock at the source receipt cost and recalculates the remaining moving-average cost; BrassLedger refuses a return that would make quantity or inventory value negative.
+Use **Return to supplier** on a posted receipt to authorize exact quantities from its immutable receipt lines. Authorization reserves those quantities but does not move stock or post accounting. A return may then be shipped in one or more parts from the warehouse/bin that physically contains the goods. Shipment removes unreserved stock at the source receipt cost plus any posted landed cost allocated to that line and recalculates the remaining moving-average cost; BrassLedger refuses a return that would make quantity or inventory value negative.
 
 The accounting depends on invoice timing. A shipment made before matching the receipt debits GRNI and credits Inventory, and a later match bills only the net units retained. A shipment made after matching debits Accounts Payable and credits Inventory. The resulting vendor credit first reduces any balance still due on that source bill. Payables can deliberately apply the remaining credit to another open bill for the same vendor or record a cash refund to a mapped bank account. Credit allocation is a non-posting subledger action because the AP reduction was recorded by the physical return; a cash refund posts Cash against AP.
 
 Return authorizations, shipments, allocations, refunds, and reversals retain source receipt, purchase-order line, vendor-bill, inventory-location, journal, actor, timestamp, and reason provenance. Quantities and amounts remain visible as gross history plus returned, credited, applied, refunded, and available values. Company-scoped numbers, permissions, optimistic concurrency, closed-period controls, and duplicate protection apply throughout.
 
 The starter chart uses account 2050 for GRNI, but workflows resolve the company-scoped operational role rather than relying on that number. Existing companies receive a starter GRNI control account only when neither the role nor proposed number is already present. An administrator cannot reassign the role while unmatched posted receipts remain.
+
+## Landed costs
+
+Use **Allocate landed cost** on a posted inventory receipt for freight, customs duty, brokerage, insurance, handling, port fees, inspection, storage, demurrage, or another documented inbound charge. Payables enters one or more positive charge lines, the external vendor bill number and dates, and chooses allocation by retained receipt value, retained quantity, or exact manual line amounts. Manual allocations must include every retained receipt line and reconcile to the charge total; proportional methods assign any rounding remainder to the final line so the result always reconciles.
+
+The saved document is a non-posting draft. Payables submits it, a different purchasing reviewer approves or rejects it with a reason, and a Payables operator other than that reviewer posts the approved allocation. Posting debits Inventory, credits Accounts Payable, creates the linked open vendor bill, adds a zero-quantity valuation transaction for each affected item, and incorporates the allocated amount into moving-average cost. The receipt, charge lines, allocation lines, item cost before and after posting, bill, journal, actors, decisions, and timestamps remain linked and auditable.
+
+BrassLedger rejects duplicate allocation or bill numbers, stale receipt/item/allocation tokens, unsupported or unreconciled charges, cross-company sources, active supplier-return activity, and capitalization after affected stock has moved out. That last restriction is deliberate: the current weighted-average model cannot prove how a late charge should be split between remaining inventory and cost of goods sold after outbound movement. Enter and approve landed cost before selling or otherwise issuing the affected inventory; otherwise use a reviewed current-period inventory/COGS adjustment.
+
+Do not void the generated bill through the generic Payables action. Use **Reverse** on the landed-cost allocation after reversing every payment, credit, or adjustment against its bill. Reversal requires both purchasing and payment-reversal authority, must remain the latest valuation event for every affected item, posts an inverse journal, restores prior item costs, voids the bill, and retains both sides of the history.
 
 ## Corrections
 
@@ -36,4 +46,4 @@ All postings enforce company isolation, active vendors and items, closed account
 
 ## Current boundary
 
-This workflow supports separate purchase requisitions, exact approved conversion, exact receipt-level matching, warehouse/bin receiving, moving-average valuation, receipt-provenance supplier returns, vendor-credit settlement, and dependency-ordered corrections. Price/quantity variance approval, landed-cost allocation, lots, serial numbers, and FIFO layers remain separate production-readiness work. Do not represent those capabilities as implemented.
+This workflow supports separate purchase requisitions, exact approved conversion, exact receipt-level matching, warehouse/bin receiving, moving-average valuation, controlled landed-cost allocation, receipt-provenance supplier returns, vendor-credit settlement, and dependency-ordered corrections. Price/quantity variance approval, late landed-cost allocation after outbound movement, lots, serial numbers, and FIFO layers remain separate production-readiness work. Do not represent those capabilities as implemented.

@@ -72,6 +72,8 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("table[aria-label='Supplier return authorizations']"));
         Assert.NotNull(cut.Find("table[aria-label='Supplier return shipments']"));
         Assert.Contains("Returns remain linked to the exact receipt and purchase-order lines", cut.Markup);
+        Assert.NotNull(cut.Find("table[aria-label='Landed cost allocations']"));
+        Assert.Contains("Freight and import charges remain tied to their source receipt", cut.Markup);
     }
 }
 
@@ -190,6 +192,12 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> ReverseSupplierReturnShipmentAsync(ReverseSupplierReturnShipmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SupplierReturnShipmentId));
     public Task<TransactionResult> ReverseSupplierReturnCreditApplicationAsync(ReverseSupplierReturnCreditApplicationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SupplierReturnCreditApplicationId));
     public Task<TransactionResult> ReverseSupplierReturnCreditRefundAsync(ReverseSupplierReturnCreditRefundRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.SupplierReturnCreditRefundId));
+    public Task<TransactionResult> SaveLandedCostAllocationAsync(SaveLandedCostAllocationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> SubmitLandedCostAllocationAsync(SubmitLandedCostAllocationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.LandedCostAllocationId));
+    public Task<TransactionResult> DecideLandedCostAllocationAsync(DecideLandedCostAllocationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.LandedCostAllocationId));
+    public Task<TransactionResult> CancelLandedCostAllocationAsync(CancelLandedCostAllocationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.LandedCostAllocationId));
+    public Task<TransactionResult> PostLandedCostAllocationAsync(PostLandedCostAllocationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.LandedCostAllocationId));
+    public Task<TransactionResult> ReverseLandedCostAllocationAsync(ReverseLandedCostAllocationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.LandedCostAllocationId));
 }
 
 internal sealed class StubAccountingInterchangeService : IAccountingInterchangeService

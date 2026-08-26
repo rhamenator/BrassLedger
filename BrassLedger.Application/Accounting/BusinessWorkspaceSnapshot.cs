@@ -159,7 +159,8 @@ public sealed record OperationsWorkspace(
     IReadOnlyList<CustomerReturnCreditSnapshot>? CustomerReturnCredits = null,
     IReadOnlyList<PurchaseRequisitionSnapshot>? PurchaseRequisitions = null,
     IReadOnlyList<SupplierReturnAuthorizationSnapshot>? SupplierReturnAuthorizations = null,
-    IReadOnlyList<SupplierReturnShipmentSnapshot>? SupplierReturnShipments = null);
+    IReadOnlyList<SupplierReturnShipmentSnapshot>? SupplierReturnShipments = null,
+    IReadOnlyList<LandedCostAllocationSnapshot>? LandedCostAllocations = null);
 
 public sealed record InventoryItemSnapshot(
     string Sku,
@@ -230,6 +231,9 @@ public sealed record SupplierReturnShipmentSnapshot(Guid Id, Guid SupplierReturn
 public sealed record SupplierReturnShipmentLineSnapshot(Guid Id, Guid SupplierReturnAuthorizationLineId, Guid InventoryReceiptLineId, Guid PurchaseOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal TotalAmount);
 public sealed record SupplierReturnCreditApplicationSnapshot(Guid Id, Guid VendorBillId, string VendorBillNumber, DateOnly AppliedOn, decimal Amount, string Status, string ConcurrencyToken);
 public sealed record SupplierReturnCreditRefundSnapshot(Guid Id, Guid BankAccountId, string BankAccountName, string Reference, DateOnly RefundDate, decimal Amount, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken);
+public sealed record LandedCostAllocationSnapshot(Guid Id, Guid InventoryReceiptId, string ReceiptNumber, Guid VendorId, string VendorName, Guid? VendorBillId, string AllocationNumber, string BillNumber, DateOnly BillDate, DateOnly DueDate, string AllocationMethod, string Description, string Status, decimal TotalAmount, string DecisionReason, string CancellationReason, Guid? JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<LandedCostChargeSnapshot> Charges, IReadOnlyList<LandedCostAllocationLineSnapshot> Lines);
+public sealed record LandedCostChargeSnapshot(Guid Id, int Sequence, string ChargeType, string Description, decimal Amount);
+public sealed record LandedCostAllocationLineSnapshot(Guid Id, Guid InventoryReceiptLineId, Guid InventoryItemId, string Sku, int Sequence, decimal BasisQuantity, decimal BasisAmount, decimal AllocatedAmount, decimal PriorQuantityOnHand, decimal PriorUnitCost, decimal ResultingUnitCost);
 
 public sealed record PurchaseOrderSnapshot(
     string OrderNumber,

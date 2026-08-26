@@ -135,6 +135,14 @@ public sealed record RefundSupplierReturnCreditRequest(Guid SupplierReturnShipme
 public sealed record ReverseSupplierReturnShipmentRequest(Guid SupplierReturnShipmentId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record ReverseSupplierReturnCreditApplicationRequest(Guid SupplierReturnCreditApplicationId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record ReverseSupplierReturnCreditRefundRequest(Guid SupplierReturnCreditRefundId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
+public sealed record LandedCostChargeRequest(string ChargeType, string Description, decimal Amount);
+public sealed record LandedCostManualLineRequest(Guid InventoryReceiptLineId, decimal AllocatedAmount);
+public sealed record SaveLandedCostAllocationRequest(Guid? Id, Guid InventoryReceiptId, Guid VendorId, string AllocationNumber, string BillNumber, DateOnly BillDate, DateOnly DueDate, string AllocationMethod, string Description, IReadOnlyList<LandedCostChargeRequest> Charges, IReadOnlyList<LandedCostManualLineRequest>? ManualLines, string ReceiptConcurrencyToken, string ConcurrencyToken = "");
+public sealed record SubmitLandedCostAllocationRequest(Guid LandedCostAllocationId, string ConcurrencyToken);
+public sealed record DecideLandedCostAllocationRequest(Guid LandedCostAllocationId, bool Approve, string Reason, string ConcurrencyToken);
+public sealed record CancelLandedCostAllocationRequest(Guid LandedCostAllocationId, string Reason, string ConcurrencyToken);
+public sealed record PostLandedCostAllocationRequest(Guid LandedCostAllocationId, string ConcurrencyToken);
+public sealed record ReverseLandedCostAllocationRequest(Guid LandedCostAllocationId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record SavePayrollJurisdictionRuleRequest(Guid? Id, string ResidenceJurisdiction, string WorkJurisdiction, bool ExemptWorkWithholding, decimal ResidentCreditRate, bool IsActive, string Notes);
 public sealed record TransactionResult(bool Succeeded, string ErrorMessage, Guid? Id = null)
 {
@@ -266,6 +274,12 @@ public interface IAccountingTransactionService
     Task<TransactionResult> ReverseSupplierReturnShipmentAsync(ReverseSupplierReturnShipmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReverseSupplierReturnCreditApplicationAsync(ReverseSupplierReturnCreditApplicationRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReverseSupplierReturnCreditRefundAsync(ReverseSupplierReturnCreditRefundRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveLandedCostAllocationAsync(SaveLandedCostAllocationRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SubmitLandedCostAllocationAsync(SubmitLandedCostAllocationRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> DecideLandedCostAllocationAsync(DecideLandedCostAllocationRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CancelLandedCostAllocationAsync(CancelLandedCostAllocationRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> PostLandedCostAllocationAsync(PostLandedCostAllocationRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseLandedCostAllocationAsync(ReverseLandedCostAllocationRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Exports and imports the core list CSV shapes used by QuickBooks Online.</summary>

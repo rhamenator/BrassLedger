@@ -1141,6 +1141,41 @@ api.MapPost("/supplier-return-credit-refunds/{supplierReturnCreditRefundId:guid}
     var result = await service.ReverseSupplierReturnCreditRefundAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["supplierReturnCreditRefund"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments);
 
+api.MapPost("/landed-cost-allocations", async (SaveLandedCostAllocationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.SaveLandedCostAllocationAsync(request, cancellationToken); return result.Succeeded ? Results.Created($"/api/landed-cost-allocations/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["landedCost"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/landed-cost-allocations/{landedCostAllocationId:guid}/submission", async (Guid landedCostAllocationId, SubmitLandedCostAllocationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.LandedCostAllocationId != landedCostAllocationId) return Results.BadRequest(new { error = "landed_cost_allocation_id_mismatch" });
+    var result = await service.SubmitLandedCostAllocationAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["landedCost"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/landed-cost-allocations/{landedCostAllocationId:guid}/decision", async (Guid landedCostAllocationId, DecideLandedCostAllocationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.LandedCostAllocationId != landedCostAllocationId) return Results.BadRequest(new { error = "landed_cost_allocation_id_mismatch" });
+    var result = await service.DecideLandedCostAllocationAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["landedCost"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
+api.MapPost("/landed-cost-allocations/{landedCostAllocationId:guid}/cancellation", async (Guid landedCostAllocationId, CancelLandedCostAllocationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.LandedCostAllocationId != landedCostAllocationId) return Results.BadRequest(new { error = "landed_cost_allocation_id_mismatch" });
+    var result = await service.CancelLandedCostAllocationAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["landedCost"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/landed-cost-allocations/{landedCostAllocationId:guid}/posting", async (Guid landedCostAllocationId, PostLandedCostAllocationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.LandedCostAllocationId != landedCostAllocationId) return Results.BadRequest(new { error = "landed_cost_allocation_id_mismatch" });
+    var result = await service.PostLandedCostAllocationAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["landedCost"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
+
+api.MapPost("/landed-cost-allocations/{landedCostAllocationId:guid}/reversal", async (Guid landedCostAllocationId, ReverseLandedCostAllocationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.LandedCostAllocationId != landedCostAllocationId) return Results.BadRequest(new { error = "landed_cost_allocation_id_mismatch" });
+    var result = await service.ReverseLandedCostAllocationAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["landedCost"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ReversePayments).RequireAuthorization(policy => policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PurchasingManage));
+
 api.MapGet("/interchange/quickbooks-online/{entity}.csv", async (string entity, IAccountingInterchangeService service, CancellationToken cancellationToken) =>
 {
     var export = await service.ExportQuickBooksOnlineCsvAsync(entity, cancellationToken);

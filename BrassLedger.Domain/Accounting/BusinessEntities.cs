@@ -1294,6 +1294,70 @@ public sealed class SupplierReturnCreditRefund
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
+public sealed class LandedCostAllocation
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid InventoryReceiptId { get; set; }
+    public Guid VendorId { get; set; }
+    public Guid? VendorBillId { get; set; }
+    public string AllocationNumber { get; set; } = string.Empty;
+    public string BillNumber { get; set; } = string.Empty;
+    public DateOnly BillDate { get; set; }
+    public DateOnly DueDate { get; set; }
+    public string AllocationMethod { get; set; } = "ReceiptValue";
+    public string Description { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
+    public decimal TotalAmount { get; set; }
+    public string SourceReceiptConcurrencyToken { get; set; } = string.Empty;
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? SubmittedByUserId { get; set; }
+    public DateTimeOffset? SubmittedAtUtc { get; set; }
+    public Guid? DecidedByUserId { get; set; }
+    public DateTimeOffset? DecidedAtUtc { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
+    public Guid? PostedByUserId { get; set; }
+    public DateTimeOffset? PostedAtUtc { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class LandedCostCharge
+{
+    public Guid Id { get; set; }
+    public Guid LandedCostAllocationId { get; set; }
+    public int Sequence { get; set; }
+    public string ChargeType { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+}
+
+public sealed class LandedCostAllocationLine
+{
+    public Guid Id { get; set; }
+    public Guid LandedCostAllocationId { get; set; }
+    public Guid InventoryReceiptLineId { get; set; }
+    public Guid PurchaseOrderLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public int Sequence { get; set; }
+    public decimal BasisQuantity { get; set; }
+    public decimal BasisAmount { get; set; }
+    public decimal AllocatedAmount { get; set; }
+    public string PreparedItemConcurrencyToken { get; set; } = string.Empty;
+    public decimal PriorQuantityOnHand { get; set; }
+    public decimal PriorUnitCost { get; set; }
+    public decimal ResultingUnitCost { get; set; }
+}
+
 public sealed class AccountingSchedule
 {
     public Guid Id { get; set; }
