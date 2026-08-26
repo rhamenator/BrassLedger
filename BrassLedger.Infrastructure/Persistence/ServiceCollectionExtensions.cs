@@ -354,6 +354,10 @@ public static class ServiceCollectionExtensions
                 && await HasIndexAsync(dbContext, dbContext.Database.IsNpgsql()
                     ? "IX_SubledgerDocumentWorkflows_CompanyId_DocumentType_DocumentS~"
                     : "IX_SubledgerDocumentWorkflows_CompanyId_DocumentType_DocumentScope_DocumentNumber_IsRecurringTemplate", cancellationToken);
+        if (migrationId.EndsWith("_AddSubledgerRejectionWorkflow", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "SubledgerDocumentWorkflows", "RejectedByUserId", cancellationToken)
+                && await HasColumnAsync(dbContext, "SubledgerDocumentWorkflows", "RejectedAtUtc", cancellationToken)
+                && await HasColumnAsync(dbContext, "SubledgerDocumentWorkflows", "DecisionReason", cancellationToken);
         return false;
     }
 

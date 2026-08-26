@@ -15,11 +15,11 @@ SQLite and PostgreSQL have separate versioned migrations for this schema. Existi
 Verification completed on 2026-08-26:
 
 - Release solution build: succeeded with zero warnings and zero errors.
-- SQLite/default infrastructure suite: 181 tests passed; six PostgreSQL-only tests were skipped in that run.
-- Disposable PostgreSQL 16 infrastructure suite: 187 of 187 tests passed with zero skips.
+- SQLite/default infrastructure suite: 184 tests passed; six PostgreSQL-only tests were skipped in that run.
+- Disposable PostgreSQL 16 infrastructure suite: 190 of 190 tests passed with zero skips.
 - API integration suite: 32 of 32 tests passed.
-- Web component suite: 7 of 7 tests passed.
-- Chromium end-to-end suite: 27 of 27 tests passed, including separated purchasing and AR/AP roles and the visually approved snapshots.
+- Web component suite: 8 of 8 tests passed.
+- Chromium end-to-end suite: 28 of 28 tests passed, including separated purchasing and AR/AP roles, rejected-draft correction and resubmission, and the visually approved snapshots.
 - SQLite and PostgreSQL EF model-drift checks: no pending model changes.
 - NuGet direct and transitive vulnerability scan: no known vulnerable packages from the configured source.
 - Cross-invoice supplier-return regression: passed for a return spanning two supplier invoices with different prices, followed by exact reversal.
@@ -29,9 +29,11 @@ The browser test host launches the already-built web assembly directly. This avo
 
 ### Controlled receivables and payables posting
 
-Customer invoices and ordinary vendor bills enter through draft, approval, and posting workflows; neither the HTTP API nor the public accounting application-service contract exposes a direct ordinary posting operation that bypasses review. Integrations and future server-side components therefore have to create drafts. Built-in Receivables and Payables Preparer, Approver, and Poster roles permit least-privilege assignments. A preparer cannot approve the same document, and its approver cannot post it.
+Customer invoices and ordinary vendor bills enter through draft, approval, and posting workflows; neither the HTTP API nor the public accounting application-service contract exposes a direct ordinary posting operation that bypasses review. Integrations and future server-side components therefore have to create drafts. Built-in Receivables and Payables Preparer, Approver, and Poster roles permit least-privilege assignments. A preparer cannot approve or reject the same document as its reviewer, and its approver cannot post it.
 
 Posting the journal, account and subledger balances, source invoice or bill, workflow state, and audit evidence is one database transaction. A forced source-document insertion failure proves that the earlier journal and balance changes roll back and the workflow remains approved for correction or retry. Repeating a completed request returns the original source-document ID without posting again; concurrent attempts produce exactly one source document and one journal entry. These controls are covered by infrastructure and API authorization regressions on 2026-08-26.
+
+Saving and approving a draft now execute the retained posting payload inside a disposable database transaction and explicitly roll it back, so invalid references, distributions, dates, control-account rules, credit limits, and corrupted payloads are rejected before approval without changing the ledger. An authorized reviewer can reject a draft or approved document with a required reason and optimistic concurrency token. The reason, reviewer, time, and immutable audit event remain visible. A preparer corrects it by saving the same invoice number, or the same vendor and bill number; the workflow is revised in place, returns to Draft, retains before-and-after audit evidence, and must pass independent approval and posting again. SQLite and PostgreSQL migrations add the review fields, support lost-history adoption, and prohibit downgrade that could delete reviewer provenance.
 
 Vendor-scoped external invoice numbers now apply consistently to drafts, recurring templates, generated drafts, posted bills, purchase-invoice matches, and landed-cost bills. Two vendors may both issue `1001`; a second `1001` for the same vendor is rejected before review. Versioned SQLite and PostgreSQL migrations backfill historical workflow identity from retained request data, support lost-history adoption, and block unsafe downgrade.
 
@@ -40,7 +42,7 @@ Vendor-scoped external invoice numbers now apply consistently to drafts, recurri
 The following areas are not yet proven complete against the project definition of done:
 
 - The representative-business acceptance scenario has not passed as one uninterrupted install-to-restore workflow.
-- The ordinary AR/AP draft-to-post path is controlled and retry-safe, but complete AR, AP, banking, payroll, inventory, projects, fixed assets, period-end, multi-currency, consolidation, and reporting acceptance matrices remain to be audited against the required positive, negative, authorization, isolation, rounding, concurrency, and reversal cases.
+- The ordinary AR/AP draft-to-post path is controlled, rejectable, correctable, and retry-safe, but complete AR, AP, banking, payroll, inventory, projects, fixed assets, period-end, multi-currency, consolidation, and reporting acceptance matrices remain to be audited against the required positive, negative, authorization, isolation, rounding, concurrency, and reversal cases.
 - Tax runtime packages for every state and the District of Columbia require a source-by-source completion audit, executable boundary tests, review, and explicit activation. Captured or LLM-assisted interpretations are not regulatory approval.
 - Local payroll-tax coverage, reciprocity, convenience-of-employer rules, filing outputs, and multi-work-location allocation require jurisdiction-specific verification by qualified payroll/tax reviewers.
 - QuickBooks and other interchange paths require a capability-by-capability audit of mapping, dry runs, idempotency, duplicate handling, rejection correction, reconciliation totals, and round trips. QuickBooks Online production synchronization additionally depends on provider credentials and approval.

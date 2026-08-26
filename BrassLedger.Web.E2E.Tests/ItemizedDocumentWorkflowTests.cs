@@ -54,4 +54,48 @@ public sealed class ItemizedDocumentWorkflowTests
         await payables.RecordAndReverseVendorCreditAsync($"VC-E2E-{browserKind}");
         await session.AssertNoUiFailuresAsync("itemized bill workflow");
     }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task InvoiceReviewer_CanRejectAndPreparerCanCorrectAndResubmit(BrowserKind browserKind)
+    {
+        await _fixture.CreateSubledgerWorkflowUsersAsync();
+        var invoiceNumber = $"INV-REVISE-{Guid.NewGuid():N}"[..24];
+        const string rejectionReason = "Clarify the customer-facing work description.";
+
+        await using var preparerSession = await _fixture.CreateSessionAsync(browserKind);
+        await preparerSession.SignInAsync();
+        var preparer = new ReceivablesPage(preparerSession);
+        await preparer.OpenAsync();
+        await preparer.CreateItemizedInvoiceDraftAsync(invoiceNumber);
+
+        await using (var reviewerSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await reviewerSession.SignInAsync("e2e-ar-approver");
+            var reviewer = new ReceivablesPage(reviewerSession);
+            await reviewer.OpenAsync();
+            await reviewer.RejectInvoiceAsync(invoiceNumber, rejectionReason);
+            await reviewerSession.AssertNoUiFailuresAsync("invoice rejection workflow");
+        }
+
+        await preparer.OpenAsync();
+        await preparer.AssertRejectedInvoiceAsync(invoiceNumber, rejectionReason);
+        await preparer.CreateItemizedInvoiceDraftAsync(invoiceNumber);
+
+        await using (var reviewerSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await reviewerSession.SignInAsync("e2e-ar-approver");
+            var reviewer = new ReceivablesPage(reviewerSession);
+            await reviewer.OpenAsync();
+            await reviewer.ApproveInvoiceAsync(invoiceNumber);
+        }
+        await using (var posterSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await posterSession.SignInAsync("e2e-ar-poster");
+            var poster = new ReceivablesPage(posterSession);
+            await poster.OpenAsync();
+            await poster.PostInvoiceAsync(invoiceNumber, "$165.00");
+            await posterSession.AssertNoUiFailuresAsync("corrected invoice posting workflow");
+        }
+    }
 }

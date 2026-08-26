@@ -34,6 +34,23 @@ public sealed class ReceivablesPage
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Invoice draft approved.");
     }
 
+    public async Task RejectInvoiceAsync(string invoiceNumber, string reason)
+    {
+        await _session.Page.GetByLabel("Invoice rejection reason").FillAsync(reason);
+        var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = invoiceNumber });
+        await Assertions.Expect(workflowRow).ToContainTextAsync("Draft");
+        await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Reject", Exact = true }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Invoice draft rejected.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = invoiceNumber })).ToContainTextAsync(reason);
+    }
+
+    public async Task AssertRejectedInvoiceAsync(string invoiceNumber, string reason)
+    {
+        var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = invoiceNumber });
+        await Assertions.Expect(workflowRow).ToContainTextAsync("Rejected");
+        await Assertions.Expect(workflowRow).ToContainTextAsync(reason);
+    }
+
     public async Task PostInvoiceAsync(string invoiceNumber, string expectedTotal)
     {
         var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = invoiceNumber });

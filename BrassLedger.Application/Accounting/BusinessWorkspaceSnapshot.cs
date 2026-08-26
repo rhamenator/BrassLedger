@@ -136,7 +136,7 @@ public sealed record BillLineSnapshot(int Sequence, string Description, decimal 
 public sealed record SubledgerPaymentSnapshot(Guid Id, string Direction, string CounterpartyName, DateOnly PaymentDate, decimal Amount, decimal AppliedAmount, decimal UnappliedAmount, string Reference, string Method, string Status, IReadOnlyList<PaymentApplicationSnapshot> Applications);
 public sealed record PaymentApplicationSnapshot(Guid DocumentId, string DocumentNumber, decimal Amount);
 public sealed record SubledgerAdjustmentSnapshot(Guid Id, string Subledger, string Kind, Guid CounterpartyId, string CounterpartyName, Guid? DocumentId, string DocumentNumber, Guid? PaymentId, DateOnly AdjustmentDate, decimal Amount, string Reference, string Reason, string OffsetAccountNumber, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId);
-public sealed record SubledgerDocumentWorkflowSnapshot(Guid Id, string DocumentType, string DocumentNumber, string Status, bool IsRecurringTemplate, string Frequency, int FrequencyInterval, DateOnly? NextOccurrenceDate, DateOnly? EndDate, Guid? SourceTemplateId, Guid? PostedDocumentId, DateTimeOffset CreatedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? PostedAtUtc);
+public sealed record SubledgerDocumentWorkflowSnapshot(Guid Id, string DocumentType, string DocumentNumber, string Status, bool IsRecurringTemplate, string Frequency, int FrequencyInterval, DateOnly? NextOccurrenceDate, DateOnly? EndDate, Guid? SourceTemplateId, Guid? PostedDocumentId, DateTimeOffset CreatedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? RejectedAtUtc, string DecisionReason, DateTimeOffset? PostedAtUtc, string ConcurrencyToken);
 
 public sealed record OperationsWorkspace(
     int InventoryItemCount,

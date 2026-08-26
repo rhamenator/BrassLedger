@@ -809,6 +809,31 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var draftResponse = await preparer.PostAsJsonAsync("/api/invoice-drafts", request);
         Assert.Equal(HttpStatusCode.Created, draftResponse.StatusCode);
         var draftResult = await draftResponse.Content.ReadFromJsonAsync<TransactionResult>();
+
+        var rejectionRequest = request with { InvoiceNumber = "INV-API-REJECT-1", Description = "Needs review" };
+        var rejectionDraftResponse = await preparer.PostAsJsonAsync("/api/invoice-drafts", rejectionRequest);
+        Assert.Equal(HttpStatusCode.Created, rejectionDraftResponse.StatusCode);
+        var rejectionDraft = await rejectionDraftResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var reviewWorkspace = await preparer.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var workflow = Assert.Single(reviewWorkspace!.Receivables.Workflows ?? [], item => item.Id == rejectionDraft!.Id);
+        var rejectCommand = new RejectSubledgerDocumentRequest(workflow.Id, "Correct the customer-facing description.", workflow.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.BadRequest, (await preparer.PostAsJsonAsync($"/api/subledger-document-workflows/{workflow.Id}/reject", rejectCommand)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await approver.PostAsJsonAsync($"/api/subledger-document-workflows/{Guid.NewGuid()}/reject", rejectCommand)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await approver.PostAsJsonAsync($"/api/subledger-document-workflows/{workflow.Id}/reject", rejectCommand)).StatusCode);
+        var rejectedWorkspace = await preparer.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var rejectedWorkflow = Assert.Single(rejectedWorkspace!.Receivables.Workflows ?? [], item => item.Id == workflow.Id);
+        Assert.Equal("Rejected", rejectedWorkflow.Status);
+        Assert.Equal("Correct the customer-facing description.", rejectedWorkflow.DecisionReason);
+        var revisedResponse = await preparer.PostAsJsonAsync("/api/invoice-drafts", rejectionRequest with { Description = "Corrected customer-facing description" });
+        Assert.Equal(HttpStatusCode.Created, revisedResponse.StatusCode);
+        var revisedResult = await revisedResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        Assert.Equal(workflow.Id, revisedResult!.Id);
+        var revisedWorkspace = await preparer.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var revisedWorkflow = Assert.Single(revisedWorkspace!.Receivables.Workflows ?? [], item => item.Id == workflow.Id);
+        Assert.Equal("Draft", revisedWorkflow.Status);
+        Assert.Empty(revisedWorkflow.DecisionReason);
+        Assert.NotEqual(rejectedWorkflow.ConcurrencyToken, revisedWorkflow.ConcurrencyToken);
+
         Assert.Equal(HttpStatusCode.BadRequest, (await preparer.PostAsync($"/api/subledger-document-workflows/{draftResult!.Id}/approve", null)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await approver.PostAsync($"/api/subledger-document-workflows/{draftResult.Id}/approve", null)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await approver.PostAsync($"/api/subledger-document-workflows/{draftResult.Id}/post", null)).StatusCode);

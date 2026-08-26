@@ -6698,6 +6698,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DecisionReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("DocumentNumber")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -6738,6 +6743,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("PostedDocumentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("RejectedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RejectedByUserId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("SourceTemplateId")

@@ -837,6 +837,12 @@ main {
     color: var(--ink-strong);
 }
 
+.field-help {
+    color: var(--ink-body);
+    font-size: 0.82rem;
+    line-height: 1.4;
+}
+
 .field-input {
     min-height: 3rem;
     padding: 0.7rem 0.9rem;

@@ -19,6 +19,9 @@ public sealed class LedgerPageTests : TestContext
             BrassLedgerAuthorizationPolicies.ApproveJournals,
             BrassLedgerAuthorizationPolicies.PostJournals,
             BrassLedgerAuthorizationPolicies.ReverseJournals,
+            BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments,
+            BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments,
+            BrassLedgerAuthorizationPolicies.PostSubledgerDocuments,
             BrassLedgerAuthorizationPolicies.ManageOperations);
         Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(TestWorkspaceData.CreateWorkspace()));
         Services.AddSingleton<IAccountingTransactionService>(new StubAccountingTransactionService());
@@ -78,6 +81,20 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("table[aria-label='Landed cost allocations']"));
         Assert.Contains("Freight and import charges remain tied to their source receipt", cut.Markup);
     }
+
+    [Fact]
+    public void ReceivablesAndPayables_ExposeAuditableRejectionAndCorrectionGuidance()
+    {
+        var receivables = RenderComponent<Receivables>();
+        Assert.NotNull(receivables.Find("input[aria-label='Invoice rejection reason']"));
+        Assert.Contains("correct and resubmit it using the same invoice number", receivables.Markup);
+        Assert.Contains("Review note", receivables.Markup);
+
+        var payables = RenderComponent<Payables>();
+        Assert.NotNull(payables.Find("input[aria-label='Vendor bill rejection reason']"));
+        Assert.Contains("correct and resubmit it using the same vendor and bill number", payables.Markup);
+        Assert.Contains("Review note", payables.Markup);
+    }
 }
 
 internal sealed class StubAccountingTransactionService : IAccountingTransactionService
@@ -109,6 +126,7 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> SaveInvoiceDraftAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> SaveVendorBillDraftAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> ApproveSubledgerDocumentAsync(Guid workflowId, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(workflowId));
+    public Task<TransactionResult> RejectSubledgerDocumentAsync(RejectSubledgerDocumentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.WorkflowId));
     public Task<TransactionResult> PostApprovedSubledgerDocumentAsync(Guid workflowId, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(workflowId));
     public Task<TransactionResult> SaveRecurringInvoiceTemplateAsync(SaveRecurringInvoiceTemplateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> SaveRecurringVendorBillTemplateAsync(SaveRecurringVendorBillTemplateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));

@@ -76,6 +76,7 @@ Receivables manages invoices, customer balances, cash application, and collectio
 Best practices:
 
 - issue invoices with complete customer and document detail
+- reviewers should reject incomplete drafts with a specific correction reason; the preparer can correct and resubmit using the same invoice number without erasing review history
 - apply cash promptly and explicitly
 - separate disputes from write-offs
 - review aging and unapplied cash before period close
@@ -87,6 +88,7 @@ Payables handles vendor invoices, due dates, credits, approvals, and payment rel
 Best practices:
 
 - capture due dates, references, and approval state
+- reviewers should reject incomplete drafts with a specific correction reason; the preparer can correct and resubmit using the same vendor and bill number without erasing review history
 - keep vendor credits visible until intentionally applied
 - review payment proposals before releasing checks or payments
 - reconcile payable aging to the control account

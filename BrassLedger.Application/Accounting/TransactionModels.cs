@@ -19,6 +19,7 @@ public sealed record RecordVendorCreditRequest(Guid VendorBillId, DateOnly Adjus
 public sealed record RefundUnappliedPaymentRequest(Guid PaymentId, Guid BankAccountId, DateOnly RefundDate, decimal Amount, string Reference, string Reason);
 public sealed record VoidSubledgerDocumentRequest(Guid DocumentId, DateOnly VoidDate, string Reason);
 public sealed record ReverseSubledgerAdjustmentRequest(Guid AdjustmentId, DateOnly ReversalDate, string Reason);
+public sealed record RejectSubledgerDocumentRequest(Guid WorkflowId, string Reason, string ConcurrencyToken);
 public sealed record SaveRecurringInvoiceTemplateRequest(CreateInvoiceRequest Invoice, string Frequency, int FrequencyInterval, DateOnly NextOccurrenceDate, DateOnly? EndDate = null);
 public sealed record SaveRecurringVendorBillTemplateRequest(CreateVendorBillRequest Bill, string Frequency, int FrequencyInterval, DateOnly NextOccurrenceDate, DateOnly? EndDate = null);
 public sealed record ReconcileBankAccountRequest(Guid BankAccountId, DateOnly StatementDate, decimal StatementClosingBalance, IReadOnlyList<Guid>? ClearedJournalEntryIds = null, string Notes = "");
@@ -194,6 +195,7 @@ public interface IAccountingTransactionService
     Task<TransactionResult> SaveInvoiceDraftAsync(CreateInvoiceRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveVendorBillDraftAsync(CreateVendorBillRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApproveSubledgerDocumentAsync(Guid workflowId, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RejectSubledgerDocumentAsync(RejectSubledgerDocumentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> PostApprovedSubledgerDocumentAsync(Guid workflowId, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveRecurringInvoiceTemplateAsync(SaveRecurringInvoiceTemplateRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveRecurringVendorBillTemplateAsync(SaveRecurringVendorBillTemplateRequest request, CancellationToken cancellationToken = default);

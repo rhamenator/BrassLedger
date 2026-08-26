@@ -503,7 +503,7 @@ public sealed class BusinessWorkspaceService(
         return accounts.Where(x => x.Type == accountType).Sum(x => x.CurrentBalance);
     }
 
-    private static SubledgerDocumentWorkflowSnapshot ToWorkflowSnapshot(SubledgerDocumentWorkflow workflow) => new(workflow.Id, workflow.DocumentType, workflow.DocumentNumber, workflow.Status, workflow.IsRecurringTemplate, workflow.Frequency, workflow.FrequencyInterval, workflow.NextOccurrenceDate, workflow.EndDate, workflow.SourceTemplateId, workflow.PostedDocumentId, workflow.CreatedAtUtc, workflow.ApprovedAtUtc, workflow.PostedAtUtc);
+    private static SubledgerDocumentWorkflowSnapshot ToWorkflowSnapshot(SubledgerDocumentWorkflow workflow) => new(workflow.Id, workflow.DocumentType, workflow.DocumentNumber, workflow.Status, workflow.IsRecurringTemplate, workflow.Frequency, workflow.FrequencyInterval, workflow.NextOccurrenceDate, workflow.EndDate, workflow.SourceTemplateId, workflow.PostedDocumentId, workflow.CreatedAtUtc, workflow.ApprovedAtUtc, workflow.RejectedAtUtc, workflow.DecisionReason, workflow.PostedAtUtc, workflow.ConcurrencyToken);
 
     private static string MaskTaxId(string taxId)
     {

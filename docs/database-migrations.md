@@ -46,6 +46,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `ScopeSubledgerVendorBillNumbersByVendor` carries that same identity rule into invoice and bill drafts, recurring templates, and generated drafts. The migration derives each historical vendor scope from its retained JSON request, keeps invoice numbering company-scoped, and isolates an unexpectedly malformed historical vendor payload under a legacy scope rather than guessing. It cannot safely downgrade after two vendors have used the same number through the approval workflow; restore a pre-upgrade backup instead.
 
+`AddSubledgerRejectionWorkflow` adds the reviewer identity, rejection time, and reason retained by invoice and vendor-bill workflows. Existing rows receive an empty reason and remain otherwise unchanged. Lost-history adoption requires all three columns before recording the migration as present. Downgrade is prohibited because removing them could delete review decisions and their audit provenance; restore a verified pre-upgrade backup instead.
+
 ## Verification
 
 At minimum, run:

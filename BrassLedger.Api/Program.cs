@@ -238,6 +238,13 @@ api.MapPost("/subledger-document-workflows/{workflowId:guid}/approve", async (Gu
     return result.Succeeded ? Results.Ok(result) : Results.BadRequest(result);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments);
 
+api.MapPost("/subledger-document-workflows/{workflowId:guid}/reject", async (Guid workflowId, RejectSubledgerDocumentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (workflowId != request.WorkflowId) return Results.BadRequest(TransactionResult.Failure("The workflow identifier in the route and request must match."));
+    var result = await service.RejectSubledgerDocumentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.BadRequest(result);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments);
+
 api.MapPost("/subledger-document-workflows/{workflowId:guid}/post", async (Guid workflowId, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.PostApprovedSubledgerDocumentAsync(workflowId, cancellationToken);

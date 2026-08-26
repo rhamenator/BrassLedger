@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("17", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("18", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -81,6 +81,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826141924_AddControlledPurchaseInvoiceMatching';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826150956_ScopeVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826160416_ScopeSubledgerVendorBillNumbersByVendor';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826164319_AddSubledgerRejectionWorkflow';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
         Assert.Equal("AccountsReceivable", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1100';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Accounts_CompanyId_OperationalRole';"));
@@ -111,7 +112,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("17", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("18", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -128,6 +129,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826141924_AddControlledPurchaseInvoiceMatching';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826150956_ScopeVendorBillNumbersByVendor';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826160416_ScopeSubledgerVendorBillNumbersByVendor';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826164319_AddSubledgerRejectionWorkflow';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -1334,6 +1336,119 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SubledgerWorkflow_RejectsWithConcurrencyAndAuditThenRevisesAndResubmits()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var setupDb = await factory.CreateDbContextAsync();
+        var companyId = await setupDb.Companies.Select(item => item.Id).FirstAsync();
+        var customerId = await setupDb.Customers.Where(item => item.CompanyId == companyId).Select(item => item.Id).FirstAsync();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        void ActAs(Guid userId, params string[] permissions)
+        {
+            var claims = new List<System.Security.Claims.Claim>
+            {
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString())
+            };
+            claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+        async Task<SubledgerDocumentWorkflow> LoadWorkflowAsync(Guid id)
+        {
+            await using var verification = await factory.CreateDbContextAsync();
+            return await verification.SubledgerDocumentWorkflows.AsNoTracking().SingleAsync(item => item.Id == id);
+        }
+
+        var preparerId = Guid.NewGuid();
+        var reviewerId = Guid.NewGuid();
+        var posterId = Guid.NewGuid();
+        var request = new CreateInvoiceRequest(customerId, "INV-WF-REJECT-1", new DateOnly(2026, 8, 5), new DateOnly(2026, 9, 4), 33m, 0m, "4000", "Original draft");
+        ActAs(preparerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var saved = await transactions.SaveInvoiceDraftAsync(request);
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        var draft = await LoadWorkflowAsync(saved.Id!.Value);
+
+        ActAs(preparerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        var selfRejection = await transactions.RejectSubledgerDocumentAsync(new RejectSubledgerDocumentRequest(draft.Id, "I prepared this.", draft.ConcurrencyToken));
+        Assert.False(selfRejection.Succeeded);
+        Assert.Contains("prepared", selfRejection.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        ActAs(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        var staleRejection = await transactions.RejectSubledgerDocumentAsync(new RejectSubledgerDocumentRequest(draft.Id, "Correct the description.", "stale-token"));
+        Assert.False(staleRejection.Succeeded);
+        Assert.Contains("changed", staleRejection.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var rejection = await transactions.RejectSubledgerDocumentAsync(new RejectSubledgerDocumentRequest(draft.Id, "Correct the description.", draft.ConcurrencyToken));
+        Assert.True(rejection.Succeeded, rejection.ErrorMessage);
+
+        var rejected = await LoadWorkflowAsync(draft.Id);
+        Assert.Equal("Rejected", rejected.Status);
+        Assert.Equal(reviewerId, rejected.RejectedByUserId);
+        Assert.NotNull(rejected.RejectedAtUtc);
+        Assert.Equal("Correct the description.", rejected.DecisionReason);
+        Assert.NotEqual(draft.ConcurrencyToken, rejected.ConcurrencyToken);
+        ActAs(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        Assert.False((await transactions.PostApprovedSubledgerDocumentAsync(draft.Id)).Succeeded);
+
+        ActAs(preparerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var revised = await transactions.SaveInvoiceDraftAsync(request with { Description = "Corrected draft" });
+        Assert.True(revised.Succeeded, revised.ErrorMessage);
+        Assert.Equal(draft.Id, revised.Id);
+        var corrected = await LoadWorkflowAsync(draft.Id);
+        Assert.Equal("Draft", corrected.Status);
+        Assert.Equal(preparerId, corrected.CreatedByUserId);
+        Assert.Null(corrected.RejectedByUserId);
+        Assert.Null(corrected.RejectedAtUtc);
+        Assert.Empty(corrected.DecisionReason);
+        Assert.NotEqual(rejected.ConcurrencyToken, corrected.ConcurrencyToken);
+
+        ActAs(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(draft.Id)).Succeeded);
+        ActAs(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        Assert.True((await transactions.PostApprovedSubledgerDocumentAsync(draft.Id)).Succeeded);
+
+        await using var auditDb = await factory.CreateDbContextAsync();
+        var audits = (await auditDb.BusinessAuditEntries.Where(item => item.EntityId == draft.Id).ToListAsync()).OrderBy(item => item.OccurredAtUtc).ToList();
+        Assert.Contains(audits, item => item.Action == "subledger-document.rejected" && item.UserId == reviewerId && item.DetailJson.Contains("Correct the description.", StringComparison.Ordinal));
+        Assert.Contains(audits, item => item.Action == "subledger-document.revised" && item.UserId == preparerId && item.DetailJson.Contains("previousReason", StringComparison.Ordinal));
+        Assert.Contains(audits, item => item.Action == "subledger-document.posted" && item.UserId == posterId);
+    }
+
+    [Fact]
+    public async Task SubledgerWorkflow_ApprovalPreflightRejectsCorruptedPayloadWithoutPosting()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var request = new CreateInvoiceRequest(workspace.Receivables.Customers.First().Id, "INV-WF-PREFLIGHT-1", new DateOnly(2026, 8, 6), new DateOnly(2026, 9, 5), 19m, 0m, "4000", "Approval preflight");
+        var saved = await transactions.SaveInvoiceDraftAsync(request);
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+
+        await using (var corruptingDb = await factory.CreateDbContextAsync())
+        {
+            var workflow = await corruptingDb.SubledgerDocumentWorkflows.SingleAsync(item => item.Id == saved.Id);
+            workflow.PayloadJson = System.Text.Json.JsonSerializer.Serialize(request with { CustomerId = Guid.NewGuid() });
+            workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            await corruptingDb.SaveChangesAsync();
+        }
+
+        var approval = await transactions.ApproveSubledgerDocumentAsync(saved.Id!.Value);
+        Assert.False(approval.Succeeded);
+        Assert.Contains("not postable", approval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Customer not found", approval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using var verification = await factory.CreateDbContextAsync();
+        Assert.Equal("Draft", await verification.SubledgerDocumentWorkflows.Where(item => item.Id == saved.Id).Select(item => item.Status).SingleAsync());
+        Assert.False(await verification.SalesInvoices.AnyAsync(item => item.InvoiceNumber == request.InvoiceNumber));
+        Assert.False(await verification.JournalEntries.AnyAsync(item => item.Reference == request.InvoiceNumber));
+    }
+
+    [Fact]
     public void AccountingTransactionContract_DoesNotExposeDirectInvoiceOrVendorBillPosting()
     {
         var methodNames = typeof(IAccountingTransactionService).GetMethods().Select(method => method.Name).ToArray();
@@ -1342,6 +1457,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("SaveInvoiceDraftAsync", methodNames);
         Assert.Contains("SaveVendorBillDraftAsync", methodNames);
         Assert.Contains("ApproveSubledgerDocumentAsync", methodNames);
+        Assert.Contains("RejectSubledgerDocumentAsync", methodNames);
         Assert.Contains("PostApprovedSubledgerDocumentAsync", methodNames);
     }
 

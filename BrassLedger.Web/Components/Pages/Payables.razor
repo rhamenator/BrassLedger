@@ -77,7 +77,25 @@ else
             </EditForm>
         </section>
 
-        <section class="panel"><h2>Vendor bill review queue</h2><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments"><div class="content-grid"><div class="field-group"><label class="field-label">Generate recurring drafts through</label><InputDate aria-label="Generate recurring bill drafts through" class="field-input" @bind-Value="RecurringForm.GenerateThrough" /></div><button class="action-secondary" type="button" @onclick="GenerateRecurringDraftsAsync">Generate due drafts</button></div></AuthorizeView><div class="table-scroll"><table class="data-table"><thead><tr><th>Number</th><th>Status</th><th>Source</th><th>Next</th><th>Actions</th></tr></thead><tbody>@foreach (var workflow in Workspace.Payables.Workflows ?? []) { <tr><td>@workflow.DocumentNumber</td><td>@workflow.Status</td><td>@(workflow.IsRecurringTemplate ? $"{workflow.Frequency} template" : workflow.SourceTemplateId.HasValue ? "Recurring draft" : "Manual draft")</td><td>@workflow.NextOccurrenceDate</td><td>@if (!workflow.IsRecurringTemplate && workflow.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments"><button class="action-secondary" type="button" @onclick="() => ApproveWorkflowAsync(workflow.Id)">Approve</button></AuthorizeView> } @if (!workflow.IsRecurringTemplate && workflow.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostSubledgerDocuments"><button class="action-primary" type="button" @onclick="() => PostWorkflowAsync(workflow.Id)">Post</button></AuthorizeView> }</td></tr> }</tbody></table></div></section>
+        <section class="panel">
+            <h2>Vendor bill review queue</h2>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments">
+                <div class="content-grid"><div class="field-group"><label class="field-label">Generate recurring drafts through</label><InputDate aria-label="Generate recurring bill drafts through" class="field-input" @bind-Value="RecurringForm.GenerateThrough" /></div><button class="action-secondary" type="button" @onclick="GenerateRecurringDraftsAsync">Generate due drafts</button></div>
+            </AuthorizeView>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments">
+                <div class="field-group"><label class="field-label">Rejection reason</label><InputText aria-label="Vendor bill rejection reason" class="field-input" @bind-Value="RejectionReason" /><span class="field-help">Enter a reason, then reject the applicable draft. The preparer can correct and resubmit it using the same vendor and bill number.</span></div>
+            </AuthorizeView>
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>Number</th><th>Status</th><th>Review note</th><th>Source</th><th>Next</th><th>Actions</th></tr></thead><tbody>
+                @foreach (var workflow in Workspace.Payables.Workflows ?? [])
+                {
+                    <tr><td>@workflow.DocumentNumber</td><td>@workflow.Status</td><td>@(string.IsNullOrWhiteSpace(workflow.DecisionReason) ? "—" : workflow.DecisionReason)</td><td>@(workflow.IsRecurringTemplate ? $"{workflow.Frequency} template" : workflow.SourceTemplateId.HasValue ? "Recurring draft" : "Manual draft")</td><td>@workflow.NextOccurrenceDate</td><td>
+                        @if (!workflow.IsRecurringTemplate && workflow.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments"><button class="action-secondary" type="button" @onclick="() => ApproveWorkflowAsync(workflow.Id)">Approve</button></AuthorizeView> }
+                        @if (!workflow.IsRecurringTemplate && workflow.Status is "Draft" or "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments"><button class="action-secondary" type="button" @onclick="() => RejectWorkflowAsync(workflow)">Reject</button></AuthorizeView> }
+                        @if (!workflow.IsRecurringTemplate && workflow.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostSubledgerDocuments"><button class="action-primary" type="button" @onclick="() => PostWorkflowAsync(workflow.Id)">Post</button></AuthorizeView> }
+                    </td></tr>
+                }
+            </tbody></table></div>
+        </section>
 
         <section class="panel">
             <h2>Record vendor payment or advance</h2>
@@ -190,6 +208,7 @@ else
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
     private string? StatusMessage;
+    private string RejectionReason = string.Empty;
     private BillEditor BillForm { get; } = new();
     private PaymentEditor PaymentForm { get; } = new();
     private PaymentReversalEditor ReversalForm { get; } = new();
@@ -224,6 +243,7 @@ else
     private async Task SaveRecurringBillTemplateAsync() { var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount)).ToArray(); var request = new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? DefaultCostAccountNumber, $"Recurring bill {BillForm.Number}", lines); var result = await TransactionService.SaveRecurringVendorBillTemplateAsync(new SaveRecurringVendorBillTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring vendor bill template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); BillForm.Reset(DefaultCostAccountNumber); } }
     private async Task GenerateRecurringDraftsAsync() { var result = await TransactionService.GenerateDueRecurringDocumentsAsync(RecurringForm.GenerateThrough); StatusMessage = result.Succeeded ? "Due recurring drafts generated." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task ApproveWorkflowAsync(Guid id) { var result = await TransactionService.ApproveSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Vendor bill draft approved." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
+    private async Task RejectWorkflowAsync(SubledgerDocumentWorkflowSnapshot workflow) { var result = await TransactionService.RejectSubledgerDocumentAsync(new RejectSubledgerDocumentRequest(workflow.Id, RejectionReason, workflow.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Vendor bill draft rejected. Its preparer can correct and resubmit it using the same vendor and bill number." : result.ErrorMessage; if (result.Succeeded) RejectionReason = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task PostWorkflowAsync(Guid id) { var result = await TransactionService.PostApprovedSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Approved vendor bill posted." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); SyncPaymentApplications(); }
 
     private void AddBillLine() => BillForm.Lines.Add(new BillLineEditor { ExpenseAccount = DefaultCostAccountNumber });
