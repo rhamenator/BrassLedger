@@ -190,7 +190,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             string.Empty, string.Empty,
             [new(ownershipAsset.ReportingAccountNumber, ownershipAsset.ReportingAccountName, ownershipAsset.ReportingAccountType, 100m, 0m, "Recognize acquisition-date adjustment"), new(ownershipEquity.ReportingAccountNumber, ownershipEquity.ReportingAccountName, ownershipEquity.ReportingAccountType, 0m, 100m, "Acquisition-date offset")],
             Acquisition: new(80m, 0m, 20m, 90m, 10m, 0m));
-        var ownershipRequest = new SaveConsolidationOwnershipEventRequest(null, group.Id, subsidiaryId, new DateOnly(2026, 6, 30), nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "API-ACQ-1", "US-GAAP", "ASC 805 current through 2026", ownershipContent);
+        var ownershipRequest = new SaveConsolidationOwnershipEventRequest(null, group.Id, subsidiaryId, new DateOnly(2026, 2, 1), nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "API-ACQ-1", "US-GAAP", "ASC 805 current through 2026", ownershipContent);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/ownership-events", ownershipRequest)).StatusCode);
         var ownershipResponse = await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events", ownershipRequest); Assert.Equal(HttpStatusCode.OK, ownershipResponse.StatusCode);
         var ownershipResult = await ownershipResponse.Content.ReadFromJsonAsync<TransactionResult>();

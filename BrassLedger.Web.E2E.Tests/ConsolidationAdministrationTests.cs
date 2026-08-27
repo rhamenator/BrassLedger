@@ -129,7 +129,7 @@ public sealed class ConsolidationAdministrationTests(PlaywrightWebAppFixture fix
             await using (var preparer = await fixture.CreateSessionAsync(browserKind))
             {
                 await preparer.SignInAsync("integration-admin"); await preparer.GotoAsync("/reporting");
-                await preparer.Page.Locator("#ownershipSubject").SelectOptionAsync("71000000-0000-0000-0000-000000000010");
+                await preparer.Page.Locator("#ownershipSubject").SelectOptionAsync("71000000-0000-0000-0000-000000000030");
                 await preparer.Page.Locator("#ownershipEventDate").FillAsync("2026-08-31"); await preparer.Page.Locator("#ownershipReference").FillAsync(reference); await preparer.Page.Locator("#ownershipAfter").FillAsync("0.75");
                 await preparer.Page.Locator("#ownershipRationale").FillAsync("E2E controller-reviewed purchase-price allocation"); await preparer.Page.Locator("#ownershipSource").FillAsync("E2E acquisition working paper PPA-1");
                 await preparer.Page.GetByLabel("Consideration transferred").FillAsync("80"); await preparer.Page.GetByLabel("NCI recognized").FillAsync("20"); await preparer.Page.GetByLabel("Identifiable net assets at fair value").FillAsync("90"); await preparer.Page.GetByLabel("Goodwill", new() { Exact = true }).FillAsync("10");

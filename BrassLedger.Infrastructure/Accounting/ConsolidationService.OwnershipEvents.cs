@@ -38,6 +38,8 @@ public sealed partial class ConsolidationService
         var expectedOwnership = eventType == ConsolidationOwnershipEventType.LossOfControl ? request.Content.OwnershipBefore : request.Content.OwnershipAfter;
         if (effectiveSubject.OwnershipPercentage != expectedOwnership)
             return TransactionResult.Failure($"The subject's effective ownership period must equal the event's {(eventType == ConsolidationOwnershipEventType.LossOfControl ? "before" : "after")} ownership percentage.");
+        var transitionError = ValidateOwnershipTransition(subjectPeriods, effectiveSubject, eventType, request.EventDate, request.Content);
+        if (transitionError is not null) return TransactionResult.Failure(transitionError);
         var accountError = await ValidateOwnershipPostingAccountsAsync(db, group, request.EventDate, request.Content, cancellationToken);
         if (accountError is not null) return TransactionResult.Failure(accountError);
 
@@ -169,7 +171,7 @@ public sealed partial class ConsolidationService
         if (!hasNominalLines && ((request.Content.PriorPeriodEquityAccountNumber?.Trim().Length ?? 0) > 64 || (request.Content.PriorPeriodEquityAccountName?.Trim().Length ?? 0) > 160)) return "The optional retained-earnings account is too long.";
         return eventType switch
         {
-            ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition => ValidateAcquisitionMeasurement(request.Content, request.FrameworkCode),
+            ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition => ValidateAcquisitionMeasurement(request.Content, request.FrameworkCode, eventType),
             ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl => ValidateOwnershipChangeMeasurement(request.Content),
             ConsolidationOwnershipEventType.LossOfControl => ValidateLossOfControlMeasurement(request.Content),
             ConsolidationOwnershipEventType.ProfitAttribution => ValidateProfitAttributionMeasurement(request.Content),
@@ -177,13 +179,17 @@ public sealed partial class ConsolidationService
         };
     }
 
-    private static string? ValidateAcquisitionMeasurement(ConsolidationOwnershipEventDocument content, string frameworkCode)
+    private static string? ValidateAcquisitionMeasurement(ConsolidationOwnershipEventDocument content, string frameworkCode, ConsolidationOwnershipEventType eventType)
     {
         var value = content.Acquisition; if (value is null || content.OwnershipChange is not null || content.LossOfControl is not null || content.ProfitAttribution is not null || content.OwnershipAfter <= content.OwnershipBefore) return "An acquisition requires its acquisition measurement and an increase in ownership.";
         if (!ValidOwnershipMoney(value.ConsiderationTransferred, value.PreviousInterestFairValue, value.NoncontrollingInterestRecognized, value.IdentifiableNetAssetsFairValue, value.Goodwill, value.BargainPurchaseGain) || value.ConsiderationTransferred < 0m || value.PreviousInterestFairValue < 0m || value.NoncontrollingInterestRecognized < 0m || value.Goodwill < 0m || value.BargainPurchaseGain < 0m || (value.Goodwill > 0m && value.BargainPurchaseGain > 0m)) return "Acquisition measurements must use valid nonnegative consideration, prior-interest, NCI, goodwill, and bargain-gain amounts.";
+        if (eventType == ConsolidationOwnershipEventType.AcquisitionOfControl && value.PreviousInterestFairValue != 0m) return "An acquisition from 0% ownership cannot include a previously held interest; use a step-acquisition schedule.";
+        if (eventType == ConsolidationOwnershipEventType.StepAcquisition && value.PreviousInterestFairValue <= 0m) return "A step acquisition requires the fair value of the positive previously held interest.";
         var residual = decimal.Round(value.ConsiderationTransferred + value.PreviousInterestFairValue + value.NoncontrollingInterestRecognized - value.IdentifiableNetAssetsFairValue, 2, MidpointRounding.AwayFromZero);
         if (value.Goodwill != decimal.Max(residual, 0m) || value.BargainPurchaseGain != decimal.Max(-residual, 0m)) return "Goodwill or bargain purchase gain does not reconcile to consideration, prior interest, NCI, and identifiable net assets.";
         var method = content.NciMeasurementMethod?.Trim() ?? string.Empty; if (method is not ("FullFairValue" or "ProportionateShare" or "NotApplicable")) return "Use FullFairValue, ProportionateShare, or NotApplicable for the NCI measurement method.";
+        if (content.OwnershipAfter == 1m && (value.NoncontrollingInterestRecognized != 0m || method != "NotApplicable")) return "A wholly owned acquisition must recognize no NCI and use the NotApplicable NCI measurement method.";
+        if (content.OwnershipAfter < 1m && method == "NotApplicable") return "A partially owned acquisition requires an explicit FullFairValue or ProportionateShare NCI measurement method.";
         if (frameworkCode.Trim().Equals("US-GAAP", StringComparison.OrdinalIgnoreCase) && value.NoncontrollingInterestRecognized > 0m && method != "FullFairValue") return "US GAAP acquisitions with NCI require the FullFairValue measurement method.";
         return null;
     }
@@ -234,10 +240,48 @@ public sealed partial class ConsolidationService
     {
         var content = DeserializeOwnershipEvent(entity); if (content is null) return "The retained ownership-event JSON is invalid or disagrees with its schema metadata.";
         var validation = ValidateOwnershipEventRequest(new(entity.Id, entity.ConsolidationGroupId, entity.SubjectCompanyId, entity.EventDate, entity.EventType.ToString(), entity.Reference, entity.FrameworkCode, entity.FrameworkEdition, content, entity.ConcurrencyToken)); if (validation is not null && !entity.ReversalOfEventId.HasValue) return validation;
+        if (!entity.ReversalOfEventId.HasValue)
+        {
+            var subjectPeriods = await db.ConsolidationGroupCompanies.AsNoTracking().Where(item => item.ConsolidationGroupId == entity.ConsolidationGroupId && item.MemberCompanyId == entity.SubjectCompanyId).ToArrayAsync(cancellationToken);
+            var effectiveSubject = subjectPeriods.SingleOrDefault(item => item.EffectiveFrom <= entity.EventDate && (item.EffectiveThrough == null || item.EffectiveThrough >= entity.EventDate));
+            if (effectiveSubject is null || effectiveSubject.ConsolidationBasis != ConsolidationBasis.ControlledSubsidiary) return "The retained event no longer has a reviewed controlled-subsidiary ownership period effective on its accounting date.";
+            var transitionError = ValidateOwnershipTransition(subjectPeriods, effectiveSubject, entity.EventType, entity.EventDate, content); if (transitionError is not null) return transitionError;
+        }
         var accountValidationDate = entity.EventDate;
         if (entity.ReversalOfEventId.HasValue)
             accountValidationDate = await db.ConsolidationOwnershipEvents.AsNoTracking().Where(item => item.Id == entity.ReversalOfEventId.Value).Select(item => item.EventDate).SingleOrDefaultAsync(cancellationToken);
         var group = await db.ConsolidationGroups.AsNoTracking().SingleAsync(item => item.Id == entity.ConsolidationGroupId, cancellationToken); return await ValidateOwnershipPostingAccountsAsync(db, group, accountValidationDate, content, cancellationToken);
+    }
+
+    private static string? ValidateOwnershipTransition(IReadOnlyList<ConsolidationGroupCompany> periods, ConsolidationGroupCompany effectiveSubject,
+        ConsolidationOwnershipEventType eventType, DateOnly eventDate, ConsolidationOwnershipEventDocument content)
+    {
+        var priorDate = eventDate == DateOnly.MinValue ? (DateOnly?)null : eventDate.AddDays(-1);
+        var prior = priorDate.HasValue ? periods.SingleOrDefault(item => item.EffectiveFrom <= priorDate.Value && (item.EffectiveThrough == null || item.EffectiveThrough >= priorDate.Value)) : null;
+        switch (eventType)
+        {
+            case ConsolidationOwnershipEventType.AcquisitionOfControl:
+                if (effectiveSubject.EffectiveFrom != eventDate || content.OwnershipBefore != 0m)
+                    return "An acquisition of control must be dated on the controlled-subsidiary period's first day and begin from 0% ownership. Use a step-acquisition schedule for a previously held interest.";
+                if (prior is not null)
+                    return "An acquisition of control cannot have an ownership period effective immediately before control begins. Close the prior interest and use a step-acquisition schedule when appropriate.";
+                break;
+            case ConsolidationOwnershipEventType.StepAcquisition:
+                if (effectiveSubject.EffectiveFrom != eventDate || content.OwnershipBefore <= 0m || prior is null || prior.OwnershipPercentage != content.OwnershipBefore || prior.ConsolidationBasis == ConsolidationBasis.ControlledSubsidiary)
+                    return "A step acquisition must be dated on the controlled-subsidiary period's first day and match a positive, immediately preceding noncontrolled ownership period.";
+                break;
+            case ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl:
+                if (effectiveSubject.EffectiveFrom != eventDate || prior is null || prior.ConsolidationBasis != ConsolidationBasis.ControlledSubsidiary || prior.OwnershipPercentage != content.OwnershipBefore)
+                    return "An ownership change without loss of control must be dated on a successor controlled-subsidiary period whose immediately preceding controlled period matches the before ownership.";
+                break;
+            case ConsolidationOwnershipEventType.LossOfControl:
+                if (effectiveSubject.EffectiveThrough != eventDate)
+                    return "A loss-of-control event must be dated on the final day of the controlled-subsidiary ownership period.";
+                break;
+            case ConsolidationOwnershipEventType.ProfitAttribution:
+                break;
+        }
+        return null;
     }
 
     private static ConsolidationOwnershipEventDocument? DeserializeOwnershipEvent(ConsolidationOwnershipEvent entity)

@@ -188,6 +188,17 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             INSERT OR IGNORE INTO "CompanyMemberships" ("Id", "UserId", "CompanyId", "Role", "IsOwner", "IsActive", "GrantedAtUtc")
             SELECT '71000000-0000-0000-0000-000000000013', "Id", '71000000-0000-0000-0000-000000000010', 'Controller', 0, 1, $grantedAtUtc
             FROM "Users" WHERE "UserName" = 'e2e-consolidation-poster';
+            INSERT OR IGNORE INTO "Companies" ("Id", "Name", "LegalName", "TaxId", "BaseCurrency", "FiscalYearStartMonth")
+            VALUES ('71000000-0000-0000-0000-000000000030', 'E2E acquisition-date subsidiary', 'E2E acquisition-date subsidiary LLC', 'E2E-ACQ-SUB', 'USD', 1);
+            INSERT OR IGNORE INTO "CompanyMemberships" ("Id", "UserId", "CompanyId", "Role", "IsOwner", "IsActive", "GrantedAtUtc")
+            SELECT '71000000-0000-0000-0000-000000000031', "Id", '71000000-0000-0000-0000-000000000030', 'Integration Test Administrator', 1, 1, $grantedAtUtc
+            FROM "Users" WHERE "UserName" = 'integration-admin';
+            INSERT OR IGNORE INTO "CompanyMemberships" ("Id", "UserId", "CompanyId", "Role", "IsOwner", "IsActive", "GrantedAtUtc")
+            SELECT '71000000-0000-0000-0000-000000000032', "Id", '71000000-0000-0000-0000-000000000030', 'Controller', 0, 1, $grantedAtUtc
+            FROM "Users" WHERE "UserName" = 'e2e-consolidation-reviewer';
+            INSERT OR IGNORE INTO "CompanyMemberships" ("Id", "UserId", "CompanyId", "Role", "IsOwner", "IsActive", "GrantedAtUtc")
+            SELECT '71000000-0000-0000-0000-000000000033', "Id", '71000000-0000-0000-0000-000000000030', 'Controller', 0, 1, $grantedAtUtc
+            FROM "Users" WHERE "UserName" = 'e2e-consolidation-poster';
             INSERT OR IGNORE INTO "ConsolidationGroups" ("Id", "CompanyId", "Name", "ReportingCurrency", "CtaAccountNumber", "CtaAccountName", "NciAccountNumber", "NciAccountName", "IsActive", "ConcurrencyToken")
             SELECT '71000000-0000-0000-0000-000000000001', "Id", 'E2E controlled consolidation', 'USD', '39999', 'Cumulative translation adjustment', '39998', 'Noncontrolling interests', 1, 'e2e-group-token'
             FROM "Companies" WHERE "Name" = 'Brass Ledger Manufacturing';
@@ -196,6 +207,8 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             FROM "Companies" WHERE "Name" = 'Brass Ledger Manufacturing';
             INSERT OR IGNORE INTO "ConsolidationGroupCompanies" ("Id", "ConsolidationGroupId", "MemberCompanyId", "OwnershipPercentage", "ConsolidationBasis", "BasisRationale", "BasisReviewedOn", "EffectiveFrom", "EffectiveThrough", "ConcurrencyToken")
             VALUES ('71000000-0000-0000-0000-000000000014', '71000000-0000-0000-0000-000000000001', '71000000-0000-0000-0000-000000000010', '0.75', 1, 'E2E reviewed control conclusion', '2026-01-01', '0001-01-01', NULL, 'e2e-affiliate-membership-token');
+            INSERT OR IGNORE INTO "ConsolidationGroupCompanies" ("Id", "ConsolidationGroupId", "MemberCompanyId", "OwnershipPercentage", "ConsolidationBasis", "BasisRationale", "BasisReviewedOn", "EffectiveFrom", "EffectiveThrough", "ConcurrencyToken")
+            VALUES ('71000000-0000-0000-0000-000000000034', '71000000-0000-0000-0000-000000000001', '71000000-0000-0000-0000-000000000030', '0.75', 1, 'E2E acquisition-date control conclusion', '2026-08-31', '2026-08-31', NULL, 'e2e-acquisition-membership-token');
             INSERT OR IGNORE INTO "ConsolidationAccountMappings" ("Id", "ConsolidationGroupId", "MemberCompanyId", "MemberAccountId", "ReportingAccountNumber", "ReportingAccountName", "ReportingAccountType", "TranslationMethod", "CashFlowActivity", "CashFlowRationale", "CashFlowReviewedOn", "EffectiveFrom", "EffectiveThrough", "IsActive", "ConcurrencyToken")
             SELECT '71000000-0000-0000-0000-000000000003', '71000000-0000-0000-0000-000000000001', "CompanyId", "Id", "Number", "Name", "Type", 0, 0, '', NULL, '0001-01-01', NULL, 1, 'e2e-cash-mapping-token'
             FROM "Accounts" WHERE "Number" = '1000' LIMIT 1;
@@ -364,8 +377,11 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             DELETE FROM "Customers" WHERE "Id" = '71000000-0000-0000-0000-000000000020';
             DELETE FROM "Vendors" WHERE "Id" = '71000000-0000-0000-0000-000000000021';
             DELETE FROM "ConsolidationGroupCompanies" WHERE "Id" = '71000000-0000-0000-0000-000000000014';
+            DELETE FROM "ConsolidationGroupCompanies" WHERE "Id" = '71000000-0000-0000-0000-000000000034';
             DELETE FROM "CompanyMemberships" WHERE "CompanyId" = '71000000-0000-0000-0000-000000000010';
+            DELETE FROM "CompanyMemberships" WHERE "CompanyId" = '71000000-0000-0000-0000-000000000030';
             DELETE FROM "Companies" WHERE "Id" = '71000000-0000-0000-0000-000000000010';
+            DELETE FROM "Companies" WHERE "Id" = '71000000-0000-0000-0000-000000000030';
             """;
         await command.ExecuteNonQueryAsync();
     }

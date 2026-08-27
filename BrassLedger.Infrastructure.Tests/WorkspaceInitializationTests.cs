@@ -697,8 +697,20 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.NotNull(laterReport);
         Assert.Equal(125m, laterReport!.Accounts.Single(account => account.AccountNumber == "19998").ConvertedBalance);
         Assert.Equal(125m, laterReport.Accounts.Single(account => account.AccountNumber == "39998").ConvertedBalance);
+        var ownershipEventDate = new DateOnly(2026, 5, 1);
         var usdAffiliate = await companies.CreateCompanyAsync(new CreateCompanyRequest("US distribution affiliate", "US distribution affiliate LLC", "US-AFFILIATE-TEST", "USD", 1)); Assert.True(usdAffiliate.Succeeded, usdAffiliate.ErrorMessage); var usdAffiliateId = usdAffiliate.CompanyId!.Value;
         var affiliateOwnership = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(null, group.Id.Value, usdAffiliateId, .75m, DateOnly.MinValue, null, ConsolidationBasis: nameof(ConsolidationBasis.ControlledSubsidiary), BasisRationale: "Reviewed power, variable returns, and ability to affect returns", BasisReviewedOn: basisReviewedOn)); Assert.True(affiliateOwnership.Succeeded, affiliateOwnership.ErrorMessage);
+        var acquisitionSubject = await companies.CreateCompanyAsync(new CreateCompanyRequest("Acquisition-date subsidiary", "Acquisition-date subsidiary LLC", "ACQ-SUBJECT-TEST", "USD", 1)); Assert.True(acquisitionSubject.Succeeded, acquisitionSubject.ErrorMessage); var acquisitionSubjectId = acquisitionSubject.CompanyId!.Value;
+        var acquisitionOwnership = await consolidation.SaveOwnershipPeriodAsync(new(null, group.Id.Value, acquisitionSubjectId, 1m, ownershipEventDate, null, ConsolidationBasis: nameof(ConsolidationBasis.ControlledSubsidiary), BasisRationale: "Reviewed acquisition-date control conclusion", BasisReviewedOn: ownershipEventDate)); Assert.True(acquisitionOwnership.Succeeded, acquisitionOwnership.ErrorMessage);
+        var transitionPriorStart = ownershipEventDate.AddDays(1); var transitionDate = new DateOnly(2026, 6, 1);
+        var stepSubject = await companies.CreateCompanyAsync(new("Step-acquisition subsidiary", "Step-acquisition subsidiary LLC", "STEP-SUBJECT-TEST", "USD", 1)); Assert.True(stepSubject.Succeeded, stepSubject.ErrorMessage); var stepSubjectId = stepSubject.CompanyId!.Value;
+        Assert.True((await consolidation.SaveOwnershipPeriodAsync(new(null, group.Id.Value, stepSubjectId, .50m, transitionPriorStart, transitionDate.AddDays(-1), ConsolidationBasis: nameof(ConsolidationBasis.ProportionateInterest), BasisRationale: "Reviewed noncontrolling interest before control", BasisReviewedOn: ownershipEventDate))).Succeeded);
+        Assert.True((await consolidation.SaveOwnershipPeriodAsync(new(null, group.Id.Value, stepSubjectId, 1m, transitionDate, null, ConsolidationBasis: nameof(ConsolidationBasis.ControlledSubsidiary), BasisRationale: "Reviewed control obtained through a step acquisition", BasisReviewedOn: transitionDate))).Succeeded);
+        var changeSubject = await companies.CreateCompanyAsync(new("Continuing-control subsidiary", "Continuing-control subsidiary LLC", "CHANGE-SUBJECT-TEST", "USD", 1)); Assert.True(changeSubject.Succeeded, changeSubject.ErrorMessage); var changeSubjectId = changeSubject.CompanyId!.Value;
+        Assert.True((await consolidation.SaveOwnershipPeriodAsync(new(null, group.Id.Value, changeSubjectId, .80m, transitionPriorStart, transitionDate.AddDays(-1), ConsolidationBasis: nameof(ConsolidationBasis.ControlledSubsidiary), BasisRationale: "Reviewed continuing control before ownership change", BasisReviewedOn: ownershipEventDate))).Succeeded);
+        Assert.True((await consolidation.SaveOwnershipPeriodAsync(new(null, group.Id.Value, changeSubjectId, .75m, transitionDate, null, ConsolidationBasis: nameof(ConsolidationBasis.ControlledSubsidiary), BasisRationale: "Reviewed continuing control after ownership change", BasisReviewedOn: transitionDate))).Succeeded);
+        var lossSubject = await companies.CreateCompanyAsync(new("Disposed subsidiary", "Disposed subsidiary LLC", "LOSS-SUBJECT-TEST", "USD", 1)); Assert.True(lossSubject.Succeeded, lossSubject.ErrorMessage); var lossSubjectId = lossSubject.CompanyId!.Value;
+        Assert.True((await consolidation.SaveOwnershipPeriodAsync(new(null, group.Id.Value, lossSubjectId, .75m, transitionPriorStart, transitionDate, ConsolidationBasis: nameof(ConsolidationBasis.ControlledSubsidiary), BasisRationale: "Reviewed control through the disposal date", BasisReviewedOn: ownershipEventDate))).Succeeded);
         Guid intercompanyCustomerId = Guid.NewGuid(); Guid intercompanyVendorId = Guid.NewGuid(); Guid intercompanyInvoiceId = Guid.NewGuid(); Guid intercompanyBillId = Guid.NewGuid();
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
         {
@@ -715,7 +727,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
         {
             foreach (var actorId in new[] { reviewerId, posterId, reverserId })
-            foreach (var memberCompanyId in new[] { currentCompanyId, canadianCompanyId, usdAffiliateId })
+            foreach (var memberCompanyId in new[] { currentCompanyId, canadianCompanyId, usdAffiliateId, acquisitionSubjectId, stepSubjectId, changeSubjectId, lossSubjectId })
                 db.CompanyMemberships.Add(new CompanyMembership { Id = Guid.NewGuid(), UserId = actorId, CompanyId = memberCompanyId, Role = "Accounting", IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
             await db.SaveChangesAsync();
         }
@@ -725,7 +737,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             claims.Add(new(System.Security.Claims.ClaimTypes.NameIdentifier, actorId.ToString())); claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, currentCompanyId.ToString()));
             accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
         }
-        var adjustmentPeriodStart = new DateOnly(2026, 1, 1); var adjustmentAsOf = new DateOnly(2026, 5, 1);
+        var adjustmentPeriodStart = new DateOnly(2026, 1, 1); var adjustmentAsOf = ownershipEventDate;
         SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
         var invalidDisclosureContent = new ConsolidationDisclosureDocument(1,
             [new("DEBT-1", "Term debt", "Long-term debt", 100m, -20m, 0m, 0m, 5m, 0m, 0m, 90m, string.Empty, "Debt rollforward WP-1")], [], []);
@@ -757,17 +769,17 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var adjustmentEquity = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Equity) && account.AccountNumber != "39997");
         var adjustmentRevenue = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Revenue));
         var nciEquity = adjustmentWorkspace.ReportingAccounts.Single(account => account.AccountNumber == "39997" && account.AccountType == nameof(AccountType.Equity));
-        var invalidAcquisitionContent = new ConsolidationOwnershipEventDocument(1, 0m, .75m, "FullFairValue", "Controller-reviewed purchase-price allocation", "Acquisition working paper PPA-1", string.Empty, string.Empty,
+        var invalidAcquisitionContent = new ConsolidationOwnershipEventDocument(1, 0m, 1m, "NotApplicable", "Controller-reviewed purchase-price allocation", "Acquisition working paper PPA-1", string.Empty, string.Empty,
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 100m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 100m)],
-            Acquisition: new(80m, 0m, 20m, 90m, 0m, 0m));
-        var invalidAcquisition = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-BAD", "US-GAAP", "ASC 805 current through 2026", invalidAcquisitionContent));
+            Acquisition: new(80m, 0m, 0m, 70m, 0m, 0m));
+        var invalidAcquisition = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, acquisitionSubjectId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-BAD", "US-GAAP", "ASC 805 current through 2026", invalidAcquisitionContent));
         Assert.False(invalidAcquisition.Succeeded); Assert.Contains("Goodwill", invalidAcquisition.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var acquisitionContent = invalidAcquisitionContent with
         {
-            Acquisition = new(80m, 0m, 20m, 90m, 10m, 0m),
+            Acquisition = new(80m, 0m, 0m, 70m, 10m, 0m),
             Extensions = new() { ["valuationSpecialist"] = JsonDocument.Parse("\"Independent Valuation LLC\"").RootElement.Clone() }
         };
-        var savedAcquisition = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-1", "US-GAAP", "ASC 805 current through 2026", acquisitionContent));
+        var savedAcquisition = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, acquisitionSubjectId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-1", "US-GAAP", "ASC 805 current through 2026", acquisitionContent));
         Assert.True(savedAcquisition.Succeeded, savedAcquisition.ErrorMessage);
         var acquisitionDraft = Assert.Single((await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events); Assert.Equal("Draft", acquisitionDraft.Status); Assert.Equal(10m, acquisitionDraft.Content.Acquisition!.Goodwill); Assert.False(string.IsNullOrWhiteSpace(acquisitionDraft.ContentSha256));
         SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
@@ -798,27 +810,37 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var historicalOwnershipPackage = await consolidation.GetStatementPackageAsync(group.Id.Value, adjustmentAsOf.AddDays(1), adjustmentAsOf.AddMonths(1)); Assert.NotNull(historicalOwnershipPackage);
         Assert.Contains(historicalOwnershipPackage!.OwnershipEvents!, item => item.Reference == "ACQ-US-DIST-1"); Assert.Contains(historicalOwnershipPackage.OwnershipEvents!, item => item.ReversalOfEventId == postedAcquisitionSnapshot.Id); Assert.Contains(historicalOwnershipPackage.OwnershipEvents!, item => item.Reference == "ATTR-US-DIST-1");
         SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
-        var ownershipValidationDate = adjustmentAsOf.AddMonths(1);
-        var stepContent = acquisitionContent with { OwnershipBefore = .50m, Acquisition = new(30m, 40m, 20m, 80m, 10m, 0m), Extensions = null };
-        var savedStep = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.StepAcquisition), "STEP-US-DIST-1", "US-GAAP", "ASC 805 current through 2026", stepContent)); Assert.True(savedStep.Succeeded, savedStep.ErrorMessage);
+        var ownershipValidationDate = transitionDate;
+        var stepContent = acquisitionContent with { OwnershipBefore = .50m, Acquisition = new(30m, 40m, 0m, 60m, 10m, 0m), Extensions = null };
+        var savedStep = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, stepSubjectId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.StepAcquisition), "STEP-US-DIST-1", "US-GAAP", "ASC 805 current through 2026", stepContent)); Assert.True(savedStep.Succeeded, savedStep.ErrorMessage);
         var invalidChangeContent = new ConsolidationOwnershipEventDocument(1, .80m, .75m, "NotApplicable", "Reviewed continuing-control ownership transaction", "Ownership schedule EQ-1", string.Empty, string.Empty,
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 5m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 5m)],
             OwnershipChange: new(5m, 0m, 0m, 0m, 0m, 0m));
         var invalidChange = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl), "CHANGE-US-DIST-BAD", "US-GAAP", "ASC 810 current through 2026", invalidChangeContent)); Assert.False(invalidChange.Succeeded); Assert.Contains("reconcile", invalidChange.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var changeContent = invalidChangeContent with { OwnershipChange = new(5m, 0m, 0m, 5m, 0m, 0m) };
-        var savedChange = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl), "CHANGE-US-DIST-1", "US-GAAP", "ASC 810 current through 2026", changeContent)); Assert.True(savedChange.Succeeded, savedChange.ErrorMessage);
+        var savedChange = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, changeSubjectId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl), "CHANGE-US-DIST-1", "US-GAAP", "ASC 810 current through 2026", changeContent)); Assert.True(savedChange.Succeeded, savedChange.ErrorMessage);
         var invalidLossContent = new ConsolidationOwnershipEventDocument(1, .75m, 0m, "NotApplicable", "Reviewed loss-of-control derecognition", "Disposal schedule DISP-1", string.Empty, string.Empty,
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 120m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 120m)],
             LossOfControl: new(100m, 0m, 20m, 110m, 10m, 0m, 1m));
         var invalidLoss = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.LossOfControl), "LOSS-US-DIST-BAD", "IFRS", "IFRS 10 current through 2026", invalidLossContent)); Assert.False(invalidLoss.Succeeded); Assert.Contains("does not reconcile", invalidLoss.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var lossContent = invalidLossContent with { LossOfControl = new(100m, 0m, 20m, 110m, 10m, 0m, 0m) };
-        var savedLoss = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.LossOfControl), "LOSS-US-DIST-1", "IFRS", "IFRS 10 current through 2026", lossContent)); Assert.True(savedLoss.Succeeded, savedLoss.ErrorMessage);
+        var savedLoss = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, lossSubjectId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.LossOfControl), "LOSS-US-DIST-1", "IFRS", "IFRS 10 current through 2026", lossContent)); Assert.True(savedLoss.Succeeded, savedLoss.ErrorMessage);
         var invalidAttribution = attributionContent with { ProfitAttribution = new(10m, 8m, 1m, 0m, 0m, 0m) };
         var rejectedAttributionCalculation = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.ProfitAttribution), "ATTR-US-DIST-BAD", "US-GAAP", "ASC 810 current through 2026", invalidAttribution)); Assert.False(rejectedAttributionCalculation.Succeeded); Assert.Contains("reconcile", rejectedAttributionCalculation.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        var draftEventsToReject = (await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events.Where(item => item.Id == savedStep.Id!.Value || item.Id == savedChange.Id!.Value || item.Id == savedLoss.Id!.Value).ToArray(); Assert.Equal(3, draftEventsToReject.Length);
+        var rejectedAttributionDraftResult = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.ProfitAttribution), "ATTR-US-DIST-REJECT", "US-GAAP", "ASC 810 current through 2026", attributionContent)); Assert.True(rejectedAttributionDraftResult.Succeeded, rejectedAttributionDraftResult.ErrorMessage);
+        var rejectedAttributionDraft = Assert.Single((await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events, item => item.Id == rejectedAttributionDraftResult.Id);
+        var transitionDrafts = (await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events.Where(item => item.Id == savedStep.Id!.Value || item.Id == savedChange.Id!.Value || item.Id == savedLoss.Id!.Value).ToArray(); Assert.Equal(3, transitionDrafts.Length);
         SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
-        foreach (var eventToReject in draftEventsToReject) Assert.True((await consolidation.RejectOwnershipEventAsync(new(group.Id.Value, eventToReject.Id, "Fixture-only schedule validation", eventToReject.ConcurrencyToken))).Succeeded);
-        var rejectedEventReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, ownershipValidationDate); Assert.DoesNotContain(rejectedEventReport!.Warnings, warning => warning.Contains("STEP-US-DIST-1", StringComparison.Ordinal) || warning.Contains("CHANGE-US-DIST-1", StringComparison.Ordinal) || warning.Contains("LOSS-US-DIST-1", StringComparison.Ordinal));
+        Assert.True((await consolidation.RejectOwnershipEventAsync(new(group.Id.Value, rejectedAttributionDraft.Id, "Fixture-only schedule validation", rejectedAttributionDraft.ConcurrencyToken))).Succeeded);
+        foreach (var transitionDraft in transitionDrafts) Assert.True((await consolidation.ApproveOwnershipEventAsync(new(group.Id.Value, transitionDraft.Id, transitionDraft.ConcurrencyToken))).Succeeded);
+        var approvedTransitionEvents = (await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events.Where(item => transitionDrafts.Any(draft => draft.Id == item.Id)).ToArray(); Assert.All(approvedTransitionEvents, item => Assert.Equal("Approved", item.Status));
+        SetConsolidationUser(posterId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
+        foreach (var approvedTransition in approvedTransitionEvents) Assert.True((await consolidation.PostOwnershipEventAsync(new(group.Id.Value, approvedTransition.Id, approvedTransition.ConcurrencyToken))).Succeeded);
+        var transitionReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, ownershipValidationDate); Assert.DoesNotContain(transitionReport!.Warnings, warning => warning.Contains("ATTR-US-DIST-REJECT", StringComparison.Ordinal));
+        foreach (var reference in new[] { "STEP-US-DIST-1", "CHANGE-US-DIST-1", "LOSS-US-DIST-1" }) Assert.Contains(transitionReport.Accounts.SelectMany(account => account.Contributions ?? []), contribution => contribution.Reference == reference && contribution.TranslationMethod == "OwnershipEvent");
+        var transitionPackage = await consolidation.GetStatementPackageAsync(group.Id.Value, adjustmentPeriodStart, ownershipValidationDate); Assert.NotNull(transitionPackage);
+        foreach (var reference in new[] { "STEP-US-DIST-1", "CHANGE-US-DIST-1", "LOSS-US-DIST-1" }) Assert.Contains(transitionPackage!.OwnershipEvents!, item => item.Reference == reference && item.Status == "Posted");
+        var transitionCsv = await consolidation.ExportStatementPackageCsvAsync(group.Id.Value, adjustmentPeriodStart, ownershipValidationDate); Assert.NotNull(transitionCsv); Assert.Contains("STEP-US-DIST-1", transitionCsv, StringComparison.Ordinal); Assert.Contains("CHANGE-US-DIST-1", transitionCsv, StringComparison.Ordinal); Assert.Contains("LOSS-US-DIST-1", transitionCsv, StringComparison.Ordinal);
         SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
         var missingNciReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(missingNciReport);
         Assert.Contains(missingNciReport!.Warnings, warning => warning.Contains("no posted NCI reclassification", StringComparison.OrdinalIgnoreCase));
@@ -1009,14 +1031,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(replacementNci.Succeeded, replacementNci.ErrorMessage);
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
         {
-            Assert.Equal(3, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationGroupCompany)));
+            Assert.Equal(9, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationGroupCompany)));
             Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationTradingPartner)));
             Assert.Equal(3, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationIntercompanyMatch)));
             Assert.Equal(11, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationAdjustmentBatch)));
             Assert.Equal(6, await db.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == group.Id));
             Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationDisclosurePackage)));
-            Assert.Equal(13, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationOwnershipEvent)));
-            Assert.Equal(6, await db.ConsolidationOwnershipEvents.CountAsync(item => item.ConsolidationGroupId == group.Id));
+            Assert.Equal(18, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationOwnershipEvent)));
+            Assert.Equal(7, await db.ConsolidationOwnershipEvents.CountAsync(item => item.ConsolidationGroupId == group.Id));
         }
     }
 

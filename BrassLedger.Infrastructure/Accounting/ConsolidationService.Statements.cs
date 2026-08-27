@@ -144,13 +144,24 @@ public sealed partial class ConsolidationService
         {
             var ordered = companyPeriods.OrderBy(period => period.EffectiveFrom).ToArray();
             var companyEvents = validPeriodOwnershipEvents.Where(item => item.SubjectCompanyId == companyPeriods.Key).ToArray();
-            if (ordered[0].EffectiveFrom > periodStart && !companyEvents.Any(item => item.EventType is ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition))
+            if (ordered[0].EffectiveFrom > periodStart && !companyEvents.Any(item => item.EventDate == ordered[0].EffectiveFrom && item.EventType is ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition))
                 warnings.Add($"{statementCompanyNames[companyPeriods.Key]} entered the group within the statement period without a posted acquisition-of-control or step-acquisition schedule.");
-            if (ordered[^1].EffectiveThrough is { } finalThrough && finalThrough < asOf && !companyEvents.Any(item => item.EventType == ConsolidationOwnershipEventType.LossOfControl))
+            if (ordered[^1].EffectiveThrough is { } finalThrough && finalThrough < asOf && !companyEvents.Any(item => item.EventDate == finalThrough && item.EventType == ConsolidationOwnershipEventType.LossOfControl))
                 warnings.Add($"{statementCompanyNames[companyPeriods.Key]} left the group within the statement period without a posted loss-of-control schedule.");
-            if (ordered.Select(period => (period.ConsolidationBasis, period.OwnershipPercentage)).Distinct().Count() > 1
-                && !companyEvents.Any(item => item.EventType is ConsolidationOwnershipEventType.StepAcquisition or ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl or ConsolidationOwnershipEventType.LossOfControl))
-                warnings.Add($"{statementCompanyNames[companyPeriods.Key]} changed basis or ownership within the statement period without a posted ownership-change schedule.");
+            foreach (var transition in ordered.Zip(ordered.Skip(1)))
+            {
+                var isContiguous = transition.First.EffectiveThrough is { } through && through != DateOnly.MaxValue && through.AddDays(1) == transition.Second.EffectiveFrom;
+                if (!isContiguous)
+                {
+                    if (transition.First.EffectiveThrough is { } departureDate && !companyEvents.Any(item => item.EventDate == departureDate && item.EventType == ConsolidationOwnershipEventType.LossOfControl))
+                        warnings.Add($"{statementCompanyNames[companyPeriods.Key]} left the group on {departureDate:yyyy-MM-dd} without a posted loss-of-control schedule.");
+                    if (!companyEvents.Any(item => item.EventDate == transition.Second.EffectiveFrom && item.EventType == ConsolidationOwnershipEventType.AcquisitionOfControl))
+                        warnings.Add($"{statementCompanyNames[companyPeriods.Key]} reentered the group on {transition.Second.EffectiveFrom:yyyy-MM-dd} without a posted acquisition-of-control schedule.");
+                }
+                else if ((transition.First.ConsolidationBasis != transition.Second.ConsolidationBasis || transition.First.OwnershipPercentage != transition.Second.OwnershipPercentage)
+                    && !companyEvents.Any(item => item.EventDate == transition.Second.EffectiveFrom && item.EventType is ConsolidationOwnershipEventType.StepAcquisition or ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl))
+                    warnings.Add($"{statementCompanyNames[companyPeriods.Key]} changed basis or ownership on {transition.Second.EffectiveFrom:yyyy-MM-dd} without a posted step-acquisition or continuing-control ownership-change schedule.");
+            }
         }
         if (currentCashAccounts.Count == 0 || openingCashAccounts.Count == 0)
             warnings.Add("Cash and cash equivalents could not be identified from effective bank-account consolidation mappings for both statement dates.");
