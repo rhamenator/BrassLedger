@@ -128,10 +128,26 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var mappingRequest = new SaveConsolidationAccountMappingRequest(null, group.Id, sourceAccount.CompanyId, sourceAccount.AccountId, "CON-" + sourceAccount.AccountNumber, sourceAccount.AccountName, new DateOnly(2026, 1, 1), null);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/account-mappings", mappingRequest)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", mappingRequest)).StatusCode);
+        var offsetSourceAccount = mappingWorkspace.SourceAccounts.First(account => account.CompanyId == existingCompany.CompanyId && account.AccountType != sourceAccount.AccountType);
+        var offsetMappingRequest = new SaveConsolidationAccountMappingRequest(null, group.Id, offsetSourceAccount.CompanyId, offsetSourceAccount.AccountId, "CON-" + offsetSourceAccount.AccountNumber, offsetSourceAccount.AccountName, new DateOnly(2026, 1, 1), null);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", offsetMappingRequest)).StatusCode);
         var savedMappings = await client.GetFromJsonAsync<ConsolidationAccountMappingWorkspace>($"/api/consolidation-groups/{group.Id}/account-mappings");
         Assert.Contains(savedMappings!.Mappings, mapping => mapping.AccountId == sourceAccount.AccountId && mapping.ReportingAccountNumber == "CON-" + sourceAccount.AccountNumber);
         Assert.Contains(savedMappings.Mappings, mapping => mapping.AccountId == sourceAccount.AccountId && mapping.TranslationMethod is "Closing" or "Average" or "Historical");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", mappingRequest with { EffectiveFrom = new DateOnly(2026, 2, 1) })).StatusCode);
+        var debitMapping = savedMappings.Mappings.Single(mapping => mapping.AccountId == sourceAccount.AccountId);
+        var creditMapping = savedMappings.Mappings.Single(mapping => mapping.AccountId == offsetSourceAccount.AccountId);
+        var adjustmentRequest = new SaveConsolidationAdjustmentRequest(null, group.Id, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), "ManualAdjustment", "API-CONSOL-ADJ-1", "API reporting-only adjustment", string.Empty,
+        [
+            new(debitMapping.ReportingAccountNumber, debitMapping.ReportingAccountName, debitMapping.ReportingAccountType, 10m, 0m, "API debit"),
+            new(creditMapping.ReportingAccountNumber, creditMapping.ReportingAccountName, creditMapping.ReportingAccountType, 0m, 10m, "API credit")
+        ]);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/adjustments", adjustmentRequest)).StatusCode);
+        var adjustmentResponse = await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/adjustments", adjustmentRequest); Assert.Equal(HttpStatusCode.OK, adjustmentResponse.StatusCode);
+        var adjustmentResult = await adjustmentResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var adjustmentWorkspace = await client.GetFromJsonAsync<ConsolidationAdjustmentWorkspace>($"/api/consolidation-groups/{group.Id}/adjustments");
+        var adjustment = Assert.Single(adjustmentWorkspace!.Adjustments, item => item.Id == adjustmentResult!.Id); Assert.Equal("Draft", adjustment.Status); Assert.Equal(2, adjustment.Lines.Count);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/adjustments/{Guid.NewGuid()}/approve", new ConsolidationAdjustmentActionRequest(group.Id, adjustment.Id, adjustment.ConcurrencyToken))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/consolidation-groups/{group.Id}/balances?periodStart=2026-01-01&asOf=2026-06-30")).StatusCode);
     }
 

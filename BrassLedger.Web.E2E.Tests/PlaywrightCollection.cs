@@ -9,3 +9,8 @@ public sealed class PlaywrightCollection : ICollectionFixture<PlaywrightWebAppFi
 public sealed class PlaywrightMutableCollection : ICollectionFixture<PlaywrightWebAppFixture>
 {
 }
+
+[CollectionDefinition("Playwright E2E Visual", DisableParallelization = true)]
+public sealed class PlaywrightVisualCollection : ICollectionFixture<PlaywrightWebAppFixture>
+{
+}

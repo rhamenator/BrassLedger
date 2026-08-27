@@ -13,7 +13,7 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
     public async Task<TransactionResult> SaveExchangeRateAsync(SaveExchangeRateRequest request, CancellationToken cancellationToken = default)
     {
         var baseCurrency = NormalizeCurrency(request.BaseCurrency); var quoteCurrency = NormalizeCurrency(request.QuoteCurrency); var source = request.Source?.Trim() ?? string.Empty; var sourceReference = request.SourceReference?.Trim() ?? string.Empty;
-        if (request.Rate <= 0 || baseCurrency is null || quoteCurrency is null || baseCurrency == quoteCurrency || !Enum.TryParse<CurrencyRateType>(request.RateType, true, out var rateType) || string.IsNullOrWhiteSpace(source) || source.Length > 240 || sourceReference.Length > 1000)
+        if (request.Rate <= 0 || baseCurrency is null || quoteCurrency is null || baseCurrency == quoteCurrency || !Enum.TryParse<CurrencyRateType>(request.RateType, true, out var rateType) || !Enum.IsDefined(rateType) || string.IsNullOrWhiteSpace(source) || source.Length > 240 || sourceReference.Length > 1000)
             return TransactionResult.Failure("Provide two different three-letter currencies, a positive rate, a valid rate type, and a concise source.");
         if ((rateType == CurrencyRateType.Average) != request.PeriodStartOn.HasValue || request.PeriodStartOn > request.EffectiveOn)
             return TransactionResult.Failure("An average rate requires a period start on or before its period end; closing and historical rates use one effective date.");
@@ -129,8 +129,12 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
         var sourceAccount = await db.Accounts.SingleOrDefaultAsync(account => account.Id == request.MemberAccountId && account.CompanyId == request.MemberCompanyId, cancellationToken);
         if (sourceAccount is null) return TransactionResult.Failure("The source account was not found in the selected member company.");
         var defaultMethod = sourceAccount.Type switch { AccountType.Asset or AccountType.Liability => ConsolidationTranslationMethod.Closing, AccountType.Revenue or AccountType.Expense => ConsolidationTranslationMethod.Average, _ => ConsolidationTranslationMethod.Historical };
-        if (!string.IsNullOrWhiteSpace(request.TranslationMethod) && !Enum.TryParse<ConsolidationTranslationMethod>(request.TranslationMethod, true, out _)) return TransactionResult.Failure("Choose Closing, Average, or Historical as the translation method.");
-        var translationMethod = string.IsNullOrWhiteSpace(request.TranslationMethod) ? defaultMethod : Enum.Parse<ConsolidationTranslationMethod>(request.TranslationMethod, true);
+        var translationMethod = defaultMethod;
+        if (!string.IsNullOrWhiteSpace(request.TranslationMethod))
+        {
+            if (!Enum.TryParse<ConsolidationTranslationMethod>(request.TranslationMethod, true, out var requestedMethod) || !Enum.IsDefined(requestedMethod)) return TransactionResult.Failure("Choose Closing, Average, or Historical as the translation method.");
+            translationMethod = requestedMethod;
+        }
         var mapping = request.Id is { } id ? await db.ConsolidationAccountMappings.SingleOrDefaultAsync(item => item.Id == id && item.ConsolidationGroupId == group.Id, cancellationToken) : null;
         if (request.Id is not null && mapping is null) return TransactionResult.Failure("The account mapping was not found in this consolidation group.");
         if (mapping is not null && (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(mapping.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))) return TransactionResult.Failure("The account mapping changed after it was displayed. Refresh before saving it.");
@@ -182,6 +186,203 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
                 var account = accounts.Single(item => item.Id == mapping.MemberAccountId && item.CompanyId == mapping.MemberCompanyId);
                 return new ConsolidationAccountMappingSnapshot(mapping.Id, mapping.MemberCompanyId, companies[mapping.MemberCompanyId].Name, mapping.MemberAccountId, account.Number, account.Name, account.Type.ToString(), mapping.ReportingAccountNumber, mapping.ReportingAccountName, mapping.ReportingAccountType.ToString(), mapping.TranslationMethod.ToString(), mapping.EffectiveFrom, mapping.EffectiveThrough, mapping.IsActive, mapping.ConcurrencyToken);
             }).ToArray());
+    }
+
+    public async Task<TransactionResult> SaveAdjustmentAsync(SaveConsolidationAdjustmentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedger.Infrastructure.Auth.BrassLedgerPermissions.ReportingManage) || !HasPermission(BrassLedger.Infrastructure.Auth.BrassLedgerPermissions.JournalPrepare))
+            return TransactionResult.Failure("You are not authorized to prepare consolidation adjustments.");
+        if (request.ConsolidationGroupId == Guid.Empty || request.PeriodStart > request.AsOf || !Enum.TryParse<ConsolidationAdjustmentKind>(request.Kind, true, out var kind) || !Enum.IsDefined(kind))
+            return TransactionResult.Failure("Choose a consolidation group, a valid reporting period, and a supported adjustment kind.");
+        var reference = request.Reference?.Trim() ?? string.Empty; var description = request.Description?.Trim() ?? string.Empty; var matchReference = request.MatchReference?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(reference) || reference.Length > 64 || description.Length > 1000 || matchReference.Length > 160 || request.Lines is null || request.Lines.Count < 2)
+            return TransactionResult.Failure("Provide a concise reference, at least two lines, and an optional concise description and match reference.");
+        if (kind == ConsolidationAdjustmentKind.IntercompanyElimination && string.IsNullOrWhiteSpace(matchReference))
+            return TransactionResult.Failure("An intercompany elimination requires a match reference.");
+        if (kind == ConsolidationAdjustmentKind.ManualAdjustment && !string.IsNullOrWhiteSpace(matchReference))
+            return TransactionResult.Failure("A manual consolidation adjustment must not carry an intercompany match reference.");
+        var parsedLines = new List<(ConsolidationAdjustmentLineRequest Request, AccountType Type)>();
+        foreach (var line in request.Lines)
+        {
+            if (!Enum.TryParse<AccountType>(line.ReportingAccountType, true, out var type) || !Enum.IsDefined(type)
+                || string.IsNullOrWhiteSpace(line.ReportingAccountNumber) || line.ReportingAccountNumber.Trim().Length > 64
+                || string.IsNullOrWhiteSpace(line.ReportingAccountName) || line.ReportingAccountName.Trim().Length > 160
+                || line.Description?.Trim().Length > 1000 || line.Debit < 0m || line.Credit < 0m
+                || line.Debit > 9999999999999999.99m || line.Credit > 9999999999999999.99m
+                || decimal.Round(line.Debit, 2) != line.Debit || decimal.Round(line.Credit, 2) != line.Credit
+                || (line.Debit == 0m) == (line.Credit == 0m))
+                return TransactionResult.Failure("Every adjustment line requires a valid reporting account and exactly one positive debit or credit within the supported 18-digit currency range and with no more than two decimal places.");
+            parsedLines.Add((line, type));
+        }
+        if (parsedLines.Sum(line => line.Request.Debit) != parsedLines.Sum(line => line.Request.Credit))
+            return TransactionResult.Failure("Consolidation adjustment debits and credits must balance exactly.");
+
+        var companyId = CurrentCompanyId(); var userId = CurrentUserId();
+        if (companyId is null || userId is null) return TransactionResult.Failure("An active company and user are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var group = await db.ConsolidationGroups.SingleOrDefaultAsync(item => item.Id == request.ConsolidationGroupId && item.CompanyId == companyId && item.IsActive, cancellationToken);
+        if (group is null) return TransactionResult.Failure("The active consolidation group was not found in the active company.");
+        var membershipError = await ValidateGroupAccessAsync(db, group.Id, userId.Value, request.AsOf, cancellationToken);
+        if (membershipError is not null) return TransactionResult.Failure(membershipError);
+        var memberCompanyIds = await EffectiveMemberCompanyIdsAsync(db, group.Id, request.AsOf, cancellationToken);
+        var reportingAccounts = await EffectiveReportingAccountsAsync(db, group.Id, request.AsOf, cancellationToken);
+        foreach (var (line, type) in parsedLines)
+        {
+            var number = line.ReportingAccountNumber.Trim(); var name = line.ReportingAccountName.Trim();
+            if (number == group.CtaAccountNumber)
+                return TransactionResult.Failure("The configured CTA account is system-controlled and cannot be used in a manual adjustment or elimination.");
+            if (!reportingAccounts.Contains((number, name, type)))
+                return TransactionResult.Failure($"Reporting account {number} · {name} is not established by an effective consolidation mapping for {request.AsOf:yyyy-MM-dd}.");
+            if (kind == ConsolidationAdjustmentKind.IntercompanyElimination)
+            {
+                if (!line.SourceCompanyId.HasValue || !line.CounterpartyCompanyId.HasValue || line.SourceCompanyId == line.CounterpartyCompanyId
+                    || !memberCompanyIds.Contains(line.SourceCompanyId.Value) || !memberCompanyIds.Contains(line.CounterpartyCompanyId.Value))
+                    return TransactionResult.Failure("Every elimination line requires two different companies that are members of the consolidation group on the report date.");
+            }
+            else if (line.SourceCompanyId.HasValue || line.CounterpartyCompanyId.HasValue)
+                return TransactionResult.Failure("Company-pair provenance is reserved for intercompany elimination lines.");
+        }
+
+        var entity = request.Id is { } id ? await db.ConsolidationAdjustmentBatches.SingleOrDefaultAsync(item => item.Id == id && item.CompanyId == companyId && item.ConsolidationGroupId == group.Id, cancellationToken) : null;
+        if (request.Id is not null && entity is null) return TransactionResult.Failure("The consolidation adjustment was not found in this group.");
+        if (entity is not null && entity.Status is not ("Draft" or "Rejected")) return TransactionResult.Failure("Only a draft or rejected consolidation adjustment can be edited.");
+        if (entity is not null && (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(entity.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)))
+            return TransactionResult.Failure("The consolidation adjustment changed after it was displayed. Refresh before saving it.");
+        if (entity is not null && (entity.ConsolidationGroupId != request.ConsolidationGroupId || entity.PeriodStart != request.PeriodStart || entity.AsOf != request.AsOf || entity.Kind != kind))
+            return TransactionResult.Failure("A retained adjustment cannot be moved to another group, period, or kind. Create a separate adjustment instead.");
+        entity ??= new ConsolidationAdjustmentBatch { Id = Guid.NewGuid(), CompanyId = companyId.Value, ConsolidationGroupId = group.Id, PeriodStart = request.PeriodStart, AsOf = request.AsOf, Kind = kind };
+        entity.Reference = reference; entity.Description = description; entity.MatchReference = matchReference; entity.Status = "Draft";
+        entity.PreparedByUserId = userId; entity.PreparedAtUtc = DateTimeOffset.UtcNow; entity.ApprovedByUserId = null; entity.ApprovedAtUtc = null; entity.RejectedByUserId = null; entity.RejectedAtUtc = null; entity.DecisionReason = string.Empty; entity.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        if (db.Entry(entity).State == EntityState.Detached) db.ConsolidationAdjustmentBatches.Add(entity);
+        else db.ConsolidationAdjustmentLines.RemoveRange(await db.ConsolidationAdjustmentLines.Where(line => line.ConsolidationAdjustmentBatchId == entity.Id).ToListAsync(cancellationToken));
+        db.ConsolidationAdjustmentLines.AddRange(parsedLines.Select((line, index) => new ConsolidationAdjustmentLine
+        {
+            Id = Guid.NewGuid(), ConsolidationAdjustmentBatchId = entity.Id, Sequence = index + 1,
+            ReportingAccountNumber = line.Request.ReportingAccountNumber.Trim(), ReportingAccountName = line.Request.ReportingAccountName.Trim(), ReportingAccountType = line.Type,
+            Debit = line.Request.Debit, Credit = line.Request.Credit, Description = line.Request.Description?.Trim() ?? string.Empty,
+            SourceCompanyId = line.Request.SourceCompanyId, CounterpartyCompanyId = line.Request.CounterpartyCompanyId
+        }));
+        AddAdjustmentAudit(db, companyId.Value, userId, request.Id is null ? "consolidation-adjustment.prepared" : "consolidation-adjustment.updated", entity, new { entity.Kind, entity.PeriodStart, entity.AsOf, entity.Reference, entity.MatchReference, lineCount = parsedLines.Count });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation adjustment changed concurrently. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The adjustment reference conflicts with another retained adjustment for this consolidation period."); }
+        return TransactionResult.Success(entity.Id);
+    }
+
+    public Task<TransactionResult> ApproveAdjustmentAsync(ConsolidationAdjustmentActionRequest request, CancellationToken cancellationToken = default) =>
+        DecideAdjustmentAsync(request.ConsolidationGroupId, request.AdjustmentBatchId, request.ConcurrencyToken, approve: true, string.Empty, cancellationToken);
+
+    public Task<TransactionResult> RejectAdjustmentAsync(ConsolidationAdjustmentDecisionRequest request, CancellationToken cancellationToken = default) =>
+        DecideAdjustmentAsync(request.ConsolidationGroupId, request.AdjustmentBatchId, request.ConcurrencyToken, approve: false, request.Reason, cancellationToken);
+
+    private async Task<TransactionResult> DecideAdjustmentAsync(Guid groupId, Guid batchId, string concurrencyToken, bool approve, string reason, CancellationToken cancellationToken)
+    {
+        if (!HasPermission(BrassLedger.Infrastructure.Auth.BrassLedgerPermissions.ReportingManage) || !HasPermission(BrassLedger.Infrastructure.Auth.BrassLedgerPermissions.JournalApprove))
+            return TransactionResult.Failure("You are not authorized to review consolidation adjustments.");
+        if (!approve && (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 1000)) return TransactionResult.Failure("A concise rejection reason is required.");
+        var companyId = CurrentCompanyId(); var userId = CurrentUserId(); if (companyId is null || userId is null) return TransactionResult.Failure("An active company and user are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.ConsolidationAdjustmentBatches.SingleOrDefaultAsync(item => item.Id == batchId && item.ConsolidationGroupId == groupId && item.CompanyId == companyId, cancellationToken);
+        if (entity is null) return TransactionResult.Failure("The consolidation adjustment was not found in this group.");
+        if (entity.Status != "Draft") return TransactionResult.Failure("Only a draft consolidation adjustment can be approved or rejected.");
+        if (string.IsNullOrWhiteSpace(concurrencyToken) || entity.ConcurrencyToken != concurrencyToken) return TransactionResult.Failure("The consolidation adjustment changed after it was displayed. Refresh before reviewing it.");
+        if (entity.PreparedByUserId == userId) return TransactionResult.Failure("The person who prepared a consolidation adjustment cannot approve or reject it.");
+        var membershipError = await ValidateGroupAccessAsync(db, groupId, userId.Value, entity.AsOf, cancellationToken); if (membershipError is not null) return TransactionResult.Failure(membershipError);
+        if (!await db.ConsolidationGroups.AnyAsync(group => group.Id == groupId && group.CompanyId == companyId && group.IsActive, cancellationToken)) return TransactionResult.Failure("An inactive consolidation group cannot accept new review decisions.");
+        var validationError = await ValidateRetainedAdjustmentAsync(db, entity, cancellationToken); if (validationError is not null) return TransactionResult.Failure(validationError);
+        var now = DateTimeOffset.UtcNow;
+        entity.Status = approve ? "Approved" : "Rejected"; entity.DecisionReason = approve ? string.Empty : reason.Trim(); entity.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        if (approve) { entity.ApprovedByUserId = userId; entity.ApprovedAtUtc = now; entity.RejectedByUserId = null; entity.RejectedAtUtc = null; }
+        else { entity.RejectedByUserId = userId; entity.RejectedAtUtc = now; entity.ApprovedByUserId = null; entity.ApprovedAtUtc = null; }
+        AddAdjustmentAudit(db, companyId.Value, userId, approve ? "consolidation-adjustment.approved" : "consolidation-adjustment.rejected", entity, new { reason = entity.DecisionReason });
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation adjustment changed concurrently. Refresh and try again."); }
+        return TransactionResult.Success(entity.Id);
+    }
+
+    public async Task<TransactionResult> PostAdjustmentAsync(ConsolidationAdjustmentActionRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedger.Infrastructure.Auth.BrassLedgerPermissions.ReportingManage) || !HasPermission(BrassLedger.Infrastructure.Auth.BrassLedgerPermissions.JournalPost))
+            return TransactionResult.Failure("You are not authorized to post consolidation adjustments.");
+        var companyId = CurrentCompanyId(); var userId = CurrentUserId(); if (companyId is null || userId is null) return TransactionResult.Failure("An active company and user are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.ConsolidationAdjustmentBatches.SingleOrDefaultAsync(item => item.Id == request.AdjustmentBatchId && item.ConsolidationGroupId == request.ConsolidationGroupId && item.CompanyId == companyId, cancellationToken);
+        if (entity is null) return TransactionResult.Failure("The approved consolidation adjustment was not found in this group.");
+        if (entity.Status != "Approved") return TransactionResult.Failure("Only an approved consolidation adjustment can be posted.");
+        if (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || entity.ConcurrencyToken != request.ConcurrencyToken) return TransactionResult.Failure("The consolidation adjustment changed after it was displayed. Refresh before posting it.");
+        if (entity.ApprovedByUserId == userId) return TransactionResult.Failure("The person who approved a consolidation adjustment cannot post it.");
+        var membershipError = await ValidateGroupAccessAsync(db, entity.ConsolidationGroupId, userId.Value, entity.AsOf, cancellationToken); if (membershipError is not null) return TransactionResult.Failure(membershipError);
+        if (!await db.ConsolidationGroups.AnyAsync(group => group.Id == entity.ConsolidationGroupId && group.CompanyId == companyId && group.IsActive, cancellationToken)) return TransactionResult.Failure("An inactive consolidation group cannot accept new postings.");
+        if (await db.AccountingPeriods.AnyAsync(period => period.CompanyId == companyId && period.Status == "Closed" && period.StartsOn <= entity.AsOf && period.EndsOn >= entity.PeriodStart, cancellationToken)) return TransactionResult.Failure("The consolidation reporting period overlaps a closed parent-company accounting period. Reopen the period before posting.");
+        var validationError = await ValidateRetainedAdjustmentAsync(db, entity, cancellationToken); if (validationError is not null) return TransactionResult.Failure(validationError);
+        entity.Status = "Posted"; entity.PostedByUserId = userId; entity.PostedAtUtc = DateTimeOffset.UtcNow; entity.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAdjustmentAudit(db, companyId.Value, userId, "consolidation-adjustment.posted", entity, new { entity.ApprovedByUserId, entity.ApprovedAtUtc });
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation adjustment changed concurrently. Refresh and try again."); }
+        return TransactionResult.Success(entity.Id);
+    }
+
+    public async Task<TransactionResult> ReverseAdjustmentAsync(ReverseConsolidationAdjustmentRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedger.Infrastructure.Auth.BrassLedgerPermissions.ReportingManage) || !HasPermission(BrassLedger.Infrastructure.Auth.BrassLedgerPermissions.JournalReverse))
+            return TransactionResult.Failure("You are not authorized to reverse consolidation adjustments.");
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length > 1000) return TransactionResult.Failure("A concise reversal reason is required.");
+        var companyId = CurrentCompanyId(); var userId = CurrentUserId(); if (companyId is null || userId is null) return TransactionResult.Failure("An active company and user are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var original = await db.ConsolidationAdjustmentBatches.SingleOrDefaultAsync(item => item.Id == request.AdjustmentBatchId && item.ConsolidationGroupId == request.ConsolidationGroupId && item.CompanyId == companyId, cancellationToken);
+        if (original is null) return TransactionResult.Failure("The posted consolidation adjustment was not found in this group.");
+        if (original.Status != "Posted" || original.ReversedByBatchId.HasValue || original.ReversalOfBatchId.HasValue) return TransactionResult.Failure("Only an unreversed original posted consolidation adjustment can be reversed.");
+        if (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || original.ConcurrencyToken != request.ConcurrencyToken) return TransactionResult.Failure("The consolidation adjustment changed after it was displayed. Refresh before reversing it.");
+        var membershipError = await ValidateGroupAccessAsync(db, original.ConsolidationGroupId, userId.Value, original.AsOf, cancellationToken); if (membershipError is not null) return TransactionResult.Failure(membershipError);
+        if (await db.AccountingPeriods.AnyAsync(period => period.CompanyId == companyId && period.Status == "Closed" && period.StartsOn <= original.AsOf && period.EndsOn >= original.PeriodStart, cancellationToken)) return TransactionResult.Failure("The consolidation reporting period overlaps a closed parent-company accounting period. Reopen the period before reversing.");
+        var validationError = await ValidateRetainedAdjustmentAsync(db, original, cancellationToken); if (validationError is not null) return TransactionResult.Failure(validationError);
+        var originalLines = await db.ConsolidationAdjustmentLines.AsNoTracking().Where(line => line.ConsolidationAdjustmentBatchId == original.Id).OrderBy(line => line.Sequence).ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow; var reversalId = Guid.NewGuid(); var reversalReference = $"REV-{original.Reference}-{reversalId:N}"[..Math.Min(64, 5 + original.Reference.Length + 32)];
+        var reversal = new ConsolidationAdjustmentBatch
+        {
+            Id = reversalId, CompanyId = original.CompanyId, ConsolidationGroupId = original.ConsolidationGroupId, PeriodStart = original.PeriodStart, AsOf = original.AsOf, Kind = original.Kind,
+            Reference = reversalReference, Description = Truncate($"Reversal of {original.Reference}: {request.Reason.Trim()}", 1000), MatchReference = original.MatchReference, Status = "Posted",
+            PreparedByUserId = userId, PreparedAtUtc = now, ApprovedByUserId = userId, ApprovedAtUtc = now, PostedByUserId = userId, PostedAtUtc = now,
+            ReversalOfBatchId = original.Id, ReversalReason = request.Reason.Trim(), ConcurrencyToken = Guid.NewGuid().ToString("N")
+        };
+        db.ConsolidationAdjustmentBatches.Add(reversal);
+        db.ConsolidationAdjustmentLines.AddRange(originalLines.Select(line => new ConsolidationAdjustmentLine
+        {
+            Id = Guid.NewGuid(), ConsolidationAdjustmentBatchId = reversal.Id, Sequence = line.Sequence, ReportingAccountNumber = line.ReportingAccountNumber,
+            ReportingAccountName = line.ReportingAccountName, ReportingAccountType = line.ReportingAccountType, Debit = line.Credit, Credit = line.Debit,
+            Description = Truncate($"Reversal: {line.Description}", 1000), SourceCompanyId = line.SourceCompanyId, CounterpartyCompanyId = line.CounterpartyCompanyId
+        }));
+        original.Status = "Reversed"; original.ReversedByBatchId = reversal.Id; original.ReversalReason = request.Reason.Trim(); original.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAdjustmentAudit(db, companyId.Value, userId, "consolidation-adjustment.reversed", original, new { reversalId, reason = request.Reason.Trim() });
+        try { await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation adjustment changed concurrently. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The consolidation adjustment was already reversed or conflicts with another retained reversal."); }
+        return TransactionResult.Success(reversal.Id);
+    }
+
+    public async Task<ConsolidationAdjustmentWorkspace?> GetAdjustmentWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedger.Infrastructure.Auth.BrassLedgerPermissions.ReportingManage)) return null;
+        var companyId = CurrentCompanyId(); var userId = CurrentUserId(); if (companyId is null || userId is null) return null;
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var group = await db.ConsolidationGroups.AsNoTracking().SingleOrDefaultAsync(item => item.Id == groupId && item.CompanyId == companyId, cancellationToken); if (group is null) return null;
+        var members = await db.ConsolidationGroupCompanies.AsNoTracking().Where(item => item.ConsolidationGroupId == group.Id).ToListAsync(cancellationToken);
+        var companyIds = members.Select(item => item.MemberCompanyId).Distinct().ToArray(); var companies = await db.Companies.AsNoTracking().Where(item => companyIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
+        var permittedCompanyIds = await db.CompanyMemberships.AsNoTracking().Where(item => item.UserId == userId && item.IsActive && companyIds.Contains(item.CompanyId)).Select(item => item.CompanyId).Distinct().ToArrayAsync(cancellationToken);
+        if (permittedCompanyIds.Length != companyIds.Length) return null;
+        var batches = await db.ConsolidationAdjustmentBatches.AsNoTracking().Where(item => item.ConsolidationGroupId == group.Id && item.CompanyId == companyId).OrderByDescending(item => item.AsOf).ThenBy(item => item.Reference).ToListAsync(cancellationToken);
+        var batchIds = batches.Select(item => item.Id).ToArray(); var lines = await db.ConsolidationAdjustmentLines.AsNoTracking().Where(item => batchIds.Contains(item.ConsolidationAdjustmentBatchId)).OrderBy(item => item.Sequence).ToListAsync(cancellationToken);
+        var userIds = batches.SelectMany(item => new[] { item.PreparedByUserId, item.ApprovedByUserId, item.RejectedByUserId, item.PostedByUserId }).Where(item => item.HasValue).Select(item => item!.Value).Distinct().ToArray();
+        var users = await db.Users.AsNoTracking().Where(item => userIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => string.IsNullOrWhiteSpace(item.DisplayName) ? item.UserName : item.DisplayName, cancellationToken);
+        var reportingAccounts = await db.ConsolidationAccountMappings.AsNoTracking().Where(item => item.ConsolidationGroupId == group.Id).Select(item => new { item.ReportingAccountNumber, item.ReportingAccountName, item.ReportingAccountType }).Distinct().OrderBy(item => item.ReportingAccountNumber).ToListAsync(cancellationToken);
+        return new ConsolidationAdjustmentWorkspace(group.Id, group.Name, group.ReportingCurrency,
+            reportingAccounts.Select(item => new ConsolidationReportingAccountSnapshot(item.ReportingAccountNumber, item.ReportingAccountName, item.ReportingAccountType.ToString())).ToArray(),
+            members.OrderBy(item => companies[item.MemberCompanyId].Name).ThenBy(item => item.EffectiveFrom).Select(item => new ConsolidationGroupMemberSnapshot(item.Id, item.MemberCompanyId, companies[item.MemberCompanyId].Name, companies[item.MemberCompanyId].BaseCurrency, item.OwnershipPercentage, item.EffectiveFrom, item.EffectiveThrough, item.ConcurrencyToken)).ToArray(),
+            batches.Select(batch => new ConsolidationAdjustmentSnapshot(batch.Id, batch.PeriodStart, batch.AsOf, batch.Kind.ToString(), batch.Reference, batch.Description, batch.MatchReference, batch.Status,
+                batch.PreparedByUserId.HasValue ? users.GetValueOrDefault(batch.PreparedByUserId.Value, "Unavailable user") : "Unavailable user", batch.PreparedAtUtc,
+                batch.ApprovedByUserId.HasValue ? users.GetValueOrDefault(batch.ApprovedByUserId.Value, "Unavailable user") : null, batch.ApprovedAtUtc,
+                batch.RejectedByUserId.HasValue ? users.GetValueOrDefault(batch.RejectedByUserId.Value, "Unavailable user") : null, batch.RejectedAtUtc,
+                batch.PostedByUserId.HasValue ? users.GetValueOrDefault(batch.PostedByUserId.Value, "Unavailable user") : null, batch.PostedAtUtc, batch.DecisionReason, batch.ReversalOfBatchId, batch.ReversedByBatchId, batch.ReversalReason, batch.ConcurrencyToken,
+                lines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id).Select(line => new ConsolidationAdjustmentLineSnapshot(line.Id, line.Sequence, line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType.ToString(), line.Debit, line.Credit, line.Description, line.SourceCompanyId, line.SourceCompanyId.HasValue ? companies.GetValueOrDefault(line.SourceCompanyId.Value)?.Name : null, line.CounterpartyCompanyId, line.CounterpartyCompanyId.HasValue ? companies.GetValueOrDefault(line.CounterpartyCompanyId.Value)?.Name : null)).ToArray())).ToArray());
     }
 
     public async Task<ConsolidatedBalanceReport?> GetBalanceReportAsync(Guid groupId, DateOnly asOf, CancellationToken cancellationToken = default)
@@ -282,6 +483,19 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
                 warnings.Add($"{company.Name}'s selected report-period balances do not balance in {company.BaseCurrency}. Close pre-period nominal activity or choose the correct reporting-period start; CTA was not used to conceal the {sourceSignedBalance:N2} source imbalance.");
             }
         }
+        var adjustmentBatches = await db.ConsolidationAdjustmentBatches.AsNoTracking().Where(batch => batch.CompanyId == companyId && batch.ConsolidationGroupId == group.Id && batch.PeriodStart == periodStart && batch.AsOf == asOf && (batch.Status == "Posted" || batch.Status == "Reversed")).ToListAsync(cancellationToken);
+        var adjustmentIds = adjustmentBatches.Select(batch => batch.Id).ToArray();
+        var adjustmentLines = await db.ConsolidationAdjustmentLines.AsNoTracking().Where(line => adjustmentIds.Contains(line.ConsolidationAdjustmentBatchId)).ToListAsync(cancellationToken);
+        foreach (var batch in adjustmentBatches)
+        {
+            var retainedError = ValidateReportAdjustment(batch, adjustmentLines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id).ToArray(), mappings, members.Select(member => member.MemberCompanyId).ToHashSet(), group.CtaAccountNumber);
+            if (retainedError is not null) { complete = false; warnings.Add($"Consolidation adjustment {batch.Reference} was excluded: {retainedError}"); continue; }
+            foreach (var line in adjustmentLines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id))
+            {
+                var key = (line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType.ToString(), "Adjustment");
+                totals[key] = totals.GetValueOrDefault(key) + NaturalAmount(line.ReportingAccountType, line.Debit, line.Credit);
+            }
+        }
         var translationAdjustment = 0m;
         if (complete)
         {
@@ -303,8 +517,58 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
             }
         }
         else warnings.Add("CTA was not calculated because one or more material source balances were excluded.");
-        return new ConsolidatedBalanceReport(group.Id, group.Name, group.ReportingCurrency, periodStart, asOf, totals.OrderBy(item => item.Key.Number).Select(item => new ConsolidatedAccountBalance(item.Key.Number, item.Key.Name, item.Key.Type, item.Value, item.Key.Method)).ToArray(), warnings, translationAdjustment);
+        var reportAccounts = totals.GroupBy(item => (item.Key.Number, item.Key.Name, item.Key.Type)).OrderBy(grouping => grouping.Key.Number).Select(grouping =>
+        {
+            var methods = grouping.Select(item => item.Key.Method).Distinct().OrderBy(item => item).ToArray();
+            return new ConsolidatedAccountBalance(grouping.Key.Number, grouping.Key.Name, grouping.Key.Type, grouping.Sum(item => item.Value), methods.Length == 1 ? methods[0] : "Mixed");
+        }).ToArray();
+        return new ConsolidatedBalanceReport(group.Id, group.Name, group.ReportingCurrency, periodStart, asOf, reportAccounts, warnings, translationAdjustment);
     }
+
+    private async Task<string?> ValidateRetainedAdjustmentAsync(BrassLedgerDbContext db, ConsolidationAdjustmentBatch batch, CancellationToken cancellationToken)
+    {
+        var lines = await db.ConsolidationAdjustmentLines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id).ToListAsync(cancellationToken);
+        var mappings = await db.ConsolidationAccountMappings.AsNoTracking().Where(mapping => mapping.ConsolidationGroupId == batch.ConsolidationGroupId && mapping.EffectiveFrom <= batch.AsOf && (mapping.EffectiveThrough == null || mapping.EffectiveThrough >= batch.AsOf)).ToListAsync(cancellationToken);
+        var members = await EffectiveMemberCompanyIdsAsync(db, batch.ConsolidationGroupId, batch.AsOf, cancellationToken);
+        var cta = await db.ConsolidationGroups.Where(group => group.Id == batch.ConsolidationGroupId).Select(group => group.CtaAccountNumber).SingleAsync(cancellationToken);
+        return ValidateReportAdjustment(batch, lines, mappings, members, cta);
+    }
+
+    private static string? ValidateReportAdjustment(ConsolidationAdjustmentBatch batch, IReadOnlyList<ConsolidationAdjustmentLine> lines, IReadOnlyList<ConsolidationAccountMapping> mappings, IReadOnlySet<Guid> memberCompanyIds, string ctaAccountNumber)
+    {
+        if (batch.PeriodStart > batch.AsOf || lines.Count < 2 || lines.Sum(line => line.Debit) != lines.Sum(line => line.Credit)) return "its retained lines are not a balanced adjustment for a valid period.";
+        foreach (var line in lines)
+        {
+            if (line.Debit < 0m || line.Credit < 0m || (line.Debit == 0m) == (line.Credit == 0m)) return "a retained line does not contain exactly one positive debit or credit.";
+            if (line.ReportingAccountNumber == ctaAccountNumber) return "it targets the system-controlled CTA account.";
+            if (!mappings.Any(mapping => mapping.ReportingAccountNumber == line.ReportingAccountNumber && mapping.ReportingAccountName == line.ReportingAccountName && mapping.ReportingAccountType == line.ReportingAccountType)) return $"reporting account {line.ReportingAccountNumber} is no longer supported by an effective mapping.";
+            if (batch.Kind == ConsolidationAdjustmentKind.IntercompanyElimination)
+            {
+                if (string.IsNullOrWhiteSpace(batch.MatchReference) || !line.SourceCompanyId.HasValue || !line.CounterpartyCompanyId.HasValue || line.SourceCompanyId == line.CounterpartyCompanyId || !memberCompanyIds.Contains(line.SourceCompanyId.Value) || !memberCompanyIds.Contains(line.CounterpartyCompanyId.Value)) return "its intercompany provenance is incomplete or outside the effective membership set.";
+            }
+            else if (!string.IsNullOrWhiteSpace(batch.MatchReference) || line.SourceCompanyId.HasValue || line.CounterpartyCompanyId.HasValue) return "a manual adjustment contains intercompany-only provenance.";
+        }
+        return null;
+    }
+
+    private static async Task<HashSet<Guid>> EffectiveMemberCompanyIdsAsync(BrassLedgerDbContext db, Guid groupId, DateOnly asOf, CancellationToken cancellationToken) =>
+        (await db.ConsolidationGroupCompanies.AsNoTracking().Where(item => item.ConsolidationGroupId == groupId && item.EffectiveFrom <= asOf && (item.EffectiveThrough == null || item.EffectiveThrough >= asOf)).Select(item => item.MemberCompanyId).ToListAsync(cancellationToken)).ToHashSet();
+
+    private static async Task<HashSet<(string Number, string Name, AccountType Type)>> EffectiveReportingAccountsAsync(BrassLedgerDbContext db, Guid groupId, DateOnly asOf, CancellationToken cancellationToken) =>
+        (await db.ConsolidationAccountMappings.AsNoTracking().Where(item => item.ConsolidationGroupId == groupId && item.EffectiveFrom <= asOf && (item.EffectiveThrough == null || item.EffectiveThrough >= asOf)).Select(item => new { item.ReportingAccountNumber, item.ReportingAccountName, item.ReportingAccountType }).ToListAsync(cancellationToken)).Select(item => (item.ReportingAccountNumber, item.ReportingAccountName, item.ReportingAccountType)).ToHashSet();
+
+    private static async Task<string?> ValidateGroupAccessAsync(BrassLedgerDbContext db, Guid groupId, Guid userId, DateOnly asOf, CancellationToken cancellationToken)
+    {
+        var memberIds = await EffectiveMemberCompanyIdsAsync(db, groupId, asOf, cancellationToken);
+        if (memberIds.Count == 0) return "The consolidation group has no effective member companies on the report date.";
+        var permitted = await db.CompanyMemberships.AsNoTracking().Where(item => item.UserId == userId && item.IsActive && memberIds.Contains(item.CompanyId)).Select(item => item.CompanyId).Distinct().ToListAsync(cancellationToken);
+        return permitted.Count == memberIds.Count ? null : "The current user must have active access to every effective member company.";
+    }
+
+    private static void AddAdjustmentAudit(BrassLedgerDbContext db, Guid companyId, Guid? userId, string action, ConsolidationAdjustmentBatch batch, object details) =>
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = userId, Action = action, EntityType = nameof(ConsolidationAdjustmentBatch), EntityId = batch.Id, DetailJson = JsonSerializer.Serialize(details), OccurredAtUtc = DateTimeOffset.UtcNow });
+
+    private static string Truncate(string value, int maximumLength) => value.Length <= maximumLength ? value : value[..maximumLength];
 
     private static RateResolution ResolveRate(string from, string to, CurrencyRateType type, DateOnly on, IReadOnlyList<CurrencyExchangeRate> rates)
     {
@@ -336,4 +600,12 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
         });
     private Guid? CurrentCompanyId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(BrassLedger.Infrastructure.Auth.BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId) ? companyId : null;
     private Guid? CurrentUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) ? userId : null;
+    private bool HasPermission(string permission)
+    {
+        var principal = httpContextAccessor.HttpContext?.User;
+        if (principal is null) return true;
+        if (!Guid.TryParse(principal.FindFirstValue(BrassLedger.Infrastructure.Auth.BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out _)) return false;
+        return !principal.HasClaim(BrassLedger.Infrastructure.Auth.BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+            && (principal.IsInRole("Administrator") || principal.IsInRole("Owner/CEO") || principal.HasClaim(BrassLedger.Infrastructure.Auth.BrassLedgerAuthenticationDefaults.PermissionClaimType, permission));
+    }
 }

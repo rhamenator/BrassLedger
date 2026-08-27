@@ -141,6 +141,50 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
+    public async Task CreateConsolidationWorkflowAsync()
+    {
+        await CreateConsolidationAdministratorAsync();
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        foreach (var userName in new[] { "e2e-consolidation-reviewer", "e2e-consolidation-poster" })
+        {
+            await using var userCommand = connection.CreateCommand();
+            userCommand.CommandText = """
+                INSERT OR IGNORE INTO "Users" (
+                    "Id", "CompanyId", "UserName", "DisplayName", "Email", "EmailLookupHash", "EmailConfirmedAtUtc",
+                    "PasswordHash", "SecurityStamp", "Role", "IsActive", "FailedSignInCount", "LastFailedSignInUtc",
+                    "LockoutEndUtc", "LastSuccessfulSignInUtc", "LastPasswordChangedUtc", "MfaEnabled", "MfaSecret",
+                    "MfaEnrolledAtUtc", "MfaLastAcceptedTimeStep", "MfaFailedAttemptCount", "MfaLockoutEndUtc")
+                SELECT $userId, "CompanyId", $userName, $userName, $email, NULL, "EmailConfirmedAtUtc",
+                       "PasswordHash", $securityStamp, 'Controller', 1, 0, NULL,
+                       NULL, NULL, "LastPasswordChangedUtc", 0, "MfaSecret", NULL, NULL, 0, NULL
+                FROM "Users" WHERE "UserName" = 'controller';
+                INSERT OR IGNORE INTO "CompanyMemberships" ("Id", "UserId", "CompanyId", "Role", "IsOwner", "IsActive", "GrantedAtUtc")
+                SELECT $membershipId, "Id", "CompanyId", 'Controller', 0, 1, $grantedAtUtc FROM "Users" WHERE "UserName" = $userName;
+                """;
+            userCommand.Parameters.AddWithValue("$userId", Guid.NewGuid().ToString().ToUpperInvariant()); userCommand.Parameters.AddWithValue("$userName", userName);
+            userCommand.Parameters.AddWithValue("$email", $"{userName}@example.test"); userCommand.Parameters.AddWithValue("$securityStamp", Guid.NewGuid().ToString("N"));
+            userCommand.Parameters.AddWithValue("$membershipId", Guid.NewGuid().ToString().ToUpperInvariant()); userCommand.Parameters.AddWithValue("$grantedAtUtc", DateTimeOffset.UtcNow.ToString("O"));
+            await userCommand.ExecuteNonQueryAsync();
+        }
+        await using var configuration = connection.CreateCommand();
+        configuration.CommandText = """
+            INSERT OR IGNORE INTO "ConsolidationGroups" ("Id", "CompanyId", "Name", "ReportingCurrency", "CtaAccountNumber", "CtaAccountName", "IsActive", "ConcurrencyToken")
+            SELECT '71000000-0000-0000-0000-000000000001', "Id", 'E2E controlled consolidation', 'USD', '39999', 'Cumulative translation adjustment', 1, 'e2e-group-token'
+            FROM "Companies" ORDER BY "Name" LIMIT 1;
+            INSERT OR IGNORE INTO "ConsolidationGroupCompanies" ("Id", "ConsolidationGroupId", "MemberCompanyId", "OwnershipPercentage", "EffectiveFrom", "EffectiveThrough", "ConcurrencyToken")
+            SELECT '71000000-0000-0000-0000-000000000002', '71000000-0000-0000-0000-000000000001', "Id", '1.0', '0001-01-01', NULL, 'e2e-membership-token'
+            FROM "Companies" ORDER BY "Name" LIMIT 1;
+            INSERT OR IGNORE INTO "ConsolidationAccountMappings" ("Id", "ConsolidationGroupId", "MemberCompanyId", "MemberAccountId", "ReportingAccountNumber", "ReportingAccountName", "ReportingAccountType", "TranslationMethod", "EffectiveFrom", "EffectiveThrough", "IsActive", "ConcurrencyToken")
+            SELECT '71000000-0000-0000-0000-000000000003', '71000000-0000-0000-0000-000000000001', "CompanyId", "Id", "Number", "Name", "Type", 0, '0001-01-01', NULL, 1, 'e2e-cash-mapping-token'
+            FROM "Accounts" WHERE "Number" = '1000' LIMIT 1;
+            INSERT OR IGNORE INTO "ConsolidationAccountMappings" ("Id", "ConsolidationGroupId", "MemberCompanyId", "MemberAccountId", "ReportingAccountNumber", "ReportingAccountName", "ReportingAccountType", "TranslationMethod", "EffectiveFrom", "EffectiveThrough", "IsActive", "ConcurrencyToken")
+            SELECT '71000000-0000-0000-0000-000000000004', '71000000-0000-0000-0000-000000000001', "CompanyId", "Id", "Number", "Name", "Type", 2, '0001-01-01', NULL, 1, 'e2e-equity-mapping-token'
+            FROM "Accounts" WHERE "Number" = '3000' LIMIT 1;
+            """;
+        await configuration.ExecuteNonQueryAsync();
+    }
+
     public async Task CreateSubledgerWorkflowUsersAsync()
     {
         await using var connection = new SqliteConnection(_sqliteConnectionString);

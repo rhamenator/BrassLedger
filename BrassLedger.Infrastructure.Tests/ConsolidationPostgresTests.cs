@@ -64,11 +64,11 @@ public sealed class ConsolidationPostgresTests
             Assert.Single(attempts, result => result.Succeeded);
             Assert.Single(attempts, result => !result.Succeeded);
 
-            Guid sourceAccountId; string sourceNumber; string sourceName;
+            Guid sourceAccountId; string sourceNumber; string sourceName; BrassLedger.Domain.Accounting.AccountType sourceType;
             using (var accountScope = provider.CreateScope())
             {
                 var factory = accountScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
-                var source = await db.Accounts.OrderBy(account => account.Number).FirstAsync(); sourceAccountId = source.Id; sourceNumber = source.Number; sourceName = source.Name;
+                var source = await db.Accounts.OrderBy(account => account.Number).FirstAsync(); sourceAccountId = source.Id; sourceNumber = source.Number; sourceName = source.Name; sourceType = source.Type;
             }
             using var thirdScope = provider.CreateScope(); using var fourthScope = provider.CreateScope(); SetContext(thirdScope, companyId, ownerId); SetContext(fourthScope, companyId, ownerId);
             var mappingAttempts = await Task.WhenAll(
@@ -93,12 +93,70 @@ public sealed class ConsolidationPostgresTests
             Assert.Single(rateAttempts, result => result.Succeeded);
             Assert.Single(rateAttempts, result => !result.Succeeded);
 
+            Guid offsetAccountId; string offsetNumber; string offsetName; BrassLedger.Domain.Accounting.AccountType offsetType;
+            var reviewerOne = Guid.NewGuid(); var reviewerTwo = Guid.NewGuid(); var posterOne = Guid.NewGuid(); var posterTwo = Guid.NewGuid(); var reverserOne = Guid.NewGuid(); var reverserTwo = Guid.NewGuid();
+            using (var adjustmentSetupScope = provider.CreateScope())
+            {
+                var factory = adjustmentSetupScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+                var offset = await db.Accounts.OrderBy(account => account.Number).FirstAsync(account => account.Type != sourceType); offsetAccountId = offset.Id; offsetNumber = offset.Number; offsetName = offset.Name; offsetType = offset.Type;
+                foreach (var actor in new[] { reviewerOne, reviewerTwo, posterOne, posterTwo, reverserOne, reverserTwo })
+                    db.CompanyMemberships.Add(new BrassLedger.Domain.Accounting.CompanyMembership { Id = Guid.NewGuid(), UserId = actor, CompanyId = companyId, Role = "Accounting", IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
+                await db.SaveChangesAsync();
+            }
+            Guid adjustmentId; string draftToken;
+            using (var adjustmentPreparationScope = provider.CreateScope())
+            {
+                SetContext(adjustmentPreparationScope, companyId, ownerId, BrassLedgerPermissions.JournalPrepare);
+                var service = adjustmentPreparationScope.ServiceProvider.GetRequiredService<IConsolidationService>();
+                var offsetMapping = await service.SaveAccountMappingAsync(new(null, groupId, companyId, offsetAccountId, offsetNumber, offsetName, new DateOnly(2026, 8, 1), null)); Assert.True(offsetMapping.Succeeded, offsetMapping.ErrorMessage);
+                var saved = await service.SaveAdjustmentAsync(new(null, groupId, new DateOnly(2026, 1, 1), new DateOnly(2026, 8, 31), "ManualAdjustment", "PG-CONSOL-ADJ-1", "Concurrent PostgreSQL control test", string.Empty,
+                [
+                    new(sourceNumber, sourceName, sourceType.ToString(), 10m, 0m),
+                    new(offsetNumber, offsetName, offsetType.ToString(), 0m, 10m)
+                ]));
+                Assert.True(saved.Succeeded, saved.ErrorMessage); adjustmentId = saved.Id!.Value; draftToken = (await service.GetAdjustmentWorkspaceAsync(groupId))!.Adjustments.Single(item => item.Id == adjustmentId).ConcurrencyToken;
+            }
+            using var approvalScopeOne = provider.CreateScope(); using var approvalScopeTwo = provider.CreateScope();
+            SetContext(approvalScopeOne, companyId, reviewerOne, BrassLedgerPermissions.JournalApprove); SetContext(approvalScopeTwo, companyId, reviewerTwo, BrassLedgerPermissions.JournalApprove);
+            var approvalAttempts = await Task.WhenAll(
+                approvalScopeOne.ServiceProvider.GetRequiredService<IConsolidationService>().ApproveAdjustmentAsync(new(groupId, adjustmentId, draftToken)),
+                approvalScopeTwo.ServiceProvider.GetRequiredService<IConsolidationService>().ApproveAdjustmentAsync(new(groupId, adjustmentId, draftToken)));
+            Assert.Single(approvalAttempts, result => result.Succeeded); Assert.Single(approvalAttempts, result => !result.Succeeded);
+            string approvedToken;
+            using (var adjustmentReadScope = provider.CreateScope()) { SetContext(adjustmentReadScope, companyId, ownerId); approvedToken = (await adjustmentReadScope.ServiceProvider.GetRequiredService<IConsolidationService>().GetAdjustmentWorkspaceAsync(groupId))!.Adjustments.Single(item => item.Id == adjustmentId).ConcurrencyToken; }
+            using var postingScopeOne = provider.CreateScope(); using var postingScopeTwo = provider.CreateScope();
+            SetContext(postingScopeOne, companyId, posterOne, BrassLedgerPermissions.JournalPost); SetContext(postingScopeTwo, companyId, posterTwo, BrassLedgerPermissions.JournalPost);
+            var postingAttempts = await Task.WhenAll(
+                postingScopeOne.ServiceProvider.GetRequiredService<IConsolidationService>().PostAdjustmentAsync(new(groupId, adjustmentId, approvedToken)),
+                postingScopeTwo.ServiceProvider.GetRequiredService<IConsolidationService>().PostAdjustmentAsync(new(groupId, adjustmentId, approvedToken)));
+            Assert.Single(postingAttempts, result => result.Succeeded); Assert.Single(postingAttempts, result => !result.Succeeded);
+            string postedToken;
+            using (var adjustmentReadScope = provider.CreateScope()) { SetContext(adjustmentReadScope, companyId, ownerId); postedToken = (await adjustmentReadScope.ServiceProvider.GetRequiredService<IConsolidationService>().GetAdjustmentWorkspaceAsync(groupId))!.Adjustments.Single(item => item.Id == adjustmentId).ConcurrencyToken; }
+            using var reversalScopeOne = provider.CreateScope(); using var reversalScopeTwo = provider.CreateScope();
+            SetContext(reversalScopeOne, companyId, reverserOne, BrassLedgerPermissions.JournalReverse); SetContext(reversalScopeTwo, companyId, reverserTwo, BrassLedgerPermissions.JournalReverse);
+            var reversalAttempts = await Task.WhenAll(
+                reversalScopeOne.ServiceProvider.GetRequiredService<IConsolidationService>().ReverseAdjustmentAsync(new(groupId, adjustmentId, "Concurrent reversal A", postedToken)),
+                reversalScopeTwo.ServiceProvider.GetRequiredService<IConsolidationService>().ReverseAdjustmentAsync(new(groupId, adjustmentId, "Concurrent reversal B", postedToken)));
+            Assert.Single(reversalAttempts, result => result.Succeeded); Assert.Single(reversalAttempts, result => !result.Succeeded);
+
             using var verificationScope = provider.CreateScope(); var verificationFactory = verificationScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var verification = await verificationFactory.CreateDbContextAsync();
             Assert.Equal(2, await verification.ConsolidationGroupCompanies.CountAsync(period => period.ConsolidationGroupId == groupId));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-ownership.created" && entry.EntityType == "ConsolidationGroupCompany"));
             Assert.Equal(1, await verification.ConsolidationAccountMappings.CountAsync(mapping => mapping.ConsolidationGroupId == groupId && mapping.MemberAccountId == sourceAccountId));
-            Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-account-mapping.created" && entry.EntityType == "ConsolidationAccountMapping"));
+            var sourceMappingId = await verification.ConsolidationAccountMappings
+                .Where(mapping => mapping.ConsolidationGroupId == groupId && mapping.MemberAccountId == sourceAccountId)
+                .Select(mapping => mapping.Id)
+                .SingleAsync();
+            Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry =>
+                entry.Action == "consolidation-account-mapping.created"
+                && entry.EntityType == "ConsolidationAccountMapping"
+                && entry.EntityId == sourceMappingId));
             Assert.Equal(2, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityType == nameof(BrassLedger.Domain.Accounting.CurrencyExchangeRate)));
+            Assert.Equal("Reversed", await verification.ConsolidationAdjustmentBatches.Where(batch => batch.Id == adjustmentId).Select(batch => batch.Status).SingleAsync());
+            Assert.Equal(2, await verification.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == groupId));
+            Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityId == adjustmentId && entry.Action == "consolidation-adjustment.approved"));
+            Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityId == adjustmentId && entry.Action == "consolidation-adjustment.posted"));
+            Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityId == adjustmentId && entry.Action == "consolidation-adjustment.reversed"));
         }
         finally
         {
@@ -109,16 +167,18 @@ public sealed class ConsolidationPostgresTests
         }
     }
 
-    private static void SetContext(IServiceScope scope, Guid companyId, Guid userId)
+    private static void SetContext(IServiceScope scope, Guid companyId, Guid userId, params string[] permissions)
     {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+            new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage)
+        };
+        claims.AddRange(permissions.Select(permission => new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
         scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext = new DefaultHttpContext
         {
-            User = new ClaimsPrincipal(new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                new Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
-                new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage)
-            ], "test"))
+            User = new ClaimsPrincipal(new ClaimsIdentity(claims, "test"))
         };
     }
 }

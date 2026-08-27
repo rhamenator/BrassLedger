@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManageReporting)]
 @inject IBusinessWorkspaceService WorkspaceService
 @inject IProductCatalogService AssessmentService
+@inject IConsolidationService ConsolidationService
 
 <PageTitle>Reporting</PageTitle>
 
@@ -133,14 +134,170 @@ else
                 </table>
             </article>
         </section>
+
+        <section class="panel" aria-labelledby="consolidationAdjustmentHeading">
+            <h2 id="consolidationAdjustmentHeading">Consolidation adjustments and eliminations</h2>
+            <p class="page-intro">Prepare reporting-only entries for one exact consolidation period. They never alter a member company’s ledger. Intercompany eliminations retain the matched company pair and reference; approval and posting require different operators.</p>
+            @if (!string.IsNullOrWhiteSpace(ConsolidationMessage))
+            {
+                <div class="@(ConsolidationError ? "auth-error" : "muted-copy")" role="@(ConsolidationError ? "alert" : "status")">@ConsolidationMessage</div>
+            }
+            @if (ConsolidationGroups.Count == 0)
+            {
+                <p class="muted-copy">Create a consolidation group and its effective account mappings in Administration before preparing reporting entries.</p>
+            }
+            else
+            {
+                <div class="content-grid">
+                    <div class="field-group">
+                        <label class="field-label" for="adjustmentGroup">Consolidation group</label>
+                        <select id="adjustmentGroup" class="field-input" value="@SelectedGroupId" @onchange="SelectConsolidationGroupAsync">
+                            @foreach (var group in ConsolidationGroups) { <option value="@group.Id">@group.Name — @group.ReportingCurrency</option> }
+                        </select>
+                    </div>
+                    <div class="field-group"><label class="field-label" for="adjustmentPeriodStart">Period starts</label><InputDate id="adjustmentPeriodStart" class="field-input" @bind-Value="AdjustmentForm.PeriodStart" /></div>
+                    <div class="field-group"><label class="field-label" for="adjustmentAsOf">As of</label><InputDate id="adjustmentAsOf" class="field-input" @bind-Value="AdjustmentForm.AsOf" /></div>
+                    <div class="field-group"><label class="field-label" for="adjustmentKind">Entry kind</label><InputSelect id="adjustmentKind" class="field-input" @bind-Value="AdjustmentForm.Kind"><option value="ManualAdjustment">Manual adjustment</option><option value="IntercompanyElimination">Intercompany elimination</option></InputSelect></div>
+                    <div class="field-group"><label class="field-label" for="adjustmentReference">Reference</label><InputText id="adjustmentReference" class="field-input" maxlength="64" @bind-Value="AdjustmentForm.Reference" /></div>
+                    <div class="field-group"><label class="field-label" for="adjustmentDescription">Description</label><InputText id="adjustmentDescription" class="field-input" maxlength="1000" @bind-Value="AdjustmentForm.Description" /></div>
+                    @if (AdjustmentForm.Kind == "IntercompanyElimination")
+                    {
+                        <div class="field-group"><label class="field-label" for="adjustmentMatchReference">Match reference</label><InputText id="adjustmentMatchReference" class="field-input" maxlength="160" @bind-Value="AdjustmentForm.MatchReference" /><small class="muted-copy">Use an invoice, settlement, reconciliation, or other shared reference. BrassLedger does not infer a match silently.</small></div>
+                    }
+                </div>
+                @if (AdjustmentWorkspace is null)
+                {
+                    <p class="muted-copy">This group is unavailable because you do not have access to every retained member company.</p>
+                }
+                else
+                {
+                    <EditForm Model="AdjustmentForm" OnValidSubmit="SaveAdjustmentAsync">
+                        <div class="table-scroll">
+                            <table class="data-table" aria-label="Consolidation adjustment lines">
+                                <thead><tr><th>Reporting account</th><th>Debit</th><th>Credit</th><th>Description</th>@if (AdjustmentForm.Kind == "IntercompanyElimination") { <th>Source company</th><th>Counterparty</th> }<th></th></tr></thead>
+                                <tbody>
+                                @foreach (var line in AdjustmentForm.Lines)
+                                {
+                                    <tr @key="line">
+                                        <td><InputSelect aria-label="Reporting account" class="field-input" @bind-Value="line.AccountKey"><option value="">Select reporting account</option>@foreach (var account in AdjustmentWorkspace.ReportingAccounts) { <option value="@AccountKey(account)">@account.AccountNumber — @account.AccountName (@account.AccountType)</option> }</InputSelect></td>
+                                        <td><InputNumber aria-label="Adjustment debit" class="field-input" step="0.01" min="0" @bind-Value="line.Debit" /></td>
+                                        <td><InputNumber aria-label="Adjustment credit" class="field-input" step="0.01" min="0" @bind-Value="line.Credit" /></td>
+                                        <td><InputText aria-label="Adjustment line description" class="field-input" maxlength="1000" @bind-Value="line.Description" /></td>
+                                        @if (AdjustmentForm.Kind == "IntercompanyElimination")
+                                        {
+                                            <td><InputSelect aria-label="Elimination source company" class="field-input" @bind-Value="line.SourceCompanyId"><option value="">Select source</option>@foreach (var member in EffectiveMembers()) { <option value="@member.CompanyId">@member.CompanyName</option> }</InputSelect></td>
+                                            <td><InputSelect aria-label="Elimination counterparty company" class="field-input" @bind-Value="line.CounterpartyCompanyId"><option value="">Select counterparty</option>@foreach (var member in EffectiveMembers()) { <option value="@member.CompanyId">@member.CompanyName</option> }</InputSelect></td>
+                                        }
+                                        <td><button class="action-secondary" type="button" disabled="@(AdjustmentForm.Lines.Count <= 2)" @onclick="() => RemoveAdjustmentLine(line)">Remove</button></td>
+                                    </tr>
+                                }
+                                </tbody>
+                                <tfoot><tr><th>Totals</th><th>@AdjustmentForm.Lines.Sum(line => line.Debit).ToString("N2")</th><th>@AdjustmentForm.Lines.Sum(line => line.Credit).ToString("N2")</th><th colspan="@(AdjustmentForm.Kind == "IntercompanyElimination" ? 4 : 2)">Difference: @((AdjustmentForm.Lines.Sum(line => line.Debit) - AdjustmentForm.Lines.Sum(line => line.Credit)).ToString("N2"))</th></tr></tfoot>
+                            </table>
+                        </div>
+                        <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddAdjustmentLine">Add line</button><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="adjustmentPreparationAuthorization"><button class="action-primary" type="submit">@(AdjustmentForm.Id.HasValue ? "Save corrected draft" : "Prepare draft")</button></AuthorizeView>@if (AdjustmentForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetAdjustmentForm">Cancel edit</button> }<button class="action-secondary" type="button" @onclick="RunConsolidatedReportAsync">Preview consolidated balance</button></div>
+                    </EditForm>
+
+                    <div class="field-group"><label class="field-label" for="adjustmentDecisionReason">Rejection or reversal reason</label><InputText id="adjustmentDecisionReason" class="field-input" maxlength="1000" @bind-Value="DecisionReason" /></div>
+                    @if (AdjustmentWorkspace.Adjustments.Count == 0) { <p class="muted-copy">No retained consolidation entries exist for this group.</p> }
+                    else
+                    {
+                        <div class="table-scroll"><table class="data-table" aria-label="Retained consolidation adjustments"><thead><tr><th>Period</th><th>Reference</th><th>Kind / match</th><th>Status</th><th>Control history</th><th>Amount</th><th>Actions</th></tr></thead><tbody>
+                        @foreach (var adjustment in AdjustmentWorkspace.Adjustments)
+                        {
+                            <tr><td>@adjustment.PeriodStart to @adjustment.AsOf</td><td><strong>@adjustment.Reference</strong><br /><small>@adjustment.Description</small></td><td>@DisplayKind(adjustment.Kind)@if (!string.IsNullOrWhiteSpace(adjustment.MatchReference)) { <br /><small>@adjustment.MatchReference</small> }</td><td>@adjustment.Status@if (!string.IsNullOrWhiteSpace(adjustment.DecisionReason)) { <br /><small>@adjustment.DecisionReason</small> }@if (!string.IsNullOrWhiteSpace(adjustment.ReversalReason)) { <br /><small>@adjustment.ReversalReason</small> }</td><td>Prepared by @adjustment.PreparedBy<br /><small>@adjustment.PreparedAtUtc.LocalDateTime</small>@if (adjustment.ApprovedBy is not null) { <br /><span>Approved by @adjustment.ApprovedBy</span> }@if (adjustment.RejectedBy is not null) { <br /><span>Rejected by @adjustment.RejectedBy</span> }@if (adjustment.PostedBy is not null) { <br /><span>Posted by @adjustment.PostedBy</span> }</td><td>@adjustment.Lines.Sum(line => line.Debit).ToString("N2") @AdjustmentWorkspace.ReportingCurrency</td><td><div class="hero-actions">@if (adjustment.Status is "Draft" or "Rejected") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => EditAdjustment(adjustment)">Edit</button></AuthorizeView> }@if (adjustment.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-primary" type="button" @onclick="() => ApproveAdjustmentAsync(adjustment)">Approve</button><button class="action-secondary" type="button" @onclick="() => RejectAdjustmentAsync(adjustment)">Reject</button></AuthorizeView> }@if (adjustment.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostJournals"><button class="action-primary" type="button" @onclick="() => PostAdjustmentAsync(adjustment)">Post</button></AuthorizeView> }@if (adjustment.Status == "Posted" && !adjustment.ReversalOfBatchId.HasValue) { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><button class="action-secondary" type="button" @onclick="() => ReverseAdjustmentAsync(adjustment)">Reverse</button></AuthorizeView> }</div></td></tr>
+                        }
+                        </tbody></table></div>
+                    }
+                    @if (ConsolidatedReport is not null)
+                    {
+                        <h3>@ConsolidatedReport.GroupName consolidated balance · @ConsolidatedReport.PeriodStart to @ConsolidatedReport.AsOf</h3>
+                        @foreach (var warning in ConsolidatedReport.Warnings) { <div class="auth-error" role="alert">@warning</div> }
+                        <div class="table-scroll"><table class="data-table" aria-label="Consolidated balance preview"><thead><tr><th>Account</th><th>Type</th><th>Translation</th><th>Balance (@ConsolidatedReport.ReportingCurrency)</th></tr></thead><tbody>@foreach (var account in ConsolidatedReport.Accounts) { <tr><td>@account.AccountNumber — @account.AccountName</td><td>@account.AccountType</td><td>@account.TranslationMethod</td><td>@account.ConvertedBalance.ToString("N2")</td></tr> }</tbody></table></div>
+                    }
+                }
+            }
+        </section>
     </section>
 }
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private IReadOnlyList<ConsolidationGroupSnapshot> ConsolidationGroups = [];
+    private ConsolidationAdjustmentWorkspace? AdjustmentWorkspace;
+    private ConsolidatedBalanceReport? ConsolidatedReport;
+    private Guid SelectedGroupId;
+    private AdjustmentEditor AdjustmentForm = NewAdjustmentEditor();
+    private string DecisionReason = string.Empty;
+    private string ConsolidationMessage = string.Empty;
+    private bool ConsolidationError;
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        ConsolidationGroups = await ConsolidationService.GetGroupsAsync();
+        if (ConsolidationGroups.Count > 0) { SelectedGroupId = ConsolidationGroups[0].Id; await LoadAdjustmentWorkspaceAsync(); }
+    }
+
+    private async Task SelectConsolidationGroupAsync(ChangeEventArgs args)
+    {
+        if (Guid.TryParse(args.Value?.ToString(), out var groupId)) { SelectedGroupId = groupId; ResetAdjustmentForm(); await LoadAdjustmentWorkspaceAsync(); }
+    }
+    private async Task LoadAdjustmentWorkspaceAsync() { AdjustmentWorkspace = await ConsolidationService.GetAdjustmentWorkspaceAsync(SelectedGroupId); ConsolidatedReport = null; }
+    private static AdjustmentEditor NewAdjustmentEditor() => new() { Lines = [new(), new()] };
+    private void ResetAdjustmentForm() { AdjustmentForm = NewAdjustmentEditor(); DecisionReason = string.Empty; ConsolidationMessage = string.Empty; ConsolidationError = false; }
+    private void AddAdjustmentLine() => AdjustmentForm.Lines.Add(new());
+    private void RemoveAdjustmentLine(AdjustmentLineEditor line) { if (AdjustmentForm.Lines.Count > 2) AdjustmentForm.Lines.Remove(line); }
+    private static string AccountKey(ConsolidationReportingAccountSnapshot account) => $"{account.AccountType}|{account.AccountNumber}|{account.AccountName}";
+    private IReadOnlyList<ConsolidationGroupMemberSnapshot> EffectiveMembers() => AdjustmentWorkspace?.Members.Where(member => member.EffectiveFrom <= AdjustmentForm.AsOf && (member.EffectiveThrough is null || member.EffectiveThrough >= AdjustmentForm.AsOf)).GroupBy(member => member.CompanyId).Select(group => group.First()).ToArray() ?? [];
+    private ConsolidationReportingAccountSnapshot? ResolveAccount(string key) => AdjustmentWorkspace?.ReportingAccounts.SingleOrDefault(account => AccountKey(account) == key);
+    private async Task SaveAdjustmentAsync()
+    {
+        if (AdjustmentWorkspace is null) return;
+        var lines = new List<ConsolidationAdjustmentLineRequest>();
+        foreach (var editor in AdjustmentForm.Lines)
+        {
+            var account = ResolveAccount(editor.AccountKey); if (account is null) { SetConsolidationMessage("Choose a reporting account for every line.", true); return; }
+            lines.Add(new(account.AccountNumber, account.AccountName, account.AccountType, editor.Debit, editor.Credit, editor.Description, AdjustmentForm.Kind == "IntercompanyElimination" ? editor.SourceCompanyId : null, AdjustmentForm.Kind == "IntercompanyElimination" ? editor.CounterpartyCompanyId : null));
+        }
+        var result = await ConsolidationService.SaveAdjustmentAsync(new(AdjustmentForm.Id, SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf, AdjustmentForm.Kind, AdjustmentForm.Reference, AdjustmentForm.Description, AdjustmentForm.Kind == "IntercompanyElimination" ? AdjustmentForm.MatchReference : string.Empty, lines, AdjustmentForm.ConcurrencyToken));
+        SetConsolidationMessage(result.Succeeded ? "The consolidation draft was retained for independent review." : result.ErrorMessage, !result.Succeeded);
+        if (result.Succeeded) { AdjustmentForm = NewAdjustmentEditor(); await LoadAdjustmentWorkspaceAsync(); ConsolidationMessage = "The consolidation draft was retained for independent review."; }
+    }
+    private void EditAdjustment(ConsolidationAdjustmentSnapshot adjustment)
+    {
+        AdjustmentForm = new AdjustmentEditor { Id = adjustment.Id, PeriodStart = adjustment.PeriodStart, AsOf = adjustment.AsOf, Kind = adjustment.Kind, Reference = adjustment.Reference, Description = adjustment.Description, MatchReference = adjustment.MatchReference, ConcurrencyToken = adjustment.ConcurrencyToken,
+            Lines = adjustment.Lines.Select(line => new AdjustmentLineEditor { AccountKey = AccountKey(new(line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType)), Debit = line.Debit, Credit = line.Credit, Description = line.Description, SourceCompanyId = line.SourceCompanyId, CounterpartyCompanyId = line.CounterpartyCompanyId }).ToList() };
+        ConsolidationMessage = $"Editing {adjustment.Reference}."; ConsolidationError = false;
+    }
+    private Task ApproveAdjustmentAsync(ConsolidationAdjustmentSnapshot adjustment) => RunAdjustmentActionAsync(() => ConsolidationService.ApproveAdjustmentAsync(new(SelectedGroupId, adjustment.Id, adjustment.ConcurrencyToken)), "The consolidation adjustment was approved.");
+    private Task RejectAdjustmentAsync(ConsolidationAdjustmentSnapshot adjustment) => RunAdjustmentActionAsync(() => ConsolidationService.RejectAdjustmentAsync(new(SelectedGroupId, adjustment.Id, DecisionReason, adjustment.ConcurrencyToken)), "The consolidation adjustment was rejected for correction.");
+    private Task PostAdjustmentAsync(ConsolidationAdjustmentSnapshot adjustment) => RunAdjustmentActionAsync(() => ConsolidationService.PostAdjustmentAsync(new(SelectedGroupId, adjustment.Id, adjustment.ConcurrencyToken)), "The consolidation adjustment was posted to the reporting ledger.");
+    private Task ReverseAdjustmentAsync(ConsolidationAdjustmentSnapshot adjustment) => RunAdjustmentActionAsync(() => ConsolidationService.ReverseAdjustmentAsync(new(SelectedGroupId, adjustment.Id, DecisionReason, adjustment.ConcurrencyToken)), "A non-destructive reversal was posted to the reporting ledger.");
+    private async Task RunAdjustmentActionAsync(Func<Task<TransactionResult>> action, string successMessage) { var result = await action(); SetConsolidationMessage(result.Succeeded ? successMessage : result.ErrorMessage, !result.Succeeded); if (result.Succeeded) { DecisionReason = string.Empty; await LoadAdjustmentWorkspaceAsync(); ConsolidationMessage = successMessage; } }
+    private async Task RunConsolidatedReportAsync() { ConsolidatedReport = await ConsolidationService.GetBalanceReportAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); if (ConsolidatedReport is null) SetConsolidationMessage("The consolidated balance could not be produced for this period and access context.", true); }
+    private void SetConsolidationMessage(string message, bool error) { ConsolidationMessage = message; ConsolidationError = error; }
+    private static string DisplayKind(string kind) => kind == "IntercompanyElimination" ? "Intercompany elimination" : "Manual adjustment";
+
+    private sealed class AdjustmentEditor
+    {
+        public Guid? Id { get; set; }
+        public DateOnly PeriodStart { get; set; } = new(DateTime.UtcNow.Year, 1, 1);
+        public DateOnly AsOf { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
+        public string Kind { get; set; } = "ManualAdjustment";
+        public string Reference { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string MatchReference { get; set; } = string.Empty;
+        public string ConcurrencyToken { get; set; } = string.Empty;
+        public List<AdjustmentLineEditor> Lines { get; set; } = [];
+    }
+    private sealed class AdjustmentLineEditor
+    {
+        public string AccountKey { get; set; } = string.Empty;
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public Guid? SourceCompanyId { get; set; }
+        public Guid? CounterpartyCompanyId { get; set; }
     }
 }

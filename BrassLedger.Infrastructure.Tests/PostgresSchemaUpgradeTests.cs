@@ -78,6 +78,9 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827071708_AddEffectiveDatedConsolidationOwnership';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827080442_AddConsolidationAccountMappings';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827091113_AddControlledConsolidationTranslation';"));
+            Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827095538_AddControlledConsolidationAdjustments';"));
+            Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ConsolidationAdjustmentBatches';"));
+            Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ConsolidationAdjustmentLines';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'CurrencyExchangeRates' AND column_name = 'RateType';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ConsolidationAccountMappings';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ConsolidationGroupCompanies' AND column_name = 'EffectiveFrom';"));
@@ -137,6 +140,8 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827071708_AddEffectiveDatedConsolidationOwnership';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827080442_AddConsolidationAccountMappings';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827091113_AddControlledConsolidationTranslation';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827095538_AddControlledConsolidationAdjustments';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ConsolidationAccountMappings' AND column_name = 'TranslationMethod';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ConsolidationAccountMappings';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ConsolidationGroupCompanies' AND column_name = 'EffectiveFrom';"));

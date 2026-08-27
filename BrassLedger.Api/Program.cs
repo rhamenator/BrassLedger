@@ -909,6 +909,41 @@ api.MapGet("/consolidation-groups/{groupId:guid}/account-mappings", async (Guid 
     var workspace = await service.GetAccountMappingWorkspaceAsync(groupId, cancellationToken);
     return workspace is null ? Results.NotFound() : Results.Ok(workspace);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapPut("/consolidation-groups/{groupId:guid}/adjustments", async (Guid groupId, SaveConsolidationAdjustmentRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId) return Results.BadRequest(new { error = "consolidation_group_id_mismatch" });
+    var result = await service.SaveAdjustmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.PrepareJournals);
+api.MapGet("/consolidation-groups/{groupId:guid}/adjustments", async (Guid groupId, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var workspace = await service.GetAdjustmentWorkspaceAsync(groupId, cancellationToken);
+    return workspace is null ? Results.NotFound() : Results.Ok(workspace);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapPost("/consolidation-groups/{groupId:guid}/adjustments/{adjustmentId:guid}/approve", async (Guid groupId, Guid adjustmentId, ConsolidationAdjustmentActionRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.AdjustmentBatchId != adjustmentId) return Results.BadRequest(new { error = "consolidation_adjustment_id_mismatch" });
+    var result = await service.ApproveAdjustmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.ApproveJournals);
+api.MapPost("/consolidation-groups/{groupId:guid}/adjustments/{adjustmentId:guid}/reject", async (Guid groupId, Guid adjustmentId, ConsolidationAdjustmentDecisionRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.AdjustmentBatchId != adjustmentId) return Results.BadRequest(new { error = "consolidation_adjustment_id_mismatch" });
+    var result = await service.RejectAdjustmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.ApproveJournals);
+api.MapPost("/consolidation-groups/{groupId:guid}/adjustments/{adjustmentId:guid}/post", async (Guid groupId, Guid adjustmentId, ConsolidationAdjustmentActionRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.AdjustmentBatchId != adjustmentId) return Results.BadRequest(new { error = "consolidation_adjustment_id_mismatch" });
+    var result = await service.PostAdjustmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.PostJournals);
+api.MapPost("/consolidation-groups/{groupId:guid}/adjustments/{adjustmentId:guid}/reverse", async (Guid groupId, Guid adjustmentId, ReverseConsolidationAdjustmentRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.AdjustmentBatchId != adjustmentId) return Results.BadRequest(new { error = "consolidation_adjustment_id_mismatch" });
+    var result = await service.ReverseAdjustmentAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.ReverseJournals);
 api.MapGet("/consolidation-groups", async (IConsolidationService service, CancellationToken cancellationToken) => Results.Ok(await service.GetGroupsAsync(cancellationToken))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapGet("/consolidation-groups/{groupId:guid}/balances", async (Guid groupId, DateOnly? periodStart, DateOnly? asOf, IConsolidationService service, CancellationToken cancellationToken) =>
 {

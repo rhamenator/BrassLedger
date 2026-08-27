@@ -2,7 +2,7 @@ using BrassLedger.Web.E2E.Tests.Pages;
 
 namespace BrassLedger.Web.E2E.Tests;
 
-[Collection("Playwright E2E")]
+[Collection("Playwright E2E Visual")]
 public sealed class VisualRegressionTests
 {
     private readonly PlaywrightWebAppFixture _fixture;

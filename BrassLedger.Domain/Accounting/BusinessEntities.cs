@@ -23,6 +23,12 @@ public enum ConsolidationTranslationMethod
     Historical
 }
 
+public enum ConsolidationAdjustmentKind
+{
+    ManualAdjustment,
+    IntercompanyElimination
+}
+
 public sealed class Company
 {
     public Guid Id { get; set; }
@@ -195,6 +201,48 @@ public sealed class ConsolidationAccountMapping
     public DateOnly? EffectiveThrough { get; set; }
     public bool IsActive { get; set; } = true;
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ConsolidationAdjustmentBatch
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ConsolidationGroupId { get; set; }
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly AsOf { get; set; }
+    public ConsolidationAdjustmentKind Kind { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string MatchReference { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public Guid? PostedByUserId { get; set; }
+    public DateTimeOffset? PostedAtUtc { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
+    public Guid? ReversalOfBatchId { get; set; }
+    public Guid? ReversedByBatchId { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ConsolidationAdjustmentLine
+{
+    public Guid Id { get; set; }
+    public Guid ConsolidationAdjustmentBatchId { get; set; }
+    public int Sequence { get; set; }
+    public string ReportingAccountNumber { get; set; } = string.Empty;
+    public string ReportingAccountName { get; set; } = string.Empty;
+    public AccountType ReportingAccountType { get; set; }
+    public decimal Debit { get; set; }
+    public decimal Credit { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public Guid? SourceCompanyId { get; set; }
+    public Guid? CounterpartyCompanyId { get; set; }
 }
 
 public sealed class AccountingPeriod

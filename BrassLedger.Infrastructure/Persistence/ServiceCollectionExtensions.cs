@@ -484,6 +484,51 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "TranslationMethod", cancellationToken)
                 && await HasIndexAsync(dbContext, rateIndex, cancellationToken);
         }
+        if (migrationId.EndsWith("_AddControlledConsolidationAdjustments", StringComparison.Ordinal))
+        {
+            var batchIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationAdjustmentBatches_ConsolidationGroupId_PeriodS~"
+                : "IX_ConsolidationAdjustmentBatches_ConsolidationGroupId_PeriodStart_AsOf_Reference";
+            var lineIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationAdjustmentLines_ConsolidationAdjustmentBatchId~"
+                : "IX_ConsolidationAdjustmentLines_ConsolidationAdjustmentBatchId_Sequence";
+            return await HasTableAsync(dbContext, "ConsolidationAdjustmentBatches", cancellationToken)
+                && await HasTableAsync(dbContext, "ConsolidationAdjustmentLines", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "CompanyId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "ConsolidationGroupId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "PeriodStart", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "AsOf", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "Kind", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "Reference", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "Description", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "MatchReference", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "Status", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "PreparedByUserId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "PreparedAtUtc", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "ApprovedByUserId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "ApprovedAtUtc", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "RejectedByUserId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "RejectedAtUtc", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "PostedByUserId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "PostedAtUtc", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "DecisionReason", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "ReversalOfBatchId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "ReversedByBatchId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "ReversalReason", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "ConcurrencyToken", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "ConsolidationAdjustmentBatchId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "Sequence", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "ReportingAccountNumber", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "ReportingAccountName", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "ReportingAccountType", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "Debit", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "Credit", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "Description", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "SourceCompanyId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentLines", "CounterpartyCompanyId", cancellationToken)
+                && await HasIndexAsync(dbContext, batchIndex, cancellationToken)
+                && await HasIndexAsync(dbContext, lineIndex, cancellationToken);
+        }
         return false;
     }
 

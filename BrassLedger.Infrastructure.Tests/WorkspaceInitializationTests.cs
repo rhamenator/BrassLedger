@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("32", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("33", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -96,6 +96,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827071655_AddEffectiveDatedConsolidationOwnership';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827080436_AddConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827091057_AddControlledConsolidationTranslation';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827095525_AddControlledConsolidationAdjustments';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentLines';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('CurrencyExchangeRates') WHERE name = 'RateType';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'TranslationMethod';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
@@ -149,7 +152,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("32", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("33", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -181,6 +184,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827071655_AddEffectiveDatedConsolidationOwnership';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827080436_AddConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827091057_AddControlledConsolidationTranslation';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827095525_AddControlledConsolidationAdjustments';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('CurrencyExchangeRates') WHERE name = 'RateType';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'CtaAccountNumber';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
@@ -616,9 +621,82 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.NotNull(laterReport);
         Assert.Equal(62.50m, laterReport!.Accounts.Single(account => account.AccountNumber == "19998").ConvertedBalance);
         Assert.Equal(62.50m, laterReport.Accounts.Single(account => account.AccountNumber == "39998").ConvertedBalance);
+        var preparerId = signedInOwner.User!.UserId; var reviewerId = Guid.NewGuid(); var posterId = Guid.NewGuid(); var reverserId = Guid.NewGuid();
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
+        {
+            foreach (var actorId in new[] { reviewerId, posterId, reverserId })
+            foreach (var memberCompanyId in new[] { currentCompanyId, canadianCompanyId })
+                db.CompanyMemberships.Add(new CompanyMembership { Id = Guid.NewGuid(), UserId = actorId, CompanyId = memberCompanyId, Role = "Accounting", IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        void SetConsolidationUser(Guid actorId, params string[] permissions)
+        {
+            var claims = permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)).ToList();
+            claims.Add(new(System.Security.Claims.ClaimTypes.NameIdentifier, actorId.ToString())); claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, currentCompanyId.ToString()));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+        var adjustmentPeriodStart = new DateOnly(2026, 1, 1); var adjustmentAsOf = new DateOnly(2026, 5, 1);
+        SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
+        var adjustmentWorkspace = await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value); Assert.NotNull(adjustmentWorkspace);
+        var adjustmentAsset = adjustmentWorkspace!.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Asset));
+        var adjustmentEquity = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Equity));
+        var invalidNumericKind = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, "999", "INVALID-KIND", "Invalid numeric enum", string.Empty,
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 1m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 1m)]));
+        Assert.False(invalidNumericKind.Succeeded); Assert.Contains("kind", invalidNumericKind.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var invalidNumericAccountType = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.ManualAdjustment), "INVALID-ACCOUNT-TYPE", "Invalid numeric enum", string.Empty,
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, "999", 1m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 1m)]));
+        Assert.False(invalidNumericAccountType.Succeeded); Assert.Contains("valid reporting account", invalidNumericAccountType.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var outOfRangeAmount = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.ManualAdjustment), "INVALID-AMOUNT", "Out-of-range money", string.Empty,
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 10000000000000000m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 10000000000000000m)]));
+        Assert.False(outOfRangeAmount.Succeeded); Assert.Contains("currency range", outOfRangeAmount.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var invalidElimination = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.IntercompanyElimination), "ELIM-MISSING-PROVENANCE", "Invalid elimination", "MATCH-1",
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 25m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 25m)]));
+        Assert.False(invalidElimination.Succeeded); Assert.Contains("different companies", invalidElimination.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var beforeAdjustment = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(beforeAdjustment);
+        var savedAdjustment = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.ManualAdjustment), "CONSOL-ADJ-1", "Controlled reporting-only adjustment", string.Empty,
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 25m, 0m, "Reporting asset true-up"), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 25m, "Reporting equity offset")]));
+        Assert.True(savedAdjustment.Succeeded, savedAdjustment.ErrorMessage);
+        var rejectionCandidate = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.ManualAdjustment), "CONSOL-REJECT-1", "Rejected correction example", string.Empty,
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 5m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 5m)]));
+        Assert.True(rejectionCandidate.Succeeded, rejectionCandidate.ErrorMessage);
+        var draft = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == savedAdjustment.Id);
+        var rejectionDraft = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == rejectionCandidate.Id);
+        SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
+        var selfApproval = await consolidation.ApproveAdjustmentAsync(new(group.Id.Value, draft.Id, draft.ConcurrencyToken)); Assert.False(selfApproval.Succeeded); Assert.Contains("prepared", selfApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
+        var rejected = await consolidation.RejectAdjustmentAsync(new(group.Id.Value, rejectionDraft.Id, "Provide supporting consolidation schedule", rejectionDraft.ConcurrencyToken)); Assert.True(rejected.Succeeded, rejected.ErrorMessage);
+        var rejectedSnapshot = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == rejectionDraft.Id); Assert.Equal("Rejected", rejectedSnapshot.Status); Assert.NotNull(rejectedSnapshot.RejectedBy); Assert.Equal("Provide supporting consolidation schedule", rejectedSnapshot.DecisionReason);
+        var approved = await consolidation.ApproveAdjustmentAsync(new(group.Id.Value, draft.Id, draft.ConcurrencyToken)); Assert.True(approved.Succeeded, approved.ErrorMessage);
+        SetConsolidationUser(posterId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
+        var stalePost = await consolidation.PostAdjustmentAsync(new(group.Id.Value, draft.Id, draft.ConcurrencyToken)); Assert.False(stalePost.Succeeded); Assert.Contains("changed", stalePost.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var approvedSnapshot = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == draft.Id);
+        SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
+        var reviewerPost = await consolidation.PostAdjustmentAsync(new(group.Id.Value, draft.Id, approvedSnapshot.ConcurrencyToken)); Assert.False(reviewerPost.Succeeded); Assert.Contains("approved", reviewerPost.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetConsolidationUser(posterId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
+        Guid closedPostingPeriodId = Guid.NewGuid();
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync()) { db.AccountingPeriods.Add(new AccountingPeriod { Id = closedPostingPeriodId, CompanyId = currentCompanyId, StartsOn = adjustmentPeriodStart, EndsOn = adjustmentPeriodStart, Status = "Closed" }); await db.SaveChangesAsync(); }
+        var closedPeriodPosting = await consolidation.PostAdjustmentAsync(new(group.Id.Value, draft.Id, approvedSnapshot.ConcurrencyToken)); Assert.False(closedPeriodPosting.Succeeded); Assert.Contains("closed", closedPeriodPosting.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync()) { (await db.AccountingPeriods.SingleAsync(period => period.Id == closedPostingPeriodId)).Status = "Open"; await db.SaveChangesAsync(); }
+        var postedAdjustment = await consolidation.PostAdjustmentAsync(new(group.Id.Value, draft.Id, approvedSnapshot.ConcurrencyToken)); Assert.True(postedAdjustment.Succeeded, postedAdjustment.ErrorMessage);
+        var adjustedReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(adjustedReport);
+        Assert.Equal(beforeAdjustment!.Accounts.Single(account => account.AccountNumber == adjustmentAsset.AccountNumber).ConvertedBalance + 25m, adjustedReport!.Accounts.Single(account => account.AccountNumber == adjustmentAsset.AccountNumber).ConvertedBalance);
+        Assert.Equal(beforeAdjustment.Accounts.Single(account => account.AccountNumber == adjustmentEquity.AccountNumber).ConvertedBalance + 25m, adjustedReport.Accounts.Single(account => account.AccountNumber == adjustmentEquity.AccountNumber).ConvertedBalance);
+        Assert.Equal(0m, adjustedReport.Accounts.Sum(account => account.AccountType is "Asset" or "Expense" ? account.ConvertedBalance : -account.ConvertedBalance));
+        var postedSnapshot = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == draft.Id);
+        SetConsolidationUser(reverserId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalReverse);
+        Guid closedPeriodId = Guid.NewGuid();
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync()) { db.AccountingPeriods.Add(new AccountingPeriod { Id = closedPeriodId, CompanyId = currentCompanyId, StartsOn = adjustmentPeriodStart.AddDays(1), EndsOn = adjustmentPeriodStart.AddDays(1), Status = "Closed" }); await db.SaveChangesAsync(); }
+        var closedPeriodReversal = await consolidation.ReverseAdjustmentAsync(new(group.Id.Value, draft.Id, "Closed-period reversal must fail", postedSnapshot.ConcurrencyToken)); Assert.False(closedPeriodReversal.Succeeded); Assert.Contains("closed", closedPeriodReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync()) { (await db.AccountingPeriods.SingleAsync(period => period.Id == closedPeriodId)).Status = "Open"; await db.SaveChangesAsync(); }
+        var reversedAdjustment = await consolidation.ReverseAdjustmentAsync(new(group.Id.Value, draft.Id, "Remove test consolidation true-up", postedSnapshot.ConcurrencyToken)); Assert.True(reversedAdjustment.Succeeded, reversedAdjustment.ErrorMessage);
+        var restoredReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(restoredReport);
+        Assert.Equal(beforeAdjustment.Accounts.Single(account => account.AccountNumber == adjustmentAsset.AccountNumber).ConvertedBalance, restoredReport!.Accounts.Single(account => account.AccountNumber == adjustmentAsset.AccountNumber).ConvertedBalance);
+        Assert.Equal(beforeAdjustment.Accounts.Single(account => account.AccountNumber == adjustmentEquity.AccountNumber).ConvertedBalance, restoredReport.Accounts.Single(account => account.AccountNumber == adjustmentEquity.AccountNumber).ConvertedBalance);
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
         {
             Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationGroupCompany)));
+            Assert.Equal(6, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationAdjustmentBatch)));
+            Assert.Equal(3, await db.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == group.Id));
         }
     }
 

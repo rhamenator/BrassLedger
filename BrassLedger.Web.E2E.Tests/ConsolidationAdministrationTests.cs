@@ -37,4 +37,42 @@ public sealed class ConsolidationAdministrationTests(PlaywrightWebAppFixture fix
             await fixture.RemoveQuickBooksAdministratorAsync();
         }
     }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task Reporting_PreparesApprovesPostsAndReversesConsolidationAdjustment(BrowserKind browserKind)
+    {
+        await fixture.CreateConsolidationWorkflowAsync();
+        var reference = $"E2E-CONSOL-{browserKind}";
+        await using (var preparer = await fixture.CreateSessionAsync(browserKind))
+        {
+            await preparer.SignInAsync("integration-admin"); await preparer.GotoAsync("/reporting"); await preparer.WaitForHeadingAsync("Reports, labels, forms, and print fidelity stay in the product.");
+            await preparer.Page.Locator("#adjustmentPeriodStart").FillAsync("2026-01-01"); await preparer.Page.Locator("#adjustmentAsOf").FillAsync("2026-08-31");
+            await preparer.Page.Locator("#adjustmentReference").FillAsync(reference); await preparer.Page.Locator("#adjustmentDescription").FillAsync("E2E reporting-only true-up");
+            var accountSelectors = preparer.Page.GetByLabel("Reporting account");
+            await accountSelectors.Nth(0).SelectOptionAsync(new SelectOptionValue { Index = 1 }); await accountSelectors.Nth(1).SelectOptionAsync(new SelectOptionValue { Index = 2 });
+            await preparer.Page.GetByLabel("Adjustment debit").Nth(0).FillAsync("25.00"); await preparer.Page.GetByLabel("Adjustment credit").Nth(1).FillAsync("25.00");
+            await preparer.Page.GetByRole(AriaRole.Button, new() { Name = "Prepare draft" }).ClickAsync();
+            await Assertions.Expect(preparer.Page.GetByRole(AriaRole.Table, new() { Name = "Retained consolidation adjustments" })).ToContainTextAsync(reference);
+            await Assertions.Expect(preparer.Page.GetByText("The consolidation draft was retained for independent review.")).ToBeVisibleAsync();
+            await preparer.AssertNoUiFailuresAsync("consolidation adjustment preparation");
+        }
+        await using (var reviewer = await fixture.CreateSessionAsync(browserKind))
+        {
+            await reviewer.SignInAsync("e2e-consolidation-reviewer"); await reviewer.GotoAsync("/reporting");
+            var row = reviewer.Page.GetByRole(AriaRole.Row).Filter(new() { HasTextString = reference }); await row.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+            await Assertions.Expect(reviewer.Page.GetByText("The consolidation adjustment was approved.")).ToBeVisibleAsync(); await reviewer.AssertNoUiFailuresAsync("consolidation adjustment approval");
+        }
+        await using (var poster = await fixture.CreateSessionAsync(browserKind))
+        {
+            await poster.SignInAsync("e2e-consolidation-poster"); await poster.GotoAsync("/reporting");
+            var row = poster.Page.GetByRole(AriaRole.Row).Filter(new() { HasTextString = reference }); await row.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+            await Assertions.Expect(poster.Page.GetByText("The consolidation adjustment was posted to the reporting ledger.")).ToBeVisibleAsync();
+            await poster.Page.Locator("#adjustmentDecisionReason").FillAsync("E2E non-destructive correction");
+            row = poster.Page.GetByRole(AriaRole.Row).Filter(new() { HasTextString = reference }); await row.GetByRole(AriaRole.Button, new() { Name = "Reverse", Exact = true }).ClickAsync();
+            await Assertions.Expect(poster.Page.GetByText("A non-destructive reversal was posted to the reporting ledger.")).ToBeVisibleAsync();
+            await Assertions.Expect(poster.Page.GetByRole(AriaRole.Table, new() { Name = "Retained consolidation adjustments" })).ToContainTextAsync("Reversed");
+            await poster.AssertNoUiFailuresAsync("consolidation adjustment posting and reversal");
+        }
+    }
 }

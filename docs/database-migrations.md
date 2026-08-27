@@ -72,6 +72,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddControlledConsolidationTranslation` separates closing, period-average, and historical exchange-rate evidence; adds source reference, retrieval, approval, and concurrency controls; retains each account mapping's translation policy; and adds the consolidation group's dedicated CTA reporting identity. Existing rates are preserved as active closing rates with nonblank concurrency tokens. Existing asset and liability mappings remain closing, revenue and expense mappings become average, and equity mappings become historical. Lost-history adoption requires the rate-policy and provenance columns, CTA identity, mapping method, and provider-specific typed-rate index. Downgrade is prohibited because it could delete the policy evidence needed to reproduce translated balances.
 
+`AddControlledConsolidationAdjustments` adds the separate reporting ledger for exact-period manual adjustments and explicit intercompany eliminations. Batches retain preparation, independent decision, posting, rejection, concurrency, match, and reversal evidence; lines retain reporting identity and optional source/counterparty member provenance. Restrictive group/company relationships and unique batch/sequence indexes protect attribution. Lost-history adoption requires both tables, lifecycle and reversal columns, company-pair provenance, and both provider-specific control indexes. Downgrade is prohibited because it could delete posted consolidation history and review evidence.
+
 ## Verification
 
 At minimum, run:

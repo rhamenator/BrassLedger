@@ -1031,6 +1031,152 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.ToTable("ConsolidationAccountMappings");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationAdjustmentBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("AsOf")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ConsolidationGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DecisionReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MatchReference")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly>("PeriodStart")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset?>("PostedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PostedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PreparedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("RejectedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RejectedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReversalOfBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReversalReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ReversedByBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("ReversalOfBatchId")
+                        .IsUnique();
+
+                    b.HasIndex("ConsolidationGroupId", "PeriodStart", "AsOf", "Reference")
+                        .IsUnique();
+
+                    b.ToTable("ConsolidationAdjustmentBatches");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationAdjustmentLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConsolidationAdjustmentBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CounterpartyCompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Credit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("Debit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReportingAccountName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReportingAccountNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("ReportingAccountType")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("SourceCompanyId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CounterpartyCompanyId");
+
+                    b.HasIndex("SourceCompanyId");
+
+                    b.HasIndex("ConsolidationAdjustmentBatchId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("ConsolidationAdjustmentLines");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationGroup", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9489,6 +9635,45 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasForeignKey("MemberCompanyId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationAdjustmentBatch", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ConsolidationGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationAdjustmentBatch", null)
+                        .WithOne()
+                        .HasForeignKey("BrassLedger.Domain.Accounting.ConsolidationAdjustmentBatch", "ReversalOfBatchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationAdjustmentLine", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationAdjustmentBatch", null)
+                        .WithMany()
+                        .HasForeignKey("ConsolidationAdjustmentBatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CounterpartyCompanyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("SourceCompanyId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.CustomerReturnAuthorization", b =>
