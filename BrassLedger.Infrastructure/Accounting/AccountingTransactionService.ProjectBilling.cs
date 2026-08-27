@@ -99,7 +99,18 @@ public sealed partial class AccountingTransactionService
         var invoiceLines = preview.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.RetainageAmount, 0m, line.RevenueAccountNumber, project.Id)).ToArray();
         var invoiceRequest = new CreateInvoiceRequest(project.CustomerId!.Value, request.PreviewRequest.InvoiceNumber.Trim(), request.PreviewRequest.InvoiceDate, request.PreviewRequest.DueDate, preview.GrossAmount, 0m, request.PreviewRequest.RevenueAccountNumber.Trim(), request.PreviewRequest.Description.Trim(), invoiceLines);
         var payloadJson = JsonSerializer.Serialize(invoiceRequest);
-        var validation = await ValidateSubledgerPostingAsync(companyId, "Invoice", "company", payloadJson, cancellationToken);
+        var validationContext = new ProjectBillingProposal
+        {
+            CompanyId = companyId,
+            ProjectJobId = project.Id,
+            CustomerId = project.CustomerId.Value,
+            InvoiceNumber = invoiceRequest.InvoiceNumber,
+            BillingBasis = preview.BillingBasis,
+            GrossAmount = preview.GrossAmount,
+            RetainageAmount = preview.RetainageAmount,
+            InvoiceAmount = preview.InvoiceAmount
+        };
+        var validation = await ValidateSubledgerPostingAsync(companyId, "Invoice", "company", payloadJson, cancellationToken, validationContext);
         if (!validation.Succeeded) return TransactionResult.Failure($"The project billing invoice draft is not postable: {validation.ErrorMessage}");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
@@ -351,6 +362,9 @@ public sealed partial class AccountingTransactionService
         if (string.IsNullOrWhiteSpace(proposal.PreparedProjectConcurrencyToken)
             || !string.Equals(project.ConcurrencyToken, proposal.PreparedProjectConcurrencyToken, StringComparison.Ordinal))
             return "The project or its billing history changed after this proposal was prepared. Reject and correct the proposal from a fresh preview.";
+        if ((proposal.RetainageAmount > 0m || proposal.BillingBasis == "RetainageRelease")
+            && !await db.Accounts.AnyAsync(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Asset && account.IsControlAccount && account.OperationalRole == AccountingAccountRoles.RetainageReceivable, cancellationToken))
+            return "Configure an active retainage-receivable control account before approving project billing with retained or released amounts.";
 
         var lines = await db.ProjectBillingLines.Where(x => x.ProjectBillingProposalId == proposal.Id).ToListAsync(cancellationToken);
         if (lines.Count == 0) return "The project billing proposal has no retained billing lines.";

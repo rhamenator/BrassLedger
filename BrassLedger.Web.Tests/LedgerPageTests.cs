@@ -117,10 +117,35 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("input[aria-label='Project billing invoice number']"));
         Assert.Contains("Preview billing", cut.Markup);
         Assert.Contains("Project billing proposals", cut.Markup);
+        Assert.Contains("Retainage receivable aging", cut.Markup);
+        Assert.NotNull(cut.Find("table[aria-label='Project retainage receivable aging']"));
+        Assert.Contains("PB-5007-1", cut.Markup);
+        Assert.Contains("Control-account balance", cut.Markup);
+        Assert.DoesNotContain("does not reconcile", cut.Markup);
         Assert.Contains("Gross margin", cut.Markup);
         cut.FindAll("button").First(button => button.TextContent.Contains("JOB-5007", StringComparison.Ordinal)).Click();
         Assert.Contains("JOB-5007 ledger", cut.Markup);
         Assert.Contains("Budget remaining after posted cost and open commitments", cut.Markup);
+    }
+
+    [Fact]
+    public void ProjectsPage_WarnsWhenRetainageAgingDoesNotReconcileToControlAccount()
+    {
+        var workspace = TestWorkspaceData.CreateWorkspace();
+        Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(workspace with
+        {
+            Projects = workspace.Projects with
+            {
+                RetainageControlBalance = 130m,
+                RetainageReconciliationDifference = 5m
+            }
+        }));
+
+        var cut = RenderComponent<Projects>();
+
+        var alert = cut.Find(".auth-error[role='alert']");
+        Assert.Contains("does not reconcile", alert.TextContent, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Difference:", cut.Markup);
     }
 
     [Fact]

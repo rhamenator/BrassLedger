@@ -195,6 +195,13 @@ else
             </section>
         </Authorized></AuthorizeView>
 
+        <section class="panel"><h2>Retainage receivable aging</h2>
+            <p class="page-intro">Posted retained amounts remain in the retainage-receivable control account until a controlled release invoice moves them to ordinary accounts receivable. Aging total: @Workspace.Projects.RetainageReceivable.ToString("C"). Control-account balance: @Workspace.Projects.RetainageControlBalance.ToString("C"). Difference: @Workspace.Projects.RetainageReconciliationDifference.ToString("C").</p>
+            @if (Workspace.Projects.RetainageReconciliationDifference != 0m) { <div class="auth-error" role="alert">The retainage aging does not reconcile to the configured control account. Stop retainage posting and investigate the ledger difference.</div> }
+            @if ((Workspace.Projects.RetainageAging ?? []).Count == 0) { <p class="empty-state">No posted project retainage is awaiting release.</p> }
+            else { <div class="table-scroll"><table class="data-table" aria-label="Project retainage receivable aging"><thead><tr><th>Project</th><th>Customer</th><th>Source invoice</th><th>Held on</th><th>Age</th><th>Original</th><th>Released</th><th>Outstanding</th><th>0–30</th><th>31–60</th><th>61–90</th><th>Over 90</th></tr></thead><tbody>@foreach (var item in Workspace.Projects.RetainageAging ?? []) { <tr><td>@item.ProjectJobNumber</td><td>@item.CustomerName</td><td>@item.InvoiceNumber</td><td>@item.HeldOn</td><td>@item.AgeDays days</td><td>@item.OriginalRetainage.ToString("C")</td><td>@item.ReleasedAmount.ToString("C")</td><td>@item.OutstandingAmount.ToString("C")</td><td>@item.Days0To30.ToString("C")</td><td>@item.Days31To60.ToString("C")</td><td>@item.Days61To90.ToString("C")</td><td>@item.DaysOver90.ToString("C")</td></tr> }</tbody></table></div> }
+        </section>
+
         @if (BillingCancellationForm is not null)
         {
             <section class="panel"><h2>Cancel project billing @BillingCancellationForm.InvoiceNumber</h2><EditForm Model="BillingCancellationForm" OnValidSubmit="CompleteBillingCancellationAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Cancellation reason</label><InputText aria-label="Project billing cancellation reason" class="field-input" @bind-Value="BillingCancellationForm.Reason" /></div><button class="action-primary" type="submit">Cancel and release sources</button><button class="action-secondary" type="button" @onclick="() => BillingCancellationForm = null">Keep billing</button></div></EditForm></section>

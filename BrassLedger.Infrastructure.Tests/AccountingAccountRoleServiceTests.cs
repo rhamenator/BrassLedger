@@ -40,6 +40,10 @@ public sealed class AccountingAccountRoleServiceTests : IDisposable
         Assert.True(workspace.Authorized);
         Assert.Equal(AccountingAccountRoles.Definitions.Count, workspace.Roles.Count);
         var revenue = Assert.Single(workspace.Roles, role => role.Code == AccountingAccountRoles.DefaultRevenue);
+        var retainage = Assert.Single(workspace.Roles, role => role.Code == AccountingAccountRoles.RetainageReceivable);
+        Assert.Equal("1110", retainage.AccountNumber);
+        Assert.True(retainage.RequiresControlAccount);
+        Assert.True(retainage.RequiresZeroBalanceToReassign);
 
         var unconfirmed = await service.AssignAsync(new(revenue.Code, replacementRevenueId, revenue.AccountId));
         Assert.False(unconfirmed.Succeeded);

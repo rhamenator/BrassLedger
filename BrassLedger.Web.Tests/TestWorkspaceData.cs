@@ -73,7 +73,28 @@ internal static class TestWorkspaceData
                 3,
                 135500m,
                 103630m,
-                new[] { new ProjectJobSnapshot("JOB-5007", "Red Mesa Expansion", "Red Mesa Builders", "Open", 45000m, 27600m) }),
+                new[] { new ProjectJobSnapshot("JOB-5007", "Red Mesa Expansion", "Red Mesa Builders", "Open", 45000m, 27600m) },
+                RetainageReceivable: 125m,
+                RetainageAging:
+                [
+                    new ProjectRetainageAgingSnapshot(
+                        Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                        Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                        "JOB-5007",
+                        "Red Mesa Builders",
+                        "PB-5007-1",
+                        new DateOnly(2026, 3, 1),
+                        30,
+                        250m,
+                        125m,
+                        125m,
+                        125m,
+                        0m,
+                        0m,
+                        0m)
+                ],
+                RetainageControlBalance: 125m,
+                RetainageReconciliationDifference: 0m),
             Reporting: new ReportingWorkspace(
                 6,
                 3,

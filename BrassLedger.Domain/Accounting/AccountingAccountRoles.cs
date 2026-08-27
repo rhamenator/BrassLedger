@@ -6,6 +6,7 @@ public static class AccountingAccountRoles
     public const string PayrollClearing = "PayrollClearing";
     public const string BankTransferClearing = "BankTransferClearing";
     public const string AccountsReceivable = "AccountsReceivable";
+    public const string RetainageReceivable = "RetainageReceivable";
     public const string InventoryAsset = "InventoryAsset";
     public const string VendorAdvances = "VendorAdvances";
     public const string AccountsPayable = "AccountsPayable";
@@ -27,6 +28,7 @@ public static class AccountingAccountRoles
         new(PayrollClearing, "Payroll clearing", "Clearing account available to payroll funding workflows.", AccountType.Asset, false),
         new(BankTransferClearing, "Bank-transfer clearing", "Clearing account used for the two sides of an internal bank transfer.", AccountType.Asset, false, true),
         new(AccountsReceivable, "Accounts receivable", "Control account used by customer invoices, credits, and payment applications.", AccountType.Asset, true, true),
+        new(RetainageReceivable, "Retainage receivable", "Control account used for project-billing amounts contractually held until release.", AccountType.Asset, true, true),
         new(InventoryAsset, "Inventory asset", "Control account used for inventory value and quantity adjustments.", AccountType.Asset, true, true),
         new(VendorAdvances, "Vendor advances", "Control account used for unapplied vendor payments and refunds.", AccountType.Asset, true, true),
         new(AccountsPayable, "Accounts payable", "Control account used by vendor bills, credits, and payment applications.", AccountType.Liability, true, true),

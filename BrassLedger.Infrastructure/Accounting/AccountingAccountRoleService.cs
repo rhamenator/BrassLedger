@@ -126,6 +126,7 @@ public sealed class AccountingAccountRoleService(
         return roleCode switch
         {
             AccountingAccountRoles.AccountsReceivable => await db.SalesInvoices.AnyAsync(invoice => invoice.CompanyId == companyId && invoice.BalanceDue != 0m && invoice.Status != "Voided", cancellationToken),
+            AccountingAccountRoles.RetainageReceivable => await HasOutstandingRetainageAsync(db, companyId, cancellationToken),
             AccountingAccountRoles.AccountsPayable => await db.VendorBills.AnyAsync(bill => bill.CompanyId == companyId && bill.BalanceDue != 0m && bill.Status != "Voided", cancellationToken),
             AccountingAccountRoles.GoodsReceivedNotInvoiced =>
                 await db.InventoryReceiptLines.AnyAsync(line =>
@@ -141,6 +142,15 @@ public sealed class AccountingAccountRoleService(
             AccountingAccountRoles.PayrollLiabilities => await db.PayrollLiabilities.AnyAsync(liability => liability.CompanyId == companyId && liability.OutstandingAmount != 0m, cancellationToken),
             _ => false
         };
+    }
+
+    private static async Task<bool> HasOutstandingRetainageAsync(BrassLedgerDbContext db, Guid companyId, CancellationToken cancellationToken)
+    {
+        var sources = await db.ProjectBillingProposals.AsNoTracking().Where(proposal => proposal.CompanyId == companyId && proposal.Status == "Posted" && proposal.BillingBasis != "RetainageRelease" && proposal.RetainageAmount > 0m).Select(proposal => new { proposal.Id, proposal.RetainageAmount }).ToListAsync(cancellationToken);
+        if (sources.Count == 0) return false;
+        var sourceIds = sources.Select(source => source.Id).ToArray();
+        var releases = await db.ProjectBillingProposals.AsNoTracking().Where(proposal => proposal.CompanyId == companyId && proposal.Status == "Posted" && proposal.RetainageReleaseOfProposalId.HasValue && sourceIds.Contains(proposal.RetainageReleaseOfProposalId.Value)).Select(proposal => new { SourceId = proposal.RetainageReleaseOfProposalId!.Value, proposal.InvoiceAmount }).ToListAsync(cancellationToken);
+        return sources.Any(source => source.RetainageAmount - releases.Where(release => release.SourceId == source.Id).Sum(release => release.InvoiceAmount) != 0m);
     }
 
     private Actor? CurrentActor()

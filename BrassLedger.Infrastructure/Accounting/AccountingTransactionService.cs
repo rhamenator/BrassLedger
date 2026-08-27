@@ -538,7 +538,7 @@ public sealed partial class AccountingTransactionService(
         return result;
     }
 
-    private async Task<TransactionResult> CreateInvoiceCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateInvoiceRequest request, CancellationToken cancellationToken)
+    private async Task<TransactionResult> CreateInvoiceCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateInvoiceRequest request, CancellationToken cancellationToken, ProjectBillingProposal? projectBilling = null)
     {
         var requestedLines = request.Lines?.ToArray() ?? [];
         if (string.IsNullOrWhiteSpace(request.InvoiceNumber) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("An invoice number and description are required.");
@@ -564,14 +564,36 @@ public sealed partial class AccountingTransactionService(
         var taxAmount = requestedLines.Length == 0 ? RoundCurrency(request.TaxAmount) : lineAmounts.Sum(line => line.TaxAmount);
         var total = subtotal + taxAmount;
         if (total <= 0) return TransactionResult.Failure("Invoice total must be greater than zero.");
-        if (customer.CreditLimit > 0 && customer.OpenBalance + total > customer.CreditLimit)
-            return TransactionResult.Failure("Posting this invoice would exceed the customer's credit limit.");
+        var projectPayloadRetainage = projectBilling is null ? 0m : lineAmounts.Sum(line => RoundCurrency(line.Request.DiscountAmount));
+        var projectPayloadGross = subtotal + projectPayloadRetainage;
+        if (projectBilling is not null
+            && (projectBilling.CustomerId != customer.Id || projectBilling.InvoiceNumber != request.InvoiceNumber.Trim() || projectBilling.InvoiceAmount != subtotal || taxAmount != 0m
+                || (projectBilling.BillingBasis == "RetainageRelease"
+                    ? projectBilling.RetainageAmount != 0m || projectPayloadRetainage != 0m || projectBilling.GrossAmount != subtotal
+                    : projectBilling.RetainageAmount != projectPayloadRetainage || projectBilling.GrossAmount != projectPayloadGross)))
+            return TransactionResult.Failure("The project billing proposal no longer reconciles to its controlled invoice payload.");
+        if (customer.CreditLimit > 0)
+        {
+            var existingRetainageExposure = await GetOutstandingCustomerRetainageAsync(db, companyId, customer.Id, cancellationToken);
+            var newRetainageExposure = projectBilling is not null && projectBilling.BillingBasis != "RetainageRelease" ? projectBilling.RetainageAmount : 0m;
+            var releasedRetainageExposure = projectBilling?.BillingBasis == "RetainageRelease" ? subtotal : 0m;
+            if (customer.OpenBalance + existingRetainageExposure + total + newRetainageExposure - releasedRetainageExposure > customer.CreditLimit)
+                return TransactionResult.Failure("Posting this invoice would exceed the customer's credit limit, including outstanding retainage.");
+        }
         var lines = new List<JournalLineRequest>
         {
             new(OperationalRoleReference(AccountingAccountRoles.AccountsReceivable), total, 0, "Invoice receivable")
         };
-        if (requestedLines.Length == 0) lines.Add(new JournalLineRequest(request.RevenueAccountNumber, 0, subtotal, "Invoice revenue"));
-        else lines.AddRange(lineAmounts.GroupBy(line => new { AccountNumber = line.Request.RevenueAccountNumber.Trim().ToUpperInvariant(), line.Request.ProjectJobId }).Select(group => new JournalLineRequest(group.Key.AccountNumber, 0, group.Sum(line => line.NetAmount), "Invoice revenue", group.Key.ProjectJobId)));
+        if (projectBilling?.BillingBasis == "RetainageRelease")
+        {
+            lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.RetainageReceivable), 0m, subtotal, "Release project retainage", projectBilling.ProjectJobId));
+        }
+        else
+        {
+            if (projectBilling?.RetainageAmount > 0m) lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.RetainageReceivable), projectBilling.RetainageAmount, 0m, "Project retainage receivable", projectBilling.ProjectJobId));
+            if (requestedLines.Length == 0) lines.Add(new JournalLineRequest(request.RevenueAccountNumber, 0, subtotal, "Invoice revenue"));
+            else lines.AddRange(lineAmounts.GroupBy(line => new { AccountNumber = line.Request.RevenueAccountNumber.Trim().ToUpperInvariant(), line.Request.ProjectJobId }).Select(group => new JournalLineRequest(group.Key.AccountNumber, 0, group.Sum(line => line.NetAmount + (projectBilling is null ? 0m : RoundCurrency(line.Request.DiscountAmount))), "Invoice revenue", group.Key.ProjectJobId)));
+        }
         if (taxAmount > 0) lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.SalesTaxPayable), 0, taxAmount, "Sales tax payable"));
         var invoiceId = Guid.NewGuid();
         var posting = await PostAsync(db, companyId, request.InvoiceDate, "Accounts Receivable", request.InvoiceNumber, request.Description, lines, cancellationToken, allowControlAccounts: true, sourceDocumentId: invoiceId, sourceDocumentType: "SalesInvoice", resolveOperationalRoles: true);
@@ -587,6 +609,21 @@ public sealed partial class AccountingTransactionService(
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException) { return TransactionResult.Failure("Invoice number already exists or was posted concurrently. Refresh and try again."); }
         return TransactionResult.Success(invoice.Id);
+    }
+
+    private static async Task<decimal> GetOutstandingCustomerRetainageAsync(BrassLedgerDbContext db, Guid companyId, Guid customerId, CancellationToken cancellationToken)
+    {
+        var sources = await db.ProjectBillingProposals.AsNoTracking()
+            .Where(proposal => proposal.CompanyId == companyId && proposal.CustomerId == customerId && proposal.Status == "Posted" && proposal.BillingBasis != "RetainageRelease" && proposal.RetainageAmount > 0m)
+            .Select(proposal => new { proposal.Id, proposal.RetainageAmount })
+            .ToListAsync(cancellationToken);
+        if (sources.Count == 0) return 0m;
+        var sourceIds = sources.Select(source => source.Id).ToArray();
+        var releases = await db.ProjectBillingProposals.AsNoTracking()
+            .Where(proposal => proposal.CompanyId == companyId && proposal.Status == "Posted" && proposal.RetainageReleaseOfProposalId.HasValue && sourceIds.Contains(proposal.RetainageReleaseOfProposalId.Value))
+            .Select(proposal => proposal.InvoiceAmount)
+            .ToListAsync(cancellationToken);
+        return sources.Sum(source => source.RetainageAmount) - releases.Sum();
     }
 
     private async Task<TransactionResult> CreateVendorBillCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateVendorBillRequest request, CancellationToken cancellationToken)
@@ -663,7 +700,7 @@ public sealed partial class AccountingTransactionService(
             var projectBillingError = await ValidateProjectBillingApprovalAsync(db, companyId, projectBilling, cancellationToken);
             if (projectBillingError is not null) return TransactionResult.Failure(projectBillingError);
         }
-        var validation = await ValidateSubledgerPostingAsync(companyId, workflow.DocumentType, workflow.DocumentScope, workflow.PayloadJson, cancellationToken);
+        var validation = await ValidateSubledgerPostingAsync(companyId, workflow.DocumentType, workflow.DocumentScope, workflow.PayloadJson, cancellationToken, projectBilling);
         if (!validation.Succeeded) return TransactionResult.Failure($"The draft cannot be approved because it is not postable: {validation.ErrorMessage}");
         workflow.Status = "Approved"; workflow.ApprovedByUserId = approvingUserId; workflow.ApprovedAtUtc = DateTimeOffset.UtcNow; workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
         if (projectBilling is not null) { projectBilling.Status = "Approved"; projectBilling.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
@@ -716,6 +753,7 @@ public sealed partial class AccountingTransactionService(
         if (workflow.Status != "Approved") return TransactionResult.Failure("Only an approved invoice or bill draft can be posted.");
         if (postingUserId.HasValue && workflow.ApprovedByUserId == postingUserId)
             return TransactionResult.Failure("The person who approved an invoice or bill draft cannot post it.");
+        var projectBilling = await db.ProjectBillingProposals.SingleOrDefaultAsync(item => item.SubledgerDocumentWorkflowId == workflow.Id && item.CompanyId == companyId, cancellationToken);
         TransactionResult posting;
         try
         {
@@ -724,7 +762,7 @@ public sealed partial class AccountingTransactionService(
                 var request = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(workflow.PayloadJson);
                 if (request is null) return TransactionResult.Failure("The approved invoice draft payload is empty.");
                 if (!string.Equals(workflow.DocumentScope, "company", StringComparison.Ordinal)) return TransactionResult.Failure("The approved invoice draft identity scope does not match its document type.");
-                posting = await CreateInvoiceCoreAsync(db, companyId, request, cancellationToken);
+                posting = await CreateInvoiceCoreAsync(db, companyId, request, cancellationToken, projectBilling);
             }
             else
             {
@@ -739,7 +777,6 @@ public sealed partial class AccountingTransactionService(
         catch (DbUpdateException) { return TransactionResult.Failure("The approved draft could not be posted atomically. The entire posting was rolled back; refresh and try again."); }
         if (!posting.Succeeded) return posting;
         workflow.Status = "Posted"; workflow.PostedDocumentId = posting.Id; workflow.PostedByUserId = postingUserId; workflow.PostedAtUtc = DateTimeOffset.UtcNow; workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        var projectBilling = await db.ProjectBillingProposals.SingleOrDefaultAsync(item => item.SubledgerDocumentWorkflowId == workflow.Id && item.CompanyId == companyId, cancellationToken);
         if (projectBilling is not null)
         {
             projectBilling.Status = "Posted";
@@ -3126,7 +3163,7 @@ public sealed partial class AccountingTransactionService(
         return TransactionResult.Success(workflow.Id);
     }
 
-    private async Task<TransactionResult> ValidateSubledgerPostingAsync(Guid companyId, string documentType, string documentScope, string payloadJson, CancellationToken cancellationToken)
+    private async Task<TransactionResult> ValidateSubledgerPostingAsync(Guid companyId, string documentType, string documentScope, string payloadJson, CancellationToken cancellationToken, ProjectBillingProposal? projectBilling = null)
     {
         await using var validationDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await validationDb.Database.BeginTransactionAsync(cancellationToken);
@@ -3138,7 +3175,7 @@ public sealed partial class AccountingTransactionService(
                 var request = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(payloadJson);
                 result = request is null || !string.Equals(documentScope, "company", StringComparison.Ordinal)
                     ? TransactionResult.Failure("The invoice identity or retained payload is invalid.")
-                    : await CreateInvoiceCoreAsync(validationDb, companyId, request, cancellationToken);
+                    : await CreateInvoiceCoreAsync(validationDb, companyId, request, cancellationToken, projectBilling);
             }
             else if (documentType == "VendorBill")
             {

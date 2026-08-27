@@ -4726,10 +4726,18 @@ public sealed class WorkspaceInitializationTests : IDisposable
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
-        Guid companyId; Guid customerId;
-        await using (var db = await factory.CreateDbContextAsync()) { companyId = await db.Companies.Select(x => x.Id).SingleAsync(); customerId = await db.Customers.OrderBy(x => x.CustomerNumber).Select(x => x.Id).FirstAsync(); }
+        Guid companyId; Guid customerId; decimal receivablesBefore; decimal retainageBefore; decimal revenueBefore;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(x => x.Id).SingleAsync();
+            customerId = await db.Customers.OrderBy(x => x.CustomerNumber).Select(x => x.Id).FirstAsync();
+            receivablesBefore = await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.AccountsReceivable).Select(x => x.CurrentBalance).SingleAsync();
+            retainageBefore = await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.RetainageReceivable).Select(x => x.CurrentBalance).SingleAsync();
+            revenueBefore = await db.Accounts.Where(x => x.CompanyId == companyId && x.Number == "4000").Select(x => x.CurrentBalance).SingleAsync();
+        }
         var userId = Guid.NewGuid(); var reviewerId = Guid.NewGuid(); var posterId = Guid.NewGuid();
         void SetUser(Guid id, params string[] permissions) { var claims = permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)).ToList(); claims.Add(new(System.Security.Claims.ClaimTypes.NameIdentifier, id.ToString())); claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString())); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
         SetUser(userId, BrassLedgerPermissions.ProjectsManage, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
@@ -4763,16 +4771,72 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var correctedFixedRequest = fixedRequest with { ExistingProposalId = fixedProposal.Id, Description = "August progress billing after project review" };
         var correctedFixedPreview = await transactions.PreviewProjectBillingAsync(correctedFixedRequest); Assert.True(correctedFixedPreview.Succeeded, correctedFixedPreview.ErrorMessage);
         Assert.True((await transactions.SaveProjectBillingProposalAsync(new(fixedProposal.Id, correctedFixedRequest, correctedFixedPreview.Fingerprint, correctedFixedPreview.ProjectConcurrencyToken, fixedProposal.ConcurrencyToken))).Succeeded);
-        await using (var db = await factory.CreateDbContextAsync()) { fixedProposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == fixedProposal.Id); fixedWorkflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == fixedProposal.SubledgerDocumentWorkflowId); }
+        Guid retainageAccountId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            fixedProposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == fixedProposal.Id);
+            fixedWorkflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == fixedProposal.SubledgerDocumentWorkflowId);
+            var retainageAccount = await db.Accounts.SingleAsync(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.RetainageReceivable);
+            retainageAccountId = retainageAccount.Id; retainageAccount.OperationalRole = null; await db.SaveChangesAsync();
+        }
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        var missingRetainageAccount = await transactions.ApproveSubledgerDocumentAsync(fixedWorkflow.Id); Assert.False(missingRetainageAccount.Succeeded); Assert.Contains("retainage-receivable control account", missingRetainageAccount.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync()) { (await db.Accounts.SingleAsync(x => x.Id == retainageAccountId)).OperationalRole = AccountingAccountRoles.RetainageReceivable; await db.SaveChangesAsync(); }
         SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove); Assert.True((await transactions.ApproveSubledgerDocumentAsync(fixedWorkflow.Id)).Succeeded);
         SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost); var fixedPosted = await transactions.PostApprovedSubledgerDocumentAsync(fixedWorkflow.Id); Assert.True(fixedPosted.Succeeded, fixedPosted.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(receivablesBefore + 2_375m, await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.AccountsReceivable).Select(x => x.CurrentBalance).SingleAsync());
+            Assert.Equal(retainageBefore + 125m, await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.RetainageReceivable).Select(x => x.CurrentBalance).SingleAsync());
+            Assert.Equal(revenueBefore + 2_500m, await db.Accounts.Where(x => x.CompanyId == companyId && x.Number == "4000").Select(x => x.CurrentBalance).SingleAsync());
+        }
+        var retainedWorkspace = await workspaceService.GetWorkspaceAsync();
+        var retainedAging = Assert.Single(retainedWorkspace.Projects.RetainageAging!, item => item.ProposalId == fixedProposal.Id);
+        Assert.Equal(125m, retainedWorkspace.Projects.RetainageReceivable); Assert.Equal(retainageBefore + 125m, retainedWorkspace.Projects.RetainageControlBalance); Assert.Equal(retainageBefore, retainedWorkspace.Projects.RetainageReconciliationDifference); Assert.Equal(125m, retainedAging.OutstandingAmount); Assert.Equal(125m, retainedAging.Days0To30 + retainedAging.Days31To60 + retainedAging.Days61To90 + retainedAging.DaysOver90);
         SetUser(userId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var customer = await db.Customers.SingleAsync(x => x.Id == customerId);
+            customer.CreditLimit = customer.OpenBalance + 125m;
+            await db.SaveChangesAsync();
+        }
+        var retainedCreditBlocked = await transactions.SaveInvoiceDraftAsync(new(customerId, "PB-RETAINED-CREDIT", new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 1), 1m, 0m, "4000", "Retainage must consume customer credit"));
+        Assert.False(retainedCreditBlocked.Succeeded); Assert.Contains("outstanding retainage", retainedCreditBlocked.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var releaseRequest = fixedRequest with { InvoiceNumber = "PB-FIXED-RET-1", Description = "Partial retainage release", ProgressPercentToDate = 0m, RetainageReleaseOfProposalId = fixedProposal.Id, RetainageReleaseAmount = 60m };
         var releasePreview = await transactions.PreviewProjectBillingAsync(releaseRequest); Assert.True(releasePreview.Succeeded, releasePreview.ErrorMessage); Assert.Equal("RetainageRelease", releasePreview.BillingBasis); Assert.Equal(60m, releasePreview.InvoiceAmount); Assert.Equal(0m, releasePreview.RetainageAmount);
         var releaseSaved = await transactions.SaveProjectBillingProposalAsync(new(null, releaseRequest, releasePreview.Fingerprint, releasePreview.ProjectConcurrencyToken)); Assert.True(releaseSaved.Succeeded, releaseSaved.ErrorMessage);
         var excessiveRelease = await transactions.PreviewProjectBillingAsync(releaseRequest with { InvoiceNumber = "PB-FIXED-RET-2", RetainageReleaseAmount = 70m }); Assert.False(excessiveRelease.Succeeded); Assert.Contains("65.00", excessiveRelease.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ProjectBillingProposal releaseProposal; SubledgerDocumentWorkflow releaseWorkflow;
+        await using (var db = await factory.CreateDbContextAsync()) { releaseProposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == releaseSaved.Id); releaseWorkflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == releaseProposal.SubledgerDocumentWorkflowId); }
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove); Assert.True((await transactions.ApproveSubledgerDocumentAsync(releaseWorkflow.Id)).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost); var releasePosted = await transactions.PostApprovedSubledgerDocumentAsync(releaseWorkflow.Id); Assert.True(releasePosted.Succeeded, releasePosted.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(receivablesBefore + 2_435m, await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.AccountsReceivable).Select(x => x.CurrentBalance).SingleAsync());
+            Assert.Equal(retainageBefore + 65m, await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.RetainageReceivable).Select(x => x.CurrentBalance).SingleAsync());
+            Assert.Equal(revenueBefore + 2_500m, await db.Accounts.Where(x => x.CompanyId == companyId && x.Number == "4000").Select(x => x.CurrentBalance).SingleAsync());
+        }
+        var releasedWorkspace = await workspaceService.GetWorkspaceAsync();
+        var releasedAging = Assert.Single(releasedWorkspace.Projects.RetainageAging!, item => item.ProposalId == fixedProposal.Id);
+        Assert.Equal(65m, releasedWorkspace.Projects.RetainageReceivable); Assert.Equal(retainageBefore + 65m, releasedWorkspace.Projects.RetainageControlBalance); Assert.Equal(retainageBefore, releasedWorkspace.Projects.RetainageReconciliationDifference); Assert.Equal(60m, releasedAging.ReleasedAmount); Assert.Equal(65m, releasedAging.OutstandingAmount);
         SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PaymentReverse);
         var blockedOriginalVoid = await transactions.VoidInvoiceAsync(new(fixedPosted.Id!.Value, new DateOnly(2026, 9, 1), "Original cannot bypass its retainage release")); Assert.False(blockedOriginalVoid.Succeeded); Assert.Contains("retainage release", blockedOriginalVoid.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var voidedRelease = await transactions.VoidInvoiceAsync(new(releasePosted.Id!.Value, new DateOnly(2026, 9, 2), "Release was entered before the holdback was approved")); Assert.True(voidedRelease.Succeeded, voidedRelease.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(receivablesBefore + 2_375m, await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.AccountsReceivable).Select(x => x.CurrentBalance).SingleAsync());
+            Assert.Equal(retainageBefore + 125m, await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.RetainageReceivable).Select(x => x.CurrentBalance).SingleAsync());
+            Assert.Equal(revenueBefore + 2_500m, await db.Accounts.Where(x => x.CompanyId == companyId && x.Number == "4000").Select(x => x.CurrentBalance).SingleAsync());
+        }
+        Assert.Equal(125m, (await workspaceService.GetWorkspaceAsync()).Projects.RetainageReceivable);
+        var voidedOriginal = await transactions.VoidInvoiceAsync(new(fixedPosted.Id.Value, new DateOnly(2026, 9, 3), "The progress billing was cancelled")); Assert.True(voidedOriginal.Succeeded, voidedOriginal.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(receivablesBefore, await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.AccountsReceivable).Select(x => x.CurrentBalance).SingleAsync());
+            Assert.Equal(retainageBefore, await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.RetainageReceivable).Select(x => x.CurrentBalance).SingleAsync());
+            Assert.Equal(revenueBefore, await db.Accounts.Where(x => x.CompanyId == companyId && x.Number == "4000").Select(x => x.CurrentBalance).SingleAsync());
+        }
+        var voidedWorkspace = await workspaceService.GetWorkspaceAsync(); Assert.Equal(0m, voidedWorkspace.Projects.RetainageReceivable); Assert.DoesNotContain(voidedWorkspace.Projects.RetainageAging!, item => item.ProposalId == fixedProposal.Id);
         SetUser(userId, BrassLedgerPermissions.ProjectsManage, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
 
         var costPlusResult = await transactions.SaveProjectJobAsync(new(null, "JOB-COSTPLUS-BILL", "Cost-plus billing", customerId, new DateOnly(2026, 8, 1), null, "CostPlus", 5_000m, 3_000m, 0m));

@@ -877,6 +877,7 @@ public static class ServiceCollectionExtensions
                     WHEN '1010' THEN 'PayrollClearing'
                     WHEN '1050' THEN 'BankTransferClearing'
                     WHEN '1100' THEN 'AccountsReceivable'
+                    WHEN '1110' THEN 'RetainageReceivable'
                     WHEN '1200' THEN 'InventoryAsset'
                     WHEN '1300' THEN 'VendorAdvances'
                     WHEN '2000' THEN 'AccountsPayable'
@@ -891,9 +892,9 @@ public static class ServiceCollectionExtensions
                     WHEN '6300' THEN 'ForeignExchangeLoss'
                     ELSE NULL END
                 WHERE "OperationalRole" IS NULL
-                  AND "Number" IN ('1000','1010','1050','1100','1200','1300','2000','2100','2150','2200','3000','4000','4300','5100','6100','6300')
+                  AND "Number" IN ('1000','1010','1050','1100','1110','1200','1300','2000','2100','2150','2200','3000','4000','4300','5100','6100','6300')
                   AND (("Number" IN ('1000','1010','1050') AND "Type" = 'Asset' AND "IsControlAccount" = 0)
-                    OR ("Number" IN ('1100','1200','1300') AND "Type" = 'Asset' AND "IsControlAccount" = 1)
+                    OR ("Number" IN ('1100','1110','1200','1300') AND "Type" = 'Asset' AND "IsControlAccount" = 1)
                     OR ("Number" IN ('2000','2100','2150','2200') AND "Type" = 'Liability' AND "IsControlAccount" = 1)
                     OR ("Number" = '3000' AND "Type" = 'Equity' AND "IsControlAccount" = 0)
                     OR ("Number" IN ('4000','4300') AND "Type" = 'Revenue' AND "IsControlAccount" = 0)
@@ -903,7 +904,7 @@ public static class ServiceCollectionExtensions
                       WHERE existing."CompanyId" = target."CompanyId"
                         AND existing."OperationalRole" = CASE target."Number"
                             WHEN '1000' THEN 'OperatingCash' WHEN '1010' THEN 'PayrollClearing' WHEN '1050' THEN 'BankTransferClearing'
-                            WHEN '1100' THEN 'AccountsReceivable' WHEN '1200' THEN 'InventoryAsset' WHEN '1300' THEN 'VendorAdvances'
+                            WHEN '1100' THEN 'AccountsReceivable' WHEN '1110' THEN 'RetainageReceivable' WHEN '1200' THEN 'InventoryAsset' WHEN '1300' THEN 'VendorAdvances'
                             WHEN '2000' THEN 'AccountsPayable' WHEN '2100' THEN 'SalesTaxPayable' WHEN '2150' THEN 'CustomerDeposits'
                             WHEN '2200' THEN 'PayrollLiabilities' WHEN '3000' THEN 'OwnerEquity' WHEN '4000' THEN 'DefaultRevenue'
                             WHEN '4300' THEN 'ForeignExchangeGain' WHEN '5100' THEN 'CostOfGoodsSold' WHEN '6100' THEN 'PayrollExpense'
@@ -923,6 +924,7 @@ public static class ServiceCollectionExtensions
                     WHEN '1010' THEN 'PayrollClearing'
                     WHEN '1050' THEN 'BankTransferClearing'
                     WHEN '1100' THEN 'AccountsReceivable'
+                    WHEN '1110' THEN 'RetainageReceivable'
                     WHEN '1200' THEN 'InventoryAsset'
                     WHEN '1300' THEN 'VendorAdvances'
                     WHEN '2000' THEN 'AccountsPayable'
@@ -937,9 +939,9 @@ public static class ServiceCollectionExtensions
                     WHEN '6300' THEN 'ForeignExchangeLoss'
                     ELSE NULL END
                 WHERE "OperationalRole" IS NULL
-                  AND "Number" IN ('1000','1010','1050','1100','1200','1300','2000','2100','2150','2200','3000','4000','4300','5100','6100','6300')
+                  AND "Number" IN ('1000','1010','1050','1100','1110','1200','1300','2000','2100','2150','2200','3000','4000','4300','5100','6100','6300')
                   AND (("Number" IN ('1000','1010','1050') AND "Type" = 'Asset' AND "IsControlAccount" = false)
-                    OR ("Number" IN ('1100','1200','1300') AND "Type" = 'Asset' AND "IsControlAccount" = true)
+                    OR ("Number" IN ('1100','1110','1200','1300') AND "Type" = 'Asset' AND "IsControlAccount" = true)
                     OR ("Number" IN ('2000','2100','2150','2200') AND "Type" = 'Liability' AND "IsControlAccount" = true)
                     OR ("Number" = '3000' AND "Type" = 'Equity' AND "IsControlAccount" = false)
                     OR ("Number" IN ('4000','4300') AND "Type" = 'Revenue' AND "IsControlAccount" = false)
@@ -949,7 +951,7 @@ public static class ServiceCollectionExtensions
                       WHERE existing."CompanyId" = target."CompanyId"
                         AND existing."OperationalRole" = CASE target."Number"
                             WHEN '1000' THEN 'OperatingCash' WHEN '1010' THEN 'PayrollClearing' WHEN '1050' THEN 'BankTransferClearing'
-                            WHEN '1100' THEN 'AccountsReceivable' WHEN '1200' THEN 'InventoryAsset' WHEN '1300' THEN 'VendorAdvances'
+                            WHEN '1100' THEN 'AccountsReceivable' WHEN '1110' THEN 'RetainageReceivable' WHEN '1200' THEN 'InventoryAsset' WHEN '1300' THEN 'VendorAdvances'
                             WHEN '2000' THEN 'AccountsPayable' WHEN '2100' THEN 'SalesTaxPayable' WHEN '2150' THEN 'CustomerDeposits'
                             WHEN '2200' THEN 'PayrollLiabilities' WHEN '3000' THEN 'OwnerEquity' WHEN '4000' THEN 'DefaultRevenue'
                             WHEN '4300' THEN 'ForeignExchangeGain' WHEN '5100' THEN 'CostOfGoodsSold' WHEN '6100' THEN 'PayrollExpense'
