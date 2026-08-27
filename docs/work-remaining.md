@@ -17,13 +17,13 @@ This is the canonical agent-readable queue for work still required before BrassL
 | --- | --- |
 | Updated | 2026-08-27 EDT |
 | Branch | `codex/tax-content-intake-wip-20260824` |
-| Last pushed commit | `9697928 docs: advance consolidated statements checkpoint` |
+| Last pushed commit | `47e24b7 feat(reporting): add effective dated statement presentation` |
 | In progress | Comparative consolidated statements and controlled Excel/PDF output |
-| Current evidence | The uncommitted effective-dated presentation checkpoint is gate-complete pending final diff/commit: clean out-of-tree Release build; SQLite/default 194 plus 10 expected skips; PostgreSQL 204/204; API 35/35; components 13/13; Chromium 35/35; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. It adds reviewed arbitrary sections/captions/order, current/noncurrent support, explicit unconfigured-account warnings, provider migrations/adoption, owner-only administration, audit/concurrency controls, and API/browser coverage. |
+| Current evidence | The `47e24b7` effective-dated presentation checkpoint is pushed and gate-complete: clean out-of-tree Release build; SQLite/default 194 plus 10 expected skips; PostgreSQL 204/204; API 35/35; components 13/13; Chromium 35/35; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. It adds reviewed arbitrary sections/captions/order, current/noncurrent support, explicit unconfigured-account warnings, provider migrations/adoption, owner-only administration, audit/concurrency controls, and API/browser coverage. |
 
 ## Immediate queue
 
-1. **In progress — CONSOL-STATEMENTS:** commit and push the gate-complete effective-dated presentation checkpoint; then add comparative columns, controlled Excel/PDF output, financing-liability and other framework disclosures, and framework review evidence.
+1. **In progress — CONSOL-STATEMENTS:** add comparative columns, controlled Excel/PDF output, financing-liability and other framework disclosures, and framework review evidence to the pushed presentation foundation.
 2. **Pending — FX-TRANSACTIONS:** implement transaction-currency documents, rate provenance, settlement remeasurement, and realized/unrealized gains and losses.
 3. **Pending — ACCEPTANCE-01:** automate the uninterrupted representative-business scenario from clean installation through encrypted restore and audit trace.
 
@@ -62,6 +62,7 @@ This is the canonical agent-readable queue for work still required before BrassL
 
 ## Recently verified checkpoints
 
+- `47e24b7` — separate effective-dated reviewed statement sections/captions/order, current/noncurrent support, explicit unconfigured-account handling, provider migrations/adoption, owner-only administration, API, concurrency, and full build/test/browser/drift/vulnerability gates. This advances, but does not finish, `CONSOL-STATEMENTS`.
 - `076a0a5` — four consolidated statements, source drill-down, cross-statement controls, reviewed direct-cash-flow classifications, explicit incompleteness warnings, CSV output, provider migrations, and complete build/test/browser/drift/vulnerability gates. This proves the foundation, not the full `CONSOL-STATEMENTS` slice.
 - `8e24b56` — explicit reporting-parent, controlled-subsidiary, combined-affiliate, and proportionate-interest bases; reviewed evidence; full controlled consolidation; dedicated, reversible NCI equity presentation; provider migrations and complete build/test/browser/drift/vulnerability gates.
 - `496e04f` — reviewed intercompany matching; complete PostgreSQL suite passed 204/204, provider drift checks were clean, and all 12 projects had no known vulnerable direct or transitive NuGet packages.
