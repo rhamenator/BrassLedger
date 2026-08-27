@@ -250,6 +250,43 @@ internal static class ConsolidatedStatementDocumentExporter
             {
                 sheet.Cell(row, 1).Value = measurement.Name; sheet.Cell(row, 2).Value = measurement.Amount; sheet.Cell(row, 2).Style.NumberFormat.Format = MoneyFormat; row++;
             }
+            if (ownershipEvent.Content.Acquisition is { } acquisition)
+            {
+                WriteLabelValue(sheet, row++, "Measurement period ends", acquisition.MeasurementPeriodEndsOn?.ToString("yyyy-MM-dd") ?? "Not retained in legacy schema");
+                if ((acquisition.ConsiderationComponents?.Count ?? 0) > 0)
+                {
+                    sheet.Cell(row++, 1).Value = "Consideration components";
+                    WriteTableHeader(sheet, row++, ["Code", "Description", "Type", "Fair value", "Source"]);
+                    foreach (var component in acquisition.ConsiderationComponents ?? [])
+                    {
+                        sheet.Cell(row, 1).Value = component.Code; sheet.Cell(row, 2).Value = component.Description; sheet.Cell(row, 3).Value = component.ComponentType;
+                        sheet.Cell(row, 4).Value = component.FairValue; sheet.Cell(row, 4).Style.NumberFormat.Format = MoneyFormat; sheet.Cell(row, 5).Value = component.SourceReference; row++;
+                    }
+                }
+                if ((acquisition.IdentifiableItems?.Count ?? 0) > 0)
+                {
+                    sheet.Cell(row++, 1).Value = "Identifiable assets, liabilities, and deferred tax";
+                    WriteTableHeader(sheet, row++, ["Code", "Description", "Type", "Fair value", "Deferred-tax asset", "Deferred-tax liability", "Source"]);
+                    foreach (var item in acquisition.IdentifiableItems ?? [])
+                    {
+                        sheet.Cell(row, 1).Value = item.Code; sheet.Cell(row, 2).Value = item.Description; sheet.Cell(row, 3).Value = item.ItemType;
+                        sheet.Cell(row, 4).Value = item.FairValue; sheet.Cell(row, 5).Value = item.DeferredTaxAsset; sheet.Cell(row, 6).Value = item.DeferredTaxLiability;
+                        sheet.Range(row, 4, row, 6).Style.NumberFormat.Format = MoneyFormat; sheet.Cell(row, 7).Value = item.SourceReference; row++;
+                    }
+                }
+                if ((acquisition.MeasurementPeriodAdjustments?.Count ?? 0) > 0)
+                {
+                    sheet.Cell(row++, 1).Value = "Measurement-period adjustments";
+                    WriteTableHeader(sheet, row++, ["Recognized", "Code", "Description", "Consideration", "Prior interest", "NCI", "Net assets", "Goodwill", "Bargain gain", "Source"]);
+                    foreach (var adjustment in acquisition.MeasurementPeriodAdjustments ?? [])
+                    {
+                        sheet.Cell(row, 1).Value = adjustment.RecognizedOn.ToString("yyyy-MM-dd"); sheet.Cell(row, 2).Value = adjustment.Code; sheet.Cell(row, 3).Value = adjustment.Description;
+                        sheet.Cell(row, 4).Value = adjustment.ConsiderationChange; sheet.Cell(row, 5).Value = adjustment.PreviousInterestFairValueChange; sheet.Cell(row, 6).Value = adjustment.NoncontrollingInterestChange;
+                        sheet.Cell(row, 7).Value = adjustment.IdentifiableNetAssetsChange; sheet.Cell(row, 8).Value = adjustment.GoodwillChange; sheet.Cell(row, 9).Value = adjustment.BargainPurchaseGainChange;
+                        sheet.Range(row, 4, row, 9).Style.NumberFormat.Format = MoneyFormat; sheet.Cell(row, 10).Value = adjustment.SourceReference; row++;
+                    }
+                }
+            }
             WriteTableHeader(sheet, row++, ["Reporting account", "Account name", "Type", "Debit", "Credit", "Description"]);
             foreach (var line in ownershipEvent.Content.PostingLines)
             {
@@ -523,6 +560,33 @@ internal static class ConsolidatedStatementDocumentExporter
                 DrawParagraph($"Ownership before {ownershipEvent.Content.OwnershipBefore:P4}; after {ownershipEvent.Content.OwnershipAfter:P4}; NCI method {ownershipEvent.Content.NciMeasurementMethod}. {ownershipEvent.Content.MeasurementRationale}");
                 DrawHeading("Measurement");
                 DrawRows(["Measure", $"Amount ({_currency})"], [0.72, 0.28], OwnershipEventMeasurements(ownershipEvent.Content).Select(item => new[] { item.Name, Money(item.Amount) }));
+                if (ownershipEvent.Content.Acquisition is { } acquisition)
+                {
+                    DrawParagraph($"Measurement period ends: {acquisition.MeasurementPeriodEndsOn?.ToString("yyyy-MM-dd") ?? "Not retained in legacy schema"}.");
+                    if ((acquisition.ConsiderationComponents?.Count ?? 0) > 0)
+                    {
+                        DrawHeading("Consideration components");
+                        DrawRows(["Code / description", "Type", "Fair value", "Source"], [0.34, 0.18, 0.16, 0.32],
+                            acquisition.ConsiderationComponents!.Select(item => new[] { $"{item.Code} — {item.Description}", item.ComponentType, Money(item.FairValue), item.SourceReference }));
+                    }
+                    if ((acquisition.IdentifiableItems?.Count ?? 0) > 0)
+                    {
+                        DrawHeading("Identifiable assets, liabilities, and deferred tax");
+                        DrawRows(["Code / description", "Type", "Fair value", "Deferred tax", "Source"], [0.30, 0.12, 0.14, 0.18, 0.26],
+                            acquisition.IdentifiableItems!.Select(item => new[] { $"{item.Code} — {item.Description}", item.ItemType, Money(item.FairValue), $"Asset {Money(item.DeferredTaxAsset)}; liability {Money(item.DeferredTaxLiability)}", item.SourceReference }));
+                    }
+                    if ((acquisition.MeasurementPeriodAdjustments?.Count ?? 0) > 0)
+                    {
+                        DrawHeading("Measurement-period adjustments");
+                        DrawRows(["Date / code / description", "Changes", "Source"], [0.34, 0.42, 0.24],
+                            acquisition.MeasurementPeriodAdjustments!.Select(item => new[]
+                            {
+                                $"{item.RecognizedOn:yyyy-MM-dd} · {item.Code} — {item.Description}",
+                                $"Consideration {Money(item.ConsiderationChange)}; prior interest {Money(item.PreviousInterestFairValueChange)}; NCI {Money(item.NoncontrollingInterestChange)}; net assets {Money(item.IdentifiableNetAssetsChange)}; goodwill {Money(item.GoodwillChange)}; bargain gain {Money(item.BargainPurchaseGainChange)}",
+                                item.SourceReference
+                            }));
+                    }
+                }
                 DrawHeading("Posting");
                 DrawRows(["Account", "Name", "Type", "Debit", "Credit", "Description"], [0.13, 0.20, 0.12, 0.12, 0.12, 0.31], ownershipEvent.Content.PostingLines.Select(line => new[] { line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType, Money(line.Debit), Money(line.Credit), line.Description }));
             }

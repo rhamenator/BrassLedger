@@ -86,6 +86,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddConsolidationOwnershipEvents` adds the controlled acquisition, step-acquisition, ownership-change, loss-of-control, and profit/OCI-attribution schedule ledger. Each event retains typed versioned JSON, framework/source evidence, preparation/review/posting identities, immutable reversal links, and concurrency state; restrictive company, group, subject-company, and self relationships preserve provenance. Lost-history adoption requires every retained-document and lifecycle column plus the group/reference, group/date, and one-reversal indexes. Downgrade is prohibited because it could delete posted consolidation accounting and the evidence needed to reproduce it.
 
+Ownership-event schema 2 adds purchase-price-allocation line items inside the existing retained JSON document. It intentionally requires no relational migration: consideration types, identifiable asset/liability and deferred-tax detail, measurement-period changes, and extension fields can evolve without adding state-specific or framework-specific table columns. The service accepts posted legacy schema-1 acquisitions for reporting and reversal, while new or corrected acquisitions must use schema 2.
+
 ## Verification
 
 At minimum, run:

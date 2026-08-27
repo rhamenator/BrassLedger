@@ -160,6 +160,15 @@ public sealed class ReportingPageTests : TestContext
         cut.Find("input[aria-label='NCI recognized']").Change("20");
         cut.Find("input[aria-label='Identifiable net assets at fair value']").Change("90");
         cut.Find("input[aria-label='Goodwill']").Change("10");
+        cut.Find("input#acquisitionMeasurementEnd").Change("2027-06-30");
+        cut.Find("input[aria-label='Consideration component code']").Change("CASH");
+        cut.Find("input[aria-label='Consideration component description']").Change("Cash paid to sellers");
+        cut.Find("input[aria-label='Consideration component fair value']").Change("80");
+        cut.Find("input[aria-label='Consideration component source']").Change("Closing statement CS-1");
+        cut.Find("input[aria-label='Identifiable item code']").Change("NET-ASSETS");
+        cut.Find("input[aria-label='Identifiable item description']").Change("Identifiable net assets");
+        cut.Find("input[aria-label='Identifiable item fair value']").Change("90");
+        cut.Find("input[aria-label='Identifiable item source']").Change("Valuation report VR-1");
         cut.FindAll("select[aria-label='Ownership-event reporting account']").ToArray()[0].Change("1000");
         cut.FindAll("select[aria-label='Ownership-event reporting account']").ToArray()[1].Change("3000");
         cut.FindAll("input[aria-label='Debit']").ToArray()[0].Change("100");
@@ -169,7 +178,10 @@ public sealed class ReportingPageTests : TestContext
         var request = Assert.IsType<SaveConsolidationOwnershipEventRequest>(_consolidation.LastOwnershipEventRequest);
         Assert.Equal(nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), request.EventType);
         Assert.Equal(.8m, request.Content.OwnershipAfter);
+        Assert.Equal(2, request.Content.SchemaVersion);
         Assert.Equal(10m, request.Content.Acquisition!.Goodwill);
+        Assert.Equal(80m, Assert.Single(request.Content.Acquisition.ConsiderationComponents!).FairValue);
+        Assert.Equal(90m, Assert.Single(request.Content.Acquisition.IdentifiableItems!).FairValue);
         Assert.Equal(2, request.Content.PostingLines.Count);
         Assert.Equal(request.Content.PostingLines.Sum(line => line.Debit), request.Content.PostingLines.Sum(line => line.Credit));
     }

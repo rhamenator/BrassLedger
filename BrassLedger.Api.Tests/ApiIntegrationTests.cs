@@ -186,16 +186,27 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/disclosures/{disclosure.Id}/approve", new ConsolidationDisclosureActionRequest(group.Id, disclosure.Id, disclosure.ConcurrencyToken))).StatusCode);
         var ownershipAsset = savedMappings.Mappings.First(mapping => mapping.ReportingAccountType == nameof(AccountType.Asset));
         var ownershipEquity = savedMappings.Mappings.First(mapping => mapping.ReportingAccountType == nameof(AccountType.Equity));
-        var ownershipContent = new ConsolidationOwnershipEventDocument(1, 0m, .75m, "FullFairValue", "API-reviewed purchase-price allocation", "API acquisition working paper",
+        var ownershipContent = new ConsolidationOwnershipEventDocument(2, 0m, .75m, "FullFairValue", "API-reviewed purchase-price allocation", "API acquisition working paper",
             string.Empty, string.Empty,
             [new(ownershipAsset.ReportingAccountNumber, ownershipAsset.ReportingAccountName, ownershipAsset.ReportingAccountType, 100m, 0m, "Recognize acquisition-date adjustment"), new(ownershipEquity.ReportingAccountNumber, ownershipEquity.ReportingAccountName, ownershipEquity.ReportingAccountType, 0m, 100m, "Acquisition-date offset")],
-            Acquisition: new(80m, 0m, 20m, 90m, 10m, 0m));
+            Acquisition: new(80m, 0m, 20m, 90m, 10m, 0m,
+                [new("API-CASH", "Cash consideration", "Cash", 80m, "API closing statement")],
+                [new("API-ASSETS", "Identifiable assets", "Asset", 120m, 0m, 10m, "API valuation report"), new("API-LIABILITIES", "Identifiable liabilities", "Liability", 20m, 0m, 0m, "API liability schedule")],
+                [], new DateOnly(2027, 2, 1)));
         var ownershipRequest = new SaveConsolidationOwnershipEventRequest(null, group.Id, subsidiaryId, new DateOnly(2026, 2, 1), nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "API-ACQ-1", "US-GAAP", "ASC 805 current through 2026", ownershipContent);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/ownership-events", ownershipRequest)).StatusCode);
+        var wrongNciMethodRequest = ownershipRequest with { Reference = "API-ACQ-NCI-METHOD", Content = ownershipContent with { NciMeasurementMethod = "ProportionateShare", Acquisition = ownershipContent.Acquisition! with { NoncontrollingInterestRecognized = 0m, Goodwill = 0m, BargainPurchaseGain = 10m } } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events", wrongNciMethodRequest)).StatusCode);
+        var nullDetailRequest = ownershipRequest with { Reference = "API-ACQ-NULL-DETAIL", Content = ownershipContent with { Acquisition = ownershipContent.Acquisition! with { ConsiderationComponents = [null!] } } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events", nullDetailRequest)).StatusCode);
+        var legacyOwnershipRequest = ownershipRequest with { Reference = "API-ACQ-LEGACY", Content = ownershipContent with { SchemaVersion = 1, Acquisition = new(80m, 0m, 20m, 90m, 10m, 0m) } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events", legacyOwnershipRequest)).StatusCode);
         var ownershipResponse = await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events", ownershipRequest); Assert.Equal(HttpStatusCode.OK, ownershipResponse.StatusCode);
         var ownershipResult = await ownershipResponse.Content.ReadFromJsonAsync<TransactionResult>();
         var ownershipWorkspace = await client.GetFromJsonAsync<ConsolidationOwnershipEventWorkspace>($"/api/consolidation-groups/{group.Id}/ownership-events");
         var ownershipEvent = Assert.Single(ownershipWorkspace!.Events, item => item.Id == ownershipResult!.Id); Assert.Equal("Draft", ownershipEvent.Status); Assert.Equal(10m, ownershipEvent.Content.Acquisition!.Goodwill);
+        Assert.Equal(2, ownershipEvent.SchemaVersion); Assert.Equal("API closing statement", Assert.Single(ownershipEvent.Content.Acquisition.ConsiderationComponents!).SourceReference);
+        Assert.Equal(10m, ownershipEvent.Content.Acquisition.IdentifiableItems!.Single(item => item.Code == "API-ASSETS").DeferredTaxLiability);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events/{Guid.NewGuid()}/approve", new ConsolidationOwnershipEventActionRequest(group.Id, ownershipEvent.Id, ownershipEvent.ConcurrencyToken))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events/{ownershipEvent.Id}/approve", new ConsolidationOwnershipEventActionRequest(group.Id, ownershipEvent.Id, ownershipEvent.ConcurrencyToken))).StatusCode);
         var adjustmentRequest = new SaveConsolidationAdjustmentRequest(null, group.Id, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), "ManualAdjustment", "API-CONSOL-ADJ-1", "API reporting-only adjustment", string.Empty,

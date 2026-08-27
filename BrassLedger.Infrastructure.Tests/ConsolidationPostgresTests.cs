@@ -180,8 +180,11 @@ public sealed class ConsolidationPostgresTests
                 ]));
                 Assert.True(saved.Succeeded, saved.ErrorMessage); adjustmentId = saved.Id!.Value; draftToken = (await service.GetAdjustmentWorkspaceAsync(groupId))!.Adjustments.Single(item => item.Id == adjustmentId).ConcurrencyToken;
             }
-            var ownershipContent = new ConsolidationOwnershipEventDocument(1, 0m, .75m, "FullFairValue", "PostgreSQL concurrent purchase-price allocation", "PostgreSQL acquisition working paper", equityNumber, equityName,
-                [new(sourceNumber, sourceName, sourceType.ToString(), 10m, 0m), new(offsetNumber, offsetName, offsetType.ToString(), 0m, 10m)], Acquisition: new(80m, 0m, 20m, 90m, 10m, 0m));
+            var ownershipContent = new ConsolidationOwnershipEventDocument(2, 0m, .75m, "FullFairValue", "PostgreSQL concurrent purchase-price allocation", "PostgreSQL acquisition working paper", equityNumber, equityName,
+                [new(sourceNumber, sourceName, sourceType.ToString(), 10m, 0m), new(offsetNumber, offsetName, offsetType.ToString(), 0m, 10m)], Acquisition: new(80m, 0m, 20m, 90m, 10m, 0m,
+                    [new("PG-CASH", "Cash consideration", "Cash", 80m, "PostgreSQL closing statement")],
+                    [new("PG-ASSETS", "Identifiable assets", "Asset", 120m, 0m, 10m, "PostgreSQL valuation report"), new("PG-LIABILITIES", "Identifiable liabilities", "Liability", 20m, 0m, 0m, "PostgreSQL liability schedule")],
+                    [], new DateOnly(2028, 1, 1)));
             using var ownershipScopeOne = provider.CreateScope(); using var ownershipScopeTwo = provider.CreateScope(); SetContext(ownershipScopeOne, companyId, ownerId, BrassLedgerPermissions.JournalPrepare); SetContext(ownershipScopeTwo, companyId, ownerId, BrassLedgerPermissions.JournalPrepare);
             SaveConsolidationOwnershipEventRequest OwnershipRequest() => new(null, groupId, affiliateId, new DateOnly(2027, 1, 1), nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "PG-ACQ-1", "US-GAAP", "ASC 805 current through 2026", ownershipContent);
             var ownershipAttempts = await Task.WhenAll(

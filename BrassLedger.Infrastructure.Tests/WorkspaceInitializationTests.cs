@@ -769,19 +769,34 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var adjustmentEquity = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Equity) && account.AccountNumber != "39997");
         var adjustmentRevenue = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Revenue));
         var nciEquity = adjustmentWorkspace.ReportingAccounts.Single(account => account.AccountNumber == "39997" && account.AccountType == nameof(AccountType.Equity));
-        var invalidAcquisitionContent = new ConsolidationOwnershipEventDocument(1, 0m, 1m, "NotApplicable", "Controller-reviewed purchase-price allocation", "Acquisition working paper PPA-1", string.Empty, string.Empty,
+        var invalidAcquisitionContent = new ConsolidationOwnershipEventDocument(2, 0m, 1m, "NotApplicable", "Controller-reviewed purchase-price allocation", "Acquisition working paper PPA-1", string.Empty, string.Empty,
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 100m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 100m)],
-            Acquisition: new(80m, 0m, 0m, 70m, 0m, 0m));
+            Acquisition: new(80m, 0m, 0m, 70m, 0m, 0m,
+                [new("CASH", "Cash paid to sellers", "Cash", 80m, "Closing statement CS-1", new() { ["settlementChannel"] = JsonDocument.Parse("\"Wire\"").RootElement.Clone() })],
+                [new("CUSTOMER-REL", "Customer relationships", "Asset", 100m, 0m, 10m, "Valuation report VR-1"), new("ASSUMED-DEBT", "Assumed term debt", "Liability", 20m, 0m, 0m, "Debt confirmation DC-1")],
+                [new(new DateOnly(2026, 6, 1), "MPA-1", "Refine customer-relationship valuation", 0m, 0m, 0m, 2m, -2m, 0m, "Updated valuation report VR-2")], new DateOnly(2027, 5, 1),
+                new() { ["valuationConvention"] = JsonDocument.Parse("\"Market participant\"").RootElement.Clone() }));
         var invalidAcquisition = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, acquisitionSubjectId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-BAD", "US-GAAP", "ASC 805 current through 2026", invalidAcquisitionContent));
         Assert.False(invalidAcquisition.Succeeded); Assert.Contains("Goodwill", invalidAcquisition.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var componentMismatchContent = invalidAcquisitionContent with { Acquisition = invalidAcquisitionContent.Acquisition! with { Goodwill = 10m, ConsiderationComponents = [new("CASH", "Cash paid to sellers", "Cash", 79m, "Closing statement CS-1")] } };
+        var componentMismatch = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, acquisitionSubjectId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-COMPONENT-BAD", "US-GAAP", "ASC 805 current through 2026", componentMismatchContent));
+        Assert.False(componentMismatch.Succeeded); Assert.Contains("component", componentMismatch.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var adjustmentMismatchContent = invalidAcquisitionContent with { Acquisition = invalidAcquisitionContent.Acquisition! with { Goodwill = 10m, MeasurementPeriodAdjustments = [new(new DateOnly(2026, 6, 1), "MPA-1", "Refine customer-relationship valuation", 0m, 0m, 0m, 2m, -1m, 0m, "Updated valuation report VR-2")] } };
+        var adjustmentMismatch = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, acquisitionSubjectId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-MPA-BAD", "US-GAAP", "ASC 805 current through 2026", adjustmentMismatchContent));
+        Assert.False(adjustmentMismatch.Succeeded); Assert.Contains("adjustment", adjustmentMismatch.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var acquisitionContent = invalidAcquisitionContent with
         {
-            Acquisition = new(80m, 0m, 0m, 70m, 10m, 0m),
+            Acquisition = invalidAcquisitionContent.Acquisition! with { Goodwill = 10m },
             Extensions = new() { ["valuationSpecialist"] = JsonDocument.Parse("\"Independent Valuation LLC\"").RootElement.Clone() }
         };
         var savedAcquisition = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, acquisitionSubjectId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-1", "US-GAAP", "ASC 805 current through 2026", acquisitionContent));
         Assert.True(savedAcquisition.Succeeded, savedAcquisition.ErrorMessage);
         var acquisitionDraft = Assert.Single((await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events); Assert.Equal("Draft", acquisitionDraft.Status); Assert.Equal(10m, acquisitionDraft.Content.Acquisition!.Goodwill); Assert.False(string.IsNullOrWhiteSpace(acquisitionDraft.ContentSha256));
+        Assert.Equal(2, acquisitionDraft.SchemaVersion); Assert.Equal("Closing statement CS-1", Assert.Single(acquisitionDraft.Content.Acquisition.ConsiderationComponents!).SourceReference);
+        Assert.Equal("Wire", Assert.Single(acquisitionDraft.Content.Acquisition.ConsiderationComponents!).Extensions!["settlementChannel"].GetString());
+        Assert.Equal("Market participant", acquisitionDraft.Content.Acquisition.Extensions!["valuationConvention"].GetString());
+        Assert.Equal(10m, acquisitionDraft.Content.Acquisition.IdentifiableItems!.Single(item => item.Code == "CUSTOMER-REL").DeferredTaxLiability);
+        Assert.Equal(-2m, Assert.Single(acquisitionDraft.Content.Acquisition.MeasurementPeriodAdjustments!).GoodwillChange);
         SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
         var approvedAcquisition = await consolidation.ApproveOwnershipEventAsync(new(group.Id.Value, acquisitionDraft.Id, acquisitionDraft.ConcurrencyToken)); Assert.True(approvedAcquisition.Succeeded, approvedAcquisition.ErrorMessage);
         SetConsolidationUser(posterId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
@@ -811,7 +826,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains(historicalOwnershipPackage!.OwnershipEvents!, item => item.Reference == "ACQ-US-DIST-1"); Assert.Contains(historicalOwnershipPackage.OwnershipEvents!, item => item.ReversalOfEventId == postedAcquisitionSnapshot.Id); Assert.Contains(historicalOwnershipPackage.OwnershipEvents!, item => item.Reference == "ATTR-US-DIST-1");
         SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
         var ownershipValidationDate = transitionDate;
-        var stepContent = acquisitionContent with { OwnershipBefore = .50m, Acquisition = new(30m, 40m, 0m, 60m, 10m, 0m), Extensions = null };
+        var stepContent = acquisitionContent with { OwnershipBefore = .50m, Acquisition = new(30m, 40m, 0m, 60m, 10m, 0m,
+            [new("STEP-CASH", "Cash paid for additional interest", "Cash", 30m, "Step closing statement SCS-1")],
+            [new("STEP-ASSETS", "Identifiable assets", "Asset", 80m, 0m, 0m, "Step valuation report SVR-1"), new("STEP-LIABILITIES", "Identifiable liabilities", "Liability", 20m, 0m, 0m, "Step debt schedule SDS-1")],
+            [], new DateOnly(2027, 6, 1)), Extensions = null };
         var savedStep = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, stepSubjectId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.StepAcquisition), "STEP-US-DIST-1", "US-GAAP", "ASC 805 current through 2026", stepContent)); Assert.True(savedStep.Succeeded, savedStep.ErrorMessage);
         var invalidChangeContent = new ConsolidationOwnershipEventDocument(1, .80m, .75m, "NotApplicable", "Reviewed continuing-control ownership transaction", "Ownership schedule EQ-1", string.Empty, string.Empty,
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 5m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 5m)],
@@ -943,6 +961,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("Treasury confirmation WP-2", statementCsv, StringComparison.Ordinal);
         Assert.Contains("\"Ownership measurement\",\"US-GAAP\",\"AcquisitionOfControl\",\"ACQ-US-DIST-1\",\"Goodwill\"", statementCsv, StringComparison.Ordinal);
         Assert.Contains("Acquisition working paper PPA-1", statementCsv, StringComparison.Ordinal);
+        Assert.Contains("\"PPA consideration\"", statementCsv, StringComparison.Ordinal);
+        Assert.Contains("Valuation report VR-1", statementCsv, StringComparison.Ordinal);
+        Assert.Contains("Updated valuation report VR-2", statementCsv, StringComparison.Ordinal);
         var statementExcel = await consolidation.ExportStatementPackageExcelAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementExcel);
         using (var workbook = new XLWorkbook(new MemoryStream(statementExcel!)))
         {
@@ -954,6 +975,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Contains("Treasury confirmation WP-2", workbook.Worksheet("Current US-GAAP notes").CellsUsed().Select(cell => cell.GetString()));
             Assert.Contains(workbook.Worksheet("Ownership schedules").CellsUsed().Select(cell => cell.GetString()), value => value.Contains("ACQ-US-DIST-1", StringComparison.Ordinal));
             Assert.Contains("Goodwill", workbook.Worksheet("Ownership schedules").CellsUsed().Select(cell => cell.GetString()));
+            Assert.Contains("Cash paid to sellers", workbook.Worksheet("Ownership schedules").CellsUsed().Select(cell => cell.GetString()));
+            Assert.Contains("Valuation report VR-1", workbook.Worksheet("Ownership schedules").CellsUsed().Select(cell => cell.GetString()));
+            Assert.Contains("MPA-1", workbook.Worksheet("Ownership schedules").CellsUsed().Select(cell => cell.GetString()));
         }
         var statementPdf = await consolidation.ExportStatementPackagePdfAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementPdf);
         Assert.True(statementPdf!.AsSpan().StartsWith("%PDF"u8));
@@ -979,6 +1003,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("\"Reconciliation\"", comparativeCsv, StringComparison.Ordinal);
         Assert.Contains(comparisonAsOf.ToString("yyyy-MM-dd"), comparativeCsv, StringComparison.Ordinal);
         Assert.Contains("\"Current ownership\",\"AcquisitionOfControl\",\"ACQ-US-DIST-1\",\"Measurement\"", comparativeCsv, StringComparison.Ordinal);
+        Assert.Contains("\"PPA detail\"", comparativeCsv, StringComparison.Ordinal);
+        Assert.Contains("Updated valuation report VR-2", comparativeCsv, StringComparison.Ordinal);
         var comparativeExcel = await consolidation.ExportComparativeStatementPackageExcelAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, comparisonPeriodStart, comparisonAsOf); Assert.NotNull(comparativeExcel);
         using (var workbook = new XLWorkbook(new MemoryStream(comparativeExcel!)))
         {
@@ -988,6 +1014,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal(comparativeAsset.Variance, workbook.Worksheet("Balance sheet").RowsUsed().Single(row => row.Cell(1).GetString() == comparativeAsset.AccountNumber).Cell(9).GetValue<decimal>());
             Assert.True(workbook.TryGetWorksheet("Current US-GAAP notes", out _));
             Assert.True(workbook.TryGetWorksheet("Current ownership", out _));
+            Assert.Contains("Cash paid to sellers", workbook.Worksheet("Current ownership").CellsUsed().Select(cell => cell.GetString()));
         }
         var comparativePdf = await consolidation.ExportComparativeStatementPackagePdfAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, comparisonPeriodStart, comparisonAsOf); Assert.NotNull(comparativePdf);
         Assert.True(comparativePdf!.AsSpan().StartsWith("%PDF"u8));

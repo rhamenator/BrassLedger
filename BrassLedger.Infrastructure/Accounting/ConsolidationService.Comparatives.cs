@@ -63,6 +63,19 @@ public sealed partial class ConsolidationService
             foreach (var measurement in OwnershipEventMeasurements(ownershipEvent.Content))
                 AppendComparativeCsvRow(csv, recordType, ownershipEvent.EventType, ownershipEvent.Reference, "Measurement", current ? section : string.Empty, current ? measurement.Name : string.Empty, current ? evidence : string.Empty, current ? measurement.Amount : 0m,
                     current ? string.Empty : section, current ? string.Empty : measurement.Name, current ? string.Empty : evidence, current ? 0m : measurement.Amount, current ? measurement.Amount : -measurement.Amount, package, ownershipEvent.Status);
+            if (ownershipEvent.Content.Acquisition is { } acquisition)
+            {
+                foreach (var component in acquisition.ConsiderationComponents ?? []) AppendComparativeOwnershipDetailCsvRow(csv, package, recordType, current, ownershipEvent, section, component.Code, $"Consideration · {component.ComponentType} · {component.Description}", component.SourceReference, component.FairValue);
+                foreach (var item in acquisition.IdentifiableItems ?? [])
+                {
+                    AppendComparativeOwnershipDetailCsvRow(csv, package, recordType, current, ownershipEvent, section, item.Code, $"{item.ItemType} · {item.Description}", item.SourceReference, item.FairValue);
+                    if (item.DeferredTaxAsset != 0m) AppendComparativeOwnershipDetailCsvRow(csv, package, recordType, current, ownershipEvent, section, item.Code, $"Deferred-tax asset · {item.Description}", item.SourceReference, item.DeferredTaxAsset);
+                    if (item.DeferredTaxLiability != 0m) AppendComparativeOwnershipDetailCsvRow(csv, package, recordType, current, ownershipEvent, section, item.Code, $"Deferred-tax liability · {item.Description}", item.SourceReference, item.DeferredTaxLiability);
+                }
+                foreach (var adjustment in acquisition.MeasurementPeriodAdjustments ?? [])
+                foreach (var movement in MeasurementPeriodMovements(adjustment))
+                    AppendComparativeOwnershipDetailCsvRow(csv, package, recordType, current, ownershipEvent, section, adjustment.Code, $"{adjustment.RecognizedOn:yyyy-MM-dd} · {adjustment.Description} · {movement.Name}", adjustment.SourceReference, movement.Amount);
+            }
             foreach (var line in ownershipEvent.Content.PostingLines)
             {
                 var signedAmount = decimal.Round(line.Debit - line.Credit, 2, MidpointRounding.AwayFromZero);
@@ -70,6 +83,14 @@ public sealed partial class ConsolidationService
                     current ? string.Empty : section, current ? string.Empty : line.ReportingAccountName, current ? string.Empty : $"{ownershipEvent.Reference}; {line.Description}; {evidence}", current ? 0m : signedAmount, current ? signedAmount : -signedAmount, package, ownershipEvent.Status);
             }
         }
+    }
+
+    private static void AppendComparativeOwnershipDetailCsvRow(StringBuilder csv, ConsolidatedComparativeStatementPackage package, string recordType, bool current,
+        ConsolidationOwnershipEventSnapshot ownershipEvent, string section, string code, string caption, string source, decimal amount)
+    {
+        var evidence = $"{ownershipEvent.SubjectCompanyName}; {ownershipEvent.EventDate:yyyy-MM-dd}; {source}; SHA-256 {ownershipEvent.ContentSha256}";
+        AppendComparativeCsvRow(csv, recordType, ownershipEvent.EventType, code, "PPA detail", current ? section : string.Empty, current ? caption : string.Empty, current ? evidence : string.Empty, current ? amount : 0m,
+            current ? string.Empty : section, current ? string.Empty : caption, current ? string.Empty : evidence, current ? 0m : amount, current ? amount : -amount, package, ownershipEvent.Status);
     }
 
     private static void AppendComparativeDisclosureCsvRows(StringBuilder csv, ConsolidatedStatementPackage source, ConsolidatedComparativeStatementPackage package, string recordType, bool current)

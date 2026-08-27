@@ -47,6 +47,23 @@ public sealed partial class ConsolidationService
                 AppendStatementCsvRow(csv, "Ownership measurement", ownershipEvent.FrameworkCode, ownershipEvent.EventType, ownershipEvent.Reference, measurement.Name,
                     ownershipEvent.Content.NciMeasurementMethod, ownershipEvent.SubjectCompanyName, ownershipEvent.Content.MeasurementRationale, "Posted ownership event", control,
                     ownershipEvent.EventDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), measurement.Amount, package, ownershipEvent.Status);
+            if (ownershipEvent.Content.Acquisition is { } acquisition)
+            {
+                foreach (var component in acquisition.ConsiderationComponents ?? [])
+                    AppendStatementCsvRow(csv, "PPA consideration", ownershipEvent.FrameworkCode, ownershipEvent.EventType, component.Code, component.Description, component.ComponentType,
+                        ownershipEvent.SubjectCompanyName, component.SourceReference, "Acquisition detail", ownershipEvent.Reference, ownershipEvent.EventDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), component.FairValue, package, ownershipEvent.Status);
+                foreach (var item in acquisition.IdentifiableItems ?? [])
+                {
+                    AppendStatementCsvRow(csv, "PPA identifiable item", ownershipEvent.FrameworkCode, ownershipEvent.EventType, item.Code, item.Description, item.ItemType,
+                        ownershipEvent.SubjectCompanyName, item.SourceReference, "Acquisition detail", ownershipEvent.Reference, ownershipEvent.EventDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), item.FairValue, package, ownershipEvent.Status);
+                    if (item.DeferredTaxAsset != 0m) AppendStatementCsvRow(csv, "PPA deferred tax", ownershipEvent.FrameworkCode, ownershipEvent.EventType, item.Code, $"{item.Description} deferred-tax asset", "Asset", ownershipEvent.SubjectCompanyName, item.SourceReference, "Acquisition detail", ownershipEvent.Reference, ownershipEvent.EventDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), item.DeferredTaxAsset, package, ownershipEvent.Status);
+                    if (item.DeferredTaxLiability != 0m) AppendStatementCsvRow(csv, "PPA deferred tax", ownershipEvent.FrameworkCode, ownershipEvent.EventType, item.Code, $"{item.Description} deferred-tax liability", "Liability", ownershipEvent.SubjectCompanyName, item.SourceReference, "Acquisition detail", ownershipEvent.Reference, ownershipEvent.EventDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), item.DeferredTaxLiability, package, ownershipEvent.Status);
+                }
+                foreach (var adjustment in acquisition.MeasurementPeriodAdjustments ?? [])
+                foreach (var movement in MeasurementPeriodMovements(adjustment))
+                    AppendStatementCsvRow(csv, "PPA measurement-period adjustment", ownershipEvent.FrameworkCode, ownershipEvent.EventType, adjustment.Code, $"{adjustment.Description} · {movement.Name}", "Signed change",
+                        ownershipEvent.SubjectCompanyName, adjustment.SourceReference, "Acquisition detail", ownershipEvent.Reference, adjustment.RecognizedOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), movement.Amount, package, ownershipEvent.Status);
+            }
             foreach (var line in ownershipEvent.Content.PostingLines)
                 AppendStatementCsvRow(csv, "Ownership posting", ownershipEvent.FrameworkCode, ownershipEvent.EventType, line.ReportingAccountNumber, line.ReportingAccountName,
                     line.ReportingAccountType, ownershipEvent.SubjectCompanyName, line.Description, "Posted ownership event", ownershipEvent.Reference,
@@ -286,6 +303,13 @@ public sealed partial class ConsolidationService
             yield return ("NCI profit or loss", attribution.NoncontrollingInterestProfitOrLoss); yield return ("Subsidiary other comprehensive income", attribution.SubsidiaryOtherComprehensiveIncome);
             yield return ("Parent other comprehensive income", attribution.ParentOtherComprehensiveIncome); yield return ("NCI other comprehensive income", attribution.NoncontrollingInterestOtherComprehensiveIncome);
         }
+    }
+
+    private static IEnumerable<(string Name, decimal Amount)> MeasurementPeriodMovements(AcquisitionMeasurementPeriodAdjustment adjustment)
+    {
+        yield return ("Consideration", adjustment.ConsiderationChange); yield return ("Previously held interest fair value", adjustment.PreviousInterestFairValueChange);
+        yield return ("Noncontrolling interest", adjustment.NoncontrollingInterestChange); yield return ("Identifiable net assets", adjustment.IdentifiableNetAssetsChange);
+        yield return ("Goodwill", adjustment.GoodwillChange); yield return ("Bargain-purchase gain", adjustment.BargainPurchaseGainChange);
     }
 
     private static async Task<IReadOnlySet<(string Number, string Name)>> EffectiveCashReportingAccountsAsync(BrassLedgerDbContext db, Guid groupId, DateOnly asOf, CancellationToken cancellationToken)

@@ -11,7 +11,7 @@ namespace BrassLedger.Infrastructure.Accounting;
 
 public sealed partial class ConsolidationService
 {
-    private const int CurrentOwnershipEventSchemaVersion = 1;
+    private const int CurrentOwnershipEventSchemaVersion = 2;
     private const int MaximumOwnershipEventJsonBytes = 2 * 1024 * 1024;
     private static readonly JsonSerializerOptions OwnershipEventJsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -48,6 +48,8 @@ public sealed partial class ConsolidationService
         if (Encoding.UTF8.GetByteCount(contentJson) > MaximumOwnershipEventJsonBytes) return TransactionResult.Failure("The ownership-event document exceeds the supported 2 MiB retained-document limit.");
         var entity = request.Id is { } id ? await db.ConsolidationOwnershipEvents.SingleOrDefaultAsync(item => item.Id == id && item.CompanyId == companyId && item.ConsolidationGroupId == group.Id, cancellationToken) : null;
         if (request.Id is not null && entity is null) return TransactionResult.Failure("The consolidation ownership event was not found in this group.");
+        if ((eventType is ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition) && request.Content.SchemaVersion < CurrentOwnershipEventSchemaVersion)
+            return TransactionResult.Failure($"New or corrected acquisition schedules require ownership-event schema version {CurrentOwnershipEventSchemaVersion} with line-item purchase-price-allocation detail.");
         if (entity is not null && entity.Status is not ("Draft" or "Rejected")) return TransactionResult.Failure("Only a draft or rejected ownership event can be edited.");
         if (entity is not null && (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || entity.ConcurrencyToken != request.ConcurrencyToken)) return TransactionResult.Failure("The ownership event changed after it was displayed. Refresh before saving it.");
         if (entity is not null && (entity.EventDate != request.EventDate || entity.EventType != eventType || entity.SubjectCompanyId != request.SubjectCompanyId)) return TransactionResult.Failure("A retained ownership event cannot be moved to another date, type, or subject. Create a separate event instead.");
@@ -79,6 +81,8 @@ public sealed partial class ConsolidationService
         if (entity.Status != "Draft") return TransactionResult.Failure("Only a draft ownership event can be approved or rejected.");
         if (string.IsNullOrWhiteSpace(concurrencyToken) || entity.ConcurrencyToken != concurrencyToken) return TransactionResult.Failure("The ownership event changed after it was displayed. Refresh before reviewing it.");
         if (entity.PreparedByUserId == userId) return TransactionResult.Failure("The person who prepared an ownership event cannot approve or reject it.");
+        if (approve && (entity.EventType is ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition) && entity.SchemaVersion < CurrentOwnershipEventSchemaVersion)
+            return TransactionResult.Failure($"Convert the acquisition schedule to schema version {CurrentOwnershipEventSchemaVersion} with line-item purchase-price-allocation detail before approval.");
         if (!await db.ConsolidationGroups.AnyAsync(group => group.Id == groupId && group.CompanyId == companyId && group.IsActive, cancellationToken)) return TransactionResult.Failure("An inactive consolidation group cannot accept ownership-event review decisions.");
         var accessError = await ValidateOwnershipEventAccessAsync(db, groupId, userId.Value, cancellationToken); if (accessError is not null) return TransactionResult.Failure(accessError);
         var retainedError = await ValidateRetainedOwnershipEventAsync(db, entity, cancellationToken); if (retainedError is not null) return TransactionResult.Failure(retainedError);
@@ -100,6 +104,8 @@ public sealed partial class ConsolidationService
         if (entity.Status != "Approved") return TransactionResult.Failure("Only an approved ownership event can be posted.");
         if (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || entity.ConcurrencyToken != request.ConcurrencyToken) return TransactionResult.Failure("The ownership event changed after it was displayed. Refresh before posting it.");
         if (entity.ApprovedByUserId == userId) return TransactionResult.Failure("The person who approved an ownership event cannot post it.");
+        if ((entity.EventType is ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition) && entity.SchemaVersion < CurrentOwnershipEventSchemaVersion)
+            return TransactionResult.Failure($"Convert the acquisition schedule to schema version {CurrentOwnershipEventSchemaVersion} before posting.");
         var accessError = await ValidateOwnershipEventAccessAsync(db, entity.ConsolidationGroupId, userId.Value, cancellationToken); if (accessError is not null) return TransactionResult.Failure(accessError);
         if (await db.AccountingPeriods.AnyAsync(period => period.CompanyId == companyId && period.Status == "Closed" && period.StartsOn <= entity.EventDate && period.EndsOn >= entity.EventDate, cancellationToken)) return TransactionResult.Failure("The ownership-event date is in a closed parent-company accounting period. Reopen the period before posting.");
         var retainedError = await ValidateRetainedOwnershipEventAsync(db, entity, cancellationToken); if (retainedError is not null) return TransactionResult.Failure(retainedError);
@@ -158,7 +164,7 @@ public sealed partial class ConsolidationService
     {
         if (request.ConsolidationGroupId == Guid.Empty || request.SubjectCompanyId == Guid.Empty || request.EventDate == DateOnly.MinValue || request.Content is null || !Enum.TryParse<ConsolidationOwnershipEventType>(request.EventType, true, out var eventType) || !Enum.IsDefined(eventType)) return "Choose a consolidation group, subject, event date, and supported ownership-event type.";
         if (!ConciseOwnershipText(request.Reference, 64) || !ConciseOwnershipText(request.FrameworkCode, 32) || !ConciseOwnershipText(request.FrameworkEdition, 80) || !ConciseOwnershipText(request.Content.MeasurementRationale, 4000) || !ConciseOwnershipText(request.Content.SourceReference, 1000)) return "Provide concise event identity, accounting framework, measurement rationale, and source evidence.";
-        if (request.Content.SchemaVersion != CurrentOwnershipEventSchemaVersion) return $"Ownership-event schema version {request.Content.SchemaVersion} is not supported. Convert it to schema version {CurrentOwnershipEventSchemaVersion} before approval.";
+        if (request.Content.SchemaVersion is < 1 or > CurrentOwnershipEventSchemaVersion) return $"Ownership-event schema version {request.Content.SchemaVersion} is not supported. Convert it to a supported version from 1 through {CurrentOwnershipEventSchemaVersion}.";
         if (!ValidOwnershipPercentage(request.Content.OwnershipBefore) || !ValidOwnershipPercentage(request.Content.OwnershipAfter)) return "Before and after ownership percentages must be from 0% through 100%.";
         var measurementCount = new object?[] { request.Content.Acquisition, request.Content.OwnershipChange, request.Content.LossOfControl, request.Content.ProfitAttribution }.Count(item => item is not null);
         if (measurementCount != 1) return "Retain exactly one measurement schedule matching the ownership-event type.";
@@ -171,7 +177,7 @@ public sealed partial class ConsolidationService
         if (!hasNominalLines && ((request.Content.PriorPeriodEquityAccountNumber?.Trim().Length ?? 0) > 64 || (request.Content.PriorPeriodEquityAccountName?.Trim().Length ?? 0) > 160)) return "The optional retained-earnings account is too long.";
         return eventType switch
         {
-            ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition => ValidateAcquisitionMeasurement(request.Content, request.FrameworkCode, eventType),
+            ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition => ValidateAcquisitionMeasurement(request.Content, request.FrameworkCode, eventType, request.EventDate),
             ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl => ValidateOwnershipChangeMeasurement(request.Content),
             ConsolidationOwnershipEventType.LossOfControl => ValidateLossOfControlMeasurement(request.Content),
             ConsolidationOwnershipEventType.ProfitAttribution => ValidateProfitAttributionMeasurement(request.Content),
@@ -179,7 +185,7 @@ public sealed partial class ConsolidationService
         };
     }
 
-    private static string? ValidateAcquisitionMeasurement(ConsolidationOwnershipEventDocument content, string frameworkCode, ConsolidationOwnershipEventType eventType)
+    private static string? ValidateAcquisitionMeasurement(ConsolidationOwnershipEventDocument content, string frameworkCode, ConsolidationOwnershipEventType eventType, DateOnly eventDate)
     {
         var value = content.Acquisition; if (value is null || content.OwnershipChange is not null || content.LossOfControl is not null || content.ProfitAttribution is not null || content.OwnershipAfter <= content.OwnershipBefore) return "An acquisition requires its acquisition measurement and an increase in ownership.";
         if (!ValidOwnershipMoney(value.ConsiderationTransferred, value.PreviousInterestFairValue, value.NoncontrollingInterestRecognized, value.IdentifiableNetAssetsFairValue, value.Goodwill, value.BargainPurchaseGain) || value.ConsiderationTransferred < 0m || value.PreviousInterestFairValue < 0m || value.NoncontrollingInterestRecognized < 0m || value.Goodwill < 0m || value.BargainPurchaseGain < 0m || (value.Goodwill > 0m && value.BargainPurchaseGain > 0m)) return "Acquisition measurements must use valid nonnegative consideration, prior-interest, NCI, goodwill, and bargain-gain amounts.";
@@ -190,7 +196,47 @@ public sealed partial class ConsolidationService
         var method = content.NciMeasurementMethod?.Trim() ?? string.Empty; if (method is not ("FullFairValue" or "ProportionateShare" or "NotApplicable")) return "Use FullFairValue, ProportionateShare, or NotApplicable for the NCI measurement method.";
         if (content.OwnershipAfter == 1m && (value.NoncontrollingInterestRecognized != 0m || method != "NotApplicable")) return "A wholly owned acquisition must recognize no NCI and use the NotApplicable NCI measurement method.";
         if (content.OwnershipAfter < 1m && method == "NotApplicable") return "A partially owned acquisition requires an explicit FullFairValue or ProportionateShare NCI measurement method.";
-        if (frameworkCode.Trim().Equals("US-GAAP", StringComparison.OrdinalIgnoreCase) && value.NoncontrollingInterestRecognized > 0m && method != "FullFairValue") return "US GAAP acquisitions with NCI require the FullFairValue measurement method.";
+        if (frameworkCode.Trim().Equals("US-GAAP", StringComparison.OrdinalIgnoreCase) && content.OwnershipAfter < 1m && method != "FullFairValue") return "US GAAP acquisitions with NCI require the FullFairValue measurement method.";
+        if (content.SchemaVersion >= 2)
+        {
+            var detailError = ValidateAcquisitionDetail(value, frameworkCode, eventDate); if (detailError is not null) return detailError;
+        }
+        return null;
+    }
+
+    private static string? ValidateAcquisitionDetail(AcquisitionOfControlMeasurement value, string frameworkCode, DateOnly eventDate)
+    {
+        var components = value.ConsiderationComponents ?? []; var items = value.IdentifiableItems ?? []; var adjustments = value.MeasurementPeriodAdjustments ?? [];
+        if (components.Count is < 1 or > 200) return "Schema-v2 acquisition schedules require 1 through 200 consideration components.";
+        if (items.Count is < 1 or > 500) return "Schema-v2 acquisition schedules require 1 through 500 identifiable asset or liability items.";
+        if (components.Any(item => item is null) || items.Any(item => item is null) || adjustments.Any(item => item is null)) return "Schema-v2 acquisition detail cannot contain null line items.";
+        if (value.MeasurementPeriodEndsOn is not { } measurementPeriodEnd || measurementPeriodEnd < eventDate) return "Schema-v2 acquisition schedules require a measurement-period end date on or after the acquisition date.";
+        var framework = frameworkCode.Trim().ToUpperInvariant();
+        if (framework is "US-GAAP" or "IFRS" or "IFRS-SME" && eventDate <= DateOnly.MaxValue.AddYears(-1) && measurementPeriodEnd > eventDate.AddYears(1))
+            return "The retained US GAAP or IFRS measurement period cannot extend beyond one year after the acquisition date.";
+        var componentTypes = new[] { "Cash", "EquityIssued", "ContingentConsideration", "DeferredConsideration", "ReplacementAward", "Other" };
+        if (components.Select(item => item.Code?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).Count() != components.Count) return "Consideration-component codes must be unique within the acquisition schedule.";
+        foreach (var item in components)
+            if (!ConciseOwnershipText(item.Code, 64) || !ConciseOwnershipText(item.Description, 300) || !ConciseOwnershipText(item.SourceReference, 1000) || !componentTypes.Contains(item.ComponentType, StringComparer.Ordinal) || !ValidOwnershipMoney(item.FairValue) || item.FairValue < 0m)
+                return "Every consideration component requires a unique concise code, description, supported type, nonnegative fair value, and source reference.";
+        if (components.Sum(item => item.FairValue) != value.ConsiderationTransferred) return "Consideration-component fair values must equal total consideration transferred.";
+        if (items.Select(item => item.Code?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).Count() != items.Count) return "Identifiable-item codes must be unique within the acquisition schedule.";
+        foreach (var item in items)
+            if (!ConciseOwnershipText(item.Code, 64) || !ConciseOwnershipText(item.Description, 300) || !ConciseOwnershipText(item.SourceReference, 1000) || item.ItemType is not ("Asset" or "Liability")
+                || !ValidOwnershipMoney(item.FairValue, item.DeferredTaxAsset, item.DeferredTaxLiability) || item.FairValue < 0m || item.DeferredTaxAsset < 0m || item.DeferredTaxLiability < 0m || (item.DeferredTaxAsset > 0m && item.DeferredTaxLiability > 0m))
+                return "Every identifiable item requires a unique concise code, description, Asset or Liability type, nonnegative fair value, at most one deferred-tax effect, and source reference.";
+        var netAssets = items.Sum(item => item.ItemType == "Asset" ? item.FairValue : -item.FairValue) + items.Sum(item => item.DeferredTaxAsset - item.DeferredTaxLiability);
+        if (netAssets != value.IdentifiableNetAssetsFairValue) return "Identifiable asset, liability, and deferred-tax detail must equal total identifiable net assets at fair value.";
+        if (adjustments.Count > 200) return "An acquisition schedule supports at most 200 measurement-period adjustments.";
+        if (adjustments.Select(item => item.Code?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).Count() != adjustments.Count) return "Measurement-period adjustment codes must be unique within the acquisition schedule.";
+        foreach (var item in adjustments)
+        {
+            if (item.RecognizedOn < eventDate || item.RecognizedOn > measurementPeriodEnd || !ConciseOwnershipText(item.Code, 64) || !ConciseOwnershipText(item.Description, 500) || !ConciseOwnershipText(item.SourceReference, 1000)
+                || !ValidOwnershipMoney(item.ConsiderationChange, item.PreviousInterestFairValueChange, item.NoncontrollingInterestChange, item.IdentifiableNetAssetsChange, item.GoodwillChange, item.BargainPurchaseGainChange))
+                return "Every measurement-period adjustment requires an in-period date, unique concise code, description, valid signed currency changes, and source reference.";
+            var residualChange = item.ConsiderationChange + item.PreviousInterestFairValueChange + item.NoncontrollingInterestChange - item.IdentifiableNetAssetsChange;
+            if (residualChange != item.GoodwillChange - item.BargainPurchaseGainChange) return "Each measurement-period adjustment must reconcile its consideration, prior-interest, NCI, net-asset, goodwill, and bargain-gain changes.";
+        }
         return null;
     }
 
