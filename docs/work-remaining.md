@@ -17,13 +17,13 @@ This is the canonical agent-readable queue for work still required before BrassL
 | --- | --- |
 | Updated | 2026-08-27 EDT |
 | Branch | `codex/tax-content-intake-wip-20260824` |
-| Last pushed commit | `7e1db24 feat(reporting): add controlled Excel and PDF exports` |
-| In progress | Consolidated financing-liability and other framework disclosures |
-| Current evidence | The `7e1db24` controlled-document checkpoint is pushed and gate-complete: clean out-of-tree Release build; SQLite/default 194 plus 10 expected skips; PostgreSQL 204/204; API 35/35; components 14/14; Chromium 35/35; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. Current and comparative packages now have authorized Excel and PDF downloads with visible completeness state, warnings, reconciliation, statement totals, period-specific presentation, source provenance, attachment filenames, cross-platform embedded fonts, page breaks/repeated headers, and browser/API coverage. |
+| Last pushed commit | `7552e91 feat(reporting): add audited framework disclosures` |
+| In progress | Consolidated acquisition/disposal, ownership-change, and profit-attribution accounting |
+| Current evidence | The `7552e91` audited-disclosure checkpoint is pushed and gate-complete: clean out-of-tree Release build; SQLite/default 194 plus 10 expected skips; PostgreSQL 204/204; API 35/35; components 15/15; Chromium 36/36; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. Exact-period, independently reviewed versioned JSON packages now cover financing-liability reconciliation, supplier-finance arrangements, extensible categorized notes, SHA-256 identity, audited preparation/review, and period-specific JSON/CSV/Excel/PDF/browser output. |
 
 ## Immediate queue
 
-1. **In progress — CONSOL-STATEMENTS:** add financing-liability and other framework disclosures plus framework review evidence to the pushed comparative/export foundation.
+1. **In progress — CONSOL-ACQUISITION:** implement reviewed acquisition/disposal accounting, purchase-price allocation, goodwill, ownership changes, income/NCI attribution, and loss-of-control workflows on the pushed statement/disclosure foundation.
 2. **Pending — FX-TRANSACTIONS:** implement transaction-currency documents, rate provenance, settlement remeasurement, and realized/unrealized gains and losses.
 3. **Pending — ACCEPTANCE-01:** automate the uninterrupted representative-business scenario from clean installation through encrypted restore and audit trace.
 
@@ -62,6 +62,7 @@ This is the canonical agent-readable queue for work still required before BrassL
 
 ## Recently verified checkpoints
 
+- `7552e91` — exact-period/group/framework versioned JSON disclosure packages; financing-liability and supplier-finance reconciliations; extensible narrative categories/fields; source evidence and SHA-256 identity; independent preparation/approval/rejection; provider migrations/adoption; current/comparative JSON, CSV, Excel, PDF, UI and complete build/test/browser/drift/vulnerability gates. This advances, but does not finish, `CONSOL-STATEMENTS`; acquisition/disposal, ownership-change and profit-attribution work remains under `CONSOL-ACQUISITION`.
 - `7e1db24` — controlled current/comparative Excel and PDF workbooks/documents, explicit incomplete state, warnings and reconciliation, full source provenance, authenticated API/Web attachments, cross-platform embedded fonts, pagination/repeated headers, and full build/test/browser/drift/vulnerability gates. This advances, but does not finish, `CONSOL-STATEMENTS`.
 - `f3cb8e3` — independently generated current/prior consolidated packages, four side-by-side statements, current-minus-prior variance, period-specific presentation/warnings, invalid-chronology rejection, controlled CSV/API/UI paths, and full build/test/browser/drift/vulnerability gates. This advances, but does not finish, `CONSOL-STATEMENTS`.
 - `47e24b7` — separate effective-dated reviewed statement sections/captions/order, current/noncurrent support, explicit unconfigured-account handling, provider migrations/adoption, owner-only administration, API, concurrency, and full build/test/browser/drift/vulnerability gates. This advances, but does not finish, `CONSOL-STATEMENTS`.
