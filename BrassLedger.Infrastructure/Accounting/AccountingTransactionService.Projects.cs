@@ -340,6 +340,19 @@ public sealed partial class AccountingTransactionService
         return ids.Length == 0 || await db.ProjectJobs.CountAsync(project => project.CompanyId == companyId && project.Status == "Active" && ids.Contains(project.Id), cancellationToken) == ids.Length;
     }
 
+    private static async Task<bool> AreActiveProjectDimensionsAsync(BrassLedgerDbContext db, Guid companyId, IEnumerable<(Guid? ProjectJobId, Guid? ProjectPhaseId, Guid? ProjectCostCodeId)> requestedDimensions, CancellationToken cancellationToken, bool allowHistorical = false)
+    {
+        var dimensions = requestedDimensions.Distinct().ToArray();
+        if (dimensions.Any(x => !x.ProjectJobId.HasValue && (x.ProjectPhaseId.HasValue || x.ProjectCostCodeId.HasValue))) return false;
+        var projectIds = dimensions.Where(x => x.ProjectJobId.HasValue).Select(x => x.ProjectJobId!.Value).Distinct().ToArray();
+        if (projectIds.Length > 0 && await db.ProjectJobs.CountAsync(x => x.CompanyId == companyId && (allowHistorical || x.Status == "Active") && projectIds.Contains(x.Id), cancellationToken) != projectIds.Length) return false;
+        var phases = dimensions.Where(x => x.ProjectPhaseId.HasValue).Select(x => new { ProjectJobId = x.ProjectJobId!.Value, ProjectPhaseId = x.ProjectPhaseId!.Value }).Distinct().ToArray();
+        foreach (var phase in phases)
+            if (!await db.ProjectPhases.AnyAsync(x => x.Id == phase.ProjectPhaseId && x.CompanyId == companyId && x.ProjectJobId == phase.ProjectJobId && (allowHistorical || x.IsActive), cancellationToken)) return false;
+        var costCodeIds = dimensions.Where(x => x.ProjectCostCodeId.HasValue).Select(x => x.ProjectCostCodeId!.Value).Distinct().ToArray();
+        return costCodeIds.Length == 0 || await db.ProjectCostCodes.CountAsync(x => x.CompanyId == companyId && (allowHistorical || x.IsActive) && costCodeIds.Contains(x.Id), cancellationToken) == costCodeIds.Length;
+    }
+
     private void AddProjectAudit(BrassLedgerDbContext db, Guid companyId, string action, ProjectJob job, object detail) =>
         db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = nameof(ProjectJob), EntityId = job.Id, DetailJson = JsonSerializer.Serialize(detail), OccurredAtUtc = DateTimeOffset.UtcNow });
 

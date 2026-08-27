@@ -98,9 +98,11 @@ public sealed partial class AccountingTransactionService
             return new
             {
                 orderLines[authorizationLine.SalesOrderLineId].ProjectJobId,
+                orderLines[authorizationLine.SalesOrderLineId].ProjectPhaseId,
+                orderLines[authorizationLine.SalesOrderLineId].ProjectCostCodeId,
                 Cost = RoundCurrency(RoundQuantity(item.Quantity) * shipmentLines[authorizationLine.InventoryShipmentLineId].UnitCost)
             };
-        }).GroupBy(line => line.ProjectJobId).Select(group => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), 0m, group.Sum(line => line.Cost), "Reverse cost of goods sold", group.Key)));
+        }).GroupBy(line => new { line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId }).Select(group => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), 0m, group.Sum(line => line.Cost), "Reverse cost of goods sold", group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId)));
         var posting = await PostAsync(db, companyId, request.ReceivedOn, "Sales Fulfillment", receiptNumber, $"Customer return {authorization.ReturnNumber}", postingLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: receiptId, sourceDocumentType: "CustomerReturnReceipt", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
         var receipt = new CustomerReturnReceipt { Id = receiptId, CompanyId = companyId, CustomerReturnAuthorizationId = authorization.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, ReceiptNumber = receiptNumber, ReceivedOn = request.ReceivedOn, TotalCost = totalCost, JournalEntryId = posting.Id!.Value, ReceivedByUserId = ResolveUserId(), ReceivedAtUtc = DateTimeOffset.UtcNow };

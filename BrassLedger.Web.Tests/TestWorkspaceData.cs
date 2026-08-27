@@ -7,6 +7,9 @@ internal static class TestWorkspaceData
 {
     public static BusinessWorkspaceSnapshot CreateWorkspace()
     {
+        var projectId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var phaseId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var costCodeId = Guid.Parse("55555555-5555-5555-5555-555555555555");
         return new BusinessWorkspaceSnapshot(
             GeneratedAtUtc: new DateTime(2026, 4, 3, 12, 0, 0, DateTimeKind.Utc),
             Company: new CompanySnapshot("Brass Ledger Manufacturing", "Brass Ledger Manufacturing, LLC", "84-9923145", "USD", 1, 4),
@@ -73,7 +76,7 @@ internal static class TestWorkspaceData
                 3,
                 135500m,
                 103630m,
-                new[] { new ProjectJobSnapshot("JOB-5007", "Red Mesa Expansion", "Red Mesa Builders", "Open", 45000m, 27600m) },
+                new[] { new ProjectJobSnapshot("JOB-5007", "Red Mesa Expansion", "Red Mesa Builders", "Active", 45000m, 27600m, projectId) },
                 RetainageReceivable: 125m,
                 RetainageAging:
                 [
@@ -94,7 +97,9 @@ internal static class TestWorkspaceData
                         0m)
                 ],
                 RetainageControlBalance: 125m,
-                RetainageReconciliationDifference: 0m),
+                RetainageReconciliationDifference: 0m,
+                Phases: [new ProjectPhaseSnapshot(phaseId, projectId, "JOB-5007", null, "01.10", "Excavation", "Task", "Site preparation", null, null, true, "phase-token")],
+                CostCodes: [new ProjectCostCodeSnapshot(costCodeId, "LAB", "Labor", "Direct cost", "Direct project labor", true, "cost-code-token")]),
             Reporting: new ReportingWorkspace(
                 6,
                 3,

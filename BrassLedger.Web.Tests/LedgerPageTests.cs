@@ -51,6 +51,11 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("Fixed assets, prepaids, and loans", cut.Markup);
         Assert.NotNull(cut.Find("input[aria-label='Journal rejection reason']"));
         Assert.Contains("Attach the supporting bank statement.", cut.Markup);
+        var projectSelect = cut.Find("select[aria-label='Journal entry project']");
+        Assert.Contains("JOB-5007", projectSelect.TextContent);
+        projectSelect.Change("33333333-3333-3333-3333-333333333333");
+        Assert.Contains("01.10", cut.Find("select[aria-label='Journal entry project phase']").TextContent);
+        Assert.Contains("LAB", cut.Find("select[aria-label='Journal entry project cost code']").TextContent);
         cut.FindAll("button").Single(button => button.TextContent.Trim() == "Correct").Click();
         Assert.Contains("Correct journal entry", cut.Markup);
         Assert.Equal("JE-CORRECT-1", cut.Find("input[aria-label='Journal entry reference']").GetAttribute("value"));
@@ -66,9 +71,14 @@ public sealed class LedgerPageTests : TestContext
 
         Assert.Contains("Prepare purchase requisition", cut.Markup);
         Assert.Contains("Purchase requisitions", cut.Markup);
+        Assert.NotNull(cut.Find("select[aria-label='Purchase requisition line 1 project']"));
+        Assert.NotNull(cut.Find("select[aria-label='Purchase requisition line 1 phase']"));
+        Assert.NotNull(cut.Find("select[aria-label='Purchase requisition line 1 cost code']"));
         Assert.NotNull(cut.Find("select[aria-label='Purchase order vendor']"));
         Assert.NotNull(cut.Find("select[aria-label='Purchase order line 1 item']"));
         Assert.NotNull(cut.Find("select[aria-label='Purchase order line 1 project']"));
+        Assert.NotNull(cut.Find("select[aria-label='Purchase order line 1 phase']"));
+        Assert.NotNull(cut.Find("select[aria-label='Purchase order line 1 cost code']"));
         cut.FindAll("button").Last(button => button.TextContent.Trim() == "Add line").Click();
         Assert.NotNull(cut.Find("select[aria-label='Purchase order line 2 item']"));
         Assert.Contains("Inventory receipts and invoice matching", cut.Markup);
@@ -77,10 +87,14 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("select[aria-label='Sales quote customer']"));
         Assert.NotNull(cut.Find("select[aria-label='Sales quote line 1 item']"));
         Assert.NotNull(cut.Find("select[aria-label='Sales quote line 1 project']"));
+        Assert.NotNull(cut.Find("select[aria-label='Sales quote line 1 phase']"));
+        Assert.NotNull(cut.Find("select[aria-label='Sales quote line 1 cost code']"));
         Assert.Contains("Prepare sales order", cut.Markup);
         Assert.NotNull(cut.Find("select[aria-label='Sales order customer']"));
         Assert.NotNull(cut.Find("select[aria-label='Sales order line 1 item']"));
         Assert.NotNull(cut.Find("select[aria-label='Sales order line 1 project']"));
+        Assert.NotNull(cut.Find("select[aria-label='Sales order line 1 phase']"));
+        Assert.NotNull(cut.Find("select[aria-label='Sales order line 1 cost code']"));
         Assert.NotNull(cut.Find("table[aria-label='Inventory picks']"));
         Assert.NotNull(cut.Find("table[aria-label='Inventory packing slips']"));
         Assert.NotNull(cut.Find("table[aria-label='Sales backorder promises']"));
@@ -112,6 +126,10 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("select[aria-label='Project billing method']"));
         Assert.NotNull(cut.Find("select[aria-label='Project revenue recognition method']"));
         Assert.NotNull(cut.Find("input[aria-label='Project retainage percent']"));
+        Assert.NotNull(cut.Find("select[aria-label='Phase project']"));
+        Assert.NotNull(cut.Find("input[aria-label='Phase code']"));
+        Assert.NotNull(cut.Find("input[aria-label='Project cost code']"));
+        Assert.NotNull(cut.Find("select[aria-label='Budget project']"));
         Assert.NotNull(cut.Find("table[aria-label='Project portfolio']"));
         Assert.NotNull(cut.Find("select[aria-label='Change order project']"));
         Assert.NotNull(cut.Find("input[aria-label='Change order number']"));
@@ -159,11 +177,15 @@ public sealed class LedgerPageTests : TestContext
     public void ReceivablesAndPayables_ExposeAuditableRejectionAndCorrectionGuidance()
     {
         var receivables = RenderComponent<Receivables>();
+        Assert.NotNull(receivables.Find("select[aria-label='Invoice line project phase']"));
+        Assert.NotNull(receivables.Find("select[aria-label='Invoice line project cost code']"));
         Assert.NotNull(receivables.Find("input[aria-label='Invoice rejection reason']"));
         Assert.Contains("correct and resubmit it using the same invoice number", receivables.Markup);
         Assert.Contains("Review note", receivables.Markup);
 
         var payables = RenderComponent<Payables>();
+        Assert.NotNull(payables.Find("select[aria-label='Bill line project phase']"));
+        Assert.NotNull(payables.Find("select[aria-label='Bill line project cost code']"));
         Assert.NotNull(payables.Find("input[aria-label='Vendor bill rejection reason']"));
         Assert.Contains("correct and resubmit it using the same vendor and bill number", payables.Markup);
         Assert.Contains("Review note", payables.Markup);
@@ -230,6 +252,9 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> RecordPayrollLiabilityPaymentAsync(RecordPayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> ReversePayrollLiabilityPaymentAsync(ReversePayrollLiabilityPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.PaymentId));
     public Task<TransactionResult> SaveProjectJobAsync(SaveProjectJobRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> SaveProjectPhaseAsync(SaveProjectPhaseRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> SaveProjectCostCodeAsync(SaveProjectCostCodeRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> SaveProjectBudgetAllocationAsync(SaveProjectBudgetAllocationRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> CloseProjectJobAsync(CloseProjectJobRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectJobId));
     public Task<TransactionResult> ReopenProjectJobAsync(ReopenProjectJobRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectJobId));
     public Task<TransactionResult> SaveProjectChangeOrderDraftAsync(SaveProjectChangeOrderDraftRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));

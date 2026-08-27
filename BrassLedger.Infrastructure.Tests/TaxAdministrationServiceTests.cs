@@ -136,7 +136,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<ITaxAdministrationService>();
-        var packagePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ut/2026-04-01.json"));
+        var packagePath = TestRepositoryPaths.TaxContent("us/ut/2026-04-01.json");
 
         var result = await service.ImportTaxContentDocumentAsync(await File.ReadAllTextAsync(packagePath));
 
@@ -162,7 +162,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<ITaxAdministrationService>();
-        var packagePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ny/2026-runtime-package.json"));
+        var packagePath = TestRepositoryPaths.TaxContent("us/ny/2026-runtime-package.json");
 
         var import = await service.ImportTaxContentDocumentAsync(await File.ReadAllTextAsync(packagePath));
 
@@ -185,7 +185,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task StateReferenceCatalog_CoversEveryStateAndDcWithStableRelationships()
     {
-        var catalogPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/state-reference-2026.json"));
+        var catalogPath = TestRepositoryPaths.TaxContent("us/state-reference-2026.json");
         using var catalog = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(catalogPath));
         var jurisdictions = catalog.RootElement.GetProperty("jurisdictions").EnumerateArray().ToArray();
 
@@ -231,7 +231,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task MarylandLocalSourceCapture_CoversEveryCountyAndBaltimoreCityWithoutAssumingFlatRates()
     {
-        var catalogPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/state-reference-2026.json"));
+        var catalogPath = TestRepositoryPaths.TaxContent("us/state-reference-2026.json");
         using var catalog = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(catalogPath));
         var maryland = catalog.RootElement.GetProperty("jurisdictions").EnumerateArray()
             .Single(item => item.GetProperty("code").GetString() == "MD");
@@ -260,7 +260,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task IndianaSourceCapture_CoversStateFormulaCountyPrecedenceAndAllCountyRates()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/in/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/in/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -292,7 +292,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task NewYorkLocalSourceCapture_KeepsCityAndYonkersResidentAndNonresidentEnginesSeparate()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ny/2026-local-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ny/2026-local-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var rules = root.GetProperty("localRules").EnumerateArray().ToArray();
@@ -311,7 +311,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task MaineSourceCapture_PreservesOfficialFormulaAndActivationBlockers()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/me/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/me/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var rules = root.GetProperty("capturedRules");
@@ -328,7 +328,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task MichiganSourceCapture_SeparatesStateDetroitAndPendingCityRules()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/mi/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/mi/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var state = root.GetProperty("stateWithholding");
@@ -354,7 +354,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task OhioSourceCapture_PreservesMidyearTablesAndSeparateLocalSelectionModels()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/oh/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/oh/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var versions = root.GetProperty("stateWithholdingVersions").EnumerateArray().ToArray();
@@ -395,7 +395,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task IllinoisSourceCapture_PreservesAllowanceClassesAndMultiStateAllocation()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/il/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/il/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -417,7 +417,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task ColoradoSourceCapture_PreservesCertificatePrecedenceAndAnnualizedFormula()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/co/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/co/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -451,7 +451,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task NorthCarolinaSourceCapture_PreservesRoundingSupplementalAndNonresidentAlienBranches()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/nc/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/nc/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -477,7 +477,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task ArizonaSourceCapture_PreservesElectionDefaultsAndConditionalNonresidentThreshold()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/az/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/az/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -496,7 +496,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task IdahoSourceCapture_PreservesBoth2026VersionsAndSourceConflict()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/id/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/id/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var versions = root.GetProperty("calculationVersions").EnumerateArray().ToArray();
@@ -515,7 +515,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task MississippiSourceCapture_PreservesDollarExemptionAndMultiStateAllocation()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ms/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ms/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -535,7 +535,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task AlabamaSourceCapture_PreservesIncomeSensitiveDeductionsAndSafeHarbor()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/al/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/al/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -552,7 +552,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task ArkansasSourceCapture_PreservesMidpointFormulaHighIncomePhaseInAndTexarkana()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ar/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ar/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -572,7 +572,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task DelawareSourceCapture_PreservesBracketsExamplesAndEighthMonthlyFiling()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/de/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/de/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -591,7 +591,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task DistrictOfColumbiaSourceCapture_DoesNotPromoteLegacyTablesAs2026Rules()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/dc/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/dc/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -607,7 +607,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task GeorgiaSourceCapture_PreservesMayRateBoundaryAndNonresidentDualThreshold()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ga/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ga/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var versions = root.GetProperty("calculationVersions").EnumerateArray().ToArray();
@@ -627,7 +627,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task HawaiiSourceCapture_PreservesAnnualBracketsAndConditionalSixtyDayRule()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/hi/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/hi/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -646,7 +646,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task IowaSourceCapture_PreservesCertificateGenerationsFormulaAndReciprocity()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ia/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ia/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -663,7 +663,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task KansasSourceCapture_PreservesPercentageSchedulesResidentCreditAndAllocation()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ks/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ks/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -680,7 +680,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task KentuckySourceCapture_PreservesFormulaConditionalReciprocityAndPublishedDiscrepancy()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ky/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ky/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -698,7 +698,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task LouisianaSourceCapture_PreservesOfficialRateDeductionChoicesAndNoTaxStateRule()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/la/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/la/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -714,7 +714,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task MarylandSourceCapture_LinksLocalSchedulesAndPreservesCombinedMethod()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/md/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/md/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -731,7 +731,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task MassachusettsSourceCapture_PreservesSurtaxStatefulCapAndSupplementalMethod()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ma/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ma/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -748,7 +748,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task MinnesotaSourceCapture_PreservesSchedulesReciprocityAndResidentCredit()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/mn/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/mn/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -765,7 +765,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task MissouriSourceCapture_PreservesFormulaAllocationAndThresholdConflict()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/mo/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/mo/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -782,7 +782,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task MontanaSourceCapture_PreservesThreeSchedulesCeilingAndThirtyDayExceptions()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/mt/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/mt/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -799,7 +799,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task NebraskaSourceCapture_PreservesMinimumAndRetroactiveSevenDayRule()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ne/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ne/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -816,7 +816,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task NewJerseySourceCapture_PreservesFiveTablesDynamicConvenienceAndPaLocalDependency()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/nj/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/nj/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -833,7 +833,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task NorthDakotaSourceCapture_PreservesW4GenerationsAndConditionalReciprocity()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/nd/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/nd/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -850,7 +850,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task NewMexicoSourceCapture_PreservesExact2026SchedulesAndFifteenDayRule()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/nm/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/nm/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -867,7 +867,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task NewYorkSourceCapture_PreservesWholeWageTopMethodAndLocalLink()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ny/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ny/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -888,7 +888,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task OklahomaSourceCapture_PreservesSchedulesRoundingAndNonresidentThreshold()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ok/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ok/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -905,7 +905,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task OregonSourceCapture_PreservesPhaseOutsConflictsAndSupplementalRate()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/or/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/or/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -922,7 +922,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task PennsylvaniaSourceCapture_PreservesStateReciprocityAndStatefulLocalSelection()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/pa/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/pa/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var local = root.GetProperty("localWithholding");
@@ -939,7 +939,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task RhodeIslandSourceCapture_PreservesExemptionPhaseOutAndAllStatusSchedule()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ri/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/ri/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var calculation = capture.RootElement.GetProperty("calculation");
 
@@ -954,7 +954,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task SouthCarolinaSourceCapture_PreservesEquivalentMethodsAndNoTaxStateBranch()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/sc/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/sc/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -970,7 +970,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task VermontSourceCapture_PreservesHourAllocationAndChildCareContribution()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/vt/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/vt/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -987,7 +987,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task VirginiaSourceCapture_PreservesExemptionClassesReciprocityAndSunsetWarning()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/va/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/va/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -1004,7 +1004,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task WestVirginiaSourceCapture_PreservesTwoSchedulesAndRetroactiveThirtyDayRule()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/wv/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/wv/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -1020,7 +1020,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task WisconsinSourceCapture_PreservesPhaseOutSupplementalMenuAndStatefulNonresidentRule()
     {
-        var capturePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/wi/2026-source-capture.json"));
+        var capturePath = TestRepositoryPaths.TaxContent("us/wi/2026-source-capture.json");
         using var capture = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var root = capture.RootElement;
         var calculation = root.GetProperty("calculation");
@@ -1037,7 +1037,7 @@ public sealed class TaxAdministrationServiceTests : IDisposable
     [Fact]
     public async Task RemainingThirtyFiveStateCaptures_HaveIndividualInactiveAuditableEnvelopes()
     {
-        var catalogPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/state-reference-2026.json"));
+        var catalogPath = TestRepositoryPaths.TaxContent("us/state-reference-2026.json");
         using var catalog = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(catalogPath));
         var expectedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {

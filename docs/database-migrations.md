@@ -56,6 +56,12 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddProjectWipRevenueRecognition` adds the effective project recognition method and controlled cumulative WIP schedules with retained cost, contract, completion, earned-revenue, billing, contract-position, fingerprint, actor, decision, posting, and reversal evidence. Existing projects are backfilled to `AsBilled`. New standard charts add separate contract-asset and contract-liability controls during minimum setup. Downgrade is prohibited after use because it could delete period-end accounting conclusions and journal provenance; restore a verified pre-upgrade backup instead.
 
+`AddProjectPhaseCostCodeBudgets` adds project phase/task hierarchies, reusable company cost codes, and effective-period budget and forecast allocations. Lost-history adoption requires all three tables, concurrency fields, hierarchy and company foreign keys, and the uniqueness indexes that protect codes and allocation identity. Downgrade is prohibited because it could delete retained planning, hierarchy, and audit relationships.
+
+`AddProjectPhaseCostCodeLineDimensions` extends journal, invoice, bill, quote, sales-order, requisition, purchase-order, payroll-time, and payroll-earning lines with optional phase and cost-code attribution. Both providers add restrictive foreign keys and lookup indexes without rewriting existing project history. Lost-history adoption verifies representative columns and indexes before recording the migration. Downgrade is prohibited because it could delete retained accounting attribution.
+
+`AddProjectBillingLineDimensions` retains the source phase and cost code on controlled project-billing derivation lines so preview, approval revalidation, invoice creation, corrections, and historical display use the same attribution. Downgrade is prohibited because it could delete retained billing attribution.
+
 ## Verification
 
 At minimum, run:

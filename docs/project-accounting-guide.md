@@ -8,6 +8,10 @@ Open **Projects** to create or edit a job number, name, customer, start and expe
 
 Only an active project can receive new activity. BrassLedger rejects missing, closed, or other-company project references in journals, invoices, bills, quotes, sales orders, purchase requisitions, purchase orders, timecards, and payroll runs. Optimistic concurrency prevents one operator from silently overwriting another operator's project changes.
 
+Each project can have an arbitrarily deep hierarchy of phases, tasks, or work packages. Codes are unique within the project, a child must belong to the same project as its parent, date ranges must remain inside the parent range when both are specified, and cycle creation is rejected. Reusable company-scoped cost codes classify work independently of the project hierarchy. Inactive phases and cost codes remain visible on historical records but cannot receive new activity.
+
+Detailed budget allocations may combine a project, optional phase/task, optional cost code, optional active expense account, and an accounting period. The same dimension/account/period identity cannot be entered twice. Their total authorized budget cannot exceed the project's current budget, while forecast amounts may exceed it so an emerging overrun remains visible. Use a controlled change order before increasing the project budget itself. Allocation edits use concurrency tokens and retain audit evidence.
+
 Closing requires a close date, reason, and current concurrency token. A project cannot close while it has an open journal, quote, sales order, purchase order, purchase requisition, draft/submitted/approved payroll timecard, or unposted payroll run. Closing retains the actor, time, reason, and prior activity. Reopening also requires a reason and creates separate audit evidence. Corrective reversals and supplier returns can retain a historical closed-project dimension so closing a job does not make its posted accounting impossible to reverse.
 
 ## Controlled change orders
@@ -26,7 +30,7 @@ For time-and-materials work, maintain an earning-code-specific hourly rate or a 
 
 Fixed-price work supports either cumulative progress-to-date or a milestone amount. Progress billing calculates the incremental amount after every noncancelled prior billing. A proposal cannot regress cumulative progress or cause active and posted gross billing to exceed the current authorized contract. All external billing methods enforce that contract cap; approve a change order before billing additional scope.
 
-Every preview shows source, quantity, billing rate or price, source cost, markup, gross amount, retainage, and invoice amount. Saving is permitted only if the project token and a SHA-256 fingerprint of the commercial inputs and source calculations still match the preview. Saving atomically creates a project proposal, immutable line derivation, source reservation, audit event, and ordinary receivables draft. Database uniqueness and project concurrency prevent two operators from billing the same time or cost concurrently. A reserved or posted source cannot appear in another proposal. Customer, billing method, and retainage terms cannot be edited after billing history exists; this prevents later setup changes from contradicting retained invoice derivation.
+Every preview shows source, phase/task, cost code, quantity, billing rate or price, source cost, markup, gross amount, retainage, and invoice amount. Saving is permitted only if the project token and a SHA-256 fingerprint of the commercial inputs, source dimensions, and calculations still match the preview. Saving atomically creates a project proposal, immutable line derivation, source reservation, audit event, and ordinary receivables draft. The phase and cost code follow the retained source into that invoice draft. Database uniqueness and project concurrency prevent two operators from billing the same time or cost concurrently. A reserved or posted source cannot appear in another proposal. Customer, billing method, and retainage terms cannot be edited after billing history exists; this prevents later setup changes from contradicting retained invoice derivation.
 
 The linked receivables draft uses the normal independent approval and posting workflow. Approval rechecks the retained project concurrency token, every source reservation, approved or payroll-consumed time quantity and cost, and every posted-cost amount and unreversed journal state. If the project, billing history, or source changed after preparation, the reviewer must reject the draft and the preparer must correct it from a fresh preview. The project proposal follows Draft, Approved, Rejected, and Posted state changes atomically. A generic invoice correction cannot edit a project-derived draft. Instead, correct a rejected proposal from Projects; that re-derives eligible sources, preserves the prior payload and line summary in audit evidence, and returns the same invoice identity to Draft. Draft or rejected proposals can be cancelled with a reason, which cancels the linked invoice draft and releases their source reservations. An unresolved billing proposal blocks project close.
 
@@ -60,7 +64,7 @@ The project selector is available on:
 - purchase-requisition and purchase-order lines; and
 - payroll time and earning lines.
 
-The dimension follows the source line through approval, posting, fulfillment, invoice matching, customer and supplier returns, payroll posting, and reversal. Inventory shipments allocate COGS by project. Shipment invoices allocate revenue by project. Purchase invoice matching retains the purchase-order project on bill and variance lines. Payroll allocates gross pay and employer tax/benefit burden across each employee's project earnings; the final allocation absorbs rounding so the project lines reconcile exactly to the payroll posting.
+Project, phase/task, and cost code follow the source line through approval, posting, quote or requisition conversion, fulfillment, invoice matching, customer and supplier returns, payroll posting, project billing, and reversal. A phase or cost code cannot be supplied without its project. Inventory shipments allocate COGS by the retained source dimensions. Shipment invoices retain those dimensions on revenue. Purchase invoice matching retains them from the purchase-order line on bill and variance lines. Payroll allocates gross pay and employer tax/benefit burden across each employee's dimensioned earnings; the final allocation absorbs rounding so the project lines reconcile exactly to the payroll posting.
 
 Liability, cash, tax, and other balance-sheet lines may carry a project when they are source-line-specific, but the current project cost and revenue totals intentionally include only expense and revenue accounts.
 
@@ -74,11 +78,11 @@ The Projects page reports:
 - commitments from the unreceived value of active purchase-order lines; and
 - margin as revenue less actual cost.
 
-Totals scan the complete posted project ledger using exact decimal values. The on-screen drill-down is deliberately limited to the 250 most recent tagged lines to keep the workspace response bounded. Select a project to filter that recent-line view. Use the journal reference and source module to trace a line back to its authorized transaction.
+Totals scan the complete posted project ledger using exact decimal values. The on-screen drill-down is deliberately limited to the 250 most recent tagged lines to keep the workspace response bounded. Select a project to filter that recent-line view. Use the displayed phase/task and cost code together with the journal reference and source module to trace a line back to its authorized transaction.
 
 ## QuickBooks CSV interchange
 
-BrassLedger journal and zero-tax invoice CSV files include an optional `Project / Job` column containing the BrassLedger job number. Imports also accept `Project/Job`, `Project Job`, `Project`, or `Class` as header aliases. A populated value must resolve to one active project by job number or unique exact name; ambiguous, closed, foreign-company, and unknown values reject the batch instead of being discarded. Blank values remain unassigned.
+BrassLedger journal and zero-tax invoice CSV files include optional `Project / Job`, `Project Phase`, and `Cost Code` columns. Imports accept project aliases (`Project/Job`, `Project Job`, `Project`, or `Class`), phase aliases (`Phase`, `Project Task`, `Task`, or `Work Package`), and common cost-code spellings. A populated project must resolve by job number or unique exact name to one active same-company project. A phase must resolve inside that project, and a cost code must be active in the same company. A phase or cost code without a project, or an ambiguous, closed, foreign-company, or unknown value, rejects the batch instead of discarding attribution. Blank values remain unassigned.
 
 QuickBooks products and subscriptions expose project and class tracking differently. Treat this extra column as a controlled BrassLedger round-trip field and explicitly map or preserve it during the QuickBooks review step. A successful CSV parse does not prove that a particular QuickBooks subscription imported the dimension.
 
@@ -88,7 +92,7 @@ The following project-accounting capabilities remain future work and must not be
 
 - committed-cost forecasting beyond unreceived purchase-order value;
 - variable consideration, multiple performance obligations, and expected-loss provisions;
-- project-specific budgets by account, period, phase, task, department, or cost code;
+- department/class dimensions and cross-project resource planning beyond the implemented phase/task, cost-code, account, period, budget, and forecast allocations;
 - full historical project-ledger pagination/export beyond the recent workspace drill-down.
 
 Until those workflows are implemented and tested, record their accounting through controlled general journals or ordinary subledger documents with project assignments, retain the external approval evidence, and reconcile the result manually.

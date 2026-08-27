@@ -3,6 +3,7 @@ using System;
 using BrassLedger.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BrassLedger.Migrations.Sqlite.Migrations
 {
     [DbContext(typeof(BrassLedgerDbContext))]
-    partial class BrassLedgerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260827042019_AddProjectPhaseCostCodeLineDimensions")]
+    partial class AddProjectPhaseCostCodeLineDimensions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.30");
@@ -5561,12 +5564,6 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid>("ProjectBillingProposalId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
-                        .HasColumnType("TEXT");
-
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("TEXT");
@@ -5605,10 +5602,6 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ProjectCostCodeId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("ProjectBillingProposalId", "Sequence")
                         .IsUnique();
@@ -10075,16 +10068,6 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasForeignKey("ProjectBillingProposalId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
-                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingProposal", b =>

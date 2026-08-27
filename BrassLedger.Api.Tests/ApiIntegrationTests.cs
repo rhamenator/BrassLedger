@@ -1571,6 +1571,29 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/projects/{project.Id}", updateRequest)).StatusCode);
         project = Assert.Single((await client.GetFromJsonAsync<ProjectsWorkspace>("/api/projects"))!.Jobs, candidate => candidate.Id == project.Id);
         Assert.Equal("FixedPrice", project.BillingMethod);
+
+        var phaseRequest = new SaveProjectPhaseRequest(null, project.Id, null, "API.01", "API delivery", "Phase", "Controlled API phase", new DateOnly(2026, 8, 26), new DateOnly(2026, 12, 31));
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/projects/{Guid.NewGuid()}/phases", phaseRequest)).StatusCode);
+        var phaseResponse = await client.PostAsJsonAsync($"/api/projects/{project.Id}/phases", phaseRequest);
+        Assert.Equal(HttpStatusCode.Created, phaseResponse.StatusCode);
+        var phaseResult = await phaseResponse.Content.ReadFromJsonAsync<TransactionResult>();
+
+        var costCodeRequest = new SaveProjectCostCodeRequest(null, "API-LAB", "API labor", "Direct cost", "Controlled API cost code");
+        var costCodeResponse = await client.PostAsJsonAsync("/api/project-cost-codes", costCodeRequest);
+        Assert.Equal(HttpStatusCode.Created, costCodeResponse.StatusCode);
+        var costCodeResult = await costCodeResponse.Content.ReadFromJsonAsync<TransactionResult>();
+
+        var allocationRequest = new SaveProjectBudgetAllocationRequest(null, project.Id, phaseResult!.Id, costCodeResult!.Id, "5100", new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30), 1_000m, 1_200m, "API delivery forecast");
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/projects/{Guid.NewGuid()}/budget-allocations", allocationRequest)).StatusCode);
+        var allocationResponse = await client.PostAsJsonAsync($"/api/projects/{project.Id}/budget-allocations", allocationRequest);
+        Assert.Equal(HttpStatusCode.Created, allocationResponse.StatusCode);
+        var allocationResult = await allocationResponse.Content.ReadFromJsonAsync<TransactionResult>();
+
+        var dimensionWorkspace = await client.GetFromJsonAsync<ProjectsWorkspace>("/api/projects");
+        Assert.Contains(dimensionWorkspace!.Phases!, candidate => candidate.Id == phaseResult.Id && candidate.ProjectJobId == project.Id);
+        Assert.Contains(dimensionWorkspace.CostCodes!, candidate => candidate.Id == costCodeResult.Id && candidate.Code == "API-LAB");
+        Assert.Contains(dimensionWorkspace.BudgetAllocations!, candidate => candidate.Id == allocationResult!.Id && candidate.ProjectPhaseId == phaseResult.Id && candidate.ProjectCostCodeId == costCodeResult.Id);
+
         var changeRequest = new SaveProjectChangeOrderDraftRequest(null, project.Id, "CO-API-001", "API-approved scope", "Customer approved added integration work", new DateOnly(2026, 8, 27), new DateOnly(2026, 9, 1), 1_500m, 900m);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/projects/{Guid.NewGuid()}/change-orders", changeRequest)).StatusCode);
         var changeResponse = await client.PostAsJsonAsync($"/api/projects/{project.Id}/change-orders", changeRequest);

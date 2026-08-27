@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Playwright;
@@ -28,7 +29,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         _projectRoot = Path.Combine(_solutionRoot, "BrassLedger.Web");
         _buildConfiguration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
             ?? throw new InvalidOperationException("Could not determine the E2E test build configuration.");
-        _applicationPath = Path.Combine(_projectRoot, "bin", _buildConfiguration, "net8.0", "BrassLedger.Web.dll");
+        _applicationPath = ResolveApplicationPath();
         _dataRootPath = Path.Combine(Path.GetTempPath(), "BrassLedger.Web.E2E.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dataRootPath);
         _sqliteConnectionString = $"Data Source={Path.Combine(_dataRootPath, "brassledger.e2e.db")}";
@@ -333,16 +334,39 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         }));
     }
 
-    private static string ResolveSolutionRoot()
+    private string ResolveApplicationPath()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuredPath = Environment.GetEnvironmentVariable("BRASSLEDGER_E2E_APP_PATH");
+        var applicationPath = string.IsNullOrWhiteSpace(configuredPath)
+            ? Path.Combine(_projectRoot, "bin", _buildConfiguration, "net8.0", "BrassLedger.Web.dll")
+            : Path.GetFullPath(configuredPath);
+        return File.Exists(applicationPath)
+            ? applicationPath
+            : throw new FileNotFoundException("Could not locate the BrassLedger web application for E2E testing. Set BRASSLEDGER_E2E_APP_PATH when using an out-of-tree artifacts directory.", applicationPath);
+    }
 
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "BrassLedger.slnx")))
+    private static string ResolveSolutionRoot([CallerFilePath] string callerFilePath = "")
+    {
+        var configuredRoot = Environment.GetEnvironmentVariable("BRASSLEDGER_REPOSITORY_ROOT");
+        var startingPaths = new[]
         {
-            directory = directory.Parent;
+            configuredRoot,
+            Directory.GetCurrentDirectory(),
+            Path.GetDirectoryName(callerFilePath),
+            AppContext.BaseDirectory
+        };
+
+        foreach (var startingPath in startingPaths.Where(path => !string.IsNullOrWhiteSpace(path)))
+        {
+            var directory = new DirectoryInfo(startingPath!);
+            while (directory is not null)
+            {
+                if (File.Exists(Path.Combine(directory.FullName, "BrassLedger.slnx"))) return directory.FullName;
+                directory = directory.Parent;
+            }
         }
 
-        return directory?.FullName ?? throw new DirectoryNotFoundException("Could not locate BrassLedger.slnx from the test assembly path.");
+        throw new DirectoryNotFoundException("Could not locate BrassLedger.slnx. Set BRASSLEDGER_REPOSITORY_ROOT when E2E tests run outside the repository checkout.");
     }
 
     public static IReadOnlyList<BrowserKind> GetInstalledBrowsers()

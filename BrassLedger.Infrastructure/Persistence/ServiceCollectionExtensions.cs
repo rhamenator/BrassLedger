@@ -403,6 +403,32 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "ProjectWipSchedules", "ReversalJournalEntryId", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ProjectWipSchedules_JournalEntryId", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ProjectWipSchedules_ReversalJournalEntryId", cancellationToken);
+        if (migrationId.EndsWith("_AddProjectPhaseCostCodeBudgets", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "ProjectPhases", cancellationToken)
+                && await HasTableAsync(dbContext, "ProjectCostCodes", cancellationToken)
+                && await HasTableAsync(dbContext, "ProjectBudgetAllocations", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectPhases", "ParentProjectPhaseId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectBudgetAllocations", "ForecastAmount", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ProjectPhases_CompanyId_ProjectJobId_Code", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ProjectCostCodes_CompanyId_Code", cancellationToken);
+        if (migrationId.EndsWith("_AddProjectPhaseCostCodeLineDimensions", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "JournalEntryLines", "ProjectPhaseId", cancellationToken)
+                && await HasColumnAsync(dbContext, "JournalEntryLines", "ProjectCostCodeId", cancellationToken)
+                && await HasColumnAsync(dbContext, "SalesInvoiceLines", "ProjectPhaseId", cancellationToken)
+                && await HasColumnAsync(dbContext, "VendorBillLines", "ProjectCostCodeId", cancellationToken)
+                && await HasColumnAsync(dbContext, "PayrollTimeEntries", "ProjectPhaseId", cancellationToken)
+                && await HasColumnAsync(dbContext, "PayrollEarningLines", "ProjectCostCodeId", cancellationToken)
+                && await HasColumnAsync(dbContext, "SalesQuoteLines", "ProjectPhaseId", cancellationToken)
+                && await HasColumnAsync(dbContext, "SalesOrderLines", "ProjectCostCodeId", cancellationToken)
+                && await HasColumnAsync(dbContext, "PurchaseRequisitionLines", "ProjectPhaseId", cancellationToken)
+                && await HasColumnAsync(dbContext, "PurchaseOrderLines", "ProjectCostCodeId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_JournalEntryLines_ProjectPhaseId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_PayrollEarningLines_ProjectCostCodeId", cancellationToken);
+        if (migrationId.EndsWith("_AddProjectBillingLineDimensions", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "ProjectBillingLines", "ProjectPhaseId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectBillingLines", "ProjectCostCodeId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ProjectBillingLines_ProjectPhaseId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ProjectBillingLines_ProjectCostCodeId", cancellationToken);
         return false;
     }
 

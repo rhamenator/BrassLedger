@@ -3,6 +3,7 @@ using System;
 using BrassLedger.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BrassLedger.Migrations.Sqlite.Migrations
 {
     [DbContext(typeof(BrassLedgerDbContext))]
-    partial class BrassLedgerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260827035027_AddProjectPhaseCostCodeBudgets")]
+    partial class AddProjectPhaseCostCodeBudgets
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.30");
@@ -3075,20 +3078,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ProjectJobId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectPhaseId")
-                        .HasColumnType("TEXT");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("ProjectCostCodeId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("ProjectJobId", "JournalEntryId");
 
@@ -4001,13 +3994,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("PayrollTimeEntryId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ProjectJobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Rate")
@@ -4044,11 +4031,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasIndex("PayrollTimeEntryId");
 
-                    b.HasIndex("ProjectCostCodeId");
-
                     b.HasIndex("ProjectJobId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("PayrollRunEmployeeLineId", "Sequence")
                         .IsUnique();
@@ -5409,13 +5392,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid>("PayrollTimecardId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ProjectJobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Rate")
@@ -5450,11 +5427,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectCostCodeId");
-
                     b.HasIndex("ProjectJobId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("PayrollTimecardId", "Sequence")
                         .IsUnique();
@@ -5561,12 +5534,6 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid>("ProjectBillingProposalId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
-                        .HasColumnType("TEXT");
-
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("TEXT");
@@ -5605,10 +5572,6 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ProjectCostCodeId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("ProjectBillingProposalId", "Sequence")
                         .IsUnique();
@@ -6772,13 +6735,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ProjectJobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("PurchaseOrderId")
@@ -6802,11 +6759,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasIndex("InventoryItemId");
 
-                    b.HasIndex("ProjectCostCodeId");
-
                     b.HasIndex("ProjectJobId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("PurchaseOrderId", "Sequence")
                         .IsUnique();
@@ -6928,13 +6881,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid>("InventoryItemId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ProjectJobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("PurchaseRequisitionId")
@@ -6951,11 +6898,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasIndex("InventoryItemId");
 
-                    b.HasIndex("ProjectCostCodeId");
-
                     b.HasIndex("ProjectJobId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("PurchaseRequisitionId", "Sequence")
                         .IsUnique();
@@ -7089,13 +7032,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ProjectJobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Quantity")
@@ -7128,11 +7065,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasIndex("InventoryShipmentLineId");
 
-                    b.HasIndex("ProjectCostCodeId");
-
                     b.HasIndex("ProjectJobId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("RevenueAccountId");
 
@@ -7371,13 +7304,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ProjectJobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("ReturnedQuantity")
@@ -7413,11 +7340,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasIndex("InventoryItemId");
 
-                    b.HasIndex("ProjectCostCodeId");
-
                     b.HasIndex("ProjectJobId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("RevenueAccountId");
 
@@ -7525,13 +7448,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ProjectJobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Quantity")
@@ -7559,11 +7476,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasIndex("InventoryItemId");
 
-                    b.HasIndex("ProjectCostCodeId");
-
                     b.HasIndex("ProjectJobId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("RevenueAccountId");
 
@@ -9024,13 +8937,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectCostCodeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ProjectJobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ProjectPhaseId")
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Quantity")
@@ -9069,11 +8976,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.HasIndex("InventoryReceiptLineId");
 
-                    b.HasIndex("ProjectCostCodeId");
-
                     b.HasIndex("ProjectJobId");
-
-                    b.HasIndex("ProjectPhaseId");
 
                     b.HasIndex("VendorBillId", "Sequence")
                         .IsUnique();
@@ -9710,19 +9613,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.JournalEntryLine", b =>
                 {
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
                         .WithMany()
                         .HasForeignKey("ProjectJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -9833,19 +9726,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasForeignKey("PayrollTimeEntryId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
                         .WithMany()
                         .HasForeignKey("ProjectJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -10038,19 +9921,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
                         .WithMany()
                         .HasForeignKey("ProjectJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -10075,16 +9948,6 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasForeignKey("ProjectBillingProposalId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
-                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingProposal", b =>
@@ -10302,19 +10165,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
                         .WithMany()
                         .HasForeignKey("ProjectJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.PurchaseOrder", null)
@@ -10340,19 +10193,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
                         .WithMany()
                         .HasForeignKey("ProjectJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.PurchaseRequisition", null)
@@ -10387,19 +10230,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasForeignKey("InventoryShipmentLineId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
                         .WithMany()
                         .HasForeignKey("ProjectJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
@@ -10476,19 +10309,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
                         .WithMany()
                         .HasForeignKey("ProjectJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
@@ -10521,19 +10344,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
                         .WithMany()
                         .HasForeignKey("ProjectJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
@@ -10796,19 +10609,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasForeignKey("InventoryReceiptLineId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectCostCodeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
                         .WithMany()
                         .HasForeignKey("ProjectJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BrassLedger.Domain.Accounting.ProjectPhase", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectPhaseId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.VendorBill", null)

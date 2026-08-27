@@ -29,7 +29,7 @@ public sealed partial class AccountingTransactionService
         var itemIds = requestedLines.Select(line => line.InventoryItemId).ToArray();
         if (await db.InventoryItems.CountAsync(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id), cancellationToken) != itemIds.Length)
             return TransactionResult.Failure("Every purchase-order item must be active in the current company.");
-        if (!await AreActiveProjectsAsync(db, companyId, requestedLines.Select(line => line.ProjectJobId), cancellationToken))
+        if (!await AreActiveProjectDimensionsAsync(db, companyId, requestedLines.Select(line => (line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId)), cancellationToken))
             return TransactionResult.Failure("Every purchase-order project must be active and belong to this company.");
         var number = request.OrderNumber.Trim();
         if (await db.PurchaseOrders.AnyAsync(order => order.CompanyId == companyId && order.OrderNumber == number && order.Id != request.Id, cancellationToken))
@@ -74,6 +74,8 @@ public sealed partial class AccountingTransactionService
             Sequence = index + 1,
             InventoryItemId = line.InventoryItemId,
             ProjectJobId = line.ProjectJobId,
+            ProjectPhaseId = line.ProjectPhaseId,
+            ProjectCostCodeId = line.ProjectCostCodeId,
             Description = line.Description.Trim(),
             OrderedQuantity = RoundQuantity(line.Quantity),
             UnitCost = RoundCurrency(line.UnitCost),
@@ -98,7 +100,7 @@ public sealed partial class AccountingTransactionService
         if (!string.Equals(order.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The purchase order changed after it was opened. Refresh and review it again.");
         var approvalLines = await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).ToListAsync(cancellationToken);
         if (approvalLines.Count == 0) return TransactionResult.Failure("A purchase order must contain at least one line before approval.");
-        if (!await AreActiveProjectsAsync(db, companyId, approvalLines.Select(line => line.ProjectJobId), cancellationToken)) return TransactionResult.Failure("One or more purchase-order projects are closed or unavailable.");
+        if (!await AreActiveProjectDimensionsAsync(db, companyId, approvalLines.Select(line => (line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId)), cancellationToken)) return TransactionResult.Failure("One or more purchase-order project dimensions are closed or unavailable.");
         order.Status = "Approved";
         order.ApprovedByUserId = ResolveUserId();
         order.ApprovedAtUtc = DateTimeOffset.UtcNow;
@@ -151,8 +153,15 @@ public sealed partial class AccountingTransactionService
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var receiptId = Guid.NewGuid();
+        var receiptDimensions = requestedLines.Select(requested =>
+        {
+            var line = orderLines.Single(candidate => candidate.Id == requested.PurchaseOrderLineId);
+            return new { line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, Amount = RoundCurrency(RoundQuantity(requested.Quantity) * line.UnitCost) };
+        }).GroupBy(line => new { line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId }).Select(group => new { group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId, Amount = group.Sum(line => line.Amount) }).ToArray();
+        var receiptPostingLines = receiptDimensions.Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), item.Amount, 0m, "Inventory received", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId))
+            .Concat(receiptDimensions.Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.GoodsReceivedNotInvoiced), 0m, item.Amount, "Goods received not invoiced", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId))).ToArray();
         var posting = await PostAsync(db, companyId, request.ReceivedOn, "Purchasing", receiptNumber, $"Inventory receipt for purchase order {order.OrderNumber}",
-            [new(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), total, 0m, "Inventory received"), new(OperationalRoleReference(AccountingAccountRoles.GoodsReceivedNotInvoiced), 0m, total, "Goods received not invoiced")],
+            receiptPostingLines,
             cancellationToken, allowControlAccounts: true, sourceDocumentId: receiptId, sourceDocumentType: "InventoryReceipt", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
 

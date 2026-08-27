@@ -96,7 +96,7 @@ public sealed partial class AccountingTransactionService
         var project = await db.ProjectJobs.SingleAsync(x => x.Id == preview.ProjectJobId && x.CompanyId == companyId, cancellationToken);
         if (!string.Equals(project.ConcurrencyToken, request.ProjectConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The project changed after preview. Refresh and preview the billing again.");
 
-        var invoiceLines = preview.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.RetainageAmount, 0m, line.RevenueAccountNumber, project.Id)).ToArray();
+        var invoiceLines = preview.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.RetainageAmount, 0m, line.RevenueAccountNumber, project.Id, line.ProjectPhaseId, line.ProjectCostCodeId)).ToArray();
         var invoiceRequest = new CreateInvoiceRequest(project.CustomerId!.Value, request.PreviewRequest.InvoiceNumber.Trim(), request.PreviewRequest.InvoiceDate, request.PreviewRequest.DueDate, preview.GrossAmount, 0m, request.PreviewRequest.RevenueAccountNumber.Trim(), request.PreviewRequest.Description.Trim(), invoiceLines);
         var payloadJson = JsonSerializer.Serialize(invoiceRequest);
         var validationContext = new ProjectBillingProposal
@@ -168,7 +168,7 @@ public sealed partial class AccountingTransactionService
         proposal.CancelledByUserId = null; proposal.CancelledAtUtc = null; proposal.CancellationReason = string.Empty;
         proposal.ConcurrencyToken = Guid.NewGuid().ToString("N");
 
-        db.ProjectBillingLines.AddRange(preview.Lines.Select((line, index) => new ProjectBillingLine { Id = Guid.NewGuid(), ProjectBillingProposalId = proposal.Id, Sequence = index + 1, SourceType = line.SourceType, SourceId = line.SourceId, SourceKey = line.SourceKey, Description = line.Description, Quantity = line.Quantity, UnitPrice = line.UnitPrice, SourceCost = line.SourceCost, MarkupAmount = line.MarkupAmount, GrossAmount = line.GrossAmount, RetainageAmount = line.RetainageAmount, InvoiceAmount = line.InvoiceAmount, RevenueAccountNumber = line.RevenueAccountNumber }));
+        db.ProjectBillingLines.AddRange(preview.Lines.Select((line, index) => new ProjectBillingLine { Id = Guid.NewGuid(), ProjectBillingProposalId = proposal.Id, Sequence = index + 1, SourceType = line.SourceType, SourceId = line.SourceId, ProjectPhaseId = line.ProjectPhaseId, ProjectCostCodeId = line.ProjectCostCodeId, SourceKey = line.SourceKey, Description = line.Description, Quantity = line.Quantity, UnitPrice = line.UnitPrice, SourceCost = line.SourceCost, MarkupAmount = line.MarkupAmount, GrossAmount = line.GrossAmount, RetainageAmount = line.RetainageAmount, InvoiceAmount = line.InvoiceAmount, RevenueAccountNumber = line.RevenueAccountNumber }));
         var sourceKeys = preview.Lines.Where(x => x.SourceId.HasValue).Select(x => x.SourceKey).ToHashSet(StringComparer.Ordinal);
         var reservations = await db.ProjectBillingSourceReservations.Where(x => x.CompanyId == companyId && (sourceKeys.Contains(x.SourceKey) || x.ProjectBillingProposalId == proposal.Id)).ToListAsync(cancellationToken);
         foreach (var reservation in reservations.Where(x => x.ProjectBillingProposalId == proposal.Id && !sourceKeys.Contains(x.SourceKey))) { reservation.Status = "Released"; reservation.UpdatedAtUtc = now; reservation.ConcurrencyToken = Guid.NewGuid().ToString("N"); }
@@ -309,7 +309,7 @@ public sealed partial class AccountingTransactionService
                     var rate = rates.Where(x => (x.EarningCode == entry.EarningCode.ToUpper() || x.EarningCode == "*") && x.EffectiveOn <= entry.WorkDate && (x.EffectiveThrough == null || x.EffectiveThrough >= entry.WorkDate)).OrderBy(x => x.EarningCode == "*" ? 1 : 0).ThenByDescending(x => x.EffectiveOn).FirstOrDefault();
                     if (rate is null) return ProjectBillingPreview.Failure($"No effective billing rate covers {entry.EarningCode} time on {entry.WorkDate:yyyy-MM-dd}. Add a specific or * default rate.");
                     var gross = RoundCurrency(entry.Hours * rate.HourlyRate);
-                    if (gross > 0m) lines.Add(new("ApprovedTime", entry.Id, $"TIME:{entry.Id:N}", $"{entry.WorkDate:yyyy-MM-dd} {entry.EarningCode} — {entry.Hours:0.####} hours", entry.Hours, rate.HourlyRate, entry.Amount, gross - entry.Amount, gross, 0m, gross, revenueAccount));
+                    if (gross > 0m) lines.Add(new("ApprovedTime", entry.Id, $"TIME:{entry.Id:N}", $"{entry.WorkDate:yyyy-MM-dd} {entry.EarningCode} — {entry.Hours:0.####} hours", entry.Hours, rate.HourlyRate, entry.Amount, gross - entry.Amount, gross, 0m, gross, revenueAccount, entry.ProjectPhaseId, entry.ProjectCostCodeId));
                 }
             }
             if (request.IncludeCosts) await AddEligibleCostLinesAsync(db, companyId, project.Id, request, blocked, revenueAccount, false, lines, cancellationToken);
@@ -333,7 +333,7 @@ public sealed partial class AccountingTransactionService
         }
         var invoiceTotal = grossTotal - retainageTotal;
         if (invoiceTotal <= 0m) return ProjectBillingPreview.Failure("Retainage leaves no amount to invoice. Reduce retainage or use a future retainage-release workflow.");
-        var fingerprintPayload = JsonSerializer.Serialize(new { Request = request, project.Id, project.ConcurrencyToken, project.ContractAmount, project.RetainagePercent, previousGross, basis, Lines = lines.Select(x => new { x.SourceKey, x.Quantity, x.UnitPrice, x.SourceCost, x.MarkupAmount, x.GrossAmount, x.RetainageAmount, x.InvoiceAmount }) });
+        var fingerprintPayload = JsonSerializer.Serialize(new { Request = request, project.Id, project.ConcurrencyToken, project.ContractAmount, project.RetainagePercent, previousGross, basis, Lines = lines.Select(x => new { x.SourceKey, x.ProjectPhaseId, x.ProjectCostCodeId, x.Quantity, x.UnitPrice, x.SourceCost, x.MarkupAmount, x.GrossAmount, x.RetainageAmount, x.InvoiceAmount }) });
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintPayload))).ToLowerInvariant();
         return new(true, string.Empty, project.Id, project.ConcurrencyToken, basis, project.ContractAmount, previousGross, grossTotal, retainageTotal, invoiceTotal, fingerprint, lines);
     }
@@ -351,7 +351,7 @@ public sealed partial class AccountingTransactionService
         {
             var markup = RoundCurrency(item.Cost * request.CostMarkupPercent);
             var gross = RoundCurrency(item.Cost + markup);
-            lines.Add(new("PostedCost", item.Line.Id, $"COST:{item.Line.Id:N}", $"{item.Entry.PostedOn:yyyy-MM-dd} {item.Entry.Reference} — {item.Line.Description}", 1m, gross, item.Cost, markup, gross, 0m, gross, revenueAccount));
+            lines.Add(new("PostedCost", item.Line.Id, $"COST:{item.Line.Id:N}", $"{item.Entry.PostedOn:yyyy-MM-dd} {item.Entry.Reference} — {item.Line.Description}", 1m, gross, item.Cost, markup, gross, 0m, gross, revenueAccount, item.Line.ProjectPhaseId, item.Line.ProjectCostCodeId));
         }
     }
 
@@ -385,8 +385,8 @@ public sealed partial class AccountingTransactionService
                                     join card in db.PayrollTimecards on entry.PayrollTimecardId equals card.Id
                                     where entry.Id == sourceId && entry.ProjectJobId == proposal.ProjectJobId && card.CompanyId == companyId
                                         && (card.Status == "Approved" || card.Status == "Consumed")
-                                    select new { entry.Hours, entry.Amount, entry.WorkDate }).SingleOrDefaultAsync(cancellationToken);
-                if (source is null || source.WorkDate > proposal.BillingThrough || source.Hours != line.Quantity || source.Amount != line.SourceCost)
+                                    select new { entry.Hours, entry.Amount, entry.WorkDate, entry.ProjectPhaseId, entry.ProjectCostCodeId }).SingleOrDefaultAsync(cancellationToken);
+                if (source is null || source.WorkDate > proposal.BillingThrough || source.Hours != line.Quantity || source.Amount != line.SourceCost || source.ProjectPhaseId != line.ProjectPhaseId || source.ProjectCostCodeId != line.ProjectCostCodeId)
                     return "Approved time used by this proposal changed or was voided. Reject and correct the proposal from a fresh preview.";
             }
             else if (line.SourceType == "PostedCost")
@@ -396,8 +396,8 @@ public sealed partial class AccountingTransactionService
                                     join account in db.Accounts on journalLine.AccountId equals account.Id
                                     where journalLine.Id == sourceId && journalLine.ProjectJobId == proposal.ProjectJobId && journal.CompanyId == companyId
                                         && journal.IsPosted && journal.Status == "Posted" && journal.ReversedByJournalEntryId == null && account.Type == AccountType.Expense
-                                    select new { Cost = journalLine.Debit - journalLine.Credit, journal.PostedOn }).SingleOrDefaultAsync(cancellationToken);
-                if (source is null || source.PostedOn > proposal.BillingThrough || source.Cost <= 0m || source.Cost != line.SourceCost)
+                                    select new { Cost = journalLine.Debit - journalLine.Credit, journal.PostedOn, journalLine.ProjectPhaseId, journalLine.ProjectCostCodeId }).SingleOrDefaultAsync(cancellationToken);
+                if (source is null || source.PostedOn > proposal.BillingThrough || source.Cost <= 0m || source.Cost != line.SourceCost || source.ProjectPhaseId != line.ProjectPhaseId || source.ProjectCostCodeId != line.ProjectCostCodeId)
                     return "A posted project cost used by this proposal changed or was reversed. Reject and correct the proposal from a fresh preview.";
             }
             else if (line.SourceType == "RetainageRelease")

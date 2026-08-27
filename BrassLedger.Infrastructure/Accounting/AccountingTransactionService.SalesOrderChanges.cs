@@ -32,7 +32,7 @@ public sealed partial class AccountingTransactionService
         if (await db.InventoryPicks.AnyAsync(pick => pick.SalesOrderId == order.Id, cancellationToken) || await db.SalesOrderBackorderPromises.AnyAsync(backorder => backorder.SalesOrderId == order.Id, cancellationToken)) return TransactionResult.Failure("An order with pick, pack, or backorder-promise history cannot be amended. Cancel the open demand or create a replacement order.");
         var itemIds = requestedLines.Select(line => line.InventoryItemId).ToArray();
         if (await db.InventoryItems.CountAsync(item => item.CompanyId == companyId && item.IsActive && itemIds.Contains(item.Id), cancellationToken) != itemIds.Length) return TransactionResult.Failure("Every amended item must be active in the current company.");
-        if (!await AreActiveProjectsAsync(db, companyId, requestedLines.Select(line => line.ProjectJobId), cancellationToken)) return TransactionResult.Failure("Every amended project must be active and belong to this company.");
+        if (!await AreActiveProjectDimensionsAsync(db, companyId, requestedLines.Select(line => (line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId)), cancellationToken)) return TransactionResult.Failure("Every amended project, phase, and cost code must be active and belong to this company.");
         var revenueNumbers = requestedLines.Select(line => line.RevenueAccountNumber.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var revenueAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Revenue && !account.IsControlAccount && revenueNumbers.Contains(account.Number)).ToDictionaryAsync(account => account.Number, StringComparer.OrdinalIgnoreCase, cancellationToken);
         if (revenueAccounts.Count != revenueNumbers.Length) return TransactionResult.Failure("Every amended distribution must use an active, non-control revenue account.");
@@ -45,19 +45,19 @@ public sealed partial class AccountingTransactionService
         var beforeJson = JsonSerializer.Serialize(new
         {
             order.OrderedOn, order.RequestedShipOn, order.Notes, order.Status, order.TotalAmount,
-            Lines = existingLines.Select(line => new { line.Sequence, line.InventoryItemId, line.RevenueAccountId, line.ProjectJobId, line.Description, Quantity = line.OrderedQuantity, line.AllocatedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal })
+            Lines = existingLines.Select(line => new { line.Sequence, line.InventoryItemId, line.RevenueAccountId, line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, line.Description, Quantity = line.OrderedQuantity, line.AllocatedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal })
         });
         var amendedLines = requestedLines.Select((line, index) => new SalesOrderLine
         {
             Id = Guid.NewGuid(), SalesOrderId = order.Id, Sequence = index + 1, InventoryItemId = line.InventoryItemId,
-            RevenueAccountId = revenueAccounts[line.RevenueAccountNumber.Trim()].Id, ProjectJobId = line.ProjectJobId, Description = line.Description.Trim(), OrderedQuantity = RoundQuantity(line.Quantity),
+            RevenueAccountId = revenueAccounts[line.RevenueAccountNumber.Trim()].Id, ProjectJobId = line.ProjectJobId, ProjectPhaseId = line.ProjectPhaseId, ProjectCostCodeId = line.ProjectCostCodeId, Description = line.Description.Trim(), OrderedQuantity = RoundQuantity(line.Quantity),
             UnitPrice = RoundCurrency(line.UnitPrice), DiscountAmount = RoundCurrency(line.DiscountAmount), TaxAmount = RoundCurrency(line.TaxAmount),
             LineTotal = RoundCurrency(RoundQuantity(line.Quantity) * RoundCurrency(line.UnitPrice) - RoundCurrency(line.DiscountAmount) + RoundCurrency(line.TaxAmount))
         }).ToArray();
         var afterJson = JsonSerializer.Serialize(new
         {
             request.OrderedOn, request.RequestedShipOn, Notes = request.Notes?.Trim() ?? string.Empty, Status = "Draft", TotalAmount = amendedTotal,
-            Lines = amendedLines.Select(line => new { line.Sequence, line.InventoryItemId, line.RevenueAccountId, line.ProjectJobId, line.Description, Quantity = line.OrderedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal })
+            Lines = amendedLines.Select(line => new { line.Sequence, line.InventoryItemId, line.RevenueAccountId, line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, line.Description, Quantity = line.OrderedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal })
         });
         db.SalesOrderAmendments.Add(new SalesOrderAmendment { Id = Guid.NewGuid(), CompanyId = companyId, SalesOrderId = order.Id, RevisionNumber = revisionNumber, Reason = request.Reason.Trim(), BeforeJson = beforeJson, AfterJson = afterJson, AmendedByUserId = ResolveUserId(), AmendedAtUtc = DateTimeOffset.UtcNow });
         db.SalesOrderLines.RemoveRange(existingLines);

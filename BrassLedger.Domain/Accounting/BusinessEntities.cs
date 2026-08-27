@@ -340,6 +340,8 @@ public sealed class JournalEntryLine
     public Guid JournalEntryId { get; set; }
     public Guid AccountId { get; set; }
     public Guid? ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
@@ -496,6 +498,8 @@ public sealed class SalesInvoiceLine
     public int Sequence { get; set; }
     public Guid RevenueAccountId { get; set; }
     public Guid? ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public Guid? SalesOrderLineId { get; set; }
     public Guid? InventoryShipmentLineId { get; set; }
     public Guid? InventoryItemId { get; set; }
@@ -543,6 +547,8 @@ public sealed class VendorBillLine
     public int Sequence { get; set; }
     public Guid ExpenseAccountId { get; set; }
     public Guid? ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public decimal UnitCost { get; set; }
@@ -755,6 +761,8 @@ public sealed class SalesQuoteLine
     public Guid InventoryItemId { get; set; }
     public Guid RevenueAccountId { get; set; }
     public Guid? ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
@@ -793,6 +801,8 @@ public sealed class SalesOrderLine
     public Guid InventoryItemId { get; set; }
     public Guid RevenueAccountId { get; set; }
     public Guid? ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal OrderedQuantity { get; set; }
     public decimal AllocatedQuantity { get; set; }
@@ -1138,6 +1148,8 @@ public sealed class PurchaseRequisitionLine
     public int Sequence { get; set; }
     public Guid InventoryItemId { get; set; }
     public Guid? ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal RequestedQuantity { get; set; }
     public decimal EstimatedUnitCost { get; set; }
@@ -1151,6 +1163,8 @@ public sealed class PurchaseOrderLine
     public int Sequence { get; set; }
     public Guid InventoryItemId { get; set; }
     public Guid? ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal OrderedQuantity { get; set; }
     public decimal UnitCost { get; set; }
@@ -1586,6 +1600,8 @@ public sealed class PayrollTimeEntry
     public string WorkCity { get; set; } = string.Empty;
     public string WorkSchoolDistrict { get; set; } = string.Empty;
     public Guid? ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public string Notes { get; set; } = string.Empty;
     public string W2ReportingJson { get; set; } = "{}";
 }
@@ -1613,6 +1629,62 @@ public sealed class ProjectJob
     public Guid? ClosedByUserId { get; set; }
     public DateTimeOffset? ClosedAtUtc { get; set; }
     public string CloseReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ProjectPhase
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ProjectJobId { get; set; }
+    public Guid? ParentProjectPhaseId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Kind { get; set; } = "Phase";
+    public string Description { get; set; } = string.Empty;
+    public DateOnly? StartsOn { get; set; }
+    public DateOnly? EndsOn { get; set; }
+    public bool IsActive { get; set; } = true;
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? UpdatedByUserId { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ProjectCostCode
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? UpdatedByUserId { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ProjectBudgetAllocation
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
+    public Guid? AccountId { get; set; }
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    public decimal BudgetAmount { get; set; }
+    public decimal ForecastAmount { get; set; }
+    public string Notes { get; set; } = string.Empty;
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? UpdatedByUserId { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
@@ -1752,6 +1824,8 @@ public sealed class ProjectBillingLine
     public int Sequence { get; set; }
     public string SourceType { get; set; } = string.Empty;
     public Guid? SourceId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public string SourceKey { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
@@ -1982,6 +2056,8 @@ public sealed class PayrollEarningLine
     public Guid PayrollRunEmployeeLineId { get; set; }
     public Guid? PayrollTimeEntryId { get; set; }
     public Guid? ProjectJobId { get; set; }
+    public Guid? ProjectPhaseId { get; set; }
+    public Guid? ProjectCostCodeId { get; set; }
     public int Sequence { get; set; }
     public string EarningCode { get; set; } = "REGULAR";
     public string EarningType { get; set; } = "Regular";

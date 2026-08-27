@@ -163,6 +163,48 @@ api.MapPost("/projects/{projectJobId:guid}/reopen", async (Guid projectJobId, Re
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["project"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
 
+api.MapPost("/projects/{projectJobId:guid}/phases", async (Guid projectJobId, SaveProjectPhaseRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id.HasValue || request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("A new project phase must match the route project and cannot contain an identifier."));
+    var result = await service.SaveProjectPhaseAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/project-phases/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectPhase"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
+api.MapPut("/projects/{projectJobId:guid}/phases/{projectPhaseId:guid}", async (Guid projectJobId, Guid projectPhaseId, SaveProjectPhaseRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id != projectPhaseId || request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("The phase and project identifiers in the route and request must match."));
+    var result = await service.SaveProjectPhaseAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectPhase"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
+api.MapPost("/project-cost-codes", async (SaveProjectCostCodeRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id.HasValue) return Results.BadRequest(TransactionResult.Failure("A new cost code request cannot contain an identifier."));
+    var result = await service.SaveProjectCostCodeAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/project-cost-codes/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectCostCode"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
+api.MapPut("/project-cost-codes/{projectCostCodeId:guid}", async (Guid projectCostCodeId, SaveProjectCostCodeRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id != projectCostCodeId) return Results.BadRequest(TransactionResult.Failure("The cost-code identifier in the route and request must match."));
+    var result = await service.SaveProjectCostCodeAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectCostCode"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
+api.MapPost("/projects/{projectJobId:guid}/budget-allocations", async (Guid projectJobId, SaveProjectBudgetAllocationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id.HasValue || request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("A new budget allocation must match the route project and cannot contain an identifier."));
+    var result = await service.SaveProjectBudgetAllocationAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/project-budget-allocations/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectBudgetAllocation"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
+api.MapPut("/projects/{projectJobId:guid}/budget-allocations/{allocationId:guid}", async (Guid projectJobId, Guid allocationId, SaveProjectBudgetAllocationRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id != allocationId || request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("The allocation and project identifiers in the route and request must match."));
+    var result = await service.SaveProjectBudgetAllocationAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["projectBudgetAllocation"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageProjects);
+
 api.MapPost("/projects/{projectJobId:guid}/change-orders", async (Guid projectJobId, SaveProjectChangeOrderDraftRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     if (request.Id.HasValue || request.ProjectJobId != projectJobId) return Results.BadRequest(TransactionResult.Failure("A new change-order request must match the route project and cannot contain an identifier."));

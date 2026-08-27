@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("24", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("27", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -88,6 +88,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826210012_AddControlledProjectChangeOrders';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826225614_AddControlledProjectBilling';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827012549_AddProjectWipRevenueRecognition';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827035027_AddProjectPhaseCostCodeBudgets';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042019_AddProjectPhaseCostCodeLineDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042959_AddProjectBillingLineDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectPhases';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectCostCodes';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectBudgetAllocations';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('JournalEntryLines') WHERE name = 'ProjectPhaseId';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('PayrollEarningLines') WHERE name = 'ProjectCostCodeId';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ProjectBillingLines') WHERE name = 'ProjectPhaseId';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectWipSchedules';"));
         Assert.Equal("AsBilled", await ReadScalarAsync(connection, "SELECT RevenueRecognitionMethod FROM ProjectJobs ORDER BY JobNumber LIMIT 1;"));
         Assert.Equal("ContractAsset", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1120';"));
@@ -124,7 +133,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("24", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("27", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -148,6 +157,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826210012_AddControlledProjectChangeOrders';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826225614_AddControlledProjectBilling';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827012549_AddProjectWipRevenueRecognition';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827035027_AddProjectPhaseCostCodeBudgets';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042019_AddProjectPhaseCostCodeLineDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042959_AddProjectBillingLineDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectWipSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
@@ -3697,7 +3709,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var taxAdministration = scope.ServiceProvider.GetRequiredService<ITaxAdministrationService>();
-        var packagePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../tax-content/us/ny/2026-runtime-package.json"));
+        var packagePath = TestRepositoryPaths.TaxContent("us/ny/2026-runtime-package.json");
         var import = await taxAdministration.ImportTaxContentDocumentAsync(await File.ReadAllTextAsync(packagePath));
         Assert.True(import.Succeeded, import.ErrorMessage);
         var activation = await taxAdministration.ActivateContentPackageAsync(import.SavedId!.Value);
@@ -4407,6 +4419,174 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task ProjectDimensions_EnforceHierarchyCompanyBudgetAndConcurrencyControls()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; ProjectJob project; Guid foreignProjectId; Guid inventoryItemId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(x => x.Id).SingleAsync();
+            project = await db.ProjectJobs.Where(x => x.Status == "Active" && x.BudgetAmount > 0m).OrderBy(x => x.JobNumber).FirstAsync();
+            inventoryItemId = await db.InventoryItems.Where(x => x.IsActive).OrderBy(x => x.Sku).Select(x => x.Id).FirstAsync();
+            var foreignCompanyId = Guid.NewGuid(); foreignProjectId = Guid.NewGuid();
+            db.Companies.Add(new Company { Id = foreignCompanyId, Name = "Foreign dimensions", LegalName = "Foreign dimensions", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            db.ProjectJobs.Add(new ProjectJob { Id = foreignProjectId, CompanyId = foreignCompanyId, JobNumber = "FOREIGN-DIM", Name = "Invisible project", Status = "Active", BillingMethod = "Internal", RevenueRecognitionMethod = "AsBilled", BudgetAmount = 1_000m, CreatedAtUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        var userId = Guid.NewGuid();
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectsManage),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.JournalPrepare),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RequisitionManage)
+            ], "test"))
+        };
+
+        var foreign = await transactions.SaveProjectPhaseAsync(new(null, foreignProjectId, null, "X", "Cross-company phase", "Phase", "", null, null));
+        Assert.False(foreign.Succeeded);
+        Assert.Contains("not found", foreign.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var parentResult = await transactions.SaveProjectPhaseAsync(new(null, project.Id, null, " 01 ", "Foundation", "Phase", "Primary scope", new DateOnly(2026, 1, 1), new DateOnly(2026, 3, 31)));
+        Assert.True(parentResult.Succeeded, parentResult.ErrorMessage);
+        var childResult = await transactions.SaveProjectPhaseAsync(new(null, project.Id, parentResult.Id, "01.10", "Excavation", "Task", "", new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+        Assert.True(childResult.Succeeded, childResult.ErrorMessage);
+        var childOutsideParent = await transactions.SaveProjectPhaseAsync(new(null, project.Id, parentResult.Id, "01.20", "Out-of-range task", "Task", "", new DateOnly(2025, 12, 31), new DateOnly(2026, 4, 1)));
+        Assert.False(childOutsideParent.Succeeded);
+        Assert.Contains("parent", childOutsideParent.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var duplicatePhase = await transactions.SaveProjectPhaseAsync(new(null, project.Id, null, "01", "Duplicate", "Phase", "", null, null));
+        Assert.False(duplicatePhase.Succeeded);
+
+        ProjectPhase parent; ProjectPhase child;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            parent = await db.ProjectPhases.SingleAsync(x => x.Id == parentResult.Id);
+            child = await db.ProjectPhases.SingleAsync(x => x.Id == childResult.Id);
+        }
+        var cycle = await transactions.SaveProjectPhaseAsync(new(parent.Id, project.Id, child.Id, parent.Code, parent.Name, parent.Kind, parent.Description, parent.StartsOn, parent.EndsOn, true, parent.ConcurrencyToken));
+        Assert.False(cycle.Succeeded);
+        Assert.Contains("cycle", cycle.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var parentInsideChild = await transactions.SaveProjectPhaseAsync(new(parent.Id, project.Id, null, parent.Code, parent.Name, parent.Kind, parent.Description, new DateOnly(2026, 1, 15), parent.EndsOn, true, parent.ConcurrencyToken));
+        Assert.False(parentInsideChild.Succeeded);
+        Assert.Contains("child", parentInsideChild.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var activeChildBlock = await transactions.SaveProjectPhaseAsync(new(parent.Id, project.Id, null, parent.Code, parent.Name, parent.Kind, parent.Description, parent.StartsOn, parent.EndsOn, false, parent.ConcurrencyToken));
+        Assert.False(activeChildBlock.Succeeded);
+        Assert.Contains("child", activeChildBlock.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var costCodeResult = await transactions.SaveProjectCostCodeAsync(new(null, " lab ", "Labor", "Direct cost", "Reusable labor code"));
+        Assert.True(costCodeResult.Succeeded, costCodeResult.ErrorMessage);
+        var duplicateCode = await transactions.SaveProjectCostCodeAsync(new(null, "LAB", "Duplicate", "", ""));
+        Assert.False(duplicateCode.Succeeded);
+
+        var amount = Math.Min(project.BudgetAmount, 100m);
+        var allocationResult = await transactions.SaveProjectBudgetAllocationAsync(new(null, project.Id, child.Id, costCodeResult.Id, "5100", new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31), amount, amount + 25m, "Forecast preserves a visible overrun"));
+        Assert.True(allocationResult.Succeeded, allocationResult.ErrorMessage);
+        var duplicateAllocation = await transactions.SaveProjectBudgetAllocationAsync(new(null, project.Id, child.Id, costCodeResult.Id, "5100", new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31), amount, amount, "Duplicate key"));
+        Assert.False(duplicateAllocation.Succeeded);
+        var revenueAccount = await transactions.SaveProjectBudgetAllocationAsync(new(null, project.Id, null, null, "4000", new DateOnly(2026, 2, 1), new DateOnly(2026, 2, 28), 1m, 1m, "Wrong account type"));
+        Assert.False(revenueAccount.Succeeded);
+        Assert.Contains("expense", revenueAccount.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var overBudget = await transactions.SaveProjectBudgetAllocationAsync(new(null, project.Id, null, null, "5100", new DateOnly(2026, 3, 1), new DateOnly(2026, 3, 31), project.BudgetAmount, project.BudgetAmount, "Must exceed total"));
+        Assert.False(overBudget.Succeeded);
+        Assert.Contains("exceed", overBudget.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        ProjectBudgetAllocation allocation;
+        await using (var db = await factory.CreateDbContextAsync()) allocation = await db.ProjectBudgetAllocations.SingleAsync(x => x.Id == allocationResult.Id);
+        var updated = await transactions.SaveProjectBudgetAllocationAsync(new(allocation.Id, project.Id, child.Id, costCodeResult.Id, "5100", allocation.PeriodStart, allocation.PeriodEnd, allocation.BudgetAmount, allocation.ForecastAmount + 10m, "Updated forecast", allocation.ConcurrencyToken));
+        Assert.True(updated.Succeeded, updated.ErrorMessage);
+        var stale = await transactions.SaveProjectBudgetAllocationAsync(new(allocation.Id, project.Id, child.Id, costCodeResult.Id, "5100", allocation.PeriodStart, allocation.PeriodEnd, allocation.BudgetAmount, allocation.ForecastAmount, "Stale update", allocation.ConcurrencyToken));
+        Assert.False(stale.Succeeded);
+        Assert.Contains("changed", stale.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var remainingBudget = project.BudgetAmount - amount;
+        Assert.True(remainingBudget > 0m);
+        var concurrentAmount = Math.Round(remainingBudget * 0.75m, 2, MidpointRounding.AwayFromZero);
+        using var firstAllocationScope = services.CreateScope();
+        using var secondAllocationScope = services.CreateScope();
+        var concurrentAllocations = await Task.WhenAll(
+            firstAllocationScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().SaveProjectBudgetAllocationAsync(new(null, project.Id, null, costCodeResult.Id, "5100", new DateOnly(2026, 4, 1), new DateOnly(2026, 4, 30), concurrentAmount, concurrentAmount, "Concurrent allocation A")),
+            secondAllocationScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().SaveProjectBudgetAllocationAsync(new(null, project.Id, null, costCodeResult.Id, "5100", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), concurrentAmount, concurrentAmount, "Concurrent allocation B")));
+        Assert.Single(concurrentAllocations, result => result.Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.True((await db.ProjectBudgetAllocations.Where(x => x.ProjectJobId == project.Id).Select(x => x.BudgetAmount).ToListAsync()).Sum() <= project.BudgetAmount);
+
+        var workspace = await workspaceService.GetWorkspaceAsync();
+        Assert.Contains(workspace.Projects.Phases ?? [], x => x.Id == child.Id && x.ParentProjectPhaseId == parent.Id && x.Kind == "Task");
+        Assert.Contains(workspace.Projects.CostCodes ?? [], x => x.Id == costCodeResult.Id && x.Code == "LAB");
+        Assert.Contains(workspace.Projects.BudgetAllocations ?? [], x => x.Id == allocation.Id && x.ProjectPhaseCode == "01.10" && x.ProjectCostCode == "LAB" && x.ForecastAmount == amount + 35m);
+
+        var dimensionlessProject = await transactions.SaveJournalEntryDraftAsync(new(null, new DateOnly(2026, 1, 15), "DIM-NO-PROJECT", "Dimensions require their project", [new JournalLineRequest("5100", 1m, 0m, "Invalid", null, child.Id, costCodeResult.Id), new JournalLineRequest("4000", 0m, 1m, "Offset")]));
+        Assert.False(dimensionlessProject.Succeeded);
+        Assert.Contains("project", dimensionlessProject.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var requisitionResult = await transactions.SavePurchaseRequisitionAsync(new(
+            null,
+            null,
+            "REQ-PROJECT-DIMENSIONS",
+            new DateOnly(2026, 1, 15),
+            new DateOnly(2026, 1, 31),
+            "Retain project dimensions from requisition entry",
+            [new(inventoryItemId, "Project material", 2m, 25m, project.Id, child.Id, costCodeResult.Id)]));
+        Assert.True(requisitionResult.Succeeded, requisitionResult.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var requisitionLine = await db.PurchaseRequisitionLines.SingleAsync(x => x.PurchaseRequisitionId == requisitionResult.Id);
+            Assert.Equal(project.Id, requisitionLine.ProjectJobId);
+            Assert.Equal(child.Id, requisitionLine.ProjectPhaseId);
+            Assert.Equal(costCodeResult.Id, requisitionLine.ProjectCostCodeId);
+        }
+        var requisitionWorkspace = await workspaceService.GetWorkspaceAsync();
+        var requisitionSnapshot = Assert.Single(requisitionWorkspace.Operations.PurchaseRequisitions!, x => x.Id == requisitionResult.Id);
+        var requisitionLineSnapshot = Assert.Single(requisitionSnapshot.Lines);
+        Assert.Equal(project.Id, requisitionLineSnapshot.ProjectJobId);
+        Assert.Equal(child.Id, requisitionLineSnapshot.ProjectPhaseId);
+        Assert.Equal(costCodeResult.Id, requisitionLineSnapshot.ProjectCostCodeId);
+
+        const string importHeader = "Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description,Project / Job,Project Phase,Cost Code\r\n";
+        var importCsv = importHeader
+            + $"DIM-IMPORT,2026-01-15,DIM-REF,Dimension import,5100,10,0,Imported project cost,{project.JobNumber},{child.Code},LAB\r\n"
+            + $"DIM-IMPORT,2026-01-15,DIM-REF,Dimension import,4000,0,10,Imported project revenue,{project.JobNumber},{child.Code},LAB\r\n";
+        await using (var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(importCsv)))
+        {
+            var imported = await interchange.ImportQuickBooksOnlineCsvAsync("journal-entries", content, new(false, "project-dimensions.csv"));
+            Assert.True(imported.Succeeded, string.Join("; ", imported.Errors));
+            Assert.Equal(1, imported.ImportedCount);
+        }
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var importedEntry = await db.JournalEntries.SingleAsync(x => x.CompanyId == companyId && x.Description.Contains("QuickBooks journal DIM-IMPORT"));
+            var importedLines = await db.JournalEntryLines.Where(x => x.JournalEntryId == importedEntry.Id).ToListAsync();
+            Assert.All(importedLines, line => { Assert.Equal(project.Id, line.ProjectJobId); Assert.Equal(child.Id, line.ProjectPhaseId); Assert.Equal(costCodeResult.Id, line.ProjectCostCodeId); });
+            importedEntry.Status = "Posted";
+            importedEntry.IsPosted = true;
+            await db.SaveChangesAsync();
+        }
+        var exported = await interchange.ExportQuickBooksOnlineCsvAsync("journal-entries");
+        Assert.NotNull(exported);
+        var exportedCsv = System.Text.Encoding.UTF8.GetString(exported.Content);
+        Assert.Contains("\"Project Phase\",\"Cost Code\"", exportedCsv, StringComparison.Ordinal);
+        Assert.Contains($"\"{child.Code}\",\"LAB\"", exportedCsv, StringComparison.Ordinal);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var actions = await db.BusinessAuditEntries.Where(x => x.EntityId == parent.Id || x.EntityId == child.Id || x.EntityId == costCodeResult.Id || x.EntityId == allocation.Id).Select(x => x.Action).ToListAsync();
+            Assert.Contains("project-phase.created", actions);
+            Assert.Contains("project-cost-code.created", actions);
+            Assert.Contains("project-budget-allocation.created", actions);
+            Assert.Contains("project-budget-allocation.updated", actions);
+        }
+    }
+
+    [Fact]
     public async Task ProjectChangeOrders_RequireIndependentApprovalAndAtomicallyReviseAuthorizedTotals()
     {
         using var services = CreateServiceProvider();
@@ -4592,6 +4772,12 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var projectResult = await transactions.SaveProjectJobAsync(new(null, "JOB-BILLING-1", "Controlled project billing", customerId, new DateOnly(2026, 8, 1), null, "TimeAndMaterials", 1_000m, 700m, 0.10m));
         Assert.True(projectResult.Succeeded, projectResult.ErrorMessage);
         var projectId = projectResult.Id!.Value;
+        var phaseResult = await transactions.SaveProjectPhaseAsync(new(null, projectId, null, "LABOR", "Labor phase", "Phase", "Billable labor", new DateOnly(2026, 8, 1), null));
+        Assert.True(phaseResult.Succeeded, phaseResult.ErrorMessage);
+        var costCodeResult = await transactions.SaveProjectCostCodeAsync(new(null, "LAB-BILL", "Billable labor", "Labor", "Project labor billed to customers"));
+        Assert.True(costCodeResult.Succeeded, costCodeResult.ErrorMessage);
+        var phaseId = phaseResult.Id!.Value;
+        var costCodeId = costCodeResult.Id!.Value;
         var rateResult = await transactions.SaveProjectBillingRateAsync(new(null, projectId, "REGULAR", 100m, new DateOnly(2026, 8, 1), null));
         Assert.True(rateResult.Succeeded, rateResult.ErrorMessage);
         var overlappingRate = await transactions.SaveProjectBillingRateAsync(new(null, projectId, "REGULAR", 110m, new DateOnly(2026, 8, 15), null));
@@ -4605,8 +4791,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
             firstTimeEntryId = Guid.NewGuid(); secondTimeEntryId = Guid.NewGuid();
             db.PayrollTimecards.Add(card);
             db.PayrollTimeEntries.AddRange(
-                new PayrollTimeEntry { Id = firstTimeEntryId, PayrollTimecardId = card.Id, Sequence = 1, WorkDate = new DateOnly(2026, 8, 18), EarningCode = "REGULAR", EarningType = "Regular", Hours = 2m, Rate = 30m, Amount = 60m, ProjectJobId = projectId },
-                new PayrollTimeEntry { Id = secondTimeEntryId, PayrollTimecardId = card.Id, Sequence = 2, WorkDate = new DateOnly(2026, 8, 19), EarningCode = "REGULAR", EarningType = "Regular", Hours = 1m, Rate = 30m, Amount = 30m, ProjectJobId = projectId });
+                new PayrollTimeEntry { Id = firstTimeEntryId, PayrollTimecardId = card.Id, Sequence = 1, WorkDate = new DateOnly(2026, 8, 18), EarningCode = "REGULAR", EarningType = "Regular", Hours = 2m, Rate = 30m, Amount = 60m, ProjectJobId = projectId, ProjectPhaseId = phaseId, ProjectCostCodeId = costCodeId },
+                new PayrollTimeEntry { Id = secondTimeEntryId, PayrollTimecardId = card.Id, Sequence = 2, WorkDate = new DateOnly(2026, 8, 19), EarningCode = "REGULAR", EarningType = "Regular", Hours = 1m, Rate = 30m, Amount = 30m, ProjectJobId = projectId, ProjectPhaseId = phaseId, ProjectCostCodeId = costCodeId });
             await db.SaveChangesAsync();
         }
 
@@ -4615,6 +4801,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(preview.Succeeded, preview.ErrorMessage);
         var previewLine = Assert.Single(preview.Lines);
         Assert.Equal(firstTimeEntryId, previewLine.SourceId);
+        Assert.Equal(phaseId, previewLine.ProjectPhaseId);
+        Assert.Equal(costCodeId, previewLine.ProjectCostCodeId);
         Assert.Equal(200m, preview.GrossAmount);
         Assert.Equal(20m, preview.RetainageAmount);
         Assert.Equal(180m, preview.InvoiceAmount);
@@ -4628,6 +4816,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
             proposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == saved.Id);
             workflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == proposal.SubledgerDocumentWorkflowId);
             project = await db.ProjectJobs.SingleAsync(x => x.Id == projectId);
+            var billingLine = await db.ProjectBillingLines.SingleAsync(x => x.ProjectBillingProposalId == proposal.Id);
+            Assert.Equal(phaseId, billingLine.ProjectPhaseId);
+            Assert.Equal(costCodeId, billingLine.ProjectCostCodeId);
             Assert.Equal("Reserved", (await db.ProjectBillingSourceReservations.SingleAsync(x => x.SourceKey == $"TIME:{firstTimeEntryId:N}")).Status);
         }
         var closeBlocked = await transactions.CloseProjectJobAsync(new(projectId, new DateOnly(2026, 8, 31), "Billing remains unresolved", project.ConcurrencyToken));
@@ -4668,6 +4859,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var invoiceLine = await db.SalesInvoiceLines.SingleAsync(x => x.SalesInvoiceId == invoice.Id);
             Assert.Equal(20m, invoiceLine.DiscountAmount);
             Assert.Equal(projectId, invoiceLine.ProjectJobId);
+            Assert.Equal(phaseId, invoiceLine.ProjectPhaseId);
+            Assert.Equal(costCodeId, invoiceLine.ProjectCostCodeId);
         }
         SetUser(posterId, BrassLedgerPermissions.PayrollReverse);
         PayrollTimecard billedTimecard;
@@ -4694,7 +4887,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         var workspace = await workspaceService.GetWorkspaceAsync();
         Assert.Contains(workspace.Projects.BillingRates!, x => x.ProjectJobId == projectId && x.EarningCode == "REGULAR");
-        Assert.Contains(workspace.Projects.BillingProposals!, x => x.Id == saved.Id && x.Status == "Posted" && x.Lines.Count == 1);
+        Assert.Contains(workspace.Projects.BillingProposals!, x => x.Id == saved.Id && x.Status == "Posted" && x.Lines.Count == 1 && x.Lines[0].ProjectPhaseCode == "LABOR" && x.Lines[0].ProjectCostCode == "LAB-BILL");
+        var postedInvoiceSnapshot = Assert.Single(workspace.Receivables.Invoices, x => x.Id == posted.Id);
+        var postedInvoiceLineSnapshot = Assert.Single(postedInvoiceSnapshot.Lines!);
+        Assert.Equal(projectId, postedInvoiceLineSnapshot.ProjectJobId);
+        Assert.Equal("JOB-BILLING-1", postedInvoiceLineSnapshot.ProjectJobNumber);
+        Assert.Equal(phaseId, postedInvoiceLineSnapshot.ProjectPhaseId);
+        Assert.Equal("LABOR", postedInvoiceLineSnapshot.ProjectPhaseCode);
+        Assert.Equal(costCodeId, postedInvoiceLineSnapshot.ProjectCostCodeId);
+        Assert.Equal("LAB-BILL", postedInvoiceLineSnapshot.ProjectCostCode);
 
         SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PaymentReverse);
         var voided = await transactions.VoidInvoiceAsync(new(posted.Id!.Value, new DateOnly(2026, 8, 26), "Customer cancelled the billed work"));
