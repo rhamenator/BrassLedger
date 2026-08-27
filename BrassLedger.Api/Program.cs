@@ -909,6 +909,34 @@ api.MapGet("/consolidation-groups/{groupId:guid}/account-mappings", async (Guid 
     var workspace = await service.GetAccountMappingWorkspaceAsync(groupId, cancellationToken);
     return workspace is null ? Results.NotFound() : Results.Ok(workspace);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapPut("/consolidation-groups/{groupId:guid}/trading-partners", async (Guid groupId, SaveConsolidationTradingPartnerRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId) return Results.BadRequest(new { error = "consolidation_group_id_mismatch" });
+    var result = await service.SaveTradingPartnerAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["tradingPartner"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/consolidation-groups/{groupId:guid}/trading-partners", async (Guid groupId, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var workspace = await service.GetTradingPartnerWorkspaceAsync(groupId, cancellationToken);
+    return workspace is null ? Results.NotFound() : Results.Ok(workspace);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapPost("/consolidation-groups/{groupId:guid}/intercompany-matches/discover", async (Guid groupId, DiscoverConsolidationIntercompanyMatchesRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId) return Results.BadRequest(new { error = "consolidation_group_id_mismatch" });
+    var result = await service.DiscoverIntercompanyMatchesAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["intercompanyMatch"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.PrepareJournals);
+api.MapGet("/consolidation-groups/{groupId:guid}/intercompany-matches", async (Guid groupId, DateOnly periodStart, DateOnly asOf, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var workspace = await service.GetIntercompanyMatchWorkspaceAsync(groupId, periodStart, asOf, cancellationToken);
+    return workspace is null ? Results.NotFound() : Results.Ok(workspace);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapPost("/consolidation-groups/{groupId:guid}/intercompany-matches/{matchId:guid}/decision", async (Guid groupId, Guid matchId, SetConsolidationIntercompanyMatchDecisionRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.MatchId != matchId) return Results.BadRequest(new { error = "consolidation_intercompany_match_id_mismatch" });
+    var result = await service.SetIntercompanyMatchDecisionAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["intercompanyMatch"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.PrepareJournals);
 api.MapPut("/consolidation-groups/{groupId:guid}/adjustments", async (Guid groupId, SaveConsolidationAdjustmentRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
 {
     if (request.ConsolidationGroupId != groupId) return Results.BadRequest(new { error = "consolidation_group_id_mismatch" });

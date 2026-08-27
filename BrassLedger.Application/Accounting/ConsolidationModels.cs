@@ -7,6 +7,11 @@ public interface IConsolidationService
     Task<TransactionResult> SaveGroupAsync(SaveConsolidationGroupRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveOwnershipPeriodAsync(SaveConsolidationOwnershipPeriodRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveAccountMappingAsync(SaveConsolidationAccountMappingRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveTradingPartnerAsync(SaveConsolidationTradingPartnerRequest request, CancellationToken cancellationToken = default);
+    Task<ConsolidationTradingPartnerWorkspace?> GetTradingPartnerWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default);
+    Task<ConsolidationIntercompanyDiscoveryResult> DiscoverIntercompanyMatchesAsync(DiscoverConsolidationIntercompanyMatchesRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SetIntercompanyMatchDecisionAsync(SetConsolidationIntercompanyMatchDecisionRequest request, CancellationToken cancellationToken = default);
+    Task<ConsolidationIntercompanyMatchWorkspace?> GetIntercompanyMatchWorkspaceAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ConsolidationGroupSnapshot>> GetGroupsAsync(CancellationToken cancellationToken = default);
     Task<ConsolidationAccountMappingWorkspace?> GetAccountMappingWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveAdjustmentAsync(SaveConsolidationAdjustmentRequest request, CancellationToken cancellationToken = default);
@@ -30,6 +35,15 @@ public sealed record SaveConsolidationAccountMappingRequest(Guid? Id, Guid Conso
 public sealed record ConsolidationSourceAccountSnapshot(Guid CompanyId, string CompanyName, Guid AccountId, string AccountNumber, string AccountName, string AccountType);
 public sealed record ConsolidationAccountMappingSnapshot(Guid Id, Guid CompanyId, string CompanyName, Guid AccountId, string AccountNumber, string AccountName, string AccountType, string ReportingAccountNumber, string ReportingAccountName, string ReportingAccountType, string TranslationMethod, DateOnly EffectiveFrom, DateOnly? EffectiveThrough, bool IsActive, string ConcurrencyToken);
 public sealed record ConsolidationAccountMappingWorkspace(Guid GroupId, string GroupName, IReadOnlyList<ConsolidationSourceAccountSnapshot> SourceAccounts, IReadOnlyList<ConsolidationAccountMappingSnapshot> Mappings);
+public sealed record SaveConsolidationTradingPartnerRequest(Guid? Id, Guid ConsolidationGroupId, Guid MemberCompanyId, Guid CounterpartyCompanyId, Guid? CustomerId, Guid? VendorId, DateOnly EffectiveFrom, DateOnly? EffectiveThrough, bool IsActive = true, string ConcurrencyToken = "");
+public sealed record ConsolidationTradingPartnerCandidateSnapshot(Guid CompanyId, string CompanyName, string Kind, Guid CounterpartyRecordId, string Number, string Name);
+public sealed record ConsolidationTradingPartnerSnapshot(Guid Id, Guid MemberCompanyId, string MemberCompanyName, Guid CounterpartyCompanyId, string CounterpartyCompanyName, string Kind, Guid CounterpartyRecordId, string Number, string Name, DateOnly EffectiveFrom, DateOnly? EffectiveThrough, bool IsActive, string ConcurrencyToken);
+public sealed record ConsolidationTradingPartnerWorkspace(Guid GroupId, string GroupName, IReadOnlyList<ConsolidationGroupMemberSnapshot> Members, IReadOnlyList<ConsolidationTradingPartnerCandidateSnapshot> Candidates, IReadOnlyList<ConsolidationTradingPartnerSnapshot> Links);
+public sealed record DiscoverConsolidationIntercompanyMatchesRequest(Guid ConsolidationGroupId, DateOnly PeriodStart, DateOnly AsOf);
+public sealed record ConsolidationIntercompanyDiscoveryResult(bool Succeeded, string ErrorMessage, int CreatedCount, int RefreshedCount, IReadOnlyList<string> Warnings);
+public sealed record SetConsolidationIntercompanyMatchDecisionRequest(Guid ConsolidationGroupId, Guid MatchId, string Decision, string Reason, string ConcurrencyToken);
+public sealed record ConsolidationIntercompanyMatchSnapshot(Guid Id, Guid SellerCompanyId, string SellerCompanyName, Guid BuyerCompanyId, string BuyerCompanyName, Guid SalesInvoiceId, string InvoiceNumber, DateOnly InvoiceDate, Guid VendorBillId, string BillNumber, DateOnly BillDate, string MatchReference, string Currency, decimal Amount, decimal SellerBalanceDue, decimal BuyerBalanceDue, string Status, string ReviewReason, string? ReviewedBy, DateTimeOffset? ReviewedAtUtc, Guid? ConsolidationAdjustmentBatchId, string ConcurrencyToken);
+public sealed record ConsolidationIntercompanyMatchWorkspace(Guid GroupId, string GroupName, DateOnly PeriodStart, DateOnly AsOf, IReadOnlyList<ConsolidationIntercompanyMatchSnapshot> Matches);
 public sealed record ConsolidationAdjustmentLineRequest(string ReportingAccountNumber, string ReportingAccountName, string ReportingAccountType, decimal Debit, decimal Credit, string Description = "", Guid? SourceCompanyId = null, Guid? CounterpartyCompanyId = null);
 public sealed record SaveConsolidationAdjustmentRequest(Guid? Id, Guid ConsolidationGroupId, DateOnly PeriodStart, DateOnly AsOf, string Kind, string Reference, string Description, string MatchReference, IReadOnlyList<ConsolidationAdjustmentLineRequest> Lines, string ConcurrencyToken = "");
 public sealed record ConsolidationAdjustmentActionRequest(Guid ConsolidationGroupId, Guid AdjustmentBatchId, string ConcurrencyToken);

@@ -75,4 +75,68 @@ public sealed class ConsolidationAdministrationTests(PlaywrightWebAppFixture fix
             await poster.AssertNoUiFailuresAsync("consolidation adjustment posting and reversal");
         }
     }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task IntercompanyMatching_ConfiguresReviewsAndPreparesControlledElimination(BrowserKind browserKind)
+    {
+        await fixture.CreateConsolidationWorkflowAsync();
+        try
+        {
+        await using var session = await fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync("integration-admin");
+        await session.GotoAsync("/administration");
+        await session.WaitForHeadingAsync("Define role templates, separate duties, and prepare replacement access before it becomes urgent.");
+        var groupRow = session.Page.GetByRole(AriaRole.Row).Filter(new() { HasTextString = "E2E controlled consolidation" });
+        await groupRow.GetByRole(AriaRole.Button, new() { Name = "Trading partners" }).ClickAsync();
+
+        var memberRecord = session.Page.GetByLabel("Intercompany member customer or vendor");
+        var counterparty = session.Page.GetByLabel("Intercompany counterparty company");
+        await memberRecord.SelectOptionAsync(new SelectOptionValue { Label = "Brass Ledger Manufacturing · Customer · E2E-IC-CUST · E2E intercompany affiliate" });
+        await counterparty.SelectOptionAsync(new SelectOptionValue { Label = "E2E intercompany affiliate" });
+        await session.Page.GetByLabel("Trading partner effective from").FillAsync("2026-01-01");
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Save trading-partner link" }).ClickAsync();
+        await Assertions.Expect(session.Page.GetByText("Trading-partner link saved with retained effective-date history.")).ToBeVisibleAsync();
+
+        await memberRecord.SelectOptionAsync(new SelectOptionValue { Label = "E2E intercompany affiliate · Vendor · E2E-IC-VEND · Brass Ledger Manufacturing" });
+        await counterparty.SelectOptionAsync(new SelectOptionValue { Label = "Brass Ledger Manufacturing" });
+        await session.Page.GetByLabel("Trading partner effective from").FillAsync("2026-01-01");
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Save trading-partner link" }).ClickAsync();
+        var links = session.Page.GetByRole(AriaRole.Table, new() { Name = "Intercompany trading partner links" });
+        await Assertions.Expect(links).ToContainTextAsync("E2E-IC-CUST");
+        await Assertions.Expect(links).ToContainTextAsync("E2E-IC-VEND");
+
+        await session.GotoAsync("/reporting");
+        await session.WaitForHeadingAsync("Reports, labels, forms, and print fidelity stay in the product.");
+        await session.Page.Locator("#adjustmentPeriodStart").FillAsync("2026-01-01");
+        await session.Page.Locator("#adjustmentAsOf").FillAsync("2026-08-31");
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Discover exact matches" }).ClickAsync();
+        var matches = session.Page.GetByRole(AriaRole.Table, new() { Name = "Reviewed intercompany matches" });
+        await Assertions.Expect(matches).ToContainTextAsync("E2E-IC-INV-1001");
+        await Assertions.Expect(matches).ToContainTextAsync("125.00 USD");
+
+        await session.Page.Locator("#adjustmentDecisionReason").FillAsync("E2E supporting documents require review");
+        await matches.GetByRole(AriaRole.Button, new() { Name = "Exclude" }).ClickAsync();
+        await Assertions.Expect(matches).ToContainTextAsync("Excluded");
+        await Assertions.Expect(matches).ToContainTextAsync("E2E supporting documents require review");
+        await matches.GetByRole(AriaRole.Button, new() { Name = "Restore" }).ClickAsync();
+        await matches.GetByRole(AriaRole.Button, new() { Name = "Prepare elimination" }).ClickAsync();
+        await Assertions.Expect(session.Page.Locator("#adjustmentMatchReference")).ToHaveValueAsync("IC-71000000000000000000000000000022-71000000000000000000000000000023");
+        await Assertions.Expect(session.Page.GetByText("No accounting entry has been inferred or posted.", new() { Exact = false })).ToBeVisibleAsync();
+
+        var accountSelectors = session.Page.GetByLabel("Reporting account");
+        await accountSelectors.Nth(0).SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await accountSelectors.Nth(1).SelectOptionAsync(new SelectOptionValue { Index = 2 });
+        await session.Page.GetByLabel("Adjustment debit").Nth(0).FillAsync("125.00");
+        await session.Page.GetByLabel("Adjustment credit").Nth(1).FillAsync("125.00");
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Prepare draft" }).ClickAsync();
+        await Assertions.Expect(session.Page.GetByRole(AriaRole.Table, new() { Name = "Retained consolidation adjustments" })).ToContainTextAsync("ELIM-E2E-IC-INV-1001");
+        await Assertions.Expect(matches).ToContainTextAsync("Controlled");
+        await session.AssertNoUiFailuresAsync("reviewed intercompany matching and controlled elimination preparation");
+        }
+        finally
+        {
+            await fixture.RemoveIntercompanyMatchingWorkflowAsync();
+        }
+    }
 }

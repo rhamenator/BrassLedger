@@ -1248,6 +1248,164 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("ConsolidationGroupCompanies");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationIntercompanyMatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("BuyerBalanceDue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BuyerCompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ConsolidationAdjustmentBatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConsolidationGroupId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("DiscoveredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MatchReference")
+                        .IsRequired()
+                        .HasMaxLength(68)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReviewReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ReviewedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SalesInvoiceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("SellerBalanceDue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SellerCompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("VendorBillId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BuyerCompanyId");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("ConsolidationAdjustmentBatchId")
+                        .IsUnique();
+
+                    b.HasIndex("SalesInvoiceId");
+
+                    b.HasIndex("SellerCompanyId");
+
+                    b.HasIndex("VendorBillId");
+
+                    b.HasIndex("ConsolidationGroupId", "SalesInvoiceId")
+                        .IsUnique();
+
+                    b.HasIndex("ConsolidationGroupId", "VendorBillId")
+                        .IsUnique();
+
+                    b.ToTable("ConsolidationIntercompanyMatches");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationTradingPartner", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConsolidationGroupId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CounterpartyCompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("EffectiveFrom")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("EffectiveThrough")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MemberCompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("VendorId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("CounterpartyCompanyId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("MemberCompanyId");
+
+                    b.HasIndex("VendorId");
+
+                    b.HasIndex("ConsolidationGroupId", "MemberCompanyId", "CustomerId", "EffectiveFrom")
+                        .IsUnique();
+
+                    b.HasIndex("ConsolidationGroupId", "MemberCompanyId", "VendorId", "EffectiveFrom")
+                        .IsUnique();
+
+                    b.ToTable("ConsolidationTradingPartners");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.CurrencyExchangeRate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9667,6 +9825,87 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.Company", null)
                         .WithMany()
                         .HasForeignKey("SourceCompanyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationIntercompanyMatch", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("BuyerCompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationAdjustmentBatch", null)
+                        .WithOne()
+                        .HasForeignKey("BrassLedger.Domain.Accounting.ConsolidationIntercompanyMatch", "ConsolidationAdjustmentBatchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ConsolidationGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.SalesInvoice", null)
+                        .WithMany()
+                        .HasForeignKey("SalesInvoiceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("SellerCompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.VendorBill", null)
+                        .WithMany()
+                        .HasForeignKey("VendorBillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationTradingPartner", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ConsolidationGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CounterpartyCompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("MemberCompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Vendor", null)
+                        .WithMany()
+                        .HasForeignKey("VendorId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

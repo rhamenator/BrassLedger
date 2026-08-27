@@ -93,6 +93,42 @@ public sealed class ConsolidationPostgresTests
             Assert.Single(rateAttempts, result => result.Succeeded);
             Assert.Single(rateAttempts, result => !result.Succeeded);
 
+            Guid affiliateId = Guid.NewGuid(); Guid intercompanyCustomerId = Guid.NewGuid();
+            using (var tradingPartnerSetupScope = provider.CreateScope())
+            {
+                var factory = tradingPartnerSetupScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+                db.Companies.Add(new BrassLedger.Domain.Accounting.Company { Id = affiliateId, Name = "PostgreSQL intercompany affiliate", LegalName = "PostgreSQL intercompany affiliate LLC", TaxId = $"PG-IC-{Guid.NewGuid():N}", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+                db.CompanyMemberships.Add(new BrassLedger.Domain.Accounting.CompanyMembership { Id = Guid.NewGuid(), UserId = ownerId, CompanyId = affiliateId, Role = "Controller", IsOwner = true, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
+                db.ConsolidationGroupCompanies.Add(new BrassLedger.Domain.Accounting.ConsolidationGroupCompany { Id = Guid.NewGuid(), ConsolidationGroupId = groupId, MemberCompanyId = affiliateId, OwnershipPercentage = 1m, EffectiveFrom = new DateOnly(2027, 1, 1), ConcurrencyToken = Guid.NewGuid().ToString("N") });
+                db.Customers.Add(new BrassLedger.Domain.Accounting.Customer { Id = intercompanyCustomerId, CompanyId = companyId, CustomerNumber = "PG-IC-CUST", Name = "PostgreSQL intercompany affiliate", Email = "pg-ic@example.invalid", State = "MI", CreditLimit = 1000m });
+                await db.SaveChangesAsync();
+            }
+            using var seventhScope = provider.CreateScope(); using var eighthScope = provider.CreateScope(); SetContext(seventhScope, companyId, ownerId); SetContext(eighthScope, companyId, ownerId);
+            var tradingPartnerAttempts = await Task.WhenAll(
+                seventhScope.ServiceProvider.GetRequiredService<IConsolidationService>().SaveTradingPartnerAsync(new(null, groupId, companyId, affiliateId, intercompanyCustomerId, null, new DateOnly(2027, 1, 1), null)),
+                eighthScope.ServiceProvider.GetRequiredService<IConsolidationService>().SaveTradingPartnerAsync(new(null, groupId, companyId, affiliateId, intercompanyCustomerId, null, new DateOnly(2027, 2, 1), null)));
+            Assert.Single(tradingPartnerAttempts, result => result.Succeeded);
+            Assert.Single(tradingPartnerAttempts, result => !result.Succeeded);
+
+            Guid intercompanyVendorId = Guid.NewGuid(); Guid intercompanyInvoiceId = Guid.NewGuid(); Guid intercompanyBillId = Guid.NewGuid();
+            using (var discoverySetupScope = provider.CreateScope())
+            {
+                var factory = discoverySetupScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+                db.Vendors.Add(new BrassLedger.Domain.Accounting.Vendor { Id = intercompanyVendorId, CompanyId = affiliateId, VendorNumber = "PG-IC-VEND", Name = "Parent", Email = "pg-ic-parent@example.invalid", State = "MI", PaymentTerms = "Net 30" });
+                db.SalesInvoices.Add(new BrassLedger.Domain.Accounting.SalesInvoice { Id = intercompanyInvoiceId, CompanyId = companyId, CustomerId = intercompanyCustomerId, InvoiceNumber = "PG-IC-INV-1", InvoiceDate = new DateOnly(2027, 3, 1), DueDate = new DateOnly(2027, 3, 31), Status = "Open", Subtotal = 50m, TotalAmount = 50m, BalanceDue = 50m, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+                db.VendorBills.Add(new BrassLedger.Domain.Accounting.VendorBill { Id = intercompanyBillId, CompanyId = affiliateId, VendorId = intercompanyVendorId, BillNumber = "pg-ic-inv-1", BillDate = new DateOnly(2027, 3, 2), DueDate = new DateOnly(2027, 4, 1), Status = "Open", TotalAmount = 50m, BalanceDue = 50m, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+                await db.SaveChangesAsync();
+                SetContext(discoverySetupScope, companyId, ownerId, BrassLedgerPermissions.JournalPrepare);
+                var reciprocal = await discoverySetupScope.ServiceProvider.GetRequiredService<IConsolidationService>().SaveTradingPartnerAsync(new(null, groupId, affiliateId, companyId, null, intercompanyVendorId, new DateOnly(2027, 1, 1), null));
+                Assert.True(reciprocal.Succeeded, reciprocal.ErrorMessage);
+            }
+            using var ninthScope = provider.CreateScope(); using var tenthScope = provider.CreateScope(); SetContext(ninthScope, companyId, ownerId, BrassLedgerPermissions.JournalPrepare); SetContext(tenthScope, companyId, ownerId, BrassLedgerPermissions.JournalPrepare);
+            var discoveryAttempts = await Task.WhenAll(
+                ninthScope.ServiceProvider.GetRequiredService<IConsolidationService>().DiscoverIntercompanyMatchesAsync(new(groupId, new DateOnly(2027, 1, 1), new DateOnly(2027, 3, 31))),
+                tenthScope.ServiceProvider.GetRequiredService<IConsolidationService>().DiscoverIntercompanyMatchesAsync(new(groupId, new DateOnly(2027, 1, 1), new DateOnly(2027, 3, 31))));
+            Assert.Contains(discoveryAttempts, result => result.Succeeded);
+            Assert.Equal(1, discoveryAttempts.Sum(result => result.CreatedCount));
+
             Guid offsetAccountId; string offsetNumber; string offsetName; BrassLedger.Domain.Accounting.AccountType offsetType;
             var reviewerOne = Guid.NewGuid(); var reviewerTwo = Guid.NewGuid(); var posterOne = Guid.NewGuid(); var posterTwo = Guid.NewGuid(); var reverserOne = Guid.NewGuid(); var reverserTwo = Guid.NewGuid();
             using (var adjustmentSetupScope = provider.CreateScope())
@@ -140,7 +176,7 @@ public sealed class ConsolidationPostgresTests
             Assert.Single(reversalAttempts, result => result.Succeeded); Assert.Single(reversalAttempts, result => !result.Succeeded);
 
             using var verificationScope = provider.CreateScope(); var verificationFactory = verificationScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var verification = await verificationFactory.CreateDbContextAsync();
-            Assert.Equal(2, await verification.ConsolidationGroupCompanies.CountAsync(period => period.ConsolidationGroupId == groupId));
+            Assert.Equal(3, await verification.ConsolidationGroupCompanies.CountAsync(period => period.ConsolidationGroupId == groupId));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-ownership.created" && entry.EntityType == "ConsolidationGroupCompany"));
             Assert.Equal(1, await verification.ConsolidationAccountMappings.CountAsync(mapping => mapping.ConsolidationGroupId == groupId && mapping.MemberAccountId == sourceAccountId));
             var sourceMappingId = await verification.ConsolidationAccountMappings
@@ -151,6 +187,9 @@ public sealed class ConsolidationPostgresTests
                 entry.Action == "consolidation-account-mapping.created"
                 && entry.EntityType == "ConsolidationAccountMapping"
                 && entry.EntityId == sourceMappingId));
+            Assert.Equal(1, await verification.ConsolidationTradingPartners.CountAsync(link => link.ConsolidationGroupId == groupId && link.CustomerId == intercompanyCustomerId));
+            Assert.Equal(2, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-trading-partner.created" && entry.EntityType == "ConsolidationTradingPartner"));
+            Assert.Equal(1, await verification.ConsolidationIntercompanyMatches.CountAsync(match => match.ConsolidationGroupId == groupId && match.SalesInvoiceId == intercompanyInvoiceId && match.VendorBillId == intercompanyBillId));
             Assert.Equal(2, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityType == nameof(BrassLedger.Domain.Accounting.CurrencyExchangeRate)));
             Assert.Equal("Reversed", await verification.ConsolidationAdjustmentBatches.Where(batch => batch.Id == adjustmentId).Select(batch => batch.Status).SingleAsync());
             Assert.Equal(2, await verification.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == groupId));

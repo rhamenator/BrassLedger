@@ -74,6 +74,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddControlledConsolidationAdjustments` adds the separate reporting ledger for exact-period manual adjustments and explicit intercompany eliminations. Batches retain preparation, independent decision, posting, rejection, concurrency, match, and reversal evidence; lines retain reporting identity and optional source/counterparty member provenance. Restrictive group/company relationships and unique batch/sequence indexes protect attribution. Lost-history adoption requires both tables, lifecycle and reversal columns, company-pair provenance, and both provider-specific control indexes. Downgrade is prohibited because it could delete posted consolidation history and review evidence.
 
+`AddReviewedIntercompanyMatching` adds retained effective-dated customer/vendor-to-member links and persisted exact invoice/bill suggestions. Restrictive company, group, document, and adjustment relationships preserve provenance; unique per-group invoice and bill indexes prevent one document from being silently paired twice. Lost-history adoption requires both tables, every material effective-date, document, review, adjustment-link, and concurrency column, plus all four provider-specific identity indexes. `ConstrainIntercompanyMatchMetadata` records the reviewed metadata-size contract (and applies bounded PostgreSQL column types). Downgrade is prohibited because it could remove link history, review decisions, or the schema contract used to validate retained matching evidence.
+
 ## Verification
 
 At minimum, run:

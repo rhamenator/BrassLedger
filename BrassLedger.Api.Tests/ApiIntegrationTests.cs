@@ -120,6 +120,18 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var group = Assert.Single(await client.GetFromJsonAsync<IReadOnlyList<ConsolidationGroupSnapshot>>("/api/consolidation-groups") ?? [], item => item.Id == groupResult!.Id);
         Assert.Equal("39999", group.CtaAccountNumber);
         Assert.Contains(group.Members, member => member.CompanyId == subsidiaryId && member.EffectiveFrom == new DateOnly(2026, 2, 1) && member.OwnershipPercentage == .75m);
+        var tradingPartnerWorkspace = await client.GetFromJsonAsync<ConsolidationTradingPartnerWorkspace>($"/api/consolidation-groups/{group.Id}/trading-partners");
+        Assert.NotNull(tradingPartnerWorkspace);
+        var candidate = tradingPartnerWorkspace.Candidates.First(item => item.CompanyId == existingCompany.CompanyId && item.Kind == "Customer");
+        var tradingPartnerRequest = new SaveConsolidationTradingPartnerRequest(null, group.Id, existingCompany.CompanyId, subsidiaryId, candidate.CounterpartyRecordId, null, new DateOnly(2026, 2, 1), null);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/trading-partners", tradingPartnerRequest)).StatusCode);
+        var discoveryRequest = new DiscoverConsolidationIntercompanyMatchesRequest(group.Id, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30));
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/intercompany-matches/discover", discoveryRequest)).StatusCode);
+        var emptyMatches = await client.GetFromJsonAsync<ConsolidationIntercompanyMatchWorkspace>($"/api/consolidation-groups/{group.Id}/intercompany-matches?periodStart=2026-01-01&asOf=2026-06-30");
+        Assert.Empty(emptyMatches!.Matches);
+        var matchId = Guid.NewGuid();
+        var mismatchedDecision = new SetConsolidationIntercompanyMatchDecisionRequest(group.Id, matchId, "Restore", string.Empty, "stale-token");
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/intercompany-matches/{Guid.NewGuid()}/decision", mismatchedDecision)).StatusCode);
         var overlapping = new SaveConsolidationOwnershipPeriodRequest(null, group.Id, subsidiaryId, .8m, new DateOnly(2026, 3, 1), null);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/ownership-periods", overlapping)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-periods", overlapping)).StatusCode);

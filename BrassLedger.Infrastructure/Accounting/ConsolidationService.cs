@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BrassLedger.Infrastructure.Accounting;
 
-public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext> dbContextFactory, IHttpContextAccessor httpContextAccessor) : IConsolidationService
+public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDbContext> dbContextFactory, IHttpContextAccessor httpContextAccessor) : IConsolidationService
 {
     public async Task<TransactionResult> SaveExchangeRateAsync(SaveExchangeRateRequest request, CancellationToken cancellationToken = default)
     {
@@ -251,6 +251,8 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
         if (entity is not null && (entity.ConsolidationGroupId != request.ConsolidationGroupId || entity.PeriodStart != request.PeriodStart || entity.AsOf != request.AsOf || entity.Kind != kind))
             return TransactionResult.Failure("A retained adjustment cannot be moved to another group, period, or kind. Create a separate adjustment instead.");
         entity ??= new ConsolidationAdjustmentBatch { Id = Guid.NewGuid(), CompanyId = companyId.Value, ConsolidationGroupId = group.Id, PeriodStart = request.PeriodStart, AsOf = request.AsOf, Kind = kind };
+        var matchError = await ControlIntercompanyMatchAsync(db, entity, kind, matchReference, parsedLines.Select(item => item.Request).ToArray(), userId.Value, cancellationToken);
+        if (matchError is not null) return TransactionResult.Failure(matchError);
         entity.Reference = reference; entity.Description = description; entity.MatchReference = matchReference; entity.Status = "Draft";
         entity.PreparedByUserId = userId; entity.PreparedAtUtc = DateTimeOffset.UtcNow; entity.ApprovedByUserId = null; entity.ApprovedAtUtc = null; entity.RejectedByUserId = null; entity.RejectedAtUtc = null; entity.DecisionReason = string.Empty; entity.ConcurrencyToken = Guid.NewGuid().ToString("N");
         if (db.Entry(entity).State == EntityState.Detached) db.ConsolidationAdjustmentBatches.Add(entity);

@@ -162,7 +162,7 @@ else
                     <div class="field-group"><label class="field-label" for="adjustmentDescription">Description</label><InputText id="adjustmentDescription" class="field-input" maxlength="1000" @bind-Value="AdjustmentForm.Description" /></div>
                     @if (AdjustmentForm.Kind == "IntercompanyElimination")
                     {
-                        <div class="field-group"><label class="field-label" for="adjustmentMatchReference">Match reference</label><InputText id="adjustmentMatchReference" class="field-input" maxlength="160" @bind-Value="AdjustmentForm.MatchReference" /><small class="muted-copy">Use an invoice, settlement, reconciliation, or other shared reference. BrassLedger does not infer a match silently.</small></div>
+                        <div class="field-group"><label class="field-label" for="adjustmentMatchReference">Match reference</label><InputText id="adjustmentMatchReference" class="field-input" maxlength="160" @bind-Value="AdjustmentForm.MatchReference" /><small class="muted-copy">Use a reviewed discovery result or an invoice, settlement, reconciliation, or other shared reference. Discovery never infers accounting lines or posts silently.</small></div>
                     }
                 </div>
                 @if (AdjustmentWorkspace is null)
@@ -171,6 +171,16 @@ else
                 }
                 else
                 {
+                    <section aria-labelledby="intercompanyMatchHeading">
+                        <h3 id="intercompanyMatchHeading">Reviewed intercompany matches</h3>
+                        <p class="page-intro">Discovery retains only unambiguous same-currency invoice and bill pairs with exact references and amounts through effective customer/vendor links. It never posts an elimination or guesses accounting lines.</p>
+                        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="DiscoverIntercompanyMatchesAsync">Discover exact matches</button></AuthorizeView>
+                        @if (IntercompanyMatchWorkspace?.Matches.Count > 0)
+                        {
+                            <div class="table-scroll"><table class="data-table" aria-label="Reviewed intercompany matches"><thead><tr><th>Seller invoice</th><th>Buyer bill</th><th>Amount / balances</th><th>Status</th><th>Actions</th></tr></thead><tbody>@foreach (var match in IntercompanyMatchWorkspace.Matches) { <tr><td>@match.SellerCompanyName · @match.InvoiceNumber<br /><small>@match.InvoiceDate</small></td><td>@match.BuyerCompanyName · @match.BillNumber<br /><small>@match.BillDate</small></td><td>@match.Amount.ToString("N2") @match.Currency<br /><small>AR @match.SellerBalanceDue.ToString("N2") · AP @match.BuyerBalanceDue.ToString("N2")</small></td><td>@match.Status@if (!string.IsNullOrWhiteSpace(match.ReviewReason)) { <br /><small>@match.ReviewReason</small> }</td><td><div class="hero-actions">@if (match.Status == "Suggested") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-primary" type="button" @onclick="() => UseIntercompanyMatch(match)">Prepare elimination</button><button class="action-secondary" type="button" @onclick="() => ExcludeIntercompanyMatchAsync(match)">Exclude</button></AuthorizeView> } else if (match.Status == "Excluded") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => RestoreIntercompanyMatchAsync(match)">Restore</button></AuthorizeView> } else { <span>Adjustment @match.ConsolidationAdjustmentBatchId</span> }</div></td></tr> }</tbody></table></div>
+                        }
+                        else { <p class="muted-copy">No retained exact matches exist for this group and period.</p> }
+                    </section>
                     <EditForm Model="AdjustmentForm" OnValidSubmit="SaveAdjustmentAsync">
                         <div class="table-scroll">
                             <table class="data-table" aria-label="Consolidation adjustment lines">
@@ -198,7 +208,7 @@ else
                         <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddAdjustmentLine">Add line</button><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="adjustmentPreparationAuthorization"><button class="action-primary" type="submit">@(AdjustmentForm.Id.HasValue ? "Save corrected draft" : "Prepare draft")</button></AuthorizeView>@if (AdjustmentForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetAdjustmentForm">Cancel edit</button> }<button class="action-secondary" type="button" @onclick="RunConsolidatedReportAsync">Preview consolidated balance</button></div>
                     </EditForm>
 
-                    <div class="field-group"><label class="field-label" for="adjustmentDecisionReason">Rejection or reversal reason</label><InputText id="adjustmentDecisionReason" class="field-input" maxlength="1000" @bind-Value="DecisionReason" /></div>
+                    <div class="field-group"><label class="field-label" for="adjustmentDecisionReason">Rejection, exclusion, or reversal reason</label><InputText id="adjustmentDecisionReason" class="field-input" maxlength="1000" @bind-Value="DecisionReason" /></div>
                     @if (AdjustmentWorkspace.Adjustments.Count == 0) { <p class="muted-copy">No retained consolidation entries exist for this group.</p> }
                     else
                     {
@@ -225,6 +235,7 @@ else
     private BusinessWorkspaceSnapshot? Workspace;
     private IReadOnlyList<ConsolidationGroupSnapshot> ConsolidationGroups = [];
     private ConsolidationAdjustmentWorkspace? AdjustmentWorkspace;
+    private ConsolidationIntercompanyMatchWorkspace? IntercompanyMatchWorkspace;
     private ConsolidatedBalanceReport? ConsolidatedReport;
     private Guid SelectedGroupId;
     private AdjustmentEditor AdjustmentForm = NewAdjustmentEditor();
@@ -243,7 +254,7 @@ else
     {
         if (Guid.TryParse(args.Value?.ToString(), out var groupId)) { SelectedGroupId = groupId; ResetAdjustmentForm(); await LoadAdjustmentWorkspaceAsync(); }
     }
-    private async Task LoadAdjustmentWorkspaceAsync() { AdjustmentWorkspace = await ConsolidationService.GetAdjustmentWorkspaceAsync(SelectedGroupId); ConsolidatedReport = null; }
+    private async Task LoadAdjustmentWorkspaceAsync() { AdjustmentWorkspace = await ConsolidationService.GetAdjustmentWorkspaceAsync(SelectedGroupId); IntercompanyMatchWorkspace = await ConsolidationService.GetIntercompanyMatchWorkspaceAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); ConsolidatedReport = null; }
     private static AdjustmentEditor NewAdjustmentEditor() => new() { Lines = [new(), new()] };
     private void ResetAdjustmentForm() { AdjustmentForm = NewAdjustmentEditor(); DecisionReason = string.Empty; ConsolidationMessage = string.Empty; ConsolidationError = false; }
     private void AddAdjustmentLine() => AdjustmentForm.Lines.Add(new());
@@ -270,6 +281,26 @@ else
             Lines = adjustment.Lines.Select(line => new AdjustmentLineEditor { AccountKey = AccountKey(new(line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType)), Debit = line.Debit, Credit = line.Credit, Description = line.Description, SourceCompanyId = line.SourceCompanyId, CounterpartyCompanyId = line.CounterpartyCompanyId }).ToList() };
         ConsolidationMessage = $"Editing {adjustment.Reference}."; ConsolidationError = false;
     }
+    private async Task DiscoverIntercompanyMatchesAsync()
+    {
+        var result = await ConsolidationService.DiscoverIntercompanyMatchesAsync(new(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf));
+        SetConsolidationMessage(result.Succeeded ? $"Discovery retained {result.CreatedCount} new and refreshed {result.RefreshedCount} existing exact match(es).{(result.Warnings.Count > 0 ? $" {string.Join(" ", result.Warnings)}" : string.Empty)}" : result.ErrorMessage, !result.Succeeded);
+        IntercompanyMatchWorkspace = await ConsolidationService.GetIntercompanyMatchWorkspaceAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf);
+    }
+    private void UseIntercompanyMatch(ConsolidationIntercompanyMatchSnapshot match)
+    {
+        AdjustmentForm = NewAdjustmentEditor(); AdjustmentForm.PeriodStart = IntercompanyMatchWorkspace!.PeriodStart; AdjustmentForm.AsOf = IntercompanyMatchWorkspace.AsOf; AdjustmentForm.Kind = "IntercompanyElimination"; AdjustmentForm.Reference = $"ELIM-{match.InvoiceNumber}"[..Math.Min(64, 5 + match.InvoiceNumber.Length)]; AdjustmentForm.Description = $"Eliminate {match.SellerCompanyName} invoice {match.InvoiceNumber} matched to {match.BuyerCompanyName} bill {match.BillNumber}."; AdjustmentForm.MatchReference = match.MatchReference;
+        foreach (var line in AdjustmentForm.Lines) { line.SourceCompanyId = match.SellerCompanyId; line.CounterpartyCompanyId = match.BuyerCompanyId; }
+        SetConsolidationMessage("Choose and balance the reporting accounts for this exact match. No accounting entry has been inferred or posted.", false);
+    }
+    private async Task DecideIntercompanyMatchAsync(ConsolidationIntercompanyMatchSnapshot match, string decision)
+    {
+        var result = await ConsolidationService.SetIntercompanyMatchDecisionAsync(new(SelectedGroupId, match.Id, decision, decision == "Exclude" ? DecisionReason : string.Empty, match.ConcurrencyToken));
+        SetConsolidationMessage(result.Succeeded ? $"The match was {(decision == "Exclude" ? "excluded with retained reason" : "restored for review")}." : result.ErrorMessage, !result.Succeeded);
+        if (result.Succeeded) { DecisionReason = string.Empty; IntercompanyMatchWorkspace = await ConsolidationService.GetIntercompanyMatchWorkspaceAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); }
+    }
+    private Task ExcludeIntercompanyMatchAsync(ConsolidationIntercompanyMatchSnapshot match) => DecideIntercompanyMatchAsync(match, "Exclude");
+    private Task RestoreIntercompanyMatchAsync(ConsolidationIntercompanyMatchSnapshot match) => DecideIntercompanyMatchAsync(match, "Restore");
     private Task ApproveAdjustmentAsync(ConsolidationAdjustmentSnapshot adjustment) => RunAdjustmentActionAsync(() => ConsolidationService.ApproveAdjustmentAsync(new(SelectedGroupId, adjustment.Id, adjustment.ConcurrencyToken)), "The consolidation adjustment was approved.");
     private Task RejectAdjustmentAsync(ConsolidationAdjustmentSnapshot adjustment) => RunAdjustmentActionAsync(() => ConsolidationService.RejectAdjustmentAsync(new(SelectedGroupId, adjustment.Id, DecisionReason, adjustment.ConcurrencyToken)), "The consolidation adjustment was rejected for correction.");
     private Task PostAdjustmentAsync(ConsolidationAdjustmentSnapshot adjustment) => RunAdjustmentActionAsync(() => ConsolidationService.PostAdjustmentAsync(new(SelectedGroupId, adjustment.Id, adjustment.ConcurrencyToken)), "The consolidation adjustment was posted to the reporting ledger.");

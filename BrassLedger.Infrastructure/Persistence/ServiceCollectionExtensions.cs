@@ -529,6 +529,36 @@ public static class ServiceCollectionExtensions
                 && await HasIndexAsync(dbContext, batchIndex, cancellationToken)
                 && await HasIndexAsync(dbContext, lineIndex, cancellationToken);
         }
+        if (migrationId.EndsWith("_AddReviewedIntercompanyMatching", StringComparison.Ordinal))
+        {
+            var salesIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationIntercompanyMatches_ConsolidationGroupId_Sales~"
+                : "IX_ConsolidationIntercompanyMatches_ConsolidationGroupId_SalesInvoiceId";
+            var billIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationIntercompanyMatches_ConsolidationGroupId_Vendo~"
+                : "IX_ConsolidationIntercompanyMatches_ConsolidationGroupId_VendorBillId";
+            var customerIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationTradingPartners_ConsolidationGroupId_MemberCom~"
+                : "IX_ConsolidationTradingPartners_ConsolidationGroupId_MemberCompanyId_CustomerId_EffectiveFrom";
+            var vendorIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationTradingPartners_ConsolidationGroupId_MemberCo~1"
+                : "IX_ConsolidationTradingPartners_ConsolidationGroupId_MemberCompanyId_VendorId_EffectiveFrom";
+            string[] partnerColumns = ["CompanyId", "ConsolidationGroupId", "MemberCompanyId", "CounterpartyCompanyId", "CustomerId", "VendorId", "EffectiveFrom", "EffectiveThrough", "IsActive", "ConcurrencyToken"];
+            string[] matchColumns = ["CompanyId", "ConsolidationGroupId", "SellerCompanyId", "BuyerCompanyId", "SalesInvoiceId", "VendorBillId", "MatchReference", "Currency", "Amount", "SellerBalanceDue", "BuyerBalanceDue", "Status", "DiscoveredAtUtc", "ReviewedByUserId", "ReviewedAtUtc", "ReviewReason", "ConsolidationAdjustmentBatchId", "ConcurrencyToken"];
+            if (!await HasTableAsync(dbContext, "ConsolidationTradingPartners", cancellationToken)
+                || !await HasTableAsync(dbContext, "ConsolidationIntercompanyMatches", cancellationToken))
+                return false;
+            foreach (var column in partnerColumns)
+                if (!await HasColumnAsync(dbContext, "ConsolidationTradingPartners", column, cancellationToken))
+                    return false;
+            foreach (var column in matchColumns)
+                if (!await HasColumnAsync(dbContext, "ConsolidationIntercompanyMatches", column, cancellationToken))
+                    return false;
+            return await HasIndexAsync(dbContext, salesIndex, cancellationToken)
+                && await HasIndexAsync(dbContext, billIndex, cancellationToken)
+                && await HasIndexAsync(dbContext, customerIndex, cancellationToken)
+                && await HasIndexAsync(dbContext, vendorIndex, cancellationToken);
+        }
         return false;
     }
 

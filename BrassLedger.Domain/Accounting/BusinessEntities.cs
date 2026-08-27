@@ -203,6 +203,44 @@ public sealed class ConsolidationAccountMapping
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
+public sealed class ConsolidationTradingPartner
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ConsolidationGroupId { get; set; }
+    public Guid MemberCompanyId { get; set; }
+    public Guid CounterpartyCompanyId { get; set; }
+    public Guid? CustomerId { get; set; }
+    public Guid? VendorId { get; set; }
+    public DateOnly EffectiveFrom { get; set; } = DateOnly.MinValue;
+    public DateOnly? EffectiveThrough { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ConsolidationIntercompanyMatch
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ConsolidationGroupId { get; set; }
+    public Guid SellerCompanyId { get; set; }
+    public Guid BuyerCompanyId { get; set; }
+    public Guid SalesInvoiceId { get; set; }
+    public Guid VendorBillId { get; set; }
+    public string MatchReference { get; set; } = string.Empty;
+    public string Currency { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public decimal SellerBalanceDue { get; set; }
+    public decimal BuyerBalanceDue { get; set; }
+    public string Status { get; set; } = "Suggested";
+    public DateTimeOffset DiscoveredAtUtc { get; set; }
+    public Guid? ReviewedByUserId { get; set; }
+    public DateTimeOffset? ReviewedAtUtc { get; set; }
+    public string ReviewReason { get; set; } = string.Empty;
+    public Guid? ConsolidationAdjustmentBatchId { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
 public sealed class ConsolidationAdjustmentBatch
 {
     public Guid Id { get; set; }

@@ -3,6 +3,7 @@ using System;
 using BrassLedger.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BrassLedger.Migrations.PostgreSql.Migrations
 {
     [DbContext(typeof(BrassLedgerDbContext))]
-    partial class BrassLedgerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260827120507_AddReviewedIntercompanyMatching")]
+    partial class AddReviewedIntercompanyMatching
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1276,8 +1279,7 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<string>("ConcurrencyToken")
                         .IsConcurrencyToken()
                         .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("text");
 
                     b.Property<Guid?>("ConsolidationAdjustmentBatchId")
                         .HasColumnType("uuid");
@@ -1287,21 +1289,18 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
 
                     b.Property<string>("Currency")
                         .IsRequired()
-                        .HasMaxLength(3)
-                        .HasColumnType("character varying(3)");
+                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset>("DiscoveredAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("MatchReference")
                         .IsRequired()
-                        .HasMaxLength(68)
-                        .HasColumnType("character varying(68)");
+                        .HasColumnType("text");
 
                     b.Property<string>("ReviewReason")
                         .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
+                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset?>("ReviewedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -1321,8 +1320,7 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
+                        .HasColumnType("text");
 
                     b.Property<Guid>("VendorBillId")
                         .HasColumnType("uuid");
@@ -1363,8 +1361,7 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<string>("ConcurrencyToken")
                         .IsConcurrencyToken()
                         .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("text");
 
                     b.Property<Guid>("ConsolidationGroupId")
                         .HasColumnType("uuid");

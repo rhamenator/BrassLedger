@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("33", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("35", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -97,6 +97,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827080436_AddConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827091057_AddControlledConsolidationTranslation';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827095525_AddControlledConsolidationAdjustments';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827120437_AddReviewedIntercompanyMatching';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827122336_ConstrainIntercompanyMatchMetadata';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentLines';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('CurrencyExchangeRates') WHERE name = 'RateType';"));
@@ -152,7 +156,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("33", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("35", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -185,7 +189,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827080436_AddConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827091057_AddControlledConsolidationTranslation';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827095525_AddControlledConsolidationAdjustments';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827120437_AddReviewedIntercompanyMatching';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827122336_ConstrainIntercompanyMatchMetadata';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('CurrencyExchangeRates') WHERE name = 'RateType';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'CtaAccountNumber';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
@@ -510,7 +518,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
         var ownerContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
         ownerContext.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString())], "test"));
+            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString()), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage)], "test"));
         accessor.HttpContext = ownerContext;
         var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
         var consolidation = scope.ServiceProvider.GetRequiredService<IConsolidationService>();
@@ -621,11 +629,25 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.NotNull(laterReport);
         Assert.Equal(62.50m, laterReport!.Accounts.Single(account => account.AccountNumber == "19998").ConvertedBalance);
         Assert.Equal(62.50m, laterReport.Accounts.Single(account => account.AccountNumber == "39998").ConvertedBalance);
+        var usdAffiliate = await companies.CreateCompanyAsync(new CreateCompanyRequest("US distribution affiliate", "US distribution affiliate LLC", "US-AFFILIATE-TEST", "USD", 1)); Assert.True(usdAffiliate.Succeeded, usdAffiliate.ErrorMessage); var usdAffiliateId = usdAffiliate.CompanyId!.Value;
+        var affiliateOwnership = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(null, group.Id.Value, usdAffiliateId, 1m, DateOnly.MinValue, null)); Assert.True(affiliateOwnership.Succeeded, affiliateOwnership.ErrorMessage);
+        Guid intercompanyCustomerId = Guid.NewGuid(); Guid intercompanyVendorId = Guid.NewGuid(); Guid intercompanyInvoiceId = Guid.NewGuid(); Guid intercompanyBillId = Guid.NewGuid();
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
+        {
+            db.Customers.Add(new Customer { Id = intercompanyCustomerId, CompanyId = currentCompanyId, CustomerNumber = "IC-US-DIST", Name = "US distribution affiliate", Email = "intercompany@example.invalid", State = "MI", CreditLimit = 10000m, OpenBalance = 125m });
+            db.Vendors.Add(new Vendor { Id = intercompanyVendorId, CompanyId = usdAffiliateId, VendorNumber = "IC-PARENT", Name = "Brass Ledger Manufacturing", Email = "intercompany@example.invalid", State = "MI", PaymentTerms = "Net 30", OpenBalance = 125m });
+            db.SalesInvoices.Add(new SalesInvoice { Id = intercompanyInvoiceId, CompanyId = currentCompanyId, CustomerId = intercompanyCustomerId, InvoiceNumber = "IC-INV-1001", InvoiceDate = new DateOnly(2026, 4, 15), DueDate = new DateOnly(2026, 5, 15), Status = "Open", Subtotal = 125m, TotalAmount = 125m, BalanceDue = 125m, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+            db.VendorBills.Add(new VendorBill { Id = intercompanyBillId, CompanyId = usdAffiliateId, VendorId = intercompanyVendorId, BillNumber = "ic-inv-1001", BillDate = new DateOnly(2026, 4, 16), DueDate = new DateOnly(2026, 5, 16), Status = "Open", TotalAmount = 125m, BalanceDue = 125m, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+            await db.SaveChangesAsync();
+        }
+        var sellerLink = await consolidation.SaveTradingPartnerAsync(new(null, group.Id.Value, currentCompanyId, usdAffiliateId, intercompanyCustomerId, null, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30))); Assert.True(sellerLink.Succeeded, sellerLink.ErrorMessage);
+        var buyerLink = await consolidation.SaveTradingPartnerAsync(new(null, group.Id.Value, usdAffiliateId, currentCompanyId, null, intercompanyVendorId, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30))); Assert.True(buyerLink.Succeeded, buyerLink.ErrorMessage);
+        var tradingPartnerWorkspace = await consolidation.GetTradingPartnerWorkspaceAsync(group.Id.Value); Assert.NotNull(tradingPartnerWorkspace); Assert.Equal(2, tradingPartnerWorkspace!.Links.Count);
         var preparerId = signedInOwner.User!.UserId; var reviewerId = Guid.NewGuid(); var posterId = Guid.NewGuid(); var reverserId = Guid.NewGuid();
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
         {
             foreach (var actorId in new[] { reviewerId, posterId, reverserId })
-            foreach (var memberCompanyId in new[] { currentCompanyId, canadianCompanyId })
+            foreach (var memberCompanyId in new[] { currentCompanyId, canadianCompanyId, usdAffiliateId })
                 db.CompanyMemberships.Add(new CompanyMembership { Id = Guid.NewGuid(), UserId = actorId, CompanyId = memberCompanyId, Role = "Accounting", IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
             await db.SaveChangesAsync();
         }
@@ -640,6 +662,26 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var adjustmentWorkspace = await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value); Assert.NotNull(adjustmentWorkspace);
         var adjustmentAsset = adjustmentWorkspace!.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Asset));
         var adjustmentEquity = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Equity));
+        var discovery = await consolidation.DiscoverIntercompanyMatchesAsync(new(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf)); Assert.True(discovery.Succeeded, discovery.ErrorMessage); Assert.Equal(1, discovery.CreatedCount);
+        var discoveredMatch = Assert.Single((await consolidation.GetIntercompanyMatchWorkspaceAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf))!.Matches); Assert.Equal("Suggested", discoveredMatch.Status); Assert.Equal("USD", discoveredMatch.Currency); Assert.Equal(125m, discoveredMatch.Amount); Assert.Equal($"IC-{intercompanyInvoiceId:N}-{intercompanyBillId:N}", discoveredMatch.MatchReference);
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
+        {
+            var affiliatePeriod = await db.ConsolidationGroupCompanies.SingleAsync(period => period.ConsolidationGroupId == group.Id && period.MemberCompanyId == usdAffiliateId);
+            var affiliateMembership = await db.CompanyMemberships.SingleAsync(membership => membership.UserId == preparerId && membership.CompanyId == usdAffiliateId);
+            affiliatePeriod.EffectiveThrough = adjustmentAsOf.AddDays(-1); affiliateMembership.IsActive = false; await db.SaveChangesAsync();
+        }
+        Assert.Null(await consolidation.GetIntercompanyMatchWorkspaceAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf));
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
+        {
+            var affiliatePeriod = await db.ConsolidationGroupCompanies.SingleAsync(period => period.ConsolidationGroupId == group.Id && period.MemberCompanyId == usdAffiliateId);
+            var affiliateMembership = await db.CompanyMemberships.SingleAsync(membership => membership.UserId == preparerId && membership.CompanyId == usdAffiliateId);
+            affiliatePeriod.EffectiveThrough = null; affiliateMembership.IsActive = true; await db.SaveChangesAsync();
+        }
+        var missingExclusionReason = await consolidation.SetIntercompanyMatchDecisionAsync(new(group.Id.Value, discoveredMatch.Id, "Exclude", string.Empty, discoveredMatch.ConcurrencyToken)); Assert.False(missingExclusionReason.Succeeded);
+        var excludedMatch = await consolidation.SetIntercompanyMatchDecisionAsync(new(group.Id.Value, discoveredMatch.Id, "Exclude", "Documents require controller review", discoveredMatch.ConcurrencyToken)); Assert.True(excludedMatch.Succeeded, excludedMatch.ErrorMessage);
+        var excludedSnapshot = Assert.Single((await consolidation.GetIntercompanyMatchWorkspaceAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf))!.Matches); Assert.Equal("Excluded", excludedSnapshot.Status);
+        var restoredMatch = await consolidation.SetIntercompanyMatchDecisionAsync(new(group.Id.Value, discoveredMatch.Id, "Restore", string.Empty, excludedSnapshot.ConcurrencyToken)); Assert.True(restoredMatch.Succeeded, restoredMatch.ErrorMessage);
+        discoveredMatch = Assert.Single((await consolidation.GetIntercompanyMatchWorkspaceAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf))!.Matches); Assert.Equal("Suggested", discoveredMatch.Status);
         var invalidNumericKind = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, "999", "INVALID-KIND", "Invalid numeric enum", string.Empty,
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 1m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 1m)]));
         Assert.False(invalidNumericKind.Succeeded); Assert.Contains("kind", invalidNumericKind.ErrorMessage, StringComparison.OrdinalIgnoreCase);
@@ -653,9 +695,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 25m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 25m)]));
         Assert.False(invalidElimination.Succeeded); Assert.Contains("different companies", invalidElimination.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var beforeAdjustment = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(beforeAdjustment);
-        var savedAdjustment = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.ManualAdjustment), "CONSOL-ADJ-1", "Controlled reporting-only adjustment", string.Empty,
-            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 25m, 0m, "Reporting asset true-up"), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 25m, "Reporting equity offset")]));
+        var savedAdjustment = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.IntercompanyElimination), "CONSOL-ADJ-1", "Controlled reporting-only adjustment", discoveredMatch.MatchReference,
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 25m, 0m, "Reporting asset true-up", currentCompanyId, usdAffiliateId), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 25m, "Reporting equity offset", usdAffiliateId, currentCompanyId)]));
         Assert.True(savedAdjustment.Succeeded, savedAdjustment.ErrorMessage);
+        var controlledMatch = Assert.Single((await consolidation.GetIntercompanyMatchWorkspaceAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf))!.Matches); Assert.Equal("Controlled", controlledMatch.Status); Assert.Equal(savedAdjustment.Id, controlledMatch.ConsolidationAdjustmentBatchId);
         var rejectionCandidate = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.ManualAdjustment), "CONSOL-REJECT-1", "Rejected correction example", string.Empty,
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 5m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 5m)]));
         Assert.True(rejectionCandidate.Succeeded, rejectionCandidate.ErrorMessage);
@@ -694,7 +737,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(beforeAdjustment.Accounts.Single(account => account.AccountNumber == adjustmentEquity.AccountNumber).ConvertedBalance, restoredReport.Accounts.Single(account => account.AccountNumber == adjustmentEquity.AccountNumber).ConvertedBalance);
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
         {
-            Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationGroupCompany)));
+            Assert.Equal(3, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationGroupCompany)));
+            Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationTradingPartner)));
+            Assert.Equal(3, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationIntercompanyMatch)));
             Assert.Equal(6, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationAdjustmentBatch)));
             Assert.Equal(3, await db.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == group.Id));
         }
