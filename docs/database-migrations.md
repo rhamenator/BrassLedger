@@ -78,6 +78,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddExplicitConsolidationBasisAndNci` adds the effective membership's explicit consolidation basis, rationale, and review date; separate group-level NCI account identity; and adjustment subject/control identity. Existing membership rows are deliberately backfilled as enum value `3` (**ProportionateInterest**) so an upgrade never invents a reporting-parent or control conclusion. The unique control-key index serializes one retained NCI batch per group, exact period, and controlled subsidiary, while the restrictive subject-company relationship preserves provenance. Lost-history adoption requires every policy and review column plus the subject/control indexes. Downgrade is prohibited because removing these fields could delete accounting conclusions, NCI presentation, and retained duplicate-prevention evidence.
 
+`AddConsolidatedCashFlowClassification` adds effective mapping-level Operating, Investing, Financing, or Unclassified policy plus rationale and review date. Existing mappings remain Unclassified so an upgrade never invents a cash-flow conclusion. Lost-history adoption requires all three policy/evidence columns. Downgrade is prohibited because it could delete reviewed classifications needed to reproduce a statement of cash flows.
+
 ## Verification
 
 At minimum, run:

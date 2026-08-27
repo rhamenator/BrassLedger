@@ -209,7 +209,7 @@ else
                                 <tfoot><tr><th>Totals</th><th>@AdjustmentForm.Lines.Sum(line => line.Debit).ToString("N2")</th><th>@AdjustmentForm.Lines.Sum(line => line.Credit).ToString("N2")</th><th colspan="@(AdjustmentForm.Kind == "IntercompanyElimination" ? 4 : 2)">Difference: @((AdjustmentForm.Lines.Sum(line => line.Debit) - AdjustmentForm.Lines.Sum(line => line.Credit)).ToString("N2"))</th></tr></tfoot>
                             </table>
                         </div>
-                        <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddAdjustmentLine">Add line</button><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="adjustmentPreparationAuthorization"><button class="action-primary" type="submit">@(AdjustmentForm.Id.HasValue ? "Save corrected draft" : "Prepare draft")</button></AuthorizeView>@if (AdjustmentForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetAdjustmentForm">Cancel edit</button> }<button class="action-secondary" type="button" @onclick="RunConsolidatedReportAsync">Preview consolidated balance</button></div>
+                        <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddAdjustmentLine">Add line</button><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="adjustmentPreparationAuthorization"><button class="action-primary" type="submit">@(AdjustmentForm.Id.HasValue ? "Save corrected draft" : "Prepare draft")</button></AuthorizeView>@if (AdjustmentForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetAdjustmentForm">Cancel edit</button> }<button class="action-secondary" type="button" @onclick="RunConsolidatedReportAsync">Preview consolidated balance</button><button class="action-primary" type="button" @onclick="RunConsolidatedStatementsAsync">Run statement package</button></div>
                     </EditForm>
 
                     <div class="field-group"><label class="field-label" for="adjustmentDecisionReason">Rejection, exclusion, or reversal reason</label><InputText id="adjustmentDecisionReason" class="field-input" maxlength="1000" @bind-Value="DecisionReason" /></div>
@@ -229,6 +229,35 @@ else
                         @foreach (var warning in ConsolidatedReport.Warnings) { <div class="auth-error" role="alert">@warning</div> }
                         <div class="table-scroll"><table class="data-table" aria-label="Consolidated balance preview"><thead><tr><th>Account</th><th>Type</th><th>Translation</th><th>Balance (@ConsolidatedReport.ReportingCurrency)</th></tr></thead><tbody>@foreach (var account in ConsolidatedReport.Accounts) { <tr><td>@account.AccountNumber — @account.AccountName</td><td>@account.AccountType</td><td>@account.TranslationMethod</td><td>@account.ConvertedBalance.ToString("N2")</td></tr> }</tbody></table></div>
                     }
+                    @if (ConsolidatedStatements is not null)
+                    {
+                        <section aria-labelledby="consolidatedStatementsHeading">
+                            <h3 id="consolidatedStatementsHeading">@ConsolidatedStatements.GroupName statement package · @ConsolidatedStatements.PeriodStart to @ConsolidatedStatements.AsOf</h3>
+                            <p role="status"><strong>Status:</strong> @(ConsolidatedStatements.IsComplete ? "Complete" : "Incomplete — resolve every warning before external use")</p>
+                            <p><a class="action-secondary" href="@StatementCsvUrl()">Download statement package CSV</a></p>
+                            @foreach (var warning in ConsolidatedStatements.Warnings) { <div class="auth-error" role="alert">@warning</div> }
+                            @foreach (var statement in StatementSet())
+                            {
+                                <h4>@statement.Name</h4>
+                                @foreach (var statementSection in statement.Sections)
+                                {
+                                    <div class="table-scroll"><table class="data-table" aria-label="@($"{statement.Name} — {statementSection.Name}")"><thead><tr><th>@statementSection.Name account</th><th>Amount (@ConsolidatedStatements.ReportingCurrency)</th><th>Drill-down</th></tr></thead><tbody>
+                                    @foreach (var account in statementSection.Accounts)
+                                    {
+                                        <tr><td>@account.AccountNumber — @account.AccountName</td><td>@account.Amount.ToString("N2")</td><td>@if (account.Contributions.Count == 0) { <span class="muted-copy">Derived statement line</span> } else { <details><summary>@account.Contributions.Count source contribution(s)</summary><ul class="feature-list">@foreach (var contribution in account.Contributions) { <li>@contribution.CompanyName · @contribution.SourceAccountNumber — @contribution.SourceAccountName: @contribution.ConvertedBalance.ToString("N2") (@contribution.TranslationMethod)@if (!string.IsNullOrWhiteSpace(contribution.Reference)) { <span> · @contribution.Reference</span> }</li> }</ul></details> }</td></tr>
+                                    }
+                                    </tbody><tfoot><tr><th>@statementSection.Name total</th><th>@statementSection.Total.ToString("N2")</th><th></th></tr></tfoot></table></div>
+                                }
+                                <p><strong>Statement total:</strong> @statement.Total.ToString("N2") @ConsolidatedStatements.ReportingCurrency · <strong>reconciliation difference:</strong> @statement.ReconciliationDifference.ToString("N2")</p>
+                            }
+                            <div class="table-scroll"><table class="data-table" aria-label="Consolidated statement reconciliation"><thead><tr><th>Control</th><th>Amount (@ConsolidatedStatements.ReportingCurrency)</th></tr></thead><tbody>
+                                <tr><td>Assets less liabilities, recorded equity, and current earnings</td><td>@ConsolidatedStatements.Reconciliation.BalanceSheetDifference.ToString("N2")</td></tr>
+                                <tr><td>Presented ending equity reconciliation</td><td>@ConsolidatedStatements.Reconciliation.EquityStatementDifference.ToString("N2")</td></tr>
+                                <tr><td>Ending cash less opening cash</td><td>@ConsolidatedStatements.Reconciliation.NetCashChange.ToString("N2")</td></tr>
+                                <tr><td>Cash-flow statement reconciliation</td><td>@ConsolidatedStatements.Reconciliation.CashFlowDifference.ToString("N2")</td></tr>
+                            </tbody></table></div>
+                        </section>
+                    }
                 }
             }
         </section>
@@ -241,6 +270,7 @@ else
     private ConsolidationAdjustmentWorkspace? AdjustmentWorkspace;
     private ConsolidationIntercompanyMatchWorkspace? IntercompanyMatchWorkspace;
     private ConsolidatedBalanceReport? ConsolidatedReport;
+    private ConsolidatedStatementPackage? ConsolidatedStatements;
     private Guid SelectedGroupId;
     private AdjustmentEditor AdjustmentForm = NewAdjustmentEditor();
     private string DecisionReason = string.Empty;
@@ -258,7 +288,7 @@ else
     {
         if (Guid.TryParse(args.Value?.ToString(), out var groupId)) { SelectedGroupId = groupId; ResetAdjustmentForm(); await LoadAdjustmentWorkspaceAsync(); }
     }
-    private async Task LoadAdjustmentWorkspaceAsync() { AdjustmentWorkspace = await ConsolidationService.GetAdjustmentWorkspaceAsync(SelectedGroupId); IntercompanyMatchWorkspace = await ConsolidationService.GetIntercompanyMatchWorkspaceAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); ConsolidatedReport = null; }
+    private async Task LoadAdjustmentWorkspaceAsync() { AdjustmentWorkspace = await ConsolidationService.GetAdjustmentWorkspaceAsync(SelectedGroupId); IntercompanyMatchWorkspace = await ConsolidationService.GetIntercompanyMatchWorkspaceAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); ConsolidatedReport = null; ConsolidatedStatements = null; }
     private static AdjustmentEditor NewAdjustmentEditor() => new() { Lines = [new(), new()] };
     private void ResetAdjustmentForm() { AdjustmentForm = NewAdjustmentEditor(); DecisionReason = string.Empty; ConsolidationMessage = string.Empty; ConsolidationError = false; }
     private void AddAdjustmentLine() => AdjustmentForm.Lines.Add(new());
@@ -311,6 +341,9 @@ else
     private Task ReverseAdjustmentAsync(ConsolidationAdjustmentSnapshot adjustment) => RunAdjustmentActionAsync(() => ConsolidationService.ReverseAdjustmentAsync(new(SelectedGroupId, adjustment.Id, DecisionReason, adjustment.ConcurrencyToken)), "A non-destructive reversal was posted to the reporting ledger.");
     private async Task RunAdjustmentActionAsync(Func<Task<TransactionResult>> action, string successMessage) { var result = await action(); SetConsolidationMessage(result.Succeeded ? successMessage : result.ErrorMessage, !result.Succeeded); if (result.Succeeded) { DecisionReason = string.Empty; await LoadAdjustmentWorkspaceAsync(); ConsolidationMessage = successMessage; } }
     private async Task RunConsolidatedReportAsync() { ConsolidatedReport = await ConsolidationService.GetBalanceReportAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); if (ConsolidatedReport is null) SetConsolidationMessage("The consolidated balance could not be produced for this period and access context.", true); }
+    private async Task RunConsolidatedStatementsAsync() { ConsolidatedStatements = await ConsolidationService.GetStatementPackageAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); if (ConsolidatedStatements is null) SetConsolidationMessage("The consolidated statement package could not be produced for this period and access context.", true); }
+    private IEnumerable<ConsolidatedFinancialStatement> StatementSet() => ConsolidatedStatements is null ? [] : [ConsolidatedStatements.BalanceSheet, ConsolidatedStatements.IncomeStatement, ConsolidatedStatements.EquityStatement, ConsolidatedStatements.CashFlowStatement];
+    private string StatementCsvUrl() => ConsolidatedStatements is null ? "#" : $"/consolidation-groups/{ConsolidatedStatements.GroupId}/statements.csv?periodStart={ConsolidatedStatements.PeriodStart:yyyy-MM-dd}&asOf={ConsolidatedStatements.AsOf:yyyy-MM-dd}";
     private void SetConsolidationMessage(string message, bool error) { ConsolidationMessage = message; ConsolidationError = error; }
     private static string DisplayKind(string kind) => kind switch { "IntercompanyElimination" => "Intercompany elimination", "NoncontrollingInterest" => "Noncontrolling-interest reclassification", _ => "Manual adjustment" };
 

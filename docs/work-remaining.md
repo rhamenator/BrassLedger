@@ -19,11 +19,11 @@ This is the canonical agent-readable queue for work still required before BrassL
 | Branch | `codex/tax-content-intake-wip-20260824` |
 | Last pushed commit | `8e24b56 feat(reporting): add explicit consolidation basis and nci` |
 | In progress | Consolidated financial statements with drill-down and cross-report reconciliation |
-| Current evidence | The explicit-basis/NCI checkpoint is pushed and gate-complete: clean out-of-tree Release build; SQLite/default 194 passed with 10 expected PostgreSQL-only skips; PostgreSQL 204/204; API 35/35; components 12/12; isolated Chromium 35/35; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. |
+| Current evidence | Last pushed checkpoint remains `8e24b56`/ledger `4c415e3`. The uncommitted CONSOL-STATEMENTS foundation is gate-complete pending final diff/commit: clean Release build; SQLite/default 194 plus 10 expected skips; PostgreSQL 204/204; API 35/35; components 13/13; isolated Chromium 35/35; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. |
 
 ## Immediate queue
 
-1. **In progress — CONSOL-STATEMENTS:** implement framework-reviewed consolidated balance sheet, income statement, equity statement, and cash-flow statement with drill-down and cross-report reconciliation.
+1. **In progress — CONSOL-STATEMENTS:** commit and push the gate-complete four-statement/drill-down/reconciliation/reviewed-cash-flow/CSV foundation; then add configurable current/noncurrent presentation, captions/order, comparisons, Excel/PDF output, and framework review evidence.
 2. **Pending — FX-TRANSACTIONS:** implement transaction-currency documents, rate provenance, settlement remeasurement, and realized/unrealized gains and losses.
 3. **Pending — ACCEPTANCE-01:** automate the uninterrupted representative-business scenario from clean installation through encrypted restore and audit trace.
 

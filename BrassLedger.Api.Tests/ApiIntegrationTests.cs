@@ -169,6 +169,22 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var adjustment = Assert.Single(adjustmentWorkspace!.Adjustments, item => item.Id == adjustmentResult!.Id); Assert.Equal("Draft", adjustment.Status); Assert.Equal(2, adjustment.Lines.Count);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/adjustments/{Guid.NewGuid()}/approve", new ConsolidationAdjustmentActionRequest(group.Id, adjustment.Id, adjustment.ConcurrencyToken))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/consolidation-groups/{group.Id}/balances?periodStart=2026-01-01&asOf=2026-06-30")).StatusCode);
+        var statements = await client.GetFromJsonAsync<ConsolidatedStatementPackage>($"/api/consolidation-groups/{group.Id}/statements?periodStart=2026-01-01&asOf=2026-06-30");
+        Assert.NotNull(statements);
+        Assert.Equal(group.Id, statements!.GroupId);
+        Assert.Equal("BALANCE-SHEET", statements.BalanceSheet.Code);
+        Assert.Equal("INCOME-STATEMENT", statements.IncomeStatement.Code);
+        Assert.Equal("EQUITY-STATEMENT", statements.EquityStatement.Code);
+        Assert.Equal("CASH-FLOW", statements.CashFlowStatement.Code);
+        Assert.False(statements.IsComplete);
+        Assert.Contains(statements.Warnings, warning => warning.Contains("operating, investing, or financing", StringComparison.OrdinalIgnoreCase));
+        var statementCsvResponse = await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements.csv?periodStart=2026-01-01&asOf=2026-06-30");
+        Assert.Equal(HttpStatusCode.OK, statementCsvResponse.StatusCode);
+        Assert.Equal("text/csv", statementCsvResponse.Content.Headers.ContentType?.MediaType);
+        var statementCsv = await statementCsvResponse.Content.ReadAsStringAsync();
+        Assert.Contains("Record Type,Statement,Section", statementCsv, StringComparison.Ordinal);
+        Assert.Contains("\"Reconciliation\"", statementCsv, StringComparison.Ordinal);
+        Assert.Contains("\"Incomplete\"", statementCsv, StringComparison.Ordinal);
     }
 
     [Fact]

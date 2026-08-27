@@ -700,6 +700,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<ConsolidationGroup>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<ConsolidationAccountMapping>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<ConsolidationAccountMapping>().Property(x => x.CashFlowRationale).HasMaxLength(1000);
         modelBuilder.Entity<ConsolidationTradingPartner>().Property(x => x.ConcurrencyToken).HasMaxLength(64).IsConcurrencyToken();
         modelBuilder.Entity<ConsolidationIntercompanyMatch>().Property(x => x.MatchReference).HasMaxLength(68);
         modelBuilder.Entity<ConsolidationIntercompanyMatch>().Property(x => x.Currency).HasMaxLength(3);

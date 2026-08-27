@@ -23,6 +23,14 @@ public enum ConsolidationTranslationMethod
     Historical
 }
 
+public enum ConsolidationCashFlowActivity
+{
+    Unclassified,
+    Operating,
+    Investing,
+    Financing
+}
+
 public enum ConsolidationBasis
 {
     ReportingParent,
@@ -211,6 +219,9 @@ public sealed class ConsolidationAccountMapping
     public string ReportingAccountName { get; set; } = string.Empty;
     public AccountType ReportingAccountType { get; set; }
     public ConsolidationTranslationMethod TranslationMethod { get; set; }
+    public ConsolidationCashFlowActivity CashFlowActivity { get; set; }
+    public string CashFlowRationale { get; set; } = string.Empty;
+    public DateOnly? CashFlowReviewedOn { get; set; }
     public DateOnly EffectiveFrom { get; set; } = DateOnly.MinValue;
     public DateOnly? EffectiveThrough { get; set; }
     public bool IsActive { get; set; } = true;

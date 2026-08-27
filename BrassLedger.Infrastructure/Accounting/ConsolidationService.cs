@@ -163,6 +163,14 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
             return TransactionResult.Failure("The mapping period must overlap retained ownership of the member company.");
         var sourceAccount = await db.Accounts.SingleOrDefaultAsync(account => account.Id == request.MemberAccountId && account.CompanyId == request.MemberCompanyId, cancellationToken);
         if (sourceAccount is null) return TransactionResult.Failure("The source account was not found in the selected member company.");
+        if (!Enum.TryParse<ConsolidationCashFlowActivity>(request.CashFlowActivity, true, out var cashFlowActivity) || !Enum.IsDefined(cashFlowActivity))
+            return TransactionResult.Failure("Choose Unclassified, Operating, Investing, or Financing as the cash-flow activity.");
+        var cashFlowRationale = request.CashFlowRationale?.Trim() ?? string.Empty;
+        if (cashFlowRationale.Length > 1000 || request.CashFlowReviewedOn > DateOnly.FromDateTime(DateTime.UtcNow)
+            || (cashFlowActivity != ConsolidationCashFlowActivity.Unclassified && (string.IsNullOrWhiteSpace(cashFlowRationale) || !request.CashFlowReviewedOn.HasValue)))
+            return TransactionResult.Failure("A classified cash-flow counterpart requires a concise rationale and a review date that is not in the future.");
+        if (cashFlowActivity != ConsolidationCashFlowActivity.Unclassified && await db.BankAccounts.AnyAsync(bank => bank.CompanyId == request.MemberCompanyId && bank.LedgerAccountId == sourceAccount.Id, cancellationToken))
+            return TransactionResult.Failure("Classify the noncash counterpart account, not the bank ledger account; bank mappings identify cash and cash equivalents.");
         var defaultMethod = sourceAccount.Type switch { AccountType.Asset or AccountType.Liability => ConsolidationTranslationMethod.Closing, AccountType.Revenue or AccountType.Expense => ConsolidationTranslationMethod.Average, _ => ConsolidationTranslationMethod.Historical };
         var translationMethod = defaultMethod;
         if (!string.IsNullOrWhiteSpace(request.TranslationMethod))
@@ -179,10 +187,10 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         if (await db.ConsolidationAccountMappings.AnyAsync(item => item.ConsolidationGroupId == group.Id && item.Id != request.Id && item.ReportingAccountNumber == reportingNumber && item.EffectiveFrom <= requestedEnd && (item.EffectiveThrough == null || item.EffectiveThrough >= request.EffectiveFrom) && (item.ReportingAccountName != reportingName || item.ReportingAccountType != sourceAccount.Type || item.TranslationMethod != translationMethod), cancellationToken))
             return TransactionResult.Failure("A reporting account number must retain one name, account type, and translation method throughout overlapping mapping periods.");
         mapping ??= new ConsolidationAccountMapping { Id = Guid.NewGuid(), ConsolidationGroupId = group.Id, MemberCompanyId = request.MemberCompanyId, MemberAccountId = request.MemberAccountId };
-        mapping.ReportingAccountNumber = reportingNumber; mapping.ReportingAccountName = reportingName; mapping.ReportingAccountType = sourceAccount.Type; mapping.TranslationMethod = translationMethod; mapping.EffectiveFrom = request.EffectiveFrom; mapping.EffectiveThrough = request.EffectiveThrough; mapping.IsActive = request.IsActive; mapping.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        mapping.ReportingAccountNumber = reportingNumber; mapping.ReportingAccountName = reportingName; mapping.ReportingAccountType = sourceAccount.Type; mapping.TranslationMethod = translationMethod; mapping.CashFlowActivity = cashFlowActivity; mapping.CashFlowRationale = cashFlowRationale; mapping.CashFlowReviewedOn = request.CashFlowReviewedOn; mapping.EffectiveFrom = request.EffectiveFrom; mapping.EffectiveThrough = request.EffectiveThrough; mapping.IsActive = request.IsActive; mapping.ConcurrencyToken = Guid.NewGuid().ToString("N");
         if (db.Entry(mapping).State == EntityState.Detached) db.ConsolidationAccountMappings.Add(mapping);
         group.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = request.Id is null ? "consolidation-account-mapping.created" : "consolidation-account-mapping.updated", EntityType = nameof(ConsolidationAccountMapping), EntityId = mapping.Id, DetailJson = JsonSerializer.Serialize(new { group.Id, mapping.MemberCompanyId, mapping.MemberAccountId, mapping.ReportingAccountNumber, mapping.ReportingAccountName, reportingAccountType = mapping.ReportingAccountType.ToString(), translationMethod = mapping.TranslationMethod.ToString(), mapping.EffectiveFrom, mapping.EffectiveThrough, mapping.IsActive }), OccurredAtUtc = DateTimeOffset.UtcNow });
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = request.Id is null ? "consolidation-account-mapping.created" : "consolidation-account-mapping.updated", EntityType = nameof(ConsolidationAccountMapping), EntityId = mapping.Id, DetailJson = JsonSerializer.Serialize(new { group.Id, mapping.MemberCompanyId, mapping.MemberAccountId, mapping.ReportingAccountNumber, mapping.ReportingAccountName, reportingAccountType = mapping.ReportingAccountType.ToString(), translationMethod = mapping.TranslationMethod.ToString(), cashFlowActivity = mapping.CashFlowActivity.ToString(), mapping.CashFlowRationale, mapping.CashFlowReviewedOn, mapping.EffectiveFrom, mapping.EffectiveThrough, mapping.IsActive }), OccurredAtUtc = DateTimeOffset.UtcNow });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation group or account mapping changed concurrently. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The account mapping conflicts with another retained mapping."); }
@@ -219,7 +227,7 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
             mappings.Select(mapping =>
             {
                 var account = accounts.Single(item => item.Id == mapping.MemberAccountId && item.CompanyId == mapping.MemberCompanyId);
-                return new ConsolidationAccountMappingSnapshot(mapping.Id, mapping.MemberCompanyId, companies[mapping.MemberCompanyId].Name, mapping.MemberAccountId, account.Number, account.Name, account.Type.ToString(), mapping.ReportingAccountNumber, mapping.ReportingAccountName, mapping.ReportingAccountType.ToString(), mapping.TranslationMethod.ToString(), mapping.EffectiveFrom, mapping.EffectiveThrough, mapping.IsActive, mapping.ConcurrencyToken);
+                return new ConsolidationAccountMappingSnapshot(mapping.Id, mapping.MemberCompanyId, companies[mapping.MemberCompanyId].Name, mapping.MemberAccountId, account.Number, account.Name, account.Type.ToString(), mapping.ReportingAccountNumber, mapping.ReportingAccountName, mapping.ReportingAccountType.ToString(), mapping.TranslationMethod.ToString(), mapping.EffectiveFrom, mapping.EffectiveThrough, mapping.IsActive, mapping.ConcurrencyToken, mapping.CashFlowActivity.ToString(), mapping.CashFlowRationale, mapping.CashFlowReviewedOn);
             }).ToArray());
     }
 
@@ -476,7 +484,8 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         var companies = await db.Companies.Where(company => members.Select(member => member.MemberCompanyId).Contains(company.Id)).ToDictionaryAsync(company => company.Id, cancellationToken);
         var rates = await db.CurrencyExchangeRates.AsNoTracking().Where(rate => rate.CompanyId == companyId && rate.IsActive && (rate.EffectiveOn <= asOf || (rate.RateType == CurrencyRateType.Average && rate.PeriodStartOn <= asOf))).OrderByDescending(rate => rate.EffectiveOn).ToListAsync(cancellationToken);
         var mappings = await db.ConsolidationAccountMappings.AsNoTracking().Where(mapping => mapping.ConsolidationGroupId == group.Id && mapping.EffectiveFrom <= asOf && (mapping.EffectiveThrough == null || mapping.EffectiveThrough >= asOf)).ToListAsync(cancellationToken);
-        var warnings = new List<string>(); var totals = new Dictionary<(string Number, string Name, string Type, string Method), decimal>(); var complete = true;
+        var warnings = new List<string>(); var totals = new Dictionary<(string Number, string Name, string Type, string Method), decimal>();
+        var contributions = new Dictionary<(string Number, string Name, string Type, string Method), List<ConsolidatedAccountContribution>>(); var complete = true;
         var effectiveSchedule = members.Select(member => new ConsolidationPeriodPolicy(member.MemberCompanyId, member.OwnershipPercentage, member.ConsolidationBasis, member.BasisRationale, member.BasisReviewedOn, member.EffectiveFrom, member.EffectiveThrough)).ToArray();
         if (!ValidClassifiedGroupSchedule(effectiveSchedule, group.CompanyId, asOf, asOf))
         {
@@ -563,7 +572,9 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
                     continue;
                 }
                 var key = (accountMapping.ReportingAccountNumber, accountMapping.ReportingAccountName, accountMapping.ReportingAccountType.ToString(), accountMapping.TranslationMethod.ToString());
-                totals[key] = totals.GetValueOrDefault(key) + decimal.Round(translated * inclusionFactor, 2, MidpointRounding.AwayFromZero);
+                var converted = decimal.Round(translated * inclusionFactor, 2, MidpointRounding.AwayFromZero);
+                totals[key] = totals.GetValueOrDefault(key) + converted;
+                AddContribution(contributions, key, new(member.MemberCompanyId, company.Name, account.Number, account.Name, "MemberLedger", string.Empty, converted, accountMapping.TranslationMethod.ToString()));
             }
             if (decimal.Round(sourceSignedBalance, 2, MidpointRounding.AwayFromZero) != 0m)
             {
@@ -594,7 +605,10 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
             foreach (var line in adjustmentLines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id))
             {
                 var key = (line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType.ToString(), batch.Kind == ConsolidationAdjustmentKind.NoncontrollingInterest ? "NCI" : "Adjustment");
-                totals[key] = totals.GetValueOrDefault(key) + NaturalAmount(line.ReportingAccountType, line.Debit, line.Credit);
+                var amount = NaturalAmount(line.ReportingAccountType, line.Debit, line.Credit);
+                totals[key] = totals.GetValueOrDefault(key) + amount;
+                var sourceName = line.SourceCompanyId.HasValue && companies.TryGetValue(line.SourceCompanyId.Value, out var sourceCompany) ? sourceCompany.Name : group.Name;
+                AddContribution(contributions, key, new(line.SourceCompanyId, sourceName, line.ReportingAccountNumber, line.ReportingAccountName, batch.Kind.ToString(), batch.Reference, amount, key.Item4));
             }
         }
         var translationAdjustment = 0m;
@@ -613,7 +627,9 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
                 }
                 else
                 {
-                    totals[(group.CtaAccountNumber, group.CtaAccountName, AccountType.Equity.ToString(), "CTA")] = translationAdjustment;
+                    var key = (group.CtaAccountNumber, group.CtaAccountName, AccountType.Equity.ToString(), "CTA");
+                    totals[key] = translationAdjustment;
+                    AddContribution(contributions, key, new(null, group.Name, group.CtaAccountNumber, group.CtaAccountName, "TranslationAdjustment", $"{periodStart:yyyy-MM-dd}:{asOf:yyyy-MM-dd}", translationAdjustment, "CTA"));
                 }
             }
         }
@@ -621,7 +637,8 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         var reportAccounts = totals.GroupBy(item => (item.Key.Number, item.Key.Name, item.Key.Type)).OrderBy(grouping => grouping.Key.Number).Select(grouping =>
         {
             var methods = grouping.Select(item => item.Key.Method).Distinct().OrderBy(item => item).ToArray();
-            return new ConsolidatedAccountBalance(grouping.Key.Number, grouping.Key.Name, grouping.Key.Type, grouping.Sum(item => item.Value), methods.Length == 1 ? methods[0] : "Mixed");
+            var accountContributions = grouping.SelectMany(item => contributions.GetValueOrDefault(item.Key) ?? []).OrderBy(item => item.CompanyName).ThenBy(item => item.SourceAccountNumber).ThenBy(item => item.Reference).ToArray();
+            return new ConsolidatedAccountBalance(grouping.Key.Number, grouping.Key.Name, grouping.Key.Type, grouping.Sum(item => item.Value), methods.Length == 1 ? methods[0] : "Mixed", accountContributions);
         }).ToArray();
         return new ConsolidatedBalanceReport(group.Id, group.Name, group.ReportingCurrency, periodStart, asOf, reportAccounts, warnings, translationAdjustment);
     }
@@ -686,6 +703,11 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = userId, Action = action, EntityType = nameof(ConsolidationAdjustmentBatch), EntityId = batch.Id, DetailJson = JsonSerializer.Serialize(details), OccurredAtUtc = DateTimeOffset.UtcNow });
 
     private static string BuildNciControlKey(Guid groupId, DateOnly periodStart, DateOnly asOf, Guid subjectCompanyId) => $"NCI:{groupId:N}:{periodStart:yyyyMMdd}:{asOf:yyyyMMdd}:{subjectCompanyId:N}";
+    private static void AddContribution(Dictionary<(string Number, string Name, string Type, string Method), List<ConsolidatedAccountContribution>> contributions, (string Number, string Name, string Type, string Method) key, ConsolidatedAccountContribution contribution)
+    {
+        if (!contributions.TryGetValue(key, out var items)) contributions[key] = items = [];
+        items.Add(contribution);
+    }
     private static string Truncate(string value, int maximumLength) => value.Length <= maximumLength ? value : value[..maximumLength];
 
     private static RateResolution ResolveRate(string from, string to, CurrencyRateType type, DateOnly on, IReadOnlyList<CurrencyExchangeRate> rates)

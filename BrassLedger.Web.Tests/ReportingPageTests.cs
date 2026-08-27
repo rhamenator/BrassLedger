@@ -72,6 +72,26 @@ public sealed class ReportingPageTests : TestContext
         Assert.All(request.Lines, line => Assert.Equal(StubConsolidationService.SubsidiaryCompanyId, line.SourceCompanyId));
         Assert.Contains(request.Lines, line => line.ReportingAccountNumber == "39998" && line.Credit == 5m);
     }
+
+    [Fact]
+    public void ReportingPage_RendersStatementPackageWarningsReconciliationAndDrilldown()
+    {
+        var cut = RenderComponent<Reporting>();
+
+        cut.FindAll("button").Single(button => button.TextContent.Trim() == "Run statement package").Click();
+
+        Assert.Contains("North America statement package", cut.Markup);
+        Assert.Contains("Incomplete — resolve every warning before external use", cut.Markup);
+        Assert.Contains("Cash flow pending classification", cut.Markup);
+        Assert.Contains("Consolidated balance sheet", cut.Markup);
+        Assert.Contains("Consolidated income statement", cut.Markup);
+        Assert.Contains("Consolidated statement of changes in equity", cut.Markup);
+        Assert.Contains("Consolidated statement of cash flows", cut.Markup);
+        Assert.NotNull(cut.Find("table[aria-label='Consolidated statement reconciliation']"));
+        Assert.Contains("1 source contribution(s)", cut.Markup);
+        var exportLink = cut.FindAll("a").Single(link => link.TextContent.Trim() == "Download statement package CSV");
+        Assert.Contains("/consolidation-groups/70000000-0000-0000-0000-000000000001/statements.csv?periodStart=", exportLink.OuterHtml);
+    }
 }
 
 internal sealed class StubConsolidationService : IConsolidationService
@@ -124,4 +144,16 @@ internal sealed class StubConsolidationService : IConsolidationService
     public Task<ConsolidationAdjustmentWorkspace?> GetAdjustmentWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default) => Task.FromResult<ConsolidationAdjustmentWorkspace?>(new(GroupId, "North America", "USD", ReportingAccounts, Members, [Draft]));
     public Task<ConsolidatedBalanceReport?> GetBalanceReportAsync(Guid groupId, DateOnly asOf, CancellationToken cancellationToken = default) => GetBalanceReportAsync(groupId, new DateOnly(asOf.Year, 1, 1), asOf, cancellationToken);
     public Task<ConsolidatedBalanceReport?> GetBalanceReportAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default) => Task.FromResult<ConsolidatedBalanceReport?>(new(GroupId, "North America", "USD", periodStart, asOf, [new("1000", "Cash", "Asset", 10m, "Closing"), new("3000", "Retained earnings", "Equity", 10m, "Historical")], [], 0m));
+    public Task<ConsolidatedStatementPackage?> GetStatementPackageAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default)
+    {
+        var source = new ConsolidatedAccountContribution(ParentId, "Parent", "1000", "Cash", "MemberLedger", string.Empty, 10m, "Closing");
+        var asset = new ConsolidatedStatementAccount("1000", "Cash", "Asset", 10m, [source]);
+        var equity = new ConsolidatedStatementAccount("3000", "Retained earnings", "Equity", 10m, []);
+        var balance = new ConsolidatedFinancialStatement("BALANCE-SHEET", "Consolidated balance sheet", [new("ASSETS", "Assets", [asset], 10m), new("EQUITY", "Equity", [equity], 10m)], 10m, 0m);
+        var income = new ConsolidatedFinancialStatement("INCOME-STATEMENT", "Consolidated income statement", [], 0m, 0m);
+        var changes = new ConsolidatedFinancialStatement("EQUITY-STATEMENT", "Consolidated statement of changes in equity", [], 10m, 0m);
+        var cash = new ConsolidatedFinancialStatement("CASH-FLOW", "Consolidated statement of cash flows", [], 0m, 0m);
+        return Task.FromResult<ConsolidatedStatementPackage?>(new(GroupId, "North America", "USD", periodStart, asOf, balance, income, changes, cash, new(10m, 0m, 10m, 0m, 10m, 0m, 10m, 0m, 10m, 0m, 10m, 10m, 0m, 0m, 0m), ["Cash flow pending classification"], false));
+    }
+    public Task<string?> ExportStatementPackageCsvAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default) => Task.FromResult<string?>("Record Type,Statement\n");
 }

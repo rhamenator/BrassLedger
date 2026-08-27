@@ -980,6 +980,17 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("CashFlowActivity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CashFlowRationale")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateOnly?>("CashFlowReviewedOn")
+                        .HasColumnType("date");
+
                     b.Property<string>("ConcurrencyToken")
                         .IsConcurrencyToken()
                         .IsRequired()

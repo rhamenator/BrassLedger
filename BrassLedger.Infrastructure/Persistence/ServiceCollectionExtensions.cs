@@ -571,6 +571,10 @@ public static class ServiceCollectionExtensions
                 && await HasIndexAsync(dbContext, "IX_ConsolidationAdjustmentBatches_SubjectCompanyId", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ConsolidationAdjustmentBatches_ControlKey", cancellationToken);
         }
+        if (migrationId.EndsWith("_AddConsolidatedCashFlowClassification", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "CashFlowActivity", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "CashFlowRationale", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "CashFlowReviewedOn", cancellationToken);
         return false;
     }
 

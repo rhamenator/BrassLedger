@@ -120,6 +120,12 @@ app.MapGet("/reports/{code}.csv", async (string code, BrassLedger.Application.Ac
     return string.IsNullOrEmpty(csv) ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"{code.ToLowerInvariant()}.csv");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 
+app.MapGet("/consolidation-groups/{groupId:guid}/statements.csv", async (Guid groupId, DateOnly periodStart, DateOnly asOf, BrassLedger.Application.Accounting.IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var csv = await service.ExportStatementPackageCsvAsync(groupId, periodStart, asOf, cancellationToken);
+    return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"consolidated-statements-{groupId:N}-{asOf:yyyyMMdd}.csv");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+
 app.MapGet("/payroll/reports/{payrollRunId:guid}/register.csv", async (Guid payrollRunId, BrassLedger.Application.Accounting.IPayrollReportingService service, CancellationToken cancellationToken) =>
 {
     var csv = await service.ExportRegisterCsvAsync(payrollRunId, cancellationToken);
