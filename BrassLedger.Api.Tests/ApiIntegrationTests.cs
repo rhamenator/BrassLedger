@@ -157,6 +157,14 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", mappingRequest with { EffectiveFrom = new DateOnly(2026, 2, 1) })).StatusCode);
         var debitMapping = savedMappings.Mappings.Single(mapping => mapping.AccountId == sourceAccount.AccountId);
         var creditMapping = savedMappings.Mappings.Single(mapping => mapping.AccountId == offsetSourceAccount.AccountId);
+        var presentationWorkspace = await client.GetFromJsonAsync<ConsolidationStatementPresentationWorkspace>($"/api/consolidation-groups/{group.Id}/statement-presentations");
+        var presentationCandidate = presentationWorkspace!.Candidates.Single(candidate => candidate.ReportingAccountNumber == debitMapping.ReportingAccountNumber);
+        var presentationSection = presentationCandidate.ReportingAccountType switch { "Asset" => ("CURRENT-ASSETS", "Current assets"), "Liability" => ("CURRENT-LIABILITIES", "Current liabilities"), "Equity" => ("EQUITY", "Equity"), "Revenue" => ("REVENUE", "Revenue"), _ => ("EXPENSES", "Expenses") };
+        var presentationRequest = new SaveConsolidationStatementPresentationRequest(null, group.Id, presentationCandidate.StatementCode, presentationCandidate.ReportingAccountNumber, presentationCandidate.ReportingAccountName, presentationCandidate.ReportingAccountType, presentationSection.Item1, presentationSection.Item2, 100, "API reviewed line caption", 100, "API reviewed presentation rationale", new DateOnly(2026, 1, 15), new DateOnly(2026, 1, 1), null);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/statement-presentations", presentationRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/statement-presentations", presentationRequest)).StatusCode);
+        presentationWorkspace = await client.GetFromJsonAsync<ConsolidationStatementPresentationWorkspace>($"/api/consolidation-groups/{group.Id}/statement-presentations");
+        Assert.Contains(presentationWorkspace!.Presentations, presentation => presentation.LineCaption == "API reviewed line caption" && presentation.Rationale == "API reviewed presentation rationale");
         var adjustmentRequest = new SaveConsolidationAdjustmentRequest(null, group.Id, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), "ManualAdjustment", "API-CONSOL-ADJ-1", "API reporting-only adjustment", string.Empty,
         [
             new(debitMapping.ReportingAccountNumber, debitMapping.ReportingAccountName, debitMapping.ReportingAccountType, 10m, 0m, "API debit"),

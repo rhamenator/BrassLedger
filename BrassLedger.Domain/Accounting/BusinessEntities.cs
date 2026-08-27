@@ -228,6 +228,27 @@ public sealed class ConsolidationAccountMapping
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
+public sealed class ConsolidationStatementPresentation
+{
+    public Guid Id { get; set; }
+    public Guid ConsolidationGroupId { get; set; }
+    public string StatementCode { get; set; } = string.Empty;
+    public string ReportingAccountNumber { get; set; } = string.Empty;
+    public string ReportingAccountName { get; set; } = string.Empty;
+    public AccountType ReportingAccountType { get; set; }
+    public string SectionCode { get; set; } = string.Empty;
+    public string SectionName { get; set; } = string.Empty;
+    public int SectionSortOrder { get; set; }
+    public string LineCaption { get; set; } = string.Empty;
+    public int LineSortOrder { get; set; }
+    public string Rationale { get; set; } = string.Empty;
+    public DateOnly ReviewedOn { get; set; }
+    public DateOnly EffectiveFrom { get; set; } = DateOnly.MinValue;
+    public DateOnly? EffectiveThrough { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
 public sealed class ConsolidationTradingPartner
 {
     public Guid Id { get; set; }

@@ -47,6 +47,10 @@ public sealed partial class ConsolidationService
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var currentCashAccounts = await EffectiveCashReportingAccountsAsync(db, groupId, asOf, cancellationToken);
         var openingCashAccounts = await EffectiveCashReportingAccountsAsync(db, groupId, openingAsOf, cancellationToken);
+        var presentations = await db.ConsolidationStatementPresentations.AsNoTracking()
+            .Where(item => item.ConsolidationGroupId == groupId && item.EffectiveFrom <= asOf && (item.EffectiveThrough == null || item.EffectiveThrough >= asOf))
+            .ToListAsync(cancellationToken);
+        var presentationWarnings = new List<string>();
 
         var assets = StatementAccounts(current.Accounts, nameof(AccountType.Asset));
         var liabilities = StatementAccounts(current.Accounts, nameof(AccountType.Liability));
@@ -64,11 +68,11 @@ public sealed partial class ConsolidationService
         var totalRecordedEquity = recordedEquity.Sum(item => item.Amount);
         var liabilitiesAndEquity = totalLiabilities + totalRecordedEquity + netIncome;
         var balanceDifference = decimal.Round(totalAssets - liabilitiesAndEquity, 2, MidpointRounding.AwayFromZero);
-        var balanceSheet = new ConsolidatedFinancialStatement("BALANCE-SHEET", "Consolidated balance sheet",
-            [Section("ASSETS", "Assets", assets), Section("LIABILITIES", "Liabilities", liabilities), Section("EQUITY", "Equity", [.. recordedEquity, currentEarnings])], totalAssets, balanceDifference);
+        var balanceSheet = new ConsolidatedFinancialStatement(BalanceSheetCode, "Consolidated balance sheet",
+            PresentedSections(BalanceSheetCode, [.. assets, .. liabilities, .. recordedEquity, currentEarnings], presentations, presentationWarnings), totalAssets, balanceDifference);
 
-        var incomeStatement = new ConsolidatedFinancialStatement("INCOME-STATEMENT", "Consolidated income statement",
-            [Section("REVENUE", "Revenue", revenue), Section("EXPENSES", "Expenses", expenses)], netIncome, 0m);
+        var incomeStatement = new ConsolidatedFinancialStatement(IncomeStatementCode, "Consolidated income statement",
+            PresentedSections(IncomeStatementCode, [.. revenue, .. expenses], presentations, presentationWarnings), netIncome, 0m);
 
         var openingEquityAccounts = StatementAccounts(opening.Accounts, nameof(AccountType.Equity));
         var openingEquity = openingEquityAccounts.Sum(item => item.Amount);
@@ -88,6 +92,7 @@ public sealed partial class ConsolidationService
 
         var warnings = current.Warnings.Select(warning => $"Closing report: {warning}")
             .Concat(opening.Warnings.Select(warning => $"Opening report: {warning}"))
+            .Concat(presentationWarnings)
             .Distinct(StringComparer.Ordinal).ToList();
         var statementPeriods = await db.ConsolidationGroupCompanies.AsNoTracking().Where(period => period.ConsolidationGroupId == groupId && period.EffectiveFrom <= asOf && (period.EffectiveThrough == null || period.EffectiveThrough >= periodStart)).ToListAsync(cancellationToken);
         var statementCompanyIds = statementPeriods.Select(period => period.MemberCompanyId).Distinct().ToArray();
@@ -118,6 +123,42 @@ public sealed partial class ConsolidationService
     private static ConsolidatedStatementAccount[] StatementAccounts(IReadOnlyList<ConsolidatedAccountBalance> accounts, string accountType) =>
         accounts.Where(account => account.AccountType == accountType).OrderBy(account => account.AccountNumber).ThenBy(account => account.AccountName)
             .Select(account => new ConsolidatedStatementAccount(account.AccountNumber, account.AccountName, account.AccountType, account.ConvertedBalance, account.Contributions ?? [])).ToArray();
+
+    private static IReadOnlyList<ConsolidatedStatementSection> PresentedSections(string statementCode, IReadOnlyList<ConsolidatedStatementAccount> accounts,
+        IReadOnlyList<ConsolidationStatementPresentation> presentations, ICollection<string> warnings)
+    {
+        var lines = new List<PresentedLine>();
+        foreach (var account in accounts)
+        {
+            var effective = presentations.Where(item => item.StatementCode == statementCode && item.ReportingAccountNumber == account.AccountNumber
+                && item.ReportingAccountName == account.AccountName && item.ReportingAccountType.ToString() == account.AccountType).ToArray();
+            if (effective.Length == 1)
+            {
+                var policy = effective[0];
+                lines.Add(new(policy.SectionCode, policy.SectionName, policy.SectionSortOrder, policy.LineSortOrder,
+                    account with { AccountName = policy.LineCaption }));
+                continue;
+            }
+            var defaultSection = account.AccountType switch
+            {
+                nameof(AccountType.Asset) => ("UNCONFIGURED-ASSETS", "Unconfigured assets", 900_000),
+                nameof(AccountType.Liability) => ("UNCONFIGURED-LIABILITIES", "Unconfigured liabilities", 900_100),
+                nameof(AccountType.Equity) => ("UNCONFIGURED-EQUITY", "Unconfigured equity", 900_200),
+                nameof(AccountType.Revenue) => ("UNCONFIGURED-REVENUE", "Unconfigured revenue", 900_000),
+                _ => ("UNCONFIGURED-EXPENSES", "Unconfigured expenses", 900_100)
+            };
+            lines.Add(new(defaultSection.Item1, defaultSection.Item2, defaultSection.Item3, 900_000, account));
+            if (account.Amount != 0m)
+                warnings.Add(effective.Length == 0
+                    ? $"{statementCode} account {account.AccountNumber} · {account.AccountName} has no effective reviewed presentation policy on the statement date."
+                    : $"{statementCode} account {account.AccountNumber} · {account.AccountName} has overlapping effective presentation policies and was placed in an unconfigured section.");
+        }
+        return lines.GroupBy(item => new { item.SectionCode, item.SectionName, item.SectionSortOrder })
+            .OrderBy(group => group.Key.SectionSortOrder).ThenBy(group => group.Key.SectionCode)
+            .Select(group => Section(group.Key.SectionCode, group.Key.SectionName,
+                group.OrderBy(item => item.LineSortOrder).ThenBy(item => item.Account.AccountNumber).Select(item => item.Account).ToArray()))
+            .ToArray();
+    }
 
     private static decimal CashBalance(IReadOnlyList<ConsolidatedAccountBalance> accounts, IReadOnlySet<(string Number, string Name)> cashAccounts) =>
         decimal.Round(accounts.Where(account => account.AccountType == nameof(AccountType.Asset) && cashAccounts.Contains((account.AccountNumber, account.AccountName))).Sum(account => account.ConvertedBalance), 2, MidpointRounding.AwayFromZero);
@@ -214,4 +255,5 @@ public sealed partial class ConsolidationService
     }
 
     private sealed record CashFlowBuildResult(IReadOnlyList<ConsolidatedStatementSection> Sections, decimal PresentedChange, IReadOnlyList<string> Warnings);
+    private sealed record PresentedLine(string SectionCode, string SectionName, int SectionSortOrder, int LineSortOrder, ConsolidatedStatementAccount Account);
 }

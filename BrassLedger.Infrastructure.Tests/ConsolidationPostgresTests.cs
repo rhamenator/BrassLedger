@@ -79,6 +79,16 @@ public sealed class ConsolidationPostgresTests
             Assert.Single(mappingAttempts, result => result.Succeeded);
             Assert.Single(mappingAttempts, result => !result.Succeeded);
 
+            var statementCode = sourceType is AccountType.Asset or AccountType.Liability or AccountType.Equity ? "BALANCE-SHEET" : "INCOME-STATEMENT";
+            var sectionCode = sourceType.ToString().ToUpperInvariant(); var sectionName = sourceType.ToString();
+            using var presentationScopeOne = provider.CreateScope(); using var presentationScopeTwo = provider.CreateScope(); SetContext(presentationScopeOne, companyId, ownerId); SetContext(presentationScopeTwo, companyId, ownerId);
+            SaveConsolidationStatementPresentationRequest PresentationRequest(string rationale) => new(null, groupId, statementCode, sourceNumber, sourceName, sourceType.ToString(), sectionCode, sectionName, 100, $"Presented {sourceName}", 100, rationale, new DateOnly(2026, 7, 1), new DateOnly(2026, 8, 1), null);
+            var presentationAttempts = await Task.WhenAll(
+                presentationScopeOne.ServiceProvider.GetRequiredService<IConsolidationService>().SaveStatementPresentationAsync(PresentationRequest("Concurrent PostgreSQL presentation A")),
+                presentationScopeTwo.ServiceProvider.GetRequiredService<IConsolidationService>().SaveStatementPresentationAsync(PresentationRequest("Concurrent PostgreSQL presentation B")));
+            Assert.Single(presentationAttempts, result => result.Succeeded);
+            Assert.Single(presentationAttempts, result => !result.Succeeded);
+
             Guid rateId; string rateToken;
             using (var rateSetupScope = provider.CreateScope())
             {
@@ -189,6 +199,7 @@ public sealed class ConsolidationPostgresTests
             Assert.Equal(3, await verification.ConsolidationGroupCompanies.CountAsync(period => period.ConsolidationGroupId == groupId));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-ownership.created" && entry.EntityType == "ConsolidationGroupCompany"));
             Assert.Equal(1, await verification.ConsolidationAccountMappings.CountAsync(mapping => mapping.ConsolidationGroupId == groupId && mapping.MemberAccountId == sourceAccountId));
+            Assert.Equal(1, await verification.ConsolidationStatementPresentations.CountAsync(presentation => presentation.ConsolidationGroupId == groupId && presentation.ReportingAccountNumber == sourceNumber));
             var sourceMappingId = await verification.ConsolidationAccountMappings
                 .Where(mapping => mapping.ConsolidationGroupId == groupId && mapping.MemberAccountId == sourceAccountId)
                 .Select(mapping => mapping.Id)
@@ -197,6 +208,7 @@ public sealed class ConsolidationPostgresTests
                 entry.Action == "consolidation-account-mapping.created"
                 && entry.EntityType == "ConsolidationAccountMapping"
                 && entry.EntityId == sourceMappingId));
+            Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-statement-presentation.created" && entry.EntityType == nameof(ConsolidationStatementPresentation)));
             Assert.Equal(1, await verification.ConsolidationTradingPartners.CountAsync(link => link.ConsolidationGroupId == groupId && link.CustomerId == intercompanyCustomerId));
             Assert.Equal(2, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-trading-partner.created" && entry.EntityType == "ConsolidationTradingPartner"));
             Assert.Equal(1, await verification.ConsolidationIntercompanyMatches.CountAsync(match => match.ConsolidationGroupId == groupId && match.SalesInvoiceId == intercompanyInvoiceId && match.VendorBillId == intercompanyBillId));

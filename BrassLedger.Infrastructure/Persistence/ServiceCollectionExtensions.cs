@@ -575,6 +575,20 @@ public static class ServiceCollectionExtensions
             return await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "CashFlowActivity", cancellationToken)
                 && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "CashFlowRationale", cancellationToken)
                 && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "CashFlowReviewedOn", cancellationToken);
+        if (migrationId.EndsWith("_AddConsolidatedStatementPresentation", StringComparison.Ordinal))
+        {
+            if (!await HasTableAsync(dbContext, "ConsolidationStatementPresentations", cancellationToken)) return false;
+            string[] columns = ["ConsolidationGroupId", "StatementCode", "ReportingAccountNumber", "ReportingAccountName", "ReportingAccountType", "SectionCode", "SectionName", "SectionSortOrder", "LineCaption", "LineSortOrder", "Rationale", "ReviewedOn", "EffectiveFrom", "EffectiveThrough", "IsActive", "ConcurrencyToken"];
+            foreach (var column in columns)
+                if (!await HasColumnAsync(dbContext, "ConsolidationStatementPresentations", column, cancellationToken)) return false;
+            var accountIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationStatementPresentations_ConsolidationGroupId_St~"
+                : "IX_ConsolidationStatementPresentations_ConsolidationGroupId_StatementCode_ReportingAccountNumber_EffectiveFrom";
+            var sectionIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationStatementPresentations_ConsolidationGroupId_S~1"
+                : "IX_ConsolidationStatementPresentations_ConsolidationGroupId_StatementCode_SectionCode_EffectiveFrom";
+            return await HasIndexAsync(dbContext, accountIndex, cancellationToken) && await HasIndexAsync(dbContext, sectionIndex, cancellationToken);
+        }
         return false;
     }
 

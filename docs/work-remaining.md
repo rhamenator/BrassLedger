@@ -17,13 +17,13 @@ This is the canonical agent-readable queue for work still required before BrassL
 | --- | --- |
 | Updated | 2026-08-27 EDT |
 | Branch | `codex/tax-content-intake-wip-20260824` |
-| Last pushed commit | `076a0a5 feat(reporting): add consolidated statement foundation` |
-| In progress | Configurable consolidated-statement presentation, comparisons, and additional output formats |
-| Current evidence | The `076a0a5` CONSOL-STATEMENTS foundation is pushed and gate-complete: clean Release build; SQLite/default 194 plus 10 expected skips; PostgreSQL 204/204; API 35/35; components 13/13; isolated Chromium 35/35; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. A later redundant in-tree build attempt ended with host-level MSBuild exit 135 immediately after restore; it did not supersede the successful clean out-of-tree build or expose a compiler/test failure. |
+| Last pushed commit | `9697928 docs: advance consolidated statements checkpoint` |
+| In progress | Comparative consolidated statements and controlled Excel/PDF output |
+| Current evidence | The uncommitted effective-dated presentation checkpoint is gate-complete pending final diff/commit: clean out-of-tree Release build; SQLite/default 194 plus 10 expected skips; PostgreSQL 204/204; API 35/35; components 13/13; Chromium 35/35; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. It adds reviewed arbitrary sections/captions/order, current/noncurrent support, explicit unconfigured-account warnings, provider migrations/adoption, owner-only administration, audit/concurrency controls, and API/browser coverage. |
 
 ## Immediate queue
 
-1. **In progress — CONSOL-STATEMENTS:** extend the pushed four-statement/drill-down/reconciliation/reviewed-cash-flow/CSV foundation with effective-dated configurable current/noncurrent presentation, captions/order, comparisons, Excel/PDF output, and framework review evidence.
+1. **In progress — CONSOL-STATEMENTS:** commit and push the gate-complete effective-dated presentation checkpoint; then add comparative columns, controlled Excel/PDF output, financing-liability and other framework disclosures, and framework review evidence.
 2. **Pending — FX-TRANSACTIONS:** implement transaction-currency documents, rate provenance, settlement remeasurement, and realized/unrealized gains and losses.
 3. **Pending — ACCEPTANCE-01:** automate the uninterrupted representative-business scenario from clean installation through encrypted restore and audit trace.
 

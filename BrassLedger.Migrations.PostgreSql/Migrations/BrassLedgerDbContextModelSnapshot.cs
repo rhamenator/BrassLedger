@@ -1395,6 +1395,88 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.ToTable("ConsolidationIntercompanyMatches");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationStatementPresentation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("ConsolidationGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("EffectiveFrom")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("EffectiveThrough")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LineCaption")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<int>("LineSortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Rationale")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("ReportingAccountName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("ReportingAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("ReportingAccountType")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("ReviewedOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("SectionCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SectionName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<int>("SectionSortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StatementCode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConsolidationGroupId", "StatementCode", "ReportingAccountNumber", "EffectiveFrom")
+                        .IsUnique();
+
+                    b.HasIndex("ConsolidationGroupId", "StatementCode", "SectionCode", "EffectiveFrom")
+                        .HasDatabaseName("IX_ConsolidationStatementPresentations_ConsolidationGroupId_S~1");
+
+                    b.ToTable("ConsolidationStatementPresentations");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationTradingPartner", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9924,6 +10006,15 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.VendorBill", null)
                         .WithMany()
                         .HasForeignKey("VendorBillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationStatementPresentation", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ConsolidationGroupId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

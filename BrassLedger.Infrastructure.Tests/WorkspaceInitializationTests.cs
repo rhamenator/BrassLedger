@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("37", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("38", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -101,6 +101,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827122336_ConstrainIntercompanyMatchMetadata';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827133355_AddExplicitConsolidationBasisAndNci';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827151409_AddConsolidatedCashFlowClassification';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827160327_AddConsolidatedStatementPresentation';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
@@ -115,6 +116,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'CashFlowActivity';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'CashFlowRationale';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'CashFlowReviewedOn';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'SectionCode';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'ReviewedOn';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveThrough';"));
@@ -166,7 +169,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("37", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("38", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -203,6 +206,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827122336_ConstrainIntercompanyMatchMetadata';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827133355_AddExplicitConsolidationBasisAndNci';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827151409_AddConsolidatedCashFlowClassification';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827160327_AddConsolidatedStatementPresentation';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
@@ -215,6 +219,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'CashFlowActivity';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'CashFlowRationale';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'CashFlowReviewedOn';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'SectionCode';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'ReviewedOn';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'CtaAccountNumber';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
@@ -775,6 +781,18 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var beforeAdjustment = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(beforeAdjustment);
         Assert.DoesNotContain(beforeAdjustment!.Warnings, warning => warning.Contains("no posted NCI reclassification", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(10m, beforeAdjustment.Accounts.Single(account => account.AccountNumber == nciEquity.AccountNumber).ConvertedBalance);
+        SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage);
+        var presentationWorkspace = await consolidation.GetStatementPresentationWorkspaceAsync(group.Id.Value); Assert.NotNull(presentationWorkspace);
+        Assert.Contains(presentationWorkspace!.Candidates, candidate => candidate.StatementCode == "BALANCE-SHEET" && candidate.ReportingAccountNumber == adjustmentAsset.AccountNumber);
+        var missingPresentationEvidence = await consolidation.SaveStatementPresentationAsync(new(null, group.Id.Value, "BALANCE-SHEET", adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, "CURRENT-ASSETS", "Current assets", 100, "Cash and other current assets", 100, string.Empty, basisReviewedOn, DateOnly.MinValue, null));
+        Assert.False(missingPresentationEvidence.Succeeded); Assert.Contains("rationale", missingPresentationEvidence.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var savedPresentation = await consolidation.SaveStatementPresentationAsync(new(null, group.Id.Value, "BALANCE-SHEET", adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, "CURRENT-ASSETS", "Current assets", 100, "Cash and other current assets", 100, "Reviewed current classification for consolidated presentation", basisReviewedOn, DateOnly.MinValue, null));
+        Assert.True(savedPresentation.Succeeded, savedPresentation.ErrorMessage);
+        var overlappingPresentation = await consolidation.SaveStatementPresentationAsync(new(null, group.Id.Value, "BALANCE-SHEET", adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, "NONCURRENT-ASSETS", "Noncurrent assets", 200, "Other assets", 100, "Conflicting presentation period", basisReviewedOn, adjustmentPeriodStart, null));
+        Assert.False(overlappingPresentation.Succeeded); Assert.Contains("overlap", overlappingPresentation.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        presentationWorkspace = await consolidation.GetStatementPresentationWorkspaceAsync(group.Id.Value); var retainedPresentation = Assert.Single(presentationWorkspace!.Presentations);
+        Assert.Equal("CURRENT-ASSETS", retainedPresentation.SectionCode); Assert.Equal("Reviewed current classification for consolidated presentation", retainedPresentation.Rationale);
+        SetConsolidationUser(posterId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
         var statementPackage = await consolidation.GetStatementPackageAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementPackage);
         Assert.False(statementPackage!.IsComplete);
         Assert.DoesNotContain(statementPackage.Warnings, warning => warning.Contains("has no effective operating, investing, or financing classification", StringComparison.OrdinalIgnoreCase));
@@ -784,6 +802,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(statementPackage.Reconciliation.Assets, statementPackage.Reconciliation.LiabilitiesAndEquity);
         Assert.Equal(statementPackage.Reconciliation.EndingCash - statementPackage.Reconciliation.OpeningCash, statementPackage.Reconciliation.NetCashChange);
         Assert.Contains(statementPackage.BalanceSheet.Sections.SelectMany(section => section.Accounts).SelectMany(account => account.Contributions), contribution => contribution.SourceKind == "MemberLedger");
+        var currentAssetsSection = statementPackage.BalanceSheet.Sections.Single(section => section.Code == "CURRENT-ASSETS");
+        Assert.Contains(currentAssetsSection.Accounts, account => account.AccountNumber == adjustmentAsset.AccountNumber && account.AccountName == "Cash and other current assets");
+        Assert.Contains(statementPackage.Warnings, warning => warning.Contains("has no effective reviewed presentation policy", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(statementPackage.CashFlowStatement.Sections, section => section.Code == "OPERATING");
         Assert.Contains(statementPackage.CashFlowStatement.Sections, section => section.Code == "INVESTING");
         Assert.Contains(statementPackage.CashFlowStatement.Sections, section => section.Code == "FINANCING");

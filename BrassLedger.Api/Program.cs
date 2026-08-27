@@ -909,6 +909,17 @@ api.MapGet("/consolidation-groups/{groupId:guid}/account-mappings", async (Guid 
     var workspace = await service.GetAccountMappingWorkspaceAsync(groupId, cancellationToken);
     return workspace is null ? Results.NotFound() : Results.Ok(workspace);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapPut("/consolidation-groups/{groupId:guid}/statement-presentations", async (Guid groupId, SaveConsolidationStatementPresentationRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId) return Results.BadRequest(new { error = "consolidation_group_id_mismatch" });
+    var result = await service.SaveStatementPresentationAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["statementPresentation"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/consolidation-groups/{groupId:guid}/statement-presentations", async (Guid groupId, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var workspace = await service.GetStatementPresentationWorkspaceAsync(groupId, cancellationToken);
+    return workspace is null ? Results.NotFound() : Results.Ok(workspace);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapPut("/consolidation-groups/{groupId:guid}/trading-partners", async (Guid groupId, SaveConsolidationTradingPartnerRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
 {
     if (request.ConsolidationGroupId != groupId) return Results.BadRequest(new { error = "consolidation_group_id_mismatch" });

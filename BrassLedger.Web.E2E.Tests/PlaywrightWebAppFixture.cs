@@ -173,6 +173,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             DELETE FROM "ConsolidationAdjustmentLines" WHERE "ConsolidationAdjustmentBatchId" IN (SELECT "Id" FROM "ConsolidationAdjustmentBatches" WHERE "Reference" = 'ELIM-E2E-IC-INV-1001');
             DELETE FROM "ConsolidationAdjustmentBatches" WHERE "Reference" = 'ELIM-E2E-IC-INV-1001';
             DELETE FROM "ConsolidationTradingPartners" WHERE "CustomerId" = '71000000-0000-0000-0000-000000000020' OR "VendorId" = '71000000-0000-0000-0000-000000000021';
+            DELETE FROM "ConsolidationStatementPresentations" WHERE "ConsolidationGroupId" = '71000000-0000-0000-0000-000000000001';
             INSERT OR IGNORE INTO "Companies" ("Id", "Name", "LegalName", "TaxId", "BaseCurrency", "FiscalYearStartMonth")
             VALUES ('71000000-0000-0000-0000-000000000010', 'E2E intercompany affiliate', 'E2E intercompany affiliate LLC', 'E2E-IC-AFFILIATE', 'USD', 1);
             INSERT OR IGNORE INTO "CompanyMemberships" ("Id", "UserId", "CompanyId", "Role", "IsOwner", "IsActive", "GrantedAtUtc")
@@ -345,12 +346,13 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            DELETE FROM "BusinessAuditEntries" WHERE "Action" LIKE 'consolidation-intercompany-match.%' OR "Action" LIKE 'consolidation-trading-partner.%';
+            DELETE FROM "BusinessAuditEntries" WHERE "Action" LIKE 'consolidation-intercompany-match.%' OR "Action" LIKE 'consolidation-trading-partner.%' OR "Action" LIKE 'consolidation-statement-presentation.%';
             DELETE FROM "ConsolidationIntercompanyMatches" WHERE "SalesInvoiceId" = '71000000-0000-0000-0000-000000000022';
             DELETE FROM "BusinessAuditEntries" WHERE "EntityId" IN (SELECT "Id" FROM "ConsolidationAdjustmentBatches" WHERE "Reference" IN ('ELIM-E2E-IC-INV-1001', 'NCI-E2E-CONTROLLED'));
             DELETE FROM "ConsolidationAdjustmentLines" WHERE "ConsolidationAdjustmentBatchId" IN (SELECT "Id" FROM "ConsolidationAdjustmentBatches" WHERE "Reference" IN ('ELIM-E2E-IC-INV-1001', 'NCI-E2E-CONTROLLED'));
             DELETE FROM "ConsolidationAdjustmentBatches" WHERE "Reference" IN ('ELIM-E2E-IC-INV-1001', 'NCI-E2E-CONTROLLED');
             DELETE FROM "ConsolidationTradingPartners" WHERE "CustomerId" = '71000000-0000-0000-0000-000000000020' OR "VendorId" = '71000000-0000-0000-0000-000000000021';
+            DELETE FROM "ConsolidationStatementPresentations" WHERE "ConsolidationGroupId" = '71000000-0000-0000-0000-000000000001';
             DELETE FROM "SalesInvoices" WHERE "Id" = '71000000-0000-0000-0000-000000000022';
             DELETE FROM "VendorBills" WHERE "Id" = '71000000-0000-0000-0000-000000000023';
             DELETE FROM "Customers" WHERE "Id" = '71000000-0000-0000-0000-000000000020';

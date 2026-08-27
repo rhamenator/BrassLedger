@@ -80,6 +80,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddConsolidatedCashFlowClassification` adds effective mapping-level Operating, Investing, Financing, or Unclassified policy plus rationale and review date. Existing mappings remain Unclassified so an upgrade never invents a cash-flow conclusion. Lost-history adoption requires all three policy/evidence columns. Downgrade is prohibited because it could delete reviewed classifications needed to reproduce a statement of cash flows.
 
+`AddConsolidatedStatementPresentation` adds a separate effective-dated presentation-policy table rather than coupling current/noncurrent sections, captions, or ordering to source mappings. Each row retains statement and reporting-account identity, free-form section identity, section/line ordering, reviewed rationale, lifecycle, and concurrency evidence. Unique provider indexes prevent duplicate same-date account policies and support section resolution; runtime validation rejects overlapping periods and inconsistent section captions/orders. Lost-history adoption requires the table, every policy/evidence column, and both provider-specific indexes. Downgrade is prohibited because it could delete reviewed presentation history.
+
 ## Verification
 
 At minimum, run:
