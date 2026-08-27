@@ -2,6 +2,7 @@ using Bunit;
 using Bunit.TestDoubles;
 using BrassLedger.Application.Accounting;
 using BrassLedger.Application.Catalog;
+using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Web.Components.Pages;
 using Microsoft.Extensions.DependencyInjection;
@@ -143,6 +144,35 @@ public sealed class ReportingPageTests : TestContext
         Assert.Equal("GoingConcern", narrative.Category);
         Assert.Equal("Board package WP-9", narrative.SourceReference);
     }
+
+    [Fact]
+    public void ReportingPage_PreparesReconciledAcquisitionScheduleAndPosting()
+    {
+        var cut = RenderComponent<Reporting>();
+
+        Assert.Contains("Acquisitions, disposals, ownership changes and attribution", cut.Markup);
+        cut.Find("select#ownershipSubject").Change(StubConsolidationService.SubsidiaryCompanyId.ToString());
+        cut.Find("input#ownershipReference").Change("ACQ-COMPONENT-1");
+        cut.Find("input#ownershipAfter").Change("0.8");
+        cut.Find("textarea#ownershipRationale").Change("Controller-reviewed purchase-price allocation");
+        cut.Find("input#ownershipSource").Change("PPA working paper 1");
+        cut.Find("input[aria-label='Consideration transferred']").Change("80");
+        cut.Find("input[aria-label='NCI recognized']").Change("20");
+        cut.Find("input[aria-label='Identifiable net assets at fair value']").Change("90");
+        cut.Find("input[aria-label='Goodwill']").Change("10");
+        cut.FindAll("select[aria-label='Ownership-event reporting account']").ToArray()[0].Change("1000");
+        cut.FindAll("select[aria-label='Ownership-event reporting account']").ToArray()[1].Change("3000");
+        cut.FindAll("input[aria-label='Debit']").ToArray()[0].Change("100");
+        cut.FindAll("input[aria-label='Credit']").ToArray()[1].Change("100");
+        cut.FindAll("button").Single(button => button.TextContent.Trim() == "Prepare ownership event").Click();
+
+        var request = Assert.IsType<SaveConsolidationOwnershipEventRequest>(_consolidation.LastOwnershipEventRequest);
+        Assert.Equal(nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), request.EventType);
+        Assert.Equal(.8m, request.Content.OwnershipAfter);
+        Assert.Equal(10m, request.Content.Acquisition!.Goodwill);
+        Assert.Equal(2, request.Content.PostingLines.Count);
+        Assert.Equal(request.Content.PostingLines.Sum(line => line.Debit), request.Content.PostingLines.Sum(line => line.Credit));
+    }
 }
 
 internal sealed class StubConsolidationService : IConsolidationService
@@ -175,6 +205,7 @@ internal sealed class StubConsolidationService : IConsolidationService
     public int DiscoveryCount { get; private set; }
     public SaveConsolidationAdjustmentRequest? LastAdjustmentRequest { get; private set; }
     public SaveConsolidationDisclosurePackageRequest? LastDisclosureRequest { get; private set; }
+    public SaveConsolidationOwnershipEventRequest? LastOwnershipEventRequest { get; private set; }
 
     public Task<TransactionResult> SaveExchangeRateAsync(SaveExchangeRateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<IReadOnlyList<ExchangeRateSnapshot>> GetExchangeRatesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ExchangeRateSnapshot>>([]);
@@ -194,6 +225,12 @@ internal sealed class StubConsolidationService : IConsolidationService
     public Task<TransactionResult> ApproveDisclosurePackageAsync(ConsolidationDisclosureActionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.DisclosurePackageId));
     public Task<TransactionResult> RejectDisclosurePackageAsync(ConsolidationDisclosureDecisionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.DisclosurePackageId));
     public Task<ConsolidationDisclosureWorkspace?> GetDisclosureWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default) => Task.FromResult<ConsolidationDisclosureWorkspace?>(new(GroupId, "North America", "USD", []));
+    public Task<TransactionResult> SaveOwnershipEventAsync(SaveConsolidationOwnershipEventRequest request, CancellationToken cancellationToken = default) { LastOwnershipEventRequest = request; return Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid())); }
+    public Task<TransactionResult> ApproveOwnershipEventAsync(ConsolidationOwnershipEventActionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.OwnershipEventId));
+    public Task<TransactionResult> RejectOwnershipEventAsync(ConsolidationOwnershipEventDecisionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.OwnershipEventId));
+    public Task<TransactionResult> PostOwnershipEventAsync(ConsolidationOwnershipEventActionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.OwnershipEventId));
+    public Task<TransactionResult> ReverseOwnershipEventAsync(ReverseConsolidationOwnershipEventRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<ConsolidationOwnershipEventWorkspace?> GetOwnershipEventWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default) => Task.FromResult<ConsolidationOwnershipEventWorkspace?>(new(GroupId, "North America", "USD", Members, ReportingAccounts, []));
     public Task<TransactionResult> SaveAdjustmentAsync(SaveConsolidationAdjustmentRequest request, CancellationToken cancellationToken = default) { LastAdjustmentRequest = request; return Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid())); }
     public Task<TransactionResult> ApproveAdjustmentAsync(ConsolidationAdjustmentActionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.AdjustmentBatchId));
     public Task<TransactionResult> RejectAdjustmentAsync(ConsolidationAdjustmentDecisionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.AdjustmentBatchId));

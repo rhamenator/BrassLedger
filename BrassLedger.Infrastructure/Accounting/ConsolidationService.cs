@@ -611,6 +611,46 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
                 AddContribution(contributions, key, new(line.SourceCompanyId, sourceName, line.ReportingAccountNumber, line.ReportingAccountName, batch.Kind.ToString(), batch.Reference, amount, key.Item4));
             }
         }
+        var retainedOwnershipEvents = await db.ConsolidationOwnershipEvents.AsNoTracking()
+            .Where(item => item.CompanyId == companyId && item.ConsolidationGroupId == group.Id && item.EventDate <= asOf)
+            .OrderBy(item => item.EventDate).ThenBy(item => item.Reference).ToArrayAsync(cancellationToken);
+        foreach (var pendingEvent in retainedOwnershipEvents.Where(item => item.Status is not ("Posted" or "Reversed" or "Rejected")))
+        {
+            complete = false;
+            warnings.Add($"Ownership event {pendingEvent.Reference} dated {pendingEvent.EventDate:yyyy-MM-dd} is {pendingEvent.Status} and was excluded until independently approved and posted.");
+        }
+        var ownershipEvents = retainedOwnershipEvents.Where(item => item.Status is "Posted" or "Reversed");
+        foreach (var ownershipEvent in ownershipEvents)
+        {
+            var retainedError = await ValidateRetainedOwnershipEventAsync(db, ownershipEvent, cancellationToken);
+            var content = DeserializeOwnershipEvent(ownershipEvent);
+            if (retainedError is not null || content is null)
+            {
+                complete = false;
+                warnings.Add($"Ownership event {ownershipEvent.Reference} was excluded: {retainedError ?? "its retained JSON is invalid."}");
+                continue;
+            }
+            decimal priorPeriodEarnings = 0m;
+            foreach (var line in content.PostingLines)
+            {
+                _ = Enum.TryParse<AccountType>(line.ReportingAccountType, true, out var accountType);
+                var amount = NaturalAmount(accountType, line.Debit, line.Credit);
+                if (ownershipEvent.EventDate < periodStart && accountType is AccountType.Revenue or AccountType.Expense)
+                {
+                    priorPeriodEarnings += accountType == AccountType.Revenue ? amount : -amount;
+                    continue;
+                }
+                var key = (line.ReportingAccountNumber.Trim(), line.ReportingAccountName.Trim(), accountType.ToString(), "OwnershipEvent");
+                totals[key] = totals.GetValueOrDefault(key) + amount;
+                AddContribution(contributions, key, new(ownershipEvent.SubjectCompanyId, companies.GetValueOrDefault(ownershipEvent.SubjectCompanyId)?.Name ?? "Unavailable company", line.ReportingAccountNumber.Trim(), line.ReportingAccountName.Trim(), ownershipEvent.EventType.ToString(), ownershipEvent.Reference, amount, "OwnershipEvent"));
+            }
+            if (priorPeriodEarnings != 0m)
+            {
+                var key = (content.PriorPeriodEquityAccountNumber.Trim(), content.PriorPeriodEquityAccountName.Trim(), AccountType.Equity.ToString(), "OwnershipEventCarryforward");
+                totals[key] = totals.GetValueOrDefault(key) + priorPeriodEarnings;
+                AddContribution(contributions, key, new(ownershipEvent.SubjectCompanyId, companies.GetValueOrDefault(ownershipEvent.SubjectCompanyId)?.Name ?? "Unavailable company", content.PriorPeriodEquityAccountNumber.Trim(), content.PriorPeriodEquityAccountName.Trim(), "OwnershipEventCarryforward", ownershipEvent.Reference, priorPeriodEarnings, "OwnershipEventCarryforward"));
+            }
+        }
         var translationAdjustment = 0m;
         if (complete)
         {

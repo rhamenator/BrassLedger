@@ -66,7 +66,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("39", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("40", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -106,6 +106,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827151409_AddConsolidatedCashFlowClassification';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827160327_AddConsolidatedStatementPresentation';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827185331_AddConsolidationDisclosurePackages';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827201050_AddConsolidationOwnershipEvents';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
@@ -124,6 +125,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'ReviewedOn';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationDisclosurePackages') WHERE name = 'ContentJson';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_ConsolidationDisclosurePackages_ConsolidationGroupId_PeriodStart_AsOf_FrameworkCode';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationOwnershipEvents') WHERE name = 'ContentJson';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_ConsolidationOwnershipEvents_ConsolidationGroupId_Reference';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveThrough';"));
@@ -175,7 +178,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("39", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("40", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -214,6 +217,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827151409_AddConsolidatedCashFlowClassification';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827160327_AddConsolidatedStatementPresentation';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827185331_AddConsolidationDisclosurePackages';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827201050_AddConsolidationOwnershipEvents';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
@@ -229,6 +233,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'SectionCode';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'ReviewedOn';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationDisclosurePackages') WHERE name = 'ContentJson';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationOwnershipEvents') WHERE name = 'ContentJson';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'CtaAccountNumber';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
@@ -750,7 +755,71 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var adjustmentWorkspace = await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value); Assert.NotNull(adjustmentWorkspace);
         var adjustmentAsset = adjustmentWorkspace!.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Asset));
         var adjustmentEquity = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Equity) && account.AccountNumber != "39997");
+        var adjustmentRevenue = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Revenue));
         var nciEquity = adjustmentWorkspace.ReportingAccounts.Single(account => account.AccountNumber == "39997" && account.AccountType == nameof(AccountType.Equity));
+        var invalidAcquisitionContent = new ConsolidationOwnershipEventDocument(1, 0m, .75m, "FullFairValue", "Controller-reviewed purchase-price allocation", "Acquisition working paper PPA-1", string.Empty, string.Empty,
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 100m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 100m)],
+            Acquisition: new(80m, 0m, 20m, 90m, 0m, 0m));
+        var invalidAcquisition = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-BAD", "US-GAAP", "ASC 805 current through 2026", invalidAcquisitionContent));
+        Assert.False(invalidAcquisition.Succeeded); Assert.Contains("Goodwill", invalidAcquisition.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var acquisitionContent = invalidAcquisitionContent with
+        {
+            Acquisition = new(80m, 0m, 20m, 90m, 10m, 0m),
+            Extensions = new() { ["valuationSpecialist"] = JsonDocument.Parse("\"Independent Valuation LLC\"").RootElement.Clone() }
+        };
+        var savedAcquisition = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "ACQ-US-DIST-1", "US-GAAP", "ASC 805 current through 2026", acquisitionContent));
+        Assert.True(savedAcquisition.Succeeded, savedAcquisition.ErrorMessage);
+        var acquisitionDraft = Assert.Single((await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events); Assert.Equal("Draft", acquisitionDraft.Status); Assert.Equal(10m, acquisitionDraft.Content.Acquisition!.Goodwill); Assert.False(string.IsNullOrWhiteSpace(acquisitionDraft.ContentSha256));
+        SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
+        var approvedAcquisition = await consolidation.ApproveOwnershipEventAsync(new(group.Id.Value, acquisitionDraft.Id, acquisitionDraft.ConcurrencyToken)); Assert.True(approvedAcquisition.Succeeded, approvedAcquisition.ErrorMessage);
+        SetConsolidationUser(posterId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
+        var approvedAcquisitionSnapshot = Assert.Single((await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events);
+        var postedAcquisition = await consolidation.PostOwnershipEventAsync(new(group.Id.Value, approvedAcquisitionSnapshot.Id, approvedAcquisitionSnapshot.ConcurrencyToken)); Assert.True(postedAcquisition.Succeeded, postedAcquisition.ErrorMessage);
+        var acquisitionReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(acquisitionReport);
+        Assert.Contains(acquisitionReport!.Accounts.SelectMany(account => account.Contributions ?? []), contribution => contribution.SourceKind == nameof(ConsolidationOwnershipEventType.AcquisitionOfControl) && contribution.Reference == "ACQ-US-DIST-1");
+        var postedAcquisitionSnapshot = Assert.Single((await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events, item => item.ReversalOfEventId is null);
+        SetConsolidationUser(reverserId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalReverse);
+        var reversedAcquisition = await consolidation.ReverseOwnershipEventAsync(new(group.Id.Value, postedAcquisitionSnapshot.Id, adjustmentAsOf.AddDays(1), "Acquisition schedule superseded by corrected valuation", postedAcquisitionSnapshot.ConcurrencyToken)); Assert.True(reversedAcquisition.Succeeded, reversedAcquisition.ErrorMessage);
+        var reversedWorkspace = await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value); Assert.NotNull(reversedWorkspace); Assert.Equal(2, reversedWorkspace!.Events.Count); Assert.Contains(reversedWorkspace.Events, item => item.ReversalOfEventId == postedAcquisitionSnapshot.Id && item.Status == "Posted");
+        SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
+        var attributionContent = new ConsolidationOwnershipEventDocument(1, .75m, .75m, "NotApplicable", "Reviewed period-end allocation to parent and noncontrolling interests", "Income attribution working paper NCI-1", adjustmentEquity.AccountNumber, adjustmentEquity.AccountName,
+            [new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 10m, 0m, "Allocate consolidated earnings"), new(adjustmentRevenue.AccountNumber, adjustmentRevenue.AccountName, adjustmentRevenue.AccountType, 0m, 10m, "Attributed subsidiary earnings")],
+            ProfitAttribution: new(10m, 7.50m, 2.50m, 0m, 0m, 0m));
+        var savedAttribution = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, adjustmentAsOf, nameof(ConsolidationOwnershipEventType.ProfitAttribution), "ATTR-US-DIST-1", "US-GAAP", "ASC 810 current through 2026", attributionContent)); Assert.True(savedAttribution.Succeeded, savedAttribution.ErrorMessage);
+        var attributionDraft = Assert.Single((await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events, item => item.Id == savedAttribution.Id);
+        SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
+        Assert.True((await consolidation.ApproveOwnershipEventAsync(new(group.Id.Value, attributionDraft.Id, attributionDraft.ConcurrencyToken))).Succeeded);
+        var attributionApproved = Assert.Single((await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events, item => item.Id == attributionDraft.Id);
+        SetConsolidationUser(posterId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
+        Assert.True((await consolidation.PostOwnershipEventAsync(new(group.Id.Value, attributionApproved.Id, attributionApproved.ConcurrencyToken))).Succeeded);
+        var attributionCurrentReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.Contains(attributionCurrentReport!.Accounts.SelectMany(account => account.Contributions ?? []), contribution => contribution.Reference == "ATTR-US-DIST-1" && contribution.SourceKind == nameof(ConsolidationOwnershipEventType.ProfitAttribution));
+        var attributionCarryforwardReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentAsOf.AddDays(1), adjustmentAsOf.AddMonths(1));
+        Assert.Contains(attributionCarryforwardReport!.Accounts.SelectMany(account => account.Contributions ?? []), contribution => contribution.Reference == "ATTR-US-DIST-1" && contribution.SourceKind == "OwnershipEventCarryforward");
+        var historicalOwnershipPackage = await consolidation.GetStatementPackageAsync(group.Id.Value, adjustmentAsOf.AddDays(1), adjustmentAsOf.AddMonths(1)); Assert.NotNull(historicalOwnershipPackage);
+        Assert.Contains(historicalOwnershipPackage!.OwnershipEvents!, item => item.Reference == "ACQ-US-DIST-1"); Assert.Contains(historicalOwnershipPackage.OwnershipEvents!, item => item.ReversalOfEventId == postedAcquisitionSnapshot.Id); Assert.Contains(historicalOwnershipPackage.OwnershipEvents!, item => item.Reference == "ATTR-US-DIST-1");
+        SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
+        var ownershipValidationDate = adjustmentAsOf.AddMonths(1);
+        var stepContent = acquisitionContent with { OwnershipBefore = .50m, Acquisition = new(30m, 40m, 20m, 80m, 10m, 0m), Extensions = null };
+        var savedStep = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.StepAcquisition), "STEP-US-DIST-1", "US-GAAP", "ASC 805 current through 2026", stepContent)); Assert.True(savedStep.Succeeded, savedStep.ErrorMessage);
+        var invalidChangeContent = new ConsolidationOwnershipEventDocument(1, .80m, .75m, "NotApplicable", "Reviewed continuing-control ownership transaction", "Ownership schedule EQ-1", string.Empty, string.Empty,
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 5m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 5m)],
+            OwnershipChange: new(5m, 0m, 0m, 0m, 0m, 0m));
+        var invalidChange = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl), "CHANGE-US-DIST-BAD", "US-GAAP", "ASC 810 current through 2026", invalidChangeContent)); Assert.False(invalidChange.Succeeded); Assert.Contains("reconcile", invalidChange.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var changeContent = invalidChangeContent with { OwnershipChange = new(5m, 0m, 0m, 5m, 0m, 0m) };
+        var savedChange = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl), "CHANGE-US-DIST-1", "US-GAAP", "ASC 810 current through 2026", changeContent)); Assert.True(savedChange.Succeeded, savedChange.ErrorMessage);
+        var invalidLossContent = new ConsolidationOwnershipEventDocument(1, .75m, 0m, "NotApplicable", "Reviewed loss-of-control derecognition", "Disposal schedule DISP-1", string.Empty, string.Empty,
+            [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 120m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 120m)],
+            LossOfControl: new(100m, 0m, 20m, 110m, 10m, 0m, 1m));
+        var invalidLoss = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.LossOfControl), "LOSS-US-DIST-BAD", "IFRS", "IFRS 10 current through 2026", invalidLossContent)); Assert.False(invalidLoss.Succeeded); Assert.Contains("does not reconcile", invalidLoss.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var lossContent = invalidLossContent with { LossOfControl = new(100m, 0m, 20m, 110m, 10m, 0m, 0m) };
+        var savedLoss = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.LossOfControl), "LOSS-US-DIST-1", "IFRS", "IFRS 10 current through 2026", lossContent)); Assert.True(savedLoss.Succeeded, savedLoss.ErrorMessage);
+        var invalidAttribution = attributionContent with { ProfitAttribution = new(10m, 8m, 1m, 0m, 0m, 0m) };
+        var rejectedAttributionCalculation = await consolidation.SaveOwnershipEventAsync(new(null, group.Id.Value, usdAffiliateId, ownershipValidationDate, nameof(ConsolidationOwnershipEventType.ProfitAttribution), "ATTR-US-DIST-BAD", "US-GAAP", "ASC 810 current through 2026", invalidAttribution)); Assert.False(rejectedAttributionCalculation.Succeeded); Assert.Contains("reconcile", rejectedAttributionCalculation.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var draftEventsToReject = (await consolidation.GetOwnershipEventWorkspaceAsync(group.Id.Value))!.Events.Where(item => item.Id == savedStep.Id!.Value || item.Id == savedChange.Id!.Value || item.Id == savedLoss.Id!.Value).ToArray(); Assert.Equal(3, draftEventsToReject.Length);
+        SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
+        foreach (var eventToReject in draftEventsToReject) Assert.True((await consolidation.RejectOwnershipEventAsync(new(group.Id.Value, eventToReject.Id, "Fixture-only schedule validation", eventToReject.ConcurrencyToken))).Succeeded);
+        var rejectedEventReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, ownershipValidationDate); Assert.DoesNotContain(rejectedEventReport!.Warnings, warning => warning.Contains("STEP-US-DIST-1", StringComparison.Ordinal) || warning.Contains("CHANGE-US-DIST-1", StringComparison.Ordinal) || warning.Contains("LOSS-US-DIST-1", StringComparison.Ordinal));
+        SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
         var missingNciReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(missingNciReport);
         Assert.Contains(missingNciReport!.Warnings, warning => warning.Contains("no posted NCI reclassification", StringComparison.OrdinalIgnoreCase));
         var savedNci = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.NoncontrollingInterest), "NCI-US-DIST-1", "Reviewed NCI equity attribution", string.Empty,
@@ -829,6 +898,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var statementPackage = await consolidation.GetStatementPackageAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementPackage);
         Assert.False(statementPackage!.IsComplete);
         var statementDisclosure = Assert.Single(statementPackage.DisclosurePackages!); Assert.Equal("US-GAAP", statementDisclosure.FrameworkCode); Assert.Equal("Approved", statementDisclosure.Status);
+        Assert.Equal(2, statementPackage.OwnershipEvents!.Count); Assert.Contains(statementPackage.OwnershipEvents, item => item.Reference == "ACQ-US-DIST-1" && item.Content.Acquisition!.Goodwill == 10m); Assert.Contains(statementPackage.OwnershipEvents, item => item.Reference == "ATTR-US-DIST-1" && item.Content.ProfitAttribution!.NoncontrollingInterestProfitOrLoss == 2.50m);
         Assert.DoesNotContain(statementPackage.Warnings, warning => warning.Contains("has no effective operating, investing, or financing classification", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(0m, statementPackage.Reconciliation.BalanceSheetDifference);
         Assert.Equal(0m, statementPackage.Reconciliation.EquityStatementDifference);
@@ -849,21 +919,25 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("NCI-US-DIST-1", statementCsv, StringComparison.Ordinal);
         Assert.Contains("\"Disclosure\",\"US-GAAP\",\"Financing liabilities\"", statementCsv, StringComparison.Ordinal);
         Assert.Contains("Treasury confirmation WP-2", statementCsv, StringComparison.Ordinal);
+        Assert.Contains("\"Ownership measurement\",\"US-GAAP\",\"AcquisitionOfControl\",\"ACQ-US-DIST-1\",\"Goodwill\"", statementCsv, StringComparison.Ordinal);
+        Assert.Contains("Acquisition working paper PPA-1", statementCsv, StringComparison.Ordinal);
         var statementExcel = await consolidation.ExportStatementPackageExcelAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementExcel);
         using (var workbook = new XLWorkbook(new MemoryStream(statementExcel!)))
         {
-            Assert.Equal(7, workbook.Worksheets.Count);
+            Assert.Equal(8, workbook.Worksheets.Count);
             Assert.Contains("INCOMPLETE", workbook.Worksheet("Summary").Cell("A3").GetString(), StringComparison.Ordinal);
             Assert.Equal("Section code", workbook.Worksheet("Balance sheet").Cell("A6").GetString());
             Assert.Contains("NCI-US-DIST-1", workbook.Worksheet("Source detail").CellsUsed().Select(cell => cell.GetString()));
             Assert.Equal("Financing-liability reconciliation", workbook.Worksheet("Current US-GAAP notes").Cell("A8").GetString());
             Assert.Contains("Treasury confirmation WP-2", workbook.Worksheet("Current US-GAAP notes").CellsUsed().Select(cell => cell.GetString()));
+            Assert.Contains(workbook.Worksheet("Ownership schedules").CellsUsed().Select(cell => cell.GetString()), value => value.Contains("ACQ-US-DIST-1", StringComparison.Ordinal));
+            Assert.Contains("Goodwill", workbook.Worksheet("Ownership schedules").CellsUsed().Select(cell => cell.GetString()));
         }
         var statementPdf = await consolidation.ExportStatementPackagePdfAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementPdf);
         Assert.True(statementPdf!.AsSpan().StartsWith("%PDF"u8));
         using (var document = PdfReader.Open(new MemoryStream(statementPdf), PdfDocumentOpenMode.Import))
         {
-            Assert.True(document.PageCount >= 7);
+            Assert.True(document.PageCount >= 9);
             Assert.Contains("consolidated statements", document.Info.Title, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Incomplete", document.Info.Subject, StringComparison.OrdinalIgnoreCase);
         }
@@ -882,14 +956,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("Current Amount,Comparison Section Code,Comparison Section,Comparison Caption,Comparison Amount,Variance", comparativeCsv, StringComparison.Ordinal);
         Assert.Contains("\"Reconciliation\"", comparativeCsv, StringComparison.Ordinal);
         Assert.Contains(comparisonAsOf.ToString("yyyy-MM-dd"), comparativeCsv, StringComparison.Ordinal);
+        Assert.Contains("\"Current ownership\",\"AcquisitionOfControl\",\"ACQ-US-DIST-1\",\"Measurement\"", comparativeCsv, StringComparison.Ordinal);
         var comparativeExcel = await consolidation.ExportComparativeStatementPackageExcelAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, comparisonPeriodStart, comparisonAsOf); Assert.NotNull(comparativeExcel);
         using (var workbook = new XLWorkbook(new MemoryStream(comparativeExcel!)))
         {
-            Assert.Equal(8, workbook.Worksheets.Count);
+            Assert.Equal(9, workbook.Worksheets.Count);
             Assert.Equal("Current minus comparison", workbook.Worksheet("Summary").Cell("B7").GetString());
             Assert.Equal("Variance", workbook.Worksheet("Balance sheet").Cell("I7").GetString());
             Assert.Equal(comparativeAsset.Variance, workbook.Worksheet("Balance sheet").RowsUsed().Single(row => row.Cell(1).GetString() == comparativeAsset.AccountNumber).Cell(9).GetValue<decimal>());
             Assert.True(workbook.TryGetWorksheet("Current US-GAAP notes", out _));
+            Assert.True(workbook.TryGetWorksheet("Current ownership", out _));
         }
         var comparativePdf = await consolidation.ExportComparativeStatementPackagePdfAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, comparisonPeriodStart, comparisonAsOf); Assert.NotNull(comparativePdf);
         Assert.True(comparativePdf!.AsSpan().StartsWith("%PDF"u8));
@@ -939,6 +1015,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal(11, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationAdjustmentBatch)));
             Assert.Equal(6, await db.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == group.Id));
             Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationDisclosurePackage)));
+            Assert.Equal(13, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationOwnershipEvent)));
+            Assert.Equal(6, await db.ConsolidationOwnershipEvents.CountAsync(item => item.ConsolidationGroupId == group.Id));
         }
     }
 

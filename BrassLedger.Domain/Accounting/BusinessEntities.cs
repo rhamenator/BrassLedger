@@ -46,6 +46,15 @@ public enum ConsolidationAdjustmentKind
     NoncontrollingInterest
 }
 
+public enum ConsolidationOwnershipEventType
+{
+    AcquisitionOfControl,
+    StepAcquisition,
+    OwnershipChangeWithoutLossOfControl,
+    LossOfControl,
+    ProfitAttribution
+}
+
 public sealed class Company
 {
     public Guid Id { get; set; }
@@ -269,6 +278,35 @@ public sealed class ConsolidationDisclosurePackage
     public DateTimeOffset? RejectedAtUtc { get; set; }
     public string DecisionReason { get; set; } = string.Empty;
     public string ReviewNotes { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ConsolidationOwnershipEvent
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ConsolidationGroupId { get; set; }
+    public Guid SubjectCompanyId { get; set; }
+    public DateOnly EventDate { get; set; }
+    public ConsolidationOwnershipEventType EventType { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string FrameworkCode { get; set; } = string.Empty;
+    public string FrameworkEdition { get; set; } = string.Empty;
+    public int SchemaVersion { get; set; } = 1;
+    public string ContentJson { get; set; } = "{}";
+    public string Status { get; set; } = "Draft";
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public Guid? PostedByUserId { get; set; }
+    public DateTimeOffset? PostedAtUtc { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
+    public Guid? ReversalOfEventId { get; set; }
+    public Guid? ReversedByEventId { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 

@@ -151,10 +151,18 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var offsetSourceAccount = mappingWorkspace.SourceAccounts.First(account => account.CompanyId == existingCompany.CompanyId && account.AccountType != sourceAccount.AccountType);
         var offsetMappingRequest = new SaveConsolidationAccountMappingRequest(null, group.Id, offsetSourceAccount.CompanyId, offsetSourceAccount.AccountId, "CON-" + offsetSourceAccount.AccountNumber, offsetSourceAccount.AccountName, new DateOnly(2026, 1, 1), null);
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", offsetMappingRequest)).StatusCode);
-        var savedMappings = await client.GetFromJsonAsync<ConsolidationAccountMappingWorkspace>($"/api/consolidation-groups/{group.Id}/account-mappings");
-        Assert.Contains(savedMappings!.Mappings, mapping => mapping.AccountId == sourceAccount.AccountId && mapping.ReportingAccountNumber == "CON-" + sourceAccount.AccountNumber);
+        var savedMappings = await client.GetFromJsonAsync<ConsolidationAccountMappingWorkspace>($"/api/consolidation-groups/{group.Id}/account-mappings") ?? throw new InvalidOperationException("The mapping workspace response was empty.");
+        Assert.Contains(savedMappings.Mappings, mapping => mapping.AccountId == sourceAccount.AccountId && mapping.ReportingAccountNumber == "CON-" + sourceAccount.AccountNumber);
         Assert.Contains(savedMappings.Mappings, mapping => mapping.AccountId == sourceAccount.AccountId && mapping.TranslationMethod is "Closing" or "Average" or "Historical");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", mappingRequest with { EffectiveFrom = new DateOnly(2026, 2, 1) })).StatusCode);
+        foreach (var requiredType in new[] { nameof(AccountType.Asset), nameof(AccountType.Equity) })
+        {
+            if (savedMappings.Mappings.Any(mapping => mapping.ReportingAccountType == requiredType)) continue;
+            var requiredSource = mappingWorkspace.SourceAccounts.First(account => account.CompanyId == existingCompany.CompanyId && account.AccountType == requiredType);
+            var requiredMapping = new SaveConsolidationAccountMappingRequest(null, group.Id, requiredSource.CompanyId, requiredSource.AccountId, "CON-" + requiredSource.AccountNumber, requiredSource.AccountName, new DateOnly(2026, 1, 1), null);
+            Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", requiredMapping)).StatusCode);
+            savedMappings = await client.GetFromJsonAsync<ConsolidationAccountMappingWorkspace>($"/api/consolidation-groups/{group.Id}/account-mappings") ?? throw new InvalidOperationException("The updated mapping workspace response was empty.");
+        }
         var debitMapping = savedMappings.Mappings.Single(mapping => mapping.AccountId == sourceAccount.AccountId);
         var creditMapping = savedMappings.Mappings.Single(mapping => mapping.AccountId == offsetSourceAccount.AccountId);
         var presentationWorkspace = await client.GetFromJsonAsync<ConsolidationStatementPresentationWorkspace>($"/api/consolidation-groups/{group.Id}/statement-presentations");
@@ -176,6 +184,20 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var disclosure = Assert.Single(disclosureWorkspace!.Packages, item => item.Id == disclosureResult!.Id); Assert.Equal("Draft", disclosure.Status); Assert.Equal(92m, Assert.Single(disclosure.Content.FinancingLiabilities).ClosingBalance);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/disclosures/{Guid.NewGuid()}/approve", new ConsolidationDisclosureActionRequest(group.Id, disclosure.Id, disclosure.ConcurrencyToken))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/disclosures/{disclosure.Id}/approve", new ConsolidationDisclosureActionRequest(group.Id, disclosure.Id, disclosure.ConcurrencyToken))).StatusCode);
+        var ownershipAsset = savedMappings.Mappings.First(mapping => mapping.ReportingAccountType == nameof(AccountType.Asset));
+        var ownershipEquity = savedMappings.Mappings.First(mapping => mapping.ReportingAccountType == nameof(AccountType.Equity));
+        var ownershipContent = new ConsolidationOwnershipEventDocument(1, 0m, .75m, "FullFairValue", "API-reviewed purchase-price allocation", "API acquisition working paper",
+            string.Empty, string.Empty,
+            [new(ownershipAsset.ReportingAccountNumber, ownershipAsset.ReportingAccountName, ownershipAsset.ReportingAccountType, 100m, 0m, "Recognize acquisition-date adjustment"), new(ownershipEquity.ReportingAccountNumber, ownershipEquity.ReportingAccountName, ownershipEquity.ReportingAccountType, 0m, 100m, "Acquisition-date offset")],
+            Acquisition: new(80m, 0m, 20m, 90m, 10m, 0m));
+        var ownershipRequest = new SaveConsolidationOwnershipEventRequest(null, group.Id, subsidiaryId, new DateOnly(2026, 6, 30), nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "API-ACQ-1", "US-GAAP", "ASC 805 current through 2026", ownershipContent);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/ownership-events", ownershipRequest)).StatusCode);
+        var ownershipResponse = await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events", ownershipRequest); Assert.Equal(HttpStatusCode.OK, ownershipResponse.StatusCode);
+        var ownershipResult = await ownershipResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var ownershipWorkspace = await client.GetFromJsonAsync<ConsolidationOwnershipEventWorkspace>($"/api/consolidation-groups/{group.Id}/ownership-events");
+        var ownershipEvent = Assert.Single(ownershipWorkspace!.Events, item => item.Id == ownershipResult!.Id); Assert.Equal("Draft", ownershipEvent.Status); Assert.Equal(10m, ownershipEvent.Content.Acquisition!.Goodwill);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events/{Guid.NewGuid()}/approve", new ConsolidationOwnershipEventActionRequest(group.Id, ownershipEvent.Id, ownershipEvent.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-events/{ownershipEvent.Id}/approve", new ConsolidationOwnershipEventActionRequest(group.Id, ownershipEvent.Id, ownershipEvent.ConcurrencyToken))).StatusCode);
         var adjustmentRequest = new SaveConsolidationAdjustmentRequest(null, group.Id, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), "ManualAdjustment", "API-CONSOL-ADJ-1", "API reporting-only adjustment", string.Empty,
         [
             new(debitMapping.ReportingAccountNumber, debitMapping.ReportingAccountName, debitMapping.ReportingAccountType, 10m, 0m, "API debit"),

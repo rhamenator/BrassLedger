@@ -180,6 +180,14 @@ public sealed class ConsolidationPostgresTests
                 ]));
                 Assert.True(saved.Succeeded, saved.ErrorMessage); adjustmentId = saved.Id!.Value; draftToken = (await service.GetAdjustmentWorkspaceAsync(groupId))!.Adjustments.Single(item => item.Id == adjustmentId).ConcurrencyToken;
             }
+            var ownershipContent = new ConsolidationOwnershipEventDocument(1, 0m, .75m, "FullFairValue", "PostgreSQL concurrent purchase-price allocation", "PostgreSQL acquisition working paper", equityNumber, equityName,
+                [new(sourceNumber, sourceName, sourceType.ToString(), 10m, 0m), new(offsetNumber, offsetName, offsetType.ToString(), 0m, 10m)], Acquisition: new(80m, 0m, 20m, 90m, 10m, 0m));
+            using var ownershipScopeOne = provider.CreateScope(); using var ownershipScopeTwo = provider.CreateScope(); SetContext(ownershipScopeOne, companyId, ownerId, BrassLedgerPermissions.JournalPrepare); SetContext(ownershipScopeTwo, companyId, ownerId, BrassLedgerPermissions.JournalPrepare);
+            SaveConsolidationOwnershipEventRequest OwnershipRequest() => new(null, groupId, affiliateId, new DateOnly(2027, 3, 31), nameof(ConsolidationOwnershipEventType.AcquisitionOfControl), "PG-ACQ-1", "US-GAAP", "ASC 805 current through 2026", ownershipContent);
+            var ownershipAttempts = await Task.WhenAll(
+                ownershipScopeOne.ServiceProvider.GetRequiredService<IConsolidationService>().SaveOwnershipEventAsync(OwnershipRequest()),
+                ownershipScopeTwo.ServiceProvider.GetRequiredService<IConsolidationService>().SaveOwnershipEventAsync(OwnershipRequest()));
+            Assert.Single(ownershipAttempts, result => result.Succeeded); Assert.Single(ownershipAttempts, result => !result.Succeeded);
             using var nciScopeOne = provider.CreateScope(); using var nciScopeTwo = provider.CreateScope(); SetContext(nciScopeOne, companyId, ownerId, BrassLedgerPermissions.JournalPrepare); SetContext(nciScopeTwo, companyId, ownerId, BrassLedgerPermissions.JournalPrepare);
             SaveConsolidationAdjustmentRequest NciRequest(string reference) => new(null, groupId, new DateOnly(2027, 1, 1), new DateOnly(2027, 3, 31), nameof(ConsolidationAdjustmentKind.NoncontrollingInterest), reference, "PostgreSQL concurrent NCI control", string.Empty,
                 [new(equityNumber, equityName, nameof(AccountType.Equity), 5m, 0m, "Parent equity attribution", affiliateId), new("39998", "PostgreSQL noncontrolling interests", nameof(AccountType.Equity), 0m, 5m, "NCI equity presentation", affiliateId)], SubjectCompanyId: affiliateId);
@@ -226,6 +234,7 @@ public sealed class ConsolidationPostgresTests
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-statement-presentation.created" && entry.EntityType == nameof(ConsolidationStatementPresentation)));
             Assert.Equal(1, await verification.ConsolidationDisclosurePackages.CountAsync(package => package.ConsolidationGroupId == groupId && package.Status == "Approved"));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-disclosure.approved" && entry.EntityType == nameof(ConsolidationDisclosurePackage)));
+            Assert.Equal(1, await verification.ConsolidationOwnershipEvents.CountAsync(item => item.ConsolidationGroupId == groupId && item.Reference == "PG-ACQ-1"));
             Assert.Equal(1, await verification.ConsolidationTradingPartners.CountAsync(link => link.ConsolidationGroupId == groupId && link.CustomerId == intercompanyCustomerId));
             Assert.Equal(2, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-trading-partner.created" && entry.EntityType == "ConsolidationTradingPartner"));
             Assert.Equal(1, await verification.ConsolidationIntercompanyMatches.CountAsync(match => match.ConsolidationGroupId == groupId && match.SalesInvoiceId == intercompanyInvoiceId && match.VendorBillId == intercompanyBillId));

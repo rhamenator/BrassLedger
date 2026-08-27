@@ -120,6 +120,49 @@ public sealed class ConsolidationAdministrationTests(PlaywrightWebAppFixture fix
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task Reporting_PreparesApprovesPostsAndReversesAcquisitionSchedule(BrowserKind browserKind)
+    {
+        await fixture.CreateConsolidationWorkflowAsync();
+        var reference = $"E2E-ACQ-{browserKind}";
+        try
+        {
+            await using (var preparer = await fixture.CreateSessionAsync(browserKind))
+            {
+                await preparer.SignInAsync("integration-admin"); await preparer.GotoAsync("/reporting");
+                await preparer.Page.Locator("#ownershipSubject").SelectOptionAsync("71000000-0000-0000-0000-000000000010");
+                await preparer.Page.Locator("#ownershipEventDate").FillAsync("2026-08-31"); await preparer.Page.Locator("#ownershipReference").FillAsync(reference); await preparer.Page.Locator("#ownershipAfter").FillAsync("0.75");
+                await preparer.Page.Locator("#ownershipRationale").FillAsync("E2E controller-reviewed purchase-price allocation"); await preparer.Page.Locator("#ownershipSource").FillAsync("E2E acquisition working paper PPA-1");
+                await preparer.Page.GetByLabel("Consideration transferred").FillAsync("80"); await preparer.Page.GetByLabel("NCI recognized").FillAsync("20"); await preparer.Page.GetByLabel("Identifiable net assets at fair value").FillAsync("90"); await preparer.Page.GetByLabel("Goodwill", new() { Exact = true }).FillAsync("10");
+                var accounts = preparer.Page.GetByLabel("Ownership-event reporting account"); await accounts.Nth(0).SelectOptionAsync("1000"); await accounts.Nth(1).SelectOptionAsync("3000");
+                await preparer.Page.GetByLabel("Debit", new() { Exact = true }).Nth(0).FillAsync("100"); await preparer.Page.GetByLabel("Credit", new() { Exact = true }).Nth(1).FillAsync("100");
+                await preparer.Page.GetByRole(AriaRole.Button, new() { Name = "Prepare ownership event" }).ClickAsync();
+                await Assertions.Expect(preparer.Page.GetByText("The ownership event was retained for independent review.")).ToBeVisibleAsync();
+                await Assertions.Expect(preparer.Page.GetByRole(AriaRole.Table, new() { Name = "Retained consolidation ownership events" })).ToContainTextAsync(reference);
+                await preparer.AssertNoUiFailuresAsync("acquisition schedule preparation");
+            }
+            await using (var reviewer = await fixture.CreateSessionAsync(browserKind))
+            {
+                await reviewer.SignInAsync("e2e-consolidation-reviewer"); await reviewer.GotoAsync("/reporting");
+                var row = reviewer.Page.GetByRole(AriaRole.Row).Filter(new() { HasTextString = reference }); await row.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+                await Assertions.Expect(reviewer.Page.GetByText("The ownership event was independently approved.")).ToBeVisibleAsync(); await reviewer.AssertNoUiFailuresAsync("acquisition schedule approval");
+            }
+            await using (var poster = await fixture.CreateSessionAsync(browserKind))
+            {
+                await poster.SignInAsync("e2e-consolidation-poster"); await poster.GotoAsync("/reporting");
+                var row = poster.Page.GetByRole(AriaRole.Row).Filter(new() { HasTextString = reference }); await row.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+                await Assertions.Expect(poster.Page.GetByText("The ownership event was posted to consolidated reporting.")).ToBeVisibleAsync();
+                await poster.Page.Locator("#ownershipDecisionReason").FillAsync("E2E corrected valuation schedule"); await poster.Page.Locator("#ownershipReversalDate").FillAsync("2026-09-01");
+                row = poster.Page.GetByRole(AriaRole.Row).Filter(new() { HasTextString = reference }); await row.GetByRole(AriaRole.Button, new() { Name = "Reverse", Exact = true }).ClickAsync();
+                await Assertions.Expect(poster.Page.GetByText("A dated, traceable reversing ownership event was posted.")).ToBeVisibleAsync();
+                await Assertions.Expect(poster.Page.GetByRole(AriaRole.Table, new() { Name = "Retained consolidation ownership events" })).ToContainTextAsync("Reversed");
+                await poster.AssertNoUiFailuresAsync("acquisition schedule posting and reversal");
+            }
+        }
+        finally { await fixture.RemoveIntercompanyMatchingWorkflowAsync(); }
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task Reporting_PreparesReviewedNciForPartiallyOwnedControlledSubsidiary(BrowserKind browserKind)
     {
         await fixture.CreateConsolidationWorkflowAsync();

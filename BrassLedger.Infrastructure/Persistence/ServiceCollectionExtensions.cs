@@ -601,6 +601,19 @@ public static class ServiceCollectionExtensions
             return await HasIndexAsync(dbContext, "IX_ConsolidationDisclosurePackages_CompanyId_Status_AsOf", cancellationToken)
                 && await HasIndexAsync(dbContext, periodIndex, cancellationToken);
         }
+        if (migrationId.EndsWith("_AddConsolidationOwnershipEvents", StringComparison.Ordinal))
+        {
+            if (!await HasTableAsync(dbContext, "ConsolidationOwnershipEvents", cancellationToken)) return false;
+            string[] columns = ["Id", "CompanyId", "ConsolidationGroupId", "SubjectCompanyId", "EventDate", "EventType", "Reference", "FrameworkCode", "FrameworkEdition", "SchemaVersion", "ContentJson", "Status", "PreparedByUserId", "PreparedAtUtc", "ApprovedByUserId", "ApprovedAtUtc", "RejectedByUserId", "RejectedAtUtc", "PostedByUserId", "PostedAtUtc", "DecisionReason", "ReversalOfEventId", "ReversedByEventId", "ReversalReason", "ConcurrencyToken"];
+            foreach (var column in columns)
+                if (!await HasColumnAsync(dbContext, "ConsolidationOwnershipEvents", column, cancellationToken)) return false;
+            var subjectDateIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationOwnershipEvents_ConsolidationGroupId_SubjectCo~"
+                : "IX_ConsolidationOwnershipEvents_ConsolidationGroupId_SubjectCompanyId_EventDate";
+            return await HasIndexAsync(dbContext, "IX_ConsolidationOwnershipEvents_ConsolidationGroupId_Reference", cancellationToken)
+                && await HasIndexAsync(dbContext, subjectDateIndex, cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ConsolidationOwnershipEvents_ReversalOfEventId", cancellationToken);
+        }
         return false;
     }
 

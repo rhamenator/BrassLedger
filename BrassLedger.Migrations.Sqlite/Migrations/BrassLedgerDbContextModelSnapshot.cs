@@ -1474,6 +1474,117 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("ConsolidationIntercompanyMatches");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationOwnershipEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConsolidationGroupId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("EventDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EventType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FrameworkCode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FrameworkEdition")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("PostedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PostedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PreparedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("RejectedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RejectedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReversalOfEventId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReversalReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReversedByEventId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SubjectCompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReversalOfEventId")
+                        .IsUnique();
+
+                    b.HasIndex("SubjectCompanyId");
+
+                    b.HasIndex("ConsolidationGroupId", "Reference")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "Status", "EventDate");
+
+                    b.HasIndex("ConsolidationGroupId", "SubjectCompanyId", "EventDate");
+
+                    b.ToTable("ConsolidationOwnershipEvents");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationStatementPresentation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -10097,6 +10208,32 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.VendorBill", null)
                         .WithMany()
                         .HasForeignKey("VendorBillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationOwnershipEvent", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ConsolidationGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationOwnershipEvent", null)
+                        .WithOne()
+                        .HasForeignKey("BrassLedger.Domain.Accounting.ConsolidationOwnershipEvent", "ReversalOfEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("SubjectCompanyId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

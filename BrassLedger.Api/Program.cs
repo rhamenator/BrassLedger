@@ -977,6 +977,41 @@ api.MapPost("/consolidation-groups/{groupId:guid}/disclosures/{packageId:guid}/r
     var result = await service.RejectDisclosurePackageAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["disclosurePackage"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.ApproveJournals);
+api.MapPut("/consolidation-groups/{groupId:guid}/ownership-events", async (Guid groupId, SaveConsolidationOwnershipEventRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId) return Results.BadRequest(new { error = "consolidation_group_id_mismatch" });
+    var result = await service.SaveOwnershipEventAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ownershipEvent"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.PrepareJournals);
+api.MapGet("/consolidation-groups/{groupId:guid}/ownership-events", async (Guid groupId, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var workspace = await service.GetOwnershipEventWorkspaceAsync(groupId, cancellationToken);
+    return workspace is null ? Results.NotFound() : Results.Ok(workspace);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapPost("/consolidation-groups/{groupId:guid}/ownership-events/{eventId:guid}/approve", async (Guid groupId, Guid eventId, ConsolidationOwnershipEventActionRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.OwnershipEventId != eventId) return Results.BadRequest(new { error = "consolidation_ownership_event_id_mismatch" });
+    var result = await service.ApproveOwnershipEventAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ownershipEvent"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.ApproveJournals);
+api.MapPost("/consolidation-groups/{groupId:guid}/ownership-events/{eventId:guid}/reject", async (Guid groupId, Guid eventId, ConsolidationOwnershipEventDecisionRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.OwnershipEventId != eventId) return Results.BadRequest(new { error = "consolidation_ownership_event_id_mismatch" });
+    var result = await service.RejectOwnershipEventAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ownershipEvent"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.ApproveJournals);
+api.MapPost("/consolidation-groups/{groupId:guid}/ownership-events/{eventId:guid}/post", async (Guid groupId, Guid eventId, ConsolidationOwnershipEventActionRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.OwnershipEventId != eventId) return Results.BadRequest(new { error = "consolidation_ownership_event_id_mismatch" });
+    var result = await service.PostOwnershipEventAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ownershipEvent"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.PostJournals);
+api.MapPost("/consolidation-groups/{groupId:guid}/ownership-events/{eventId:guid}/reverse", async (Guid groupId, Guid eventId, ReverseConsolidationOwnershipEventRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.OwnershipEventId != eventId) return Results.BadRequest(new { error = "consolidation_ownership_event_id_mismatch" });
+    var result = await service.ReverseOwnershipEventAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ownershipEvent"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.ReverseJournals);
 api.MapGet("/consolidation-groups/{groupId:guid}/adjustments", async (Guid groupId, IConsolidationService service, CancellationToken cancellationToken) =>
 {
     var workspace = await service.GetAdjustmentWorkspaceAsync(groupId, cancellationToken);

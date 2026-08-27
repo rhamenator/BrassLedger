@@ -1,0 +1,11 @@
+<div class="field-group">
+    <label class="field-label" for="@Id">@Label</label>
+    <InputNumber id="@Id" aria-label="@Label" class="field-input" step="0.01" Value="Value" ValueChanged="ValueChanged" ValueExpression="() => Value" />
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter] public string? Id { get; set; }
+    [Parameter] public decimal Value { get; set; }
+    [Parameter] public EventCallback<decimal> ValueChanged { get; set; }
+}

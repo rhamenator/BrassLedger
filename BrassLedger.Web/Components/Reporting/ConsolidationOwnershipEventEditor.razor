@@ -1,0 +1,173 @@
+@using BrassLedger.Application.Accounting
+@using BrassLedger.Domain.Accounting
+@using BrassLedger.Infrastructure.Auth
+@inject IConsolidationService ConsolidationService
+
+<section class="panel" aria-labelledby="ownershipEventsHeading">
+    <h3 id="ownershipEventsHeading">Acquisitions, disposals, ownership changes and attribution</h3>
+    <p class="page-intro">Retain the measurement schedule and its balanced consolidation-only posting together. The application checks the accounting equation, ownership history and reporting accounts; separate operators prepare, approve and post each event.</p>
+    @if (!string.IsNullOrWhiteSpace(Message)) { <div class="@(IsError ? "auth-error" : "muted-copy")" role="@(IsError ? "alert" : "status")">@Message</div> }
+    @if (Workspace is null)
+    {
+        <p class="muted-copy">Ownership events are unavailable because this user does not have access to every company in the retained ownership history.</p>
+    }
+    else
+    {
+        <EditForm Model="Editor" OnValidSubmit="SaveAsync">
+            <div class="content-grid">
+                <div class="field-group"><label class="field-label" for="ownershipSubject">Subject company</label><InputSelect id="ownershipSubject" class="field-input" @bind-Value="Editor.SubjectCompanyId"><option value="@Guid.Empty">Choose a company</option>@foreach (var member in Workspace.Members.GroupBy(item => item.CompanyId).Select(group => group.First()).OrderBy(item => item.CompanyName)) { <option value="@member.CompanyId">@member.CompanyName</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label" for="ownershipEventDate">Accounting date</label><InputDate id="ownershipEventDate" class="field-input" @bind-Value="Editor.EventDate" /></div>
+                <div class="field-group"><label class="field-label" for="ownershipEventType">Event type</label><InputSelect id="ownershipEventType" class="field-input" @bind-Value="Editor.EventType">@foreach (var eventType in EventTypes) { <option value="@eventType">@EventLabel(eventType)</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label" for="ownershipReference">Reference</label><InputText id="ownershipReference" class="field-input" maxlength="64" @bind-Value="Editor.Reference" /></div>
+                <div class="field-group"><label class="field-label" for="ownershipFramework">Framework</label><InputText id="ownershipFramework" class="field-input" maxlength="32" list="ownershipFrameworkChoices" @bind-Value="Editor.FrameworkCode" /><datalist id="ownershipFrameworkChoices"><option value="US-GAAP"></option><option value="IFRS"></option><option value="IFRS-SME"></option><option value="Other"></option></datalist></div>
+                <div class="field-group"><label class="field-label" for="ownershipFrameworkEdition">Framework edition</label><InputText id="ownershipFrameworkEdition" class="field-input" maxlength="80" @bind-Value="Editor.FrameworkEdition" /></div>
+                <div class="field-group"><label class="field-label" for="ownershipBefore">Ownership before</label><InputNumber id="ownershipBefore" class="field-input" min="0" max="1" step="0.000001" @bind-Value="Editor.OwnershipBefore" /><small>Use 0.75 for 75%.</small></div>
+                <div class="field-group"><label class="field-label" for="ownershipAfter">Ownership after</label><InputNumber id="ownershipAfter" class="field-input" min="0" max="1" step="0.000001" @bind-Value="Editor.OwnershipAfter" /></div>
+                <div class="field-group"><label class="field-label" for="ownershipNciMethod">NCI measurement</label><InputSelect id="ownershipNciMethod" class="field-input" @bind-Value="Editor.NciMeasurementMethod"><option value="FullFairValue">Full fair value</option><option value="ProportionateShare">Proportionate share</option><option value="NotApplicable">Not applicable</option></InputSelect></div>
+                <div class="field-group"><label class="field-label" for="ownershipRationale">Measurement rationale</label><InputTextArea id="ownershipRationale" class="field-input" maxlength="4000" @bind-Value="Editor.MeasurementRationale" /></div>
+                <div class="field-group"><label class="field-label" for="ownershipSource">Source / working paper</label><InputText id="ownershipSource" class="field-input" maxlength="1000" @bind-Value="Editor.SourceReference" /></div>
+            </div>
+
+            @if (Editor.EventType is nameof(ConsolidationOwnershipEventType.AcquisitionOfControl) or nameof(ConsolidationOwnershipEventType.StepAcquisition))
+            {
+                <h4>Acquisition-method measurement</h4>
+                <div class="content-grid">
+                    <OwnershipMoneyInput Label="Consideration transferred" Id="acquisitionConsideration" @bind-Value="Editor.ConsiderationTransferred" />
+                    <OwnershipMoneyInput Label="Previously held interest at fair value" Id="acquisitionPriorInterest" @bind-Value="Editor.PreviousInterestFairValue" />
+                    <OwnershipMoneyInput Label="NCI recognized" Id="acquisitionNci" @bind-Value="Editor.NoncontrollingInterestRecognized" />
+                    <OwnershipMoneyInput Label="Identifiable net assets at fair value" Id="acquisitionNetAssets" @bind-Value="Editor.IdentifiableNetAssetsFairValue" />
+                    <OwnershipMoneyInput Label="Goodwill" Id="acquisitionGoodwill" @bind-Value="Editor.Goodwill" />
+                    <OwnershipMoneyInput Label="Bargain purchase gain" Id="acquisitionBargain" @bind-Value="Editor.BargainPurchaseGain" />
+                </div><p class="muted-copy">Calculated residual: @AcquisitionResidual.ToString("N2"). Positive is goodwill; negative is a bargain gain.</p>
+            }
+            else if (Editor.EventType == nameof(ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl))
+            {
+                <h4>Equity-transaction measurement</h4><div class="content-grid">
+                    <OwnershipMoneyInput Label="Consideration paid" Id="changePaid" @bind-Value="Editor.ConsiderationPaid" />
+                    <OwnershipMoneyInput Label="Consideration received" Id="changeReceived" @bind-Value="Editor.ConsiderationReceived" />
+                    <OwnershipMoneyInput Label="NCI increase" Id="changeNciIncrease" @bind-Value="Editor.NciIncrease" />
+                    <OwnershipMoneyInput Label="NCI decrease" Id="changeNciDecrease" @bind-Value="Editor.NciDecrease" />
+                    <OwnershipMoneyInput Label="Parent equity debit" Id="changeParentDebit" @bind-Value="Editor.ParentEquityDebit" />
+                    <OwnershipMoneyInput Label="Parent equity credit" Id="changeParentCredit" @bind-Value="Editor.ParentEquityCredit" />
+                </div><p class="muted-copy">Measurement difference: @OwnershipChangeDifference.ToString("N2")</p>
+            }
+            else if (Editor.EventType == nameof(ConsolidationOwnershipEventType.LossOfControl))
+            {
+                <h4>Loss-of-control measurement</h4><div class="content-grid">
+                    <OwnershipMoneyInput Label="Consideration received" Id="lossProceeds" @bind-Value="Editor.LossConsiderationReceived" />
+                    <OwnershipMoneyInput Label="Retained interest fair value" Id="lossRetained" @bind-Value="Editor.RetainedInterestFairValue" />
+                    <OwnershipMoneyInput Label="NCI derecognized" Id="lossNci" @bind-Value="Editor.NciDerecognized" />
+                    <OwnershipMoneyInput Label="Net assets derecognized" Id="lossNetAssets" @bind-Value="Editor.NetAssetsDerecognized" />
+                    <OwnershipMoneyInput Label="Goodwill derecognized" Id="lossGoodwill" @bind-Value="Editor.GoodwillDerecognized" />
+                    <OwnershipMoneyInput Label="OCI reclassification (signed)" Id="lossOci" @bind-Value="Editor.OciReclassification" />
+                    <OwnershipMoneyInput Label="Gain / (loss)" Id="lossGain" @bind-Value="Editor.GainOrLoss" />
+                </div><p class="muted-copy">Calculated gain / (loss): @LossOfControlResult.ToString("N2")</p>
+            }
+            else
+            {
+                <h4>Profit and OCI attribution</h4><div class="content-grid">
+                    <OwnershipMoneyInput Label="Subsidiary profit / (loss)" Id="attrProfit" @bind-Value="Editor.SubsidiaryProfitOrLoss" />
+                    <OwnershipMoneyInput Label="Parent profit / (loss)" Id="attrParentProfit" @bind-Value="Editor.ParentProfitOrLoss" />
+                    <OwnershipMoneyInput Label="NCI profit / (loss)" Id="attrNciProfit" @bind-Value="Editor.NciProfitOrLoss" />
+                    <OwnershipMoneyInput Label="Subsidiary OCI" Id="attrOci" @bind-Value="Editor.SubsidiaryOci" />
+                    <OwnershipMoneyInput Label="Parent OCI" Id="attrParentOci" @bind-Value="Editor.ParentOci" />
+                    <OwnershipMoneyInput Label="NCI OCI" Id="attrNciOci" @bind-Value="Editor.NciOci" />
+                </div><p class="muted-copy">Profit attribution difference: @ProfitDifference.ToString("N2"); OCI attribution difference: @OciDifference.ToString("N2")</p>
+            }
+
+            <h4>Consolidation-only posting</h4>
+            <p class="muted-copy">Use only mapped reporting accounts. If the posting contains revenue or expense, choose the equity account that will carry that result after the event period.</p>
+            <div class="field-group"><label class="field-label" for="ownershipCarryforward">Prior-period retained-earnings account</label><InputSelect id="ownershipCarryforward" class="field-input" @bind-Value="Editor.CarryforwardAccountChoice"><option value="">Not needed</option>@foreach (var account in Workspace.ReportingAccounts.Where(item => item.AccountType == nameof(AccountType.Equity))) { <option value="@AccountChoiceValue(account)">@account.AccountNumber · @account.AccountName</option> }</InputSelect></div>
+            @foreach (var line in Editor.PostingLines)
+            {
+                <fieldset class="panel" @key="line"><legend>Posting line</legend><div class="content-grid">
+                    <div class="field-group"><label class="field-label">Reporting account</label><InputSelect aria-label="Ownership-event reporting account" class="field-input" @bind-Value="line.AccountChoice"><option value="">Choose an account</option>@foreach (var account in Workspace.ReportingAccounts) { <option value="@AccountChoiceValue(account)">@account.AccountNumber · @account.AccountName (@account.AccountType)</option> }</InputSelect></div>
+                    <OwnershipMoneyInput Label="Debit" @bind-Value="line.Debit" />
+                    <OwnershipMoneyInput Label="Credit" @bind-Value="line.Credit" />
+                    <div class="field-group"><label class="field-label">Description</label><InputText class="field-input" maxlength="1000" @bind-Value="line.Description" /></div>
+                </div><button class="action-secondary" type="button" @onclick="() => Editor.PostingLines.Remove(line)">Remove line</button></fieldset>
+            }
+            <p class="muted-copy">Posting difference (debits less credits): @PostingDifference.ToString("N2")</p>
+            <div class="hero-actions"><button class="action-secondary" type="button" @onclick="() => Editor.PostingLines.Add(new())">Add posting line</button><button class="action-secondary" type="button" @onclick="UseStatementDate">Use statement date</button><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="ownershipPreparationAuthorization"><button class="action-primary" type="submit">@(Editor.Id.HasValue ? "Save corrected event" : "Prepare ownership event")</button></AuthorizeView>@if (Editor.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetEditor">Cancel edit</button> }</div>
+        </EditForm>
+
+        <div class="content-grid"><div class="field-group"><label class="field-label" for="ownershipDecisionReason">Rejection or reversal reason</label><InputText id="ownershipDecisionReason" class="field-input" maxlength="1000" @bind-Value="DecisionReason" /></div><div class="field-group"><label class="field-label" for="ownershipReversalDate">Reversal date</label><InputDate id="ownershipReversalDate" class="field-input" @bind-Value="ReversalDate" /></div></div>
+        @if (Workspace.Events.Count == 0) { <p class="muted-copy">No ownership events have been retained for this group.</p> }
+        else
+        {
+            <div class="table-scroll"><table class="data-table" aria-label="Retained consolidation ownership events"><thead><tr><th>Date / event</th><th>Measurement</th><th>Status</th><th>Control history</th><th>Actions</th></tr></thead><tbody>
+            @foreach (var item in Workspace.Events)
+            {
+                <tr><td>@item.EventDate<br /><strong>@EventLabel(item.EventType)</strong><br />@item.SubjectCompanyName · @item.Reference<br /><small>@item.FrameworkCode · @item.FrameworkEdition · schema @item.SchemaVersion<br />SHA-256 @item.ContentSha256</small></td><td>@(item.Content.OwnershipBefore.ToString("P2")) → @(item.Content.OwnershipAfter.ToString("P2"))<br />@item.Content.PostingLines.Count posting line(s)</td><td>@item.Status@if (!string.IsNullOrWhiteSpace(item.DecisionReason)) { <br /><small>@item.DecisionReason</small> }@if (!string.IsNullOrWhiteSpace(item.ReversalReason)) { <br /><small>@item.ReversalReason</small> }</td><td>Prepared by @item.PreparedBy<br /><small>@item.PreparedAtUtc.LocalDateTime</small>@if (item.ApprovedBy is not null) { <br /><span>Approved by @item.ApprovedBy</span> }@if (item.PostedBy is not null) { <br /><span>Posted by @item.PostedBy</span> }</td><td><div class="hero-actions">@if (item.Status is "Draft" or "Rejected") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => Edit(item)">Edit</button></AuthorizeView> }@if (item.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-primary" type="button" @onclick="() => ApproveAsync(item)">Approve</button><button class="action-secondary" type="button" @onclick="() => RejectAsync(item)">Reject</button></AuthorizeView> }@if (item.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostJournals"><button class="action-primary" type="button" @onclick="() => PostAsync(item)">Post</button></AuthorizeView> }@if (item.Status == "Posted" && item.ReversalOfEventId is null) { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><button class="action-secondary" type="button" @onclick="() => ReverseAsync(item)">Reverse</button></AuthorizeView> }</div></td></tr>
+            }
+            </tbody></table></div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid GroupId { get; set; }
+    [Parameter] public DateOnly AsOf { get; set; }
+    private Guid LoadedGroupId;
+    private ConsolidationOwnershipEventWorkspace? Workspace;
+    private OwnershipEventEditor Editor = new();
+    private string DecisionReason = string.Empty; private DateOnly ReversalDate; private string Message = string.Empty; private bool IsError;
+    private static readonly string[] EventTypes = Enum.GetNames<ConsolidationOwnershipEventType>();
+    private decimal AcquisitionResidual => Editor.ConsiderationTransferred + Editor.PreviousInterestFairValue + Editor.NoncontrollingInterestRecognized - Editor.IdentifiableNetAssetsFairValue;
+    private decimal OwnershipChangeDifference => Editor.NciDecrease + Editor.ParentEquityDebit + Editor.ConsiderationReceived - Editor.NciIncrease - Editor.ParentEquityCredit - Editor.ConsiderationPaid;
+    private decimal LossOfControlResult => Editor.LossConsiderationReceived + Editor.RetainedInterestFairValue + Editor.NciDerecognized - Editor.NetAssetsDerecognized - Editor.GoodwillDerecognized + Editor.OciReclassification;
+    private decimal ProfitDifference => Editor.SubsidiaryProfitOrLoss - Editor.ParentProfitOrLoss - Editor.NciProfitOrLoss;
+    private decimal OciDifference => Editor.SubsidiaryOci - Editor.ParentOci - Editor.NciOci;
+    private decimal PostingDifference => Editor.PostingLines.Sum(item => item.Debit - item.Credit);
+    private string AccountChoiceValue(ConsolidationReportingAccountSnapshot account) => Workspace!.ReportingAccounts.Count(item => item.AccountNumber == account.AccountNumber) == 1 ? account.AccountNumber : $"{account.AccountType}\u001f{account.AccountNumber}\u001f{account.AccountName}";
+    private ConsolidationReportingAccountSnapshot? ResolveAccount(string choice) => Workspace?.ReportingAccounts.SingleOrDefault(item => AccountChoiceValue(item) == choice);
+    private string ChoiceForStoredAccount(string number, string name, string type)
+    {
+        var account = Workspace?.ReportingAccounts.SingleOrDefault(item => item.AccountNumber == number && item.AccountName == name && item.AccountType == type);
+        return account is null ? string.Empty : AccountChoiceValue(account);
+    }
+
+    protected override async Task OnParametersSetAsync() { if (GroupId == Guid.Empty || GroupId == LoadedGroupId) return; LoadedGroupId = GroupId; Workspace = await ConsolidationService.GetOwnershipEventWorkspaceAsync(GroupId); ResetEditor(); }
+    private void UseStatementDate() { Editor.EventDate = AsOf; ReversalDate = AsOf; }
+    private void ResetEditor() { Editor = new() { EventDate = AsOf, PostingLines = [new(), new()] }; DecisionReason = string.Empty; ReversalDate = AsOf; }
+    private static string EventLabel(string value) => value switch { nameof(ConsolidationOwnershipEventType.AcquisitionOfControl) => "Acquisition of control", nameof(ConsolidationOwnershipEventType.StepAcquisition) => "Step acquisition", nameof(ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl) => "Ownership change without loss of control", nameof(ConsolidationOwnershipEventType.LossOfControl) => "Loss of control / disposal", nameof(ConsolidationOwnershipEventType.ProfitAttribution) => "Profit and OCI attribution", _ => value };
+
+    private async Task SaveAsync()
+    {
+        if (Workspace is null) return;
+        var lines = Editor.PostingLines.Select(line => { var account = ResolveAccount(line.AccountChoice); return new ConsolidationOwnershipPostingLine(account?.AccountNumber ?? string.Empty, account?.AccountName ?? string.Empty, account?.AccountType ?? string.Empty, line.Debit, line.Credit, line.Description); }).ToArray();
+        var carry = ResolveAccount(Editor.CarryforwardAccountChoice);
+        AcquisitionOfControlMeasurement? acquisition = null; OwnershipChangeMeasurement? change = null; LossOfControlMeasurement? loss = null; ProfitAttributionMeasurement? attribution = null;
+        if (Editor.EventType is nameof(ConsolidationOwnershipEventType.AcquisitionOfControl) or nameof(ConsolidationOwnershipEventType.StepAcquisition)) acquisition = new(Editor.ConsiderationTransferred, Editor.PreviousInterestFairValue, Editor.NoncontrollingInterestRecognized, Editor.IdentifiableNetAssetsFairValue, Editor.Goodwill, Editor.BargainPurchaseGain);
+        else if (Editor.EventType == nameof(ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl)) change = new(Editor.ConsiderationPaid, Editor.ConsiderationReceived, Editor.NciIncrease, Editor.NciDecrease, Editor.ParentEquityDebit, Editor.ParentEquityCredit);
+        else if (Editor.EventType == nameof(ConsolidationOwnershipEventType.LossOfControl)) loss = new(Editor.LossConsiderationReceived, Editor.RetainedInterestFairValue, Editor.NciDerecognized, Editor.NetAssetsDerecognized, Editor.GoodwillDerecognized, Editor.OciReclassification, Editor.GainOrLoss);
+        else attribution = new(Editor.SubsidiaryProfitOrLoss, Editor.ParentProfitOrLoss, Editor.NciProfitOrLoss, Editor.SubsidiaryOci, Editor.ParentOci, Editor.NciOci);
+        var content = new ConsolidationOwnershipEventDocument(1, Editor.OwnershipBefore, Editor.OwnershipAfter, Editor.NciMeasurementMethod, Editor.MeasurementRationale, Editor.SourceReference, carry?.AccountNumber ?? string.Empty, carry?.AccountName ?? string.Empty, lines, acquisition, change, loss, attribution);
+        var result = await ConsolidationService.SaveOwnershipEventAsync(new(Editor.Id, GroupId, Editor.SubjectCompanyId, Editor.EventDate, Editor.EventType, Editor.Reference, Editor.FrameworkCode, Editor.FrameworkEdition, content, Editor.ConcurrencyToken));
+        await CompleteAsync(result, "The ownership event was retained for independent review.", result.Succeeded);
+    }
+
+    private void Edit(ConsolidationOwnershipEventSnapshot item)
+    {
+        var content = item.Content; Editor = new() { Id = item.Id, SubjectCompanyId = item.SubjectCompanyId, EventDate = item.EventDate, EventType = item.EventType, Reference = item.Reference, FrameworkCode = item.FrameworkCode, FrameworkEdition = item.FrameworkEdition, OwnershipBefore = content.OwnershipBefore, OwnershipAfter = content.OwnershipAfter, NciMeasurementMethod = content.NciMeasurementMethod, MeasurementRationale = content.MeasurementRationale, SourceReference = content.SourceReference, CarryforwardAccountChoice = ChoiceForStoredAccount(content.PriorPeriodEquityAccountNumber, content.PriorPeriodEquityAccountName, nameof(AccountType.Equity)), ConcurrencyToken = item.ConcurrencyToken, PostingLines = content.PostingLines.Select(line => new PostingEditor { AccountChoice = ChoiceForStoredAccount(line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType), Debit = line.Debit, Credit = line.Credit, Description = line.Description }).ToList() };
+        if (content.Acquisition is { } acquisition) { Editor.ConsiderationTransferred = acquisition.ConsiderationTransferred; Editor.PreviousInterestFairValue = acquisition.PreviousInterestFairValue; Editor.NoncontrollingInterestRecognized = acquisition.NoncontrollingInterestRecognized; Editor.IdentifiableNetAssetsFairValue = acquisition.IdentifiableNetAssetsFairValue; Editor.Goodwill = acquisition.Goodwill; Editor.BargainPurchaseGain = acquisition.BargainPurchaseGain; }
+        if (content.OwnershipChange is { } change) { Editor.ConsiderationPaid = change.ConsiderationPaid; Editor.ConsiderationReceived = change.ConsiderationReceived; Editor.NciIncrease = change.NoncontrollingInterestIncrease; Editor.NciDecrease = change.NoncontrollingInterestDecrease; Editor.ParentEquityDebit = change.ParentEquityDebit; Editor.ParentEquityCredit = change.ParentEquityCredit; }
+        if (content.LossOfControl is { } loss) { Editor.LossConsiderationReceived = loss.ConsiderationReceived; Editor.RetainedInterestFairValue = loss.RetainedInterestFairValue; Editor.NciDerecognized = loss.NoncontrollingInterestDerecognized; Editor.NetAssetsDerecognized = loss.NetAssetsDerecognized; Editor.GoodwillDerecognized = loss.GoodwillDerecognized; Editor.OciReclassification = loss.OciReclassification; Editor.GainOrLoss = loss.GainOrLoss; }
+        if (content.ProfitAttribution is { } attribution) { Editor.SubsidiaryProfitOrLoss = attribution.SubsidiaryProfitOrLoss; Editor.ParentProfitOrLoss = attribution.ParentProfitOrLoss; Editor.NciProfitOrLoss = attribution.NoncontrollingInterestProfitOrLoss; Editor.SubsidiaryOci = attribution.SubsidiaryOtherComprehensiveIncome; Editor.ParentOci = attribution.ParentOtherComprehensiveIncome; Editor.NciOci = attribution.NoncontrollingInterestOtherComprehensiveIncome; }
+    }
+    private async Task ApproveAsync(ConsolidationOwnershipEventSnapshot item) => await CompleteAsync(await ConsolidationService.ApproveOwnershipEventAsync(new(GroupId, item.Id, item.ConcurrencyToken)), "The ownership event was independently approved.", false);
+    private async Task RejectAsync(ConsolidationOwnershipEventSnapshot item) => await CompleteAsync(await ConsolidationService.RejectOwnershipEventAsync(new(GroupId, item.Id, DecisionReason, item.ConcurrencyToken)), "The ownership event was rejected for correction.", false);
+    private async Task PostAsync(ConsolidationOwnershipEventSnapshot item) => await CompleteAsync(await ConsolidationService.PostOwnershipEventAsync(new(GroupId, item.Id, item.ConcurrencyToken)), "The ownership event was posted to consolidated reporting.", false);
+    private async Task ReverseAsync(ConsolidationOwnershipEventSnapshot item) => await CompleteAsync(await ConsolidationService.ReverseOwnershipEventAsync(new(GroupId, item.Id, ReversalDate, DecisionReason, item.ConcurrencyToken)), "A dated, traceable reversing ownership event was posted.", false);
+    private async Task CompleteAsync(TransactionResult result, string success, bool reset) { Message = result.Succeeded ? success : result.ErrorMessage; IsError = !result.Succeeded; if (result.Succeeded) { Workspace = await ConsolidationService.GetOwnershipEventWorkspaceAsync(GroupId); DecisionReason = string.Empty; if (reset) ResetEditor(); } }
+
+    private sealed class OwnershipEventEditor
+    {
+        public Guid? Id { get; set; } public Guid SubjectCompanyId { get; set; } public DateOnly EventDate { get; set; } public string EventType { get; set; } = nameof(ConsolidationOwnershipEventType.AcquisitionOfControl); public string Reference { get; set; } = string.Empty; public string FrameworkCode { get; set; } = "US-GAAP"; public string FrameworkEdition { get; set; } = "Current authoritative edition"; public decimal OwnershipBefore { get; set; } public decimal OwnershipAfter { get; set; } public string NciMeasurementMethod { get; set; } = "FullFairValue"; public string MeasurementRationale { get; set; } = string.Empty; public string SourceReference { get; set; } = string.Empty; public string CarryforwardAccountChoice { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; public List<PostingEditor> PostingLines { get; set; } = [];
+        public decimal ConsiderationTransferred { get; set; } public decimal PreviousInterestFairValue { get; set; } public decimal NoncontrollingInterestRecognized { get; set; } public decimal IdentifiableNetAssetsFairValue { get; set; } public decimal Goodwill { get; set; } public decimal BargainPurchaseGain { get; set; }
+        public decimal ConsiderationPaid { get; set; } public decimal ConsiderationReceived { get; set; } public decimal NciIncrease { get; set; } public decimal NciDecrease { get; set; } public decimal ParentEquityDebit { get; set; } public decimal ParentEquityCredit { get; set; }
+        public decimal LossConsiderationReceived { get; set; } public decimal RetainedInterestFairValue { get; set; } public decimal NciDerecognized { get; set; } public decimal NetAssetsDerecognized { get; set; } public decimal GoodwillDerecognized { get; set; } public decimal OciReclassification { get; set; } public decimal GainOrLoss { get; set; }
+        public decimal SubsidiaryProfitOrLoss { get; set; } public decimal ParentProfitOrLoss { get; set; } public decimal NciProfitOrLoss { get; set; } public decimal SubsidiaryOci { get; set; } public decimal ParentOci { get; set; } public decimal NciOci { get; set; }
+    }
+    private sealed class PostingEditor { public string AccountChoice { get; set; } = string.Empty; public decimal Debit { get; set; } public decimal Credit { get; set; } public string Description { get; set; } = string.Empty; }
+}

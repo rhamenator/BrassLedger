@@ -51,6 +51,7 @@ internal static class ConsolidatedStatementDocumentExporter
         AddStatementSummary(workbook, package);
         foreach (var statement in PackageStatements(package)) AddStatementWorksheet(workbook, package, statement);
         AddSourceWorksheet(workbook, "Source detail", package, "Current");
+        AddOwnershipEventWorksheet(workbook, package, "Ownership schedules", "Current");
         AddDisclosureWorksheets(workbook, package, "Current");
         return SaveWorkbook(workbook);
     }
@@ -62,6 +63,8 @@ internal static class ConsolidatedStatementDocumentExporter
         foreach (var statement in package.Statements) AddComparativeWorksheet(workbook, package, statement);
         AddSourceWorksheet(workbook, "Current sources", package.Current, "Current");
         AddSourceWorksheet(workbook, "Comparison sources", package.Comparison, "Comparison");
+        AddOwnershipEventWorksheet(workbook, package.Current, "Current ownership", "Current");
+        AddOwnershipEventWorksheet(workbook, package.Comparison, "Comparison ownership", "Comparison");
         AddDisclosureWorksheets(workbook, package.Current, "Current");
         AddDisclosureWorksheets(workbook, package.Comparison, "Comparison");
         return SaveWorkbook(workbook);
@@ -74,6 +77,7 @@ internal static class ConsolidatedStatementDocumentExporter
         report.AddSummary(package.Warnings, StatementControls(package));
         foreach (var statement in PackageStatements(package)) report.AddStatement(statement);
         report.AddSources(package, "Source detail");
+        report.AddOwnershipEvents(package, "Current-period");
         report.AddDisclosures(package, "Current-period");
         return report.Save();
     }
@@ -86,6 +90,8 @@ internal static class ConsolidatedStatementDocumentExporter
         foreach (var statement in package.Statements) report.AddComparativeStatement(statement, package.Current.AsOf, package.Comparison.AsOf);
         report.AddSources(package.Current, "Current-period source detail");
         report.AddSources(package.Comparison, "Comparison-period source detail");
+        report.AddOwnershipEvents(package.Current, "Current-period");
+        report.AddOwnershipEvents(package.Comparison, "Comparison-period");
         report.AddDisclosures(package.Current, "Current-period");
         report.AddDisclosures(package.Comparison, "Comparison-period");
         return report.Save();
@@ -224,6 +230,38 @@ internal static class ConsolidatedStatementDocumentExporter
         FinishSheet(sheet, 10, row - 1, [34d, 24d, 18d, 34d, 28d, 34d, 18d, 28d, 16d, 18d], 6);
     }
 
+    private static void AddOwnershipEventWorksheet(XLWorkbook workbook, ConsolidatedStatementPackage package, string name, string periodLabel)
+    {
+        if ((package.OwnershipEvents?.Count ?? 0) == 0) return;
+        var sheet = workbook.Worksheets.Add(name);
+        WriteTitle(sheet, $"{periodLabel}-period ownership schedules", $"{package.PeriodStart:yyyy-MM-dd} to {package.AsOf:yyyy-MM-dd}", package.ReportingCurrency, package.IsComplete);
+        var row = 6;
+        foreach (var ownershipEvent in package.OwnershipEvents ?? [])
+        {
+            sheet.Cell(row++, 1).Value = $"{ownershipEvent.EventDate:yyyy-MM-dd} · {ownershipEvent.EventType} · {ownershipEvent.Reference}";
+            WriteLabelValue(sheet, row++, "Subject", ownershipEvent.SubjectCompanyName);
+            WriteLabelValue(sheet, row++, "Framework", $"{ownershipEvent.FrameworkCode} · {ownershipEvent.FrameworkEdition}");
+            WriteLabelValue(sheet, row++, "Review control", $"{ownershipEvent.Status}; prepared by {ownershipEvent.PreparedBy} at {ownershipEvent.PreparedAtUtc:O}; approved by {ownershipEvent.ApprovedBy ?? "Unavailable user"} at {ownershipEvent.ApprovedAtUtc:O}; posted by {ownershipEvent.PostedBy ?? "Unavailable user"} at {ownershipEvent.PostedAtUtc:O}");
+            WriteLabelValue(sheet, row++, "Retained document", $"JSON schema {ownershipEvent.SchemaVersion}; SHA-256 {ownershipEvent.ContentSha256}; source {ownershipEvent.Content.SourceReference}");
+            WriteLabelValue(sheet, row++, "Ownership", $"{ownershipEvent.Content.OwnershipBefore:P4} before; {ownershipEvent.Content.OwnershipAfter:P4} after; NCI method {ownershipEvent.Content.NciMeasurementMethod}");
+            WriteLabelValue(sheet, row++, "Rationale", ownershipEvent.Content.MeasurementRationale);
+            WriteTableHeader(sheet, row++, ["Measurement", "Amount"]);
+            foreach (var measurement in OwnershipEventMeasurements(ownershipEvent.Content))
+            {
+                sheet.Cell(row, 1).Value = measurement.Name; sheet.Cell(row, 2).Value = measurement.Amount; sheet.Cell(row, 2).Style.NumberFormat.Format = MoneyFormat; row++;
+            }
+            WriteTableHeader(sheet, row++, ["Reporting account", "Account name", "Type", "Debit", "Credit", "Description"]);
+            foreach (var line in ownershipEvent.Content.PostingLines)
+            {
+                sheet.Cell(row, 1).Value = line.ReportingAccountNumber; sheet.Cell(row, 2).Value = line.ReportingAccountName; sheet.Cell(row, 3).Value = line.ReportingAccountType;
+                sheet.Cell(row, 4).Value = line.Debit; sheet.Cell(row, 5).Value = line.Credit; sheet.Range(row, 4, row, 5).Style.NumberFormat.Format = MoneyFormat; sheet.Cell(row, 6).Value = line.Description; row++;
+            }
+            row++;
+        }
+        FinishSheet(sheet, 6, row - 1, [34d, 38d, 18d, 18d, 18d, 52d], 5);
+        sheet.RangeUsed()?.Style.Alignment.SetWrapText();
+    }
+
     private static void AddDisclosureWorksheets(XLWorkbook workbook, ConsolidatedStatementPackage package, string periodLabel)
     {
         foreach (var disclosure in package.DisclosurePackages ?? [])
@@ -277,6 +315,34 @@ internal static class ConsolidatedStatementDocumentExporter
     }
 
     private static string DayRange(int? minimum, int? maximum) => minimum.HasValue && maximum.HasValue ? $"{minimum}-{maximum}" : "Not provided";
+
+    private static IEnumerable<(string Name, decimal Amount)> OwnershipEventMeasurements(ConsolidationOwnershipEventDocument content)
+    {
+        if (content.Acquisition is { } acquisition)
+        {
+            yield return ("Consideration transferred", acquisition.ConsiderationTransferred); yield return ("Previous interest fair value", acquisition.PreviousInterestFairValue);
+            yield return ("Noncontrolling interest recognized", acquisition.NoncontrollingInterestRecognized); yield return ("Identifiable net assets fair value", acquisition.IdentifiableNetAssetsFairValue);
+            yield return ("Goodwill", acquisition.Goodwill); yield return ("Bargain-purchase gain", acquisition.BargainPurchaseGain);
+        }
+        if (content.OwnershipChange is { } change)
+        {
+            yield return ("Consideration paid", change.ConsiderationPaid); yield return ("Consideration received", change.ConsiderationReceived);
+            yield return ("Noncontrolling interest increase", change.NoncontrollingInterestIncrease); yield return ("Noncontrolling interest decrease", change.NoncontrollingInterestDecrease);
+            yield return ("Parent equity debit", change.ParentEquityDebit); yield return ("Parent equity credit", change.ParentEquityCredit);
+        }
+        if (content.LossOfControl is { } loss)
+        {
+            yield return ("Consideration received", loss.ConsiderationReceived); yield return ("Retained interest fair value", loss.RetainedInterestFairValue);
+            yield return ("Noncontrolling interest derecognized", loss.NoncontrollingInterestDerecognized); yield return ("Net assets derecognized", loss.NetAssetsDerecognized);
+            yield return ("Goodwill derecognized", loss.GoodwillDerecognized); yield return ("OCI reclassification", loss.OciReclassification); yield return ("Gain or loss", loss.GainOrLoss);
+        }
+        if (content.ProfitAttribution is { } attribution)
+        {
+            yield return ("Subsidiary profit or loss", attribution.SubsidiaryProfitOrLoss); yield return ("Parent profit or loss", attribution.ParentProfitOrLoss);
+            yield return ("NCI profit or loss", attribution.NoncontrollingInterestProfitOrLoss); yield return ("Subsidiary other comprehensive income", attribution.SubsidiaryOtherComprehensiveIncome);
+            yield return ("Parent other comprehensive income", attribution.ParentOtherComprehensiveIncome); yield return ("NCI other comprehensive income", attribution.NoncontrollingInterestOtherComprehensiveIncome);
+        }
+    }
 
     private static void WriteTitle(IXLWorksheet sheet, string title, string subtitle, string currency, bool isComplete)
     {
@@ -443,6 +509,23 @@ internal static class ConsolidatedStatementDocumentExporter
             }))));
             DrawRows(["Statement", "Section", "Report acct", "Line caption", "Company", "Source account", "Kind", "Reference", "Translation", "Amount"],
                 [0.08, 0.10, 0.08, 0.14, 0.12, 0.16, 0.08, 0.10, 0.07, 0.07], rows);
+        }
+
+        public void AddOwnershipEvents(ConsolidatedStatementPackage package, string periodLabel)
+        {
+            foreach (var ownershipEvent in package.OwnershipEvents ?? [])
+            {
+                NewPage($"{periodLabel} ownership schedule");
+                DrawSection($"{ownershipEvent.EventDate:yyyy-MM-dd} · {ownershipEvent.EventType} · {ownershipEvent.Reference}");
+                DrawParagraph($"Subject: {ownershipEvent.SubjectCompanyName}. Framework: {ownershipEvent.FrameworkCode} · {ownershipEvent.FrameworkEdition}. Status: {ownershipEvent.Status}.");
+                DrawParagraph($"Prepared by {ownershipEvent.PreparedBy} at {ownershipEvent.PreparedAtUtc:O}; approved by {ownershipEvent.ApprovedBy ?? "Unavailable user"} at {ownershipEvent.ApprovedAtUtc:O}; posted by {ownershipEvent.PostedBy ?? "Unavailable user"} at {ownershipEvent.PostedAtUtc:O}.");
+                DrawParagraph($"Retained JSON schema {ownershipEvent.SchemaVersion}; SHA-256 {ownershipEvent.ContentSha256}; source: {ownershipEvent.Content.SourceReference}.");
+                DrawParagraph($"Ownership before {ownershipEvent.Content.OwnershipBefore:P4}; after {ownershipEvent.Content.OwnershipAfter:P4}; NCI method {ownershipEvent.Content.NciMeasurementMethod}. {ownershipEvent.Content.MeasurementRationale}");
+                DrawHeading("Measurement");
+                DrawRows(["Measure", $"Amount ({_currency})"], [0.72, 0.28], OwnershipEventMeasurements(ownershipEvent.Content).Select(item => new[] { item.Name, Money(item.Amount) }));
+                DrawHeading("Posting");
+                DrawRows(["Account", "Name", "Type", "Debit", "Credit", "Description"], [0.13, 0.20, 0.12, 0.12, 0.12, 0.31], ownershipEvent.Content.PostingLines.Select(line => new[] { line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType, Money(line.Debit), Money(line.Credit), line.Description }));
+            }
         }
 
         public void AddDisclosures(ConsolidatedStatementPackage package, string periodLabel)

@@ -47,9 +47,29 @@ public sealed partial class ConsolidationService
         foreach (var warning in package.Warnings)
             AppendComparativeCsvRow(csv, "Warning", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, warning, 0m, string.Empty, string.Empty, string.Empty, 0m, 0m,
                 package, package.IsComplete ? "Complete" : "Incomplete");
+        AppendComparativeOwnershipEventCsvRows(csv, package.Current, package, "Current ownership", true);
+        AppendComparativeOwnershipEventCsvRows(csv, package.Comparison, package, "Comparison ownership", false);
         AppendComparativeDisclosureCsvRows(csv, package.Current, package, "Current disclosure", true);
         AppendComparativeDisclosureCsvRows(csv, package.Comparison, package, "Comparison disclosure", false);
         return csv.ToString();
+    }
+
+    private static void AppendComparativeOwnershipEventCsvRows(StringBuilder csv, ConsolidatedStatementPackage source, ConsolidatedComparativeStatementPackage package, string recordType, bool current)
+    {
+        foreach (var ownershipEvent in source.OwnershipEvents ?? [])
+        {
+            var section = $"OWNERSHIP-{ownershipEvent.EventType}";
+            var evidence = $"{ownershipEvent.SubjectCompanyName}; {ownershipEvent.EventDate:yyyy-MM-dd}; {ownershipEvent.FrameworkCode} {ownershipEvent.FrameworkEdition}; SHA-256 {ownershipEvent.ContentSha256}; source {ownershipEvent.Content.SourceReference}";
+            foreach (var measurement in OwnershipEventMeasurements(ownershipEvent.Content))
+                AppendComparativeCsvRow(csv, recordType, ownershipEvent.EventType, ownershipEvent.Reference, "Measurement", current ? section : string.Empty, current ? measurement.Name : string.Empty, current ? evidence : string.Empty, current ? measurement.Amount : 0m,
+                    current ? string.Empty : section, current ? string.Empty : measurement.Name, current ? string.Empty : evidence, current ? 0m : measurement.Amount, current ? measurement.Amount : -measurement.Amount, package, ownershipEvent.Status);
+            foreach (var line in ownershipEvent.Content.PostingLines)
+            {
+                var signedAmount = decimal.Round(line.Debit - line.Credit, 2, MidpointRounding.AwayFromZero);
+                AppendComparativeCsvRow(csv, recordType, ownershipEvent.EventType, line.ReportingAccountNumber, line.ReportingAccountType, current ? section : string.Empty, current ? line.ReportingAccountName : string.Empty, current ? $"{ownershipEvent.Reference}; {line.Description}; {evidence}" : string.Empty, current ? signedAmount : 0m,
+                    current ? string.Empty : section, current ? string.Empty : line.ReportingAccountName, current ? string.Empty : $"{ownershipEvent.Reference}; {line.Description}; {evidence}", current ? 0m : signedAmount, current ? signedAmount : -signedAmount, package, ownershipEvent.Status);
+            }
+        }
     }
 
     private static void AppendComparativeDisclosureCsvRows(StringBuilder csv, ConsolidatedStatementPackage source, ConsolidatedComparativeStatementPackage package, string recordType, bool current)

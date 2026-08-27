@@ -34,7 +34,24 @@ public sealed partial class ConsolidationService
         })
             AppendStatementCsvRow(csv, "Reconciliation", string.Empty, string.Empty, string.Empty, control.Item1, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, control.Item2, package, package.IsComplete ? "Complete" : "Incomplete");
         AppendDisclosureCsvRows(csv, package);
+        AppendOwnershipEventCsvRows(csv, package);
         return csv.ToString();
+    }
+
+    private static void AppendOwnershipEventCsvRows(StringBuilder csv, ConsolidatedStatementPackage package)
+    {
+        foreach (var ownershipEvent in package.OwnershipEvents ?? [])
+        {
+            var control = $"{ownershipEvent.FrameworkEdition} | schema {ownershipEvent.SchemaVersion} | SHA-256 {ownershipEvent.ContentSha256} | source {ownershipEvent.Content.SourceReference}";
+            foreach (var measurement in OwnershipEventMeasurements(ownershipEvent.Content))
+                AppendStatementCsvRow(csv, "Ownership measurement", ownershipEvent.FrameworkCode, ownershipEvent.EventType, ownershipEvent.Reference, measurement.Name,
+                    ownershipEvent.Content.NciMeasurementMethod, ownershipEvent.SubjectCompanyName, ownershipEvent.Content.MeasurementRationale, "Posted ownership event", control,
+                    ownershipEvent.EventDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), measurement.Amount, package, ownershipEvent.Status);
+            foreach (var line in ownershipEvent.Content.PostingLines)
+                AppendStatementCsvRow(csv, "Ownership posting", ownershipEvent.FrameworkCode, ownershipEvent.EventType, line.ReportingAccountNumber, line.ReportingAccountName,
+                    line.ReportingAccountType, ownershipEvent.SubjectCompanyName, line.Description, "Posted ownership event", ownershipEvent.Reference,
+                    ownershipEvent.EventDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), decimal.Round(line.Debit - line.Credit, 2, MidpointRounding.AwayFromZero), package, ownershipEvent.Status);
+        }
     }
 
     private static void AppendDisclosureCsvRows(StringBuilder csv, ConsolidatedStatementPackage package)
@@ -113,12 +130,27 @@ public sealed partial class ConsolidationService
         var statementPeriods = await db.ConsolidationGroupCompanies.AsNoTracking().Where(period => period.ConsolidationGroupId == groupId && period.EffectiveFrom <= asOf && (period.EffectiveThrough == null || period.EffectiveThrough >= periodStart)).ToListAsync(cancellationToken);
         var statementCompanyIds = statementPeriods.Select(period => period.MemberCompanyId).Distinct().ToArray();
         var statementCompanyNames = await db.Companies.AsNoTracking().Where(company => statementCompanyIds.Contains(company.Id)).ToDictionaryAsync(company => company.Id, company => company.Name, cancellationToken);
+        var reportOwnershipEventEntities = await db.ConsolidationOwnershipEvents.AsNoTracking()
+            .Where(item => item.CompanyId == CurrentCompanyId() && item.ConsolidationGroupId == groupId && item.EventDate <= asOf && (item.Status == "Posted" || item.Status == "Reversed"))
+            .OrderBy(item => item.EventDate).ThenBy(item => item.Reference).ToArrayAsync(cancellationToken);
+        var validReportOwnershipEvents = new List<ConsolidationOwnershipEvent>();
+        foreach (var ownershipEvent in reportOwnershipEventEntities)
+        {
+            var retainedError = await ValidateRetainedOwnershipEventAsync(db, ownershipEvent, cancellationToken);
+            if (retainedError is null) validReportOwnershipEvents.Add(ownershipEvent);
+        }
+        var validPeriodOwnershipEvents = validReportOwnershipEvents.Where(item => item.EventDate >= periodStart).ToArray();
         foreach (var companyPeriods in statementPeriods.GroupBy(period => period.MemberCompanyId))
         {
             var ordered = companyPeriods.OrderBy(period => period.EffectiveFrom).ToArray();
-            if (ordered[0].EffectiveFrom > periodStart || (ordered[^1].EffectiveThrough is { } finalThrough && finalThrough < asOf)
-                || ordered.Select(period => (period.ConsolidationBasis, period.OwnershipPercentage)).Distinct().Count() > 1)
-                warnings.Add($"{statementCompanyNames[companyPeriods.Key]} was acquired, disposed, or changed basis/ownership within the statement period. Cash flows use the effective-dated policy, but income, equity, acquisition/disposal presentation, and attribution require a reviewed schedule that is not yet implemented.");
+            var companyEvents = validPeriodOwnershipEvents.Where(item => item.SubjectCompanyId == companyPeriods.Key).ToArray();
+            if (ordered[0].EffectiveFrom > periodStart && !companyEvents.Any(item => item.EventType is ConsolidationOwnershipEventType.AcquisitionOfControl or ConsolidationOwnershipEventType.StepAcquisition))
+                warnings.Add($"{statementCompanyNames[companyPeriods.Key]} entered the group within the statement period without a posted acquisition-of-control or step-acquisition schedule.");
+            if (ordered[^1].EffectiveThrough is { } finalThrough && finalThrough < asOf && !companyEvents.Any(item => item.EventType == ConsolidationOwnershipEventType.LossOfControl))
+                warnings.Add($"{statementCompanyNames[companyPeriods.Key]} left the group within the statement period without a posted loss-of-control schedule.");
+            if (ordered.Select(period => (period.ConsolidationBasis, period.OwnershipPercentage)).Distinct().Count() > 1
+                && !companyEvents.Any(item => item.EventType is ConsolidationOwnershipEventType.StepAcquisition or ConsolidationOwnershipEventType.OwnershipChangeWithoutLossOfControl or ConsolidationOwnershipEventType.LossOfControl))
+                warnings.Add($"{statementCompanyNames[companyPeriods.Key]} changed basis or ownership within the statement period without a posted ownership-change schedule.");
         }
         if (currentCashAccounts.Count == 0 || openingCashAccounts.Count == 0)
             warnings.Add("Cash and cash equivalents could not be identified from effective bank-account consolidation mappings for both statement dates.");
@@ -145,11 +177,22 @@ public sealed partial class ConsolidationService
             else warnings.Add($"The {disclosure.FrameworkCode} {disclosure.FrameworkEdition} disclosure package is {disclosure.Status.ToLowerInvariant()} and was excluded until independent approval.");
         }
 
+        var ownershipReferences = current.Accounts.SelectMany(item => item.Contributions ?? [])
+            .Where(item => item.TranslationMethod is "OwnershipEvent" or "OwnershipEventCarryforward").Select(item => item.Reference).ToHashSet(StringComparer.Ordinal);
+        var packageOwnershipEvents = validReportOwnershipEvents.Where(item => ownershipReferences.Contains(item.Reference)).ToArray();
+        var ownershipUserIds = packageOwnershipEvents.SelectMany(item => new[] { item.PreparedByUserId, item.ApprovedByUserId, item.RejectedByUserId, item.PostedByUserId })
+            .Where(item => item.HasValue).Select(item => item!.Value).Distinct().ToArray();
+        var ownershipUsers = await db.Users.AsNoTracking().Where(item => ownershipUserIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, item => string.IsNullOrWhiteSpace(item.DisplayName) ? item.UserName : item.DisplayName, cancellationToken);
+        var ownershipCompanyIds = packageOwnershipEvents.Select(item => item.SubjectCompanyId).Distinct().ToArray();
+        var ownershipCompanies = await db.Companies.AsNoTracking().Where(item => ownershipCompanyIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
+        var ownershipSnapshots = packageOwnershipEvents.Select(item => ToOwnershipEventSnapshot(item, ownershipCompanies, ownershipUsers)).Where(item => item is not null).Select(item => item!).ToArray();
+
         var reconciliation = new ConsolidatedStatementReconciliation(totalAssets, totalLiabilities, totalRecordedEquity, netIncome, liabilitiesAndEquity,
             balanceDifference, openingEquity, directEquityMovement, equityEnding, equityDifference, openingCash, endingCash, netCashChange, cashFlowResult.PresentedChange, cashFlow.ReconciliationDifference);
         var isComplete = warnings.Count == 0 && balanceDifference == 0m && equityDifference == 0m && cashFlow.ReconciliationDifference == 0m;
         return new(current.GroupId, current.GroupName, current.ReportingCurrency, periodStart, asOf, balanceSheet, incomeStatement, equityStatement, cashFlow,
-            reconciliation, warnings, isComplete, approvedDisclosures);
+            reconciliation, warnings, isComplete, approvedDisclosures, ownershipSnapshots);
     }
 
     private static ConsolidatedStatementSection Section(string code, string name, IReadOnlyList<ConsolidatedStatementAccount> accounts) =>
@@ -205,6 +248,34 @@ public sealed partial class ConsolidationService
 
     private static string StatementCsv(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
     private static string DayRange(int? minimum, int? maximum) => minimum.HasValue && maximum.HasValue ? $"{minimum}-{maximum}" : "Not provided";
+
+    private static IEnumerable<(string Name, decimal Amount)> OwnershipEventMeasurements(ConsolidationOwnershipEventDocument content)
+    {
+        if (content.Acquisition is { } acquisition)
+        {
+            yield return ("Consideration transferred", acquisition.ConsiderationTransferred); yield return ("Previous interest fair value", acquisition.PreviousInterestFairValue);
+            yield return ("Noncontrolling interest recognized", acquisition.NoncontrollingInterestRecognized); yield return ("Identifiable net assets fair value", acquisition.IdentifiableNetAssetsFairValue);
+            yield return ("Goodwill", acquisition.Goodwill); yield return ("Bargain-purchase gain", acquisition.BargainPurchaseGain);
+        }
+        if (content.OwnershipChange is { } change)
+        {
+            yield return ("Consideration paid", change.ConsiderationPaid); yield return ("Consideration received", change.ConsiderationReceived);
+            yield return ("Noncontrolling interest increase", change.NoncontrollingInterestIncrease); yield return ("Noncontrolling interest decrease", change.NoncontrollingInterestDecrease);
+            yield return ("Parent equity debit", change.ParentEquityDebit); yield return ("Parent equity credit", change.ParentEquityCredit);
+        }
+        if (content.LossOfControl is { } loss)
+        {
+            yield return ("Consideration received", loss.ConsiderationReceived); yield return ("Retained interest fair value", loss.RetainedInterestFairValue);
+            yield return ("Noncontrolling interest derecognized", loss.NoncontrollingInterestDerecognized); yield return ("Net assets derecognized", loss.NetAssetsDerecognized);
+            yield return ("Goodwill derecognized", loss.GoodwillDerecognized); yield return ("OCI reclassification", loss.OciReclassification); yield return ("Gain or loss", loss.GainOrLoss);
+        }
+        if (content.ProfitAttribution is { } attribution)
+        {
+            yield return ("Subsidiary profit or loss", attribution.SubsidiaryProfitOrLoss); yield return ("Parent profit or loss", attribution.ParentProfitOrLoss);
+            yield return ("NCI profit or loss", attribution.NoncontrollingInterestProfitOrLoss); yield return ("Subsidiary other comprehensive income", attribution.SubsidiaryOtherComprehensiveIncome);
+            yield return ("Parent other comprehensive income", attribution.ParentOtherComprehensiveIncome); yield return ("NCI other comprehensive income", attribution.NoncontrollingInterestOtherComprehensiveIncome);
+        }
+    }
 
     private static async Task<IReadOnlySet<(string Number, string Name)>> EffectiveCashReportingAccountsAsync(BrassLedgerDbContext db, Guid groupId, DateOnly asOf, CancellationToken cancellationToken)
     {

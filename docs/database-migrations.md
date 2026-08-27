@@ -82,6 +82,10 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddConsolidatedStatementPresentation` adds a separate effective-dated presentation-policy table rather than coupling current/noncurrent sections, captions, or ordering to source mappings. Each row retains statement and reporting-account identity, free-form section identity, section/line ordering, reviewed rationale, lifecycle, and concurrency evidence. Unique provider indexes prevent duplicate same-date account policies and support section resolution; runtime validation rejects overlapping periods and inconsistent section captions/orders. Lost-history adoption requires the table, every policy/evidence column, and both provider-specific indexes. Downgrade is prohibited because it could delete reviewed presentation history.
 
+`AddConsolidationDisclosurePackages` adds exact-period, framework-specific, versioned JSON disclosure documents with preparation, independent approval/rejection, content identity, and concurrency evidence. Extension objects keep unforeseen standard or industry fields out of the relational schema while the application validates each supported document version before use. Lost-history adoption requires the table, control columns, retained JSON, and unique period/framework index. Downgrade is prohibited because it could delete approved financial-statement evidence.
+
+`AddConsolidationOwnershipEvents` adds the controlled acquisition, step-acquisition, ownership-change, loss-of-control, and profit/OCI-attribution schedule ledger. Each event retains typed versioned JSON, framework/source evidence, preparation/review/posting identities, immutable reversal links, and concurrency state; restrictive company, group, subject-company, and self relationships preserve provenance. Lost-history adoption requires every retained-document and lifecycle column plus the group/reference, group/date, and one-reversal indexes. Downgrade is prohibited because it could delete posted consolidation accounting and the evidence needed to reproduce it.
+
 ## Verification
 
 At minimum, run:
