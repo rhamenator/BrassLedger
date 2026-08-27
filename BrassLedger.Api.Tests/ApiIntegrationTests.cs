@@ -91,6 +91,36 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task ConsolidationApi_RetainsEffectiveOwnershipAndRejectsOverlapAndRouteMismatch()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var existingCompany = Assert.Single(await client.GetFromJsonAsync<IReadOnlyList<CompanyMembershipSnapshot>>("/api/companies") ?? []);
+        Guid subsidiaryId;
+        using (var scope = isolatedFactory.Services.CreateScope())
+        {
+            await using var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync();
+            var controller = await db.Users.SingleAsync(user => user.UserName == "controller");
+            subsidiaryId = Guid.NewGuid();
+            db.Companies.Add(new Company { Id = subsidiaryId, Name = "API subsidiary", LegalName = "API subsidiary Ltd.", TaxId = "API-SUB", BaseCurrency = "CAD", FiscalYearStartMonth = 1 });
+            db.CompanyMemberships.Add(new CompanyMembership { Id = Guid.NewGuid(), UserId = controller.Id, CompanyId = subsidiaryId, Role = controller.Role, IsOwner = true, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        var createGroup = await client.PutAsJsonAsync("/api/consolidation-groups", new SaveConsolidationGroupRequest(null, "API group", "USD",
+        [
+            new ConsolidationMemberRequest(existingCompany.CompanyId, 1m, new DateOnly(2026, 1, 1)),
+            new ConsolidationMemberRequest(subsidiaryId, .75m, new DateOnly(2026, 2, 1))
+        ]));
+        Assert.Equal(HttpStatusCode.OK, createGroup.StatusCode);
+        var groupResult = await createGroup.Content.ReadFromJsonAsync<TransactionResult>();
+        var group = Assert.Single(await client.GetFromJsonAsync<IReadOnlyList<ConsolidationGroupSnapshot>>("/api/consolidation-groups") ?? [], item => item.Id == groupResult!.Id);
+        Assert.Contains(group.Members, member => member.CompanyId == subsidiaryId && member.EffectiveFrom == new DateOnly(2026, 2, 1) && member.OwnershipPercentage == .75m);
+        var overlapping = new SaveConsolidationOwnershipPeriodRequest(null, group.Id, subsidiaryId, .8m, new DateOnly(2026, 3, 1), null);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/ownership-periods", overlapping)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-periods", overlapping)).StatusCode);
+    }
+
+    [Fact]
     public async Task UnsafeApiRoutes_RequireAntiforgeryAndRejectMissingTokensBeforeMutation()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();

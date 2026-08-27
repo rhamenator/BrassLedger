@@ -450,6 +450,17 @@ public static class ServiceCollectionExtensions
                     return false;
             return true;
         }
+        if (migrationId.EndsWith("_AddEffectiveDatedConsolidationOwnership", StringComparison.Ordinal))
+        {
+            var ownershipIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationGroupCompanies_ConsolidationGroupId_MemberComp~"
+                : "IX_ConsolidationGroupCompanies_ConsolidationGroupId_MemberCompanyId_EffectiveFrom";
+            return await HasColumnAsync(dbContext, "ConsolidationGroups", "ConcurrencyToken", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationGroupCompanies", "ConcurrencyToken", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationGroupCompanies", "EffectiveFrom", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationGroupCompanies", "EffectiveThrough", cancellationToken)
+                && await HasIndexAsync(dbContext, ownershipIndex, cancellationToken);
+        }
         return false;
     }
 

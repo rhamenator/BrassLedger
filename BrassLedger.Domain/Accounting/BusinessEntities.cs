@@ -145,6 +145,7 @@ public sealed class ConsolidationGroup
     public string Name { get; set; } = string.Empty;
     public string ReportingCurrency { get; set; } = "USD";
     public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class ConsolidationGroupCompany
@@ -153,6 +154,9 @@ public sealed class ConsolidationGroupCompany
     public Guid ConsolidationGroupId { get; set; }
     public Guid MemberCompanyId { get; set; }
     public decimal OwnershipPercentage { get; set; } = 1m;
+    public DateOnly EffectiveFrom { get; set; } = DateOnly.MinValue;
+    public DateOnly? EffectiveThrough { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class AccountingPeriod

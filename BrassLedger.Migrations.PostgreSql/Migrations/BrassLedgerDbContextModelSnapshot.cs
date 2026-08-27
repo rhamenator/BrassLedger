@@ -983,6 +983,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
@@ -1008,8 +1013,19 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<Guid>("ConsolidationGroupId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("EffectiveFrom")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("EffectiveThrough")
+                        .HasColumnType("date");
 
                     b.Property<Guid>("MemberCompanyId")
                         .HasColumnType("uuid");
@@ -1020,7 +1036,7 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConsolidationGroupId", "MemberCompanyId")
+                    b.HasIndex("ConsolidationGroupId", "MemberCompanyId", "EffectiveFrom")
                         .IsUnique();
 
                     b.ToTable("ConsolidationGroupCompanies");

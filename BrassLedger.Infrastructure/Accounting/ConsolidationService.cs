@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using BrassLedger.Application.Accounting;
 using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Persistence;
@@ -23,18 +24,65 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
 
     public async Task<TransactionResult> SaveGroupAsync(SaveConsolidationGroupRequest request, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Name) || request.Members.Count == 0 || request.Members.Any(member => member.CompanyId == Guid.Empty || member.OwnershipPercentage is <= 0 or > 1) || request.Members.Select(member => member.CompanyId).Distinct().Count() != request.Members.Count) return TransactionResult.Failure("Provide a name and distinct member companies with ownership between 0% and 100%.");
+        var reportingCurrency = NormalizeCurrency(request.ReportingCurrency);
+        if (string.IsNullOrWhiteSpace(request.Name) || reportingCurrency is null) return TransactionResult.Failure("Provide a group name and a three-letter reporting currency.");
+        if (request.Id is null && (request.Members.Count == 0 || !ValidOwnershipPeriods(request.Members))) return TransactionResult.Failure("Provide at least one valid, non-overlapping ownership period with ownership above 0% and no more than 100%.");
+        if (request.Id is not null && request.Members.Count > 0) return TransactionResult.Failure("Edit ownership periods separately so previously effective ownership is not replaced.");
         var companyId = CurrentCompanyId(); if (companyId is null) return TransactionResult.Failure("An active company is required.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var userId = CurrentUserId(); if (userId is null || !await db.CompanyMemberships.AnyAsync(member => member.UserId == userId && member.CompanyId == companyId && member.IsOwner && member.IsActive, cancellationToken)) return TransactionResult.Failure("Only the active-company owner can maintain consolidation groups.");
-        var allowedCompanies = await db.CompanyMemberships.Where(member => member.UserId == userId && member.IsActive).Select(member => member.CompanyId).ToListAsync(cancellationToken);
-        if (request.Members.Any(member => !allowedCompanies.Contains(member.CompanyId))) return TransactionResult.Failure("Every consolidated company must be accessible to the current owner.");
+        var allowedCompanies = await db.CompanyMemberships.Where(member => member.UserId == userId && member.IsOwner && member.IsActive).Select(member => member.CompanyId).ToListAsync(cancellationToken);
+        if (request.Members.Any(member => !allowedCompanies.Contains(member.CompanyId))) return TransactionResult.Failure("The current user must be an active owner of every consolidated company.");
         var entity = request.Id is { } id ? await db.ConsolidationGroups.SingleOrDefaultAsync(group => group.CompanyId == companyId && group.Id == id, cancellationToken) : null;
-        entity ??= new ConsolidationGroup { Id = Guid.NewGuid(), CompanyId = companyId.Value }; entity.Name = request.Name.Trim(); entity.ReportingCurrency = request.ReportingCurrency.Trim().ToUpperInvariant(); entity.IsActive = request.IsActive;
-        if (db.Entry(entity).State == EntityState.Detached) db.ConsolidationGroups.Add(entity);
-        var existing = await db.ConsolidationGroupCompanies.Where(member => member.ConsolidationGroupId == entity.Id).ToListAsync(cancellationToken); db.ConsolidationGroupCompanies.RemoveRange(existing);
-        db.ConsolidationGroupCompanies.AddRange(request.Members.Select(member => new ConsolidationGroupCompany { Id = Guid.NewGuid(), ConsolidationGroupId = entity.Id, MemberCompanyId = member.CompanyId, OwnershipPercentage = member.OwnershipPercentage }));
-        await db.SaveChangesAsync(cancellationToken); return TransactionResult.Success(entity.Id);
+        if (request.Id is not null && entity is null) return TransactionResult.Failure("The consolidation group was not found in the active company.");
+        if (entity is not null && (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(entity.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))) return TransactionResult.Failure("The consolidation group changed after it was displayed. Refresh before saving it.");
+        entity ??= new ConsolidationGroup { Id = Guid.NewGuid(), CompanyId = companyId.Value };
+        entity.Name = request.Name.Trim(); entity.ReportingCurrency = reportingCurrency; entity.IsActive = request.IsActive; entity.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        if (db.Entry(entity).State == EntityState.Detached)
+        {
+            db.ConsolidationGroups.Add(entity);
+            db.ConsolidationGroupCompanies.AddRange(request.Members.Select(member => new ConsolidationGroupCompany
+            {
+                Id = Guid.NewGuid(), ConsolidationGroupId = entity.Id, MemberCompanyId = member.CompanyId,
+                OwnershipPercentage = member.OwnershipPercentage, EffectiveFrom = member.EffectiveFrom ?? DateOnly.MinValue,
+                EffectiveThrough = member.EffectiveThrough, ConcurrencyToken = Guid.NewGuid().ToString("N")
+            }));
+        }
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = request.Id is null ? "consolidation-group.created" : "consolidation-group.updated", EntityType = nameof(ConsolidationGroup), EntityId = entity.Id, DetailJson = JsonSerializer.Serialize(new { entity.Name, entity.ReportingCurrency, entity.IsActive, initialOwnershipPeriods = request.Members.Count }), OccurredAtUtc = DateTimeOffset.UtcNow });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation group changed while it was being saved. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The consolidation group name or ownership schedule conflicts with another retained record."); }
+        return TransactionResult.Success(entity.Id);
+    }
+
+    public async Task<TransactionResult> SaveOwnershipPeriodAsync(SaveConsolidationOwnershipPeriodRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.ConsolidationGroupId == Guid.Empty || request.MemberCompanyId == Guid.Empty || request.OwnershipPercentage is <= 0 or > 1 || request.EffectiveThrough < request.EffectiveFrom)
+            return TransactionResult.Failure("Provide a member company, ownership above 0% and no more than 100%, and a valid effective period.");
+        var companyId = CurrentCompanyId(); var userId = CurrentUserId();
+        if (companyId is null || userId is null) return TransactionResult.Failure("An active company and user are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var group = await db.ConsolidationGroups.SingleOrDefaultAsync(item => item.Id == request.ConsolidationGroupId && item.CompanyId == companyId, cancellationToken);
+        if (group is null) return TransactionResult.Failure("The consolidation group was not found in the active company.");
+        if (!await db.CompanyMemberships.AnyAsync(member => member.UserId == userId && member.CompanyId == companyId && member.IsOwner && member.IsActive, cancellationToken)
+            || !await db.CompanyMemberships.AnyAsync(member => member.UserId == userId && member.CompanyId == request.MemberCompanyId && member.IsOwner && member.IsActive, cancellationToken))
+            return TransactionResult.Failure("The current user must be an active owner of the consolidation group and member company.");
+        var period = request.Id is { } id ? await db.ConsolidationGroupCompanies.SingleOrDefaultAsync(item => item.Id == id && item.ConsolidationGroupId == group.Id, cancellationToken) : null;
+        if (request.Id is not null && period is null) return TransactionResult.Failure("The ownership period was not found in this consolidation group.");
+        if (period is not null && (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(period.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))) return TransactionResult.Failure("The ownership period changed after it was displayed. Refresh before saving it.");
+        if (period is not null && period.MemberCompanyId != request.MemberCompanyId) return TransactionResult.Failure("An ownership period cannot be moved to another company. Add a separate period for that company.");
+        var requestedEnd = request.EffectiveThrough ?? DateOnly.MaxValue;
+        var overlaps = await db.ConsolidationGroupCompanies.AnyAsync(item => item.ConsolidationGroupId == group.Id && item.MemberCompanyId == request.MemberCompanyId && item.Id != request.Id && item.EffectiveFrom <= requestedEnd && (item.EffectiveThrough == null || item.EffectiveThrough >= request.EffectiveFrom), cancellationToken);
+        if (overlaps) return TransactionResult.Failure("Ownership periods for the same company cannot overlap.");
+        period ??= new ConsolidationGroupCompany { Id = Guid.NewGuid(), ConsolidationGroupId = group.Id };
+        period.MemberCompanyId = request.MemberCompanyId; period.OwnershipPercentage = request.OwnershipPercentage; period.EffectiveFrom = request.EffectiveFrom; period.EffectiveThrough = request.EffectiveThrough; period.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        if (db.Entry(period).State == EntityState.Detached) db.ConsolidationGroupCompanies.Add(period);
+        group.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = request.Id is null ? "consolidation-ownership.created" : "consolidation-ownership.updated", EntityType = nameof(ConsolidationGroupCompany), EntityId = period.Id, DetailJson = JsonSerializer.Serialize(new { group.Id, period.MemberCompanyId, period.OwnershipPercentage, period.EffectiveFrom, period.EffectiveThrough }), OccurredAtUtc = DateTimeOffset.UtcNow });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation group or ownership period changed concurrently. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The ownership period conflicts with another retained record."); }
+        return TransactionResult.Success(period.Id);
     }
 
     public async Task<IReadOnlyList<ConsolidationGroupSnapshot>> GetGroupsAsync(CancellationToken cancellationToken = default)
@@ -47,8 +95,8 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
         var members = await db.ConsolidationGroupCompanies.AsNoTracking().Where(member => groupIds.Contains(member.ConsolidationGroupId)).ToListAsync(cancellationToken);
         var companyIds = members.Select(member => member.MemberCompanyId).Distinct().ToArray();
         var companies = await db.Companies.AsNoTracking().Where(company => companyIds.Contains(company.Id)).ToDictionaryAsync(company => company.Id, cancellationToken);
-        return groups.Select(group => new ConsolidationGroupSnapshot(group.Id, group.Name, group.ReportingCurrency, group.IsActive,
-            members.Where(member => member.ConsolidationGroupId == group.Id).OrderBy(member => companies[member.MemberCompanyId].Name).Select(member => new ConsolidationGroupMemberSnapshot(member.MemberCompanyId, companies[member.MemberCompanyId].Name, companies[member.MemberCompanyId].BaseCurrency, member.OwnershipPercentage)).ToArray())).ToArray();
+        return groups.Select(group => new ConsolidationGroupSnapshot(group.Id, group.Name, group.ReportingCurrency, group.IsActive, group.ConcurrencyToken,
+            members.Where(member => member.ConsolidationGroupId == group.Id).OrderBy(member => companies[member.MemberCompanyId].Name).ThenBy(member => member.EffectiveFrom).Select(member => new ConsolidationGroupMemberSnapshot(member.Id, member.MemberCompanyId, companies[member.MemberCompanyId].Name, companies[member.MemberCompanyId].BaseCurrency, member.OwnershipPercentage, member.EffectiveFrom, member.EffectiveThrough, member.ConcurrencyToken)).ToArray())).ToArray();
     }
 
     public async Task<ConsolidatedBalanceReport?> GetBalanceReportAsync(Guid groupId, DateOnly asOf, CancellationToken cancellationToken = default)
@@ -56,7 +104,7 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
         var companyId = CurrentCompanyId(); var userId = CurrentUserId(); if (companyId is null || userId is null) return null;
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var group = await db.ConsolidationGroups.SingleOrDefaultAsync(item => item.CompanyId == companyId && item.Id == groupId && item.IsActive, cancellationToken); if (group is null) return null;
-        var members = await db.ConsolidationGroupCompanies.Where(item => item.ConsolidationGroupId == group.Id).ToListAsync(cancellationToken); var permitted = await db.CompanyMemberships.Where(item => item.UserId == userId && item.IsActive).Select(item => item.CompanyId).ToListAsync(cancellationToken); if (members.Any(member => !permitted.Contains(member.MemberCompanyId))) return null;
+        var members = await db.ConsolidationGroupCompanies.Where(item => item.ConsolidationGroupId == group.Id && item.EffectiveFrom <= asOf && (item.EffectiveThrough == null || item.EffectiveThrough >= asOf)).ToListAsync(cancellationToken); var permitted = await db.CompanyMemberships.Where(item => item.UserId == userId && item.IsActive).Select(item => item.CompanyId).ToListAsync(cancellationToken); if (members.Any(member => !permitted.Contains(member.MemberCompanyId))) return null;
         var companies = await db.Companies.Where(company => members.Select(member => member.MemberCompanyId).Contains(company.Id)).ToDictionaryAsync(company => company.Id, cancellationToken);
         var rates = await db.CurrencyExchangeRates.Where(rate => rate.CompanyId == companyId && rate.EffectiveOn <= asOf).OrderByDescending(rate => rate.EffectiveOn).ToListAsync(cancellationToken); var warnings = new List<string>(); var totals = new Dictionary<(string Number, string Name, string Type), decimal>();
         foreach (var member in members)
@@ -93,6 +141,14 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
     }
 
     private static decimal? ResolveRate(string from, string to, IReadOnlyList<CurrencyExchangeRate> rates) => string.Equals(from, to, StringComparison.OrdinalIgnoreCase) ? 1m : rates.FirstOrDefault(rate => rate.BaseCurrency == from && rate.QuoteCurrency == to)?.Rate ?? (rates.FirstOrDefault(rate => rate.BaseCurrency == to && rate.QuoteCurrency == from) is { } reverse ? 1m / reverse.Rate : null);
+    private static string? NormalizeCurrency(string value) => !string.IsNullOrWhiteSpace(value) && value.Trim().ToUpperInvariant() is { Length: 3 } currency && currency.All(character => character is >= 'A' and <= 'Z') ? currency : null;
+    private static bool ValidOwnershipPeriods(IReadOnlyList<ConsolidationMemberRequest> members) =>
+        members.All(member => member.CompanyId != Guid.Empty && member.OwnershipPercentage is > 0 and <= 1 && (!member.EffectiveThrough.HasValue || member.EffectiveThrough.Value >= (member.EffectiveFrom ?? DateOnly.MinValue)))
+        && members.GroupBy(member => member.CompanyId).All(group =>
+        {
+            var ordered = group.OrderBy(member => member.EffectiveFrom ?? DateOnly.MinValue).ToArray();
+            return ordered.Zip(ordered.Skip(1), (left, right) => (left.EffectiveThrough ?? DateOnly.MaxValue) < (right.EffectiveFrom ?? DateOnly.MinValue)).All(value => value);
+        });
     private Guid? CurrentCompanyId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(BrassLedger.Infrastructure.Auth.BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId) ? companyId : null;
     private Guid? CurrentUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) ? userId : null;
 }

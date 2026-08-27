@@ -104,6 +104,8 @@ The equivalent API is `GET` and antiforgery-protected `PUT /api/accounting/opera
 
 Fixed assets, prepaids, and loans use reviewed schedules and the normal journal approval queue. Loan payments and asset-disposal proceeds select configured bank accounts so their posted journals remain available to bank matching and reconciliation. Fixed-asset disposals calculate book value from posted depreciation and recognize the resulting gain or loss through selected non-control accounts. The opening acquisition, prepaid purchase, or loan proceeds are separate transactions and must not be duplicated by the schedule. See the [accounting schedules guide](accounting-schedules-guide.md) for calculation, posting, disposal, reversal, account, and current-scope details.
 
+Consolidation groups retain non-overlapping effective-dated ownership periods and require the operator to own every included company. Historical reports use the ownership period and posted ledger activity effective at the requested date. See [Consolidation and currency reporting](consolidation-guide.md) for the current calculation and the controls still required before distributing consolidated statements.
+
 ## Database upgrades
 
 BrassLedger now uses provider-specific EF Core migration assemblies as its primary schema-upgrade mechanism: `BrassLedger.Migrations.Sqlite` and `BrassLedger.Migrations.PostgreSql`. A new empty database is created by the applicable initial migration rather than `EnsureCreated`. Every later model change must have a reviewed migration in both assemblies and is recorded in `__EFMigrationsHistory`.

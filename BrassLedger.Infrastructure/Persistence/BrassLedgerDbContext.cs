@@ -683,6 +683,8 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<GeneralLedgerAccount>().Property(x => x.CurrentBalance));
         modelBuilder.Entity<CurrencyExchangeRate>().Property(x => x.Rate).HasPrecision(18, 8);
         modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.OwnershipPercentage).HasPrecision(9, 6);
+        modelBuilder.Entity<ConsolidationGroup>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         ConfigureMoney(modelBuilder.Entity<JournalEntry>().Property(x => x.TotalAmount));
         ConfigureMoney(modelBuilder.Entity<JournalEntryLine>().Property(x => x.Debit));
         ConfigureMoney(modelBuilder.Entity<JournalEntryLine>().Property(x => x.Credit));
@@ -973,7 +975,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.UserId, x.CompanyId }).IsUnique();
         modelBuilder.Entity<CurrencyExchangeRate>().HasIndex(x => new { x.CompanyId, x.BaseCurrency, x.QuoteCurrency, x.EffectiveOn }).IsUnique();
         modelBuilder.Entity<ConsolidationGroup>().HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();
-        modelBuilder.Entity<ConsolidationGroupCompany>().HasIndex(x => new { x.ConsolidationGroupId, x.MemberCompanyId }).IsUnique();
+        modelBuilder.Entity<ConsolidationGroupCompany>().HasIndex(x => new { x.ConsolidationGroupId, x.MemberCompanyId, x.EffectiveFrom }).IsUnique();
         modelBuilder.Entity<AccountingPeriod>().HasIndex(x => new { x.CompanyId, x.StartsOn, x.EndsOn }).IsUnique();
         modelBuilder.Entity<BusinessAuditEntry>().HasIndex(x => new { x.CompanyId, x.OccurredAtUtc });
         modelBuilder.Entity<AccountingInterchangeBatch>().HasIndex(x => new { x.CompanyId, x.ProviderCode, x.EntityType, x.ProcessedAtUtc });

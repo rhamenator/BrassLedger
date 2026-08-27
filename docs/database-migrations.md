@@ -66,6 +66,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddTrackingDimensionsToSourceLines` extends invoice, bill, quote, sales-order, requisition, purchase-order, payroll-time, payroll-earning, and project-billing lines with optional Department and Class references. Both providers add restrictive foreign keys and lookup indexes without rewriting existing records. Lost-history adoption verifies both columns and both indexes on every affected source table. Downgrade is prohibited because removing these columns could delete accounting classifications needed to reproduce source-to-ledger posting and historical reversals.
 
+`AddEffectiveDatedConsolidationOwnership` converts consolidation membership from one replaceable company percentage into retained ownership periods. Existing memberships begin at the minimum supported date, both group and period rows receive nonblank concurrency tokens, and the uniqueness constraint moves to group/company/effective-from. Lost-history adoption requires both effective-date columns, both concurrency columns, and the provider-specific ownership index. Downgrade is prohibited because restoring one membership row per company could delete later ownership periods and concurrency evidence.
+
 ## Verification
 
 At minimum, run:
