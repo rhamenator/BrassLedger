@@ -1057,6 +1057,10 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid>("ConsolidationGroupId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ControlKey")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
                     b.Property<string>("DecisionReason")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1111,12 +1115,20 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("SubjectCompanyId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CompanyId");
 
+                    b.HasIndex("ControlKey")
+                        .IsUnique();
+
                     b.HasIndex("ReversalOfBatchId")
                         .IsUnique();
+
+                    b.HasIndex("SubjectCompanyId");
 
                     b.HasIndex("ConsolidationGroupId", "PeriodStart", "AsOf", "Reference")
                         .IsUnique();
@@ -1206,6 +1218,16 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("NciAccountName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("NciAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("ReportingCurrency")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1224,10 +1246,21 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("BasisRationale")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateOnly?>("BasisReviewedOn")
+                        .HasColumnType("date");
+
                     b.Property<string>("ConcurrencyToken")
                         .IsConcurrencyToken()
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("ConsolidationBasis")
+                        .HasColumnType("integer");
 
                     b.Property<Guid>("ConsolidationGroupId")
                         .HasColumnType("uuid");
@@ -9813,6 +9846,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.ConsolidationAdjustmentBatch", null)
                         .WithOne()
                         .HasForeignKey("BrassLedger.Domain.Accounting.ConsolidationAdjustmentBatch", "ReversalOfBatchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("SubjectCompanyId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

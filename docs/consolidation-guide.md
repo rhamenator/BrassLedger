@@ -2,13 +2,22 @@
 
 BrassLedger's current consolidation report is a controlled as-of balance foundation. It derives each member company's natural account balances from posted journal lines through the requested date. It does not read today's mutable account balance for a historical report, and it retains inactive accounts that had historical activity.
 
-## Ownership periods
+## Consolidation basis and ownership periods
 
-Create a consolidation group in **Administration → Consolidation and currencies** only when the active operator is an owner of every selected company. Give each initial member an effective-from date, optional effective-through date, and ownership percentage above 0% and no more than 100%.
+Create a consolidation group in **Administration → Consolidation and currencies** only when the active operator is an owner of every selected company. Give each initial member an effective-from date, optional effective-through date, ownership percentage above 0% and no more than 100%, and an explicit consolidation basis. A classified group has exactly one **Reporting parent** at 100%. Every other classified member requires a dated review conclusion and rationale.
+
+The basis controls inclusion independently from economic ownership:
+
+- **Reporting parent** includes 100% of the parent's balances.
+- **Controlled subsidiary** includes 100% of the subsidiary's balances. A parent interest below 100% also requires separate noncontrolling-interest presentation for each exact reporting period.
+- **Combined affiliate** includes 100% for a reviewed common-control combination that is being presented on a combined basis.
+- **Proportionate interest** applies the retained ownership percentage. Use it only when proportionate presentation is the reviewed accounting conclusion, not as a shortcut for a partially owned controlled subsidiary.
+
+This distinction follows the control principle in [IFRS 10](https://www.ifrs.org/issued-standards/list-of-standards/ifrs-10-consolidated-financial-statements/): control determines which entities are consolidated. The separate NCI policy follows the presentation requirements summarized in [IFRS 10](https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2022/issued/part-a/ifrs-10-consolidated-financial-statements.pdf?bypass=on) and [FASB Statement 160](https://storage.fasb.org/aop_fas160.pdf). These links are accounting references, not a substitute for the entity's documented framework conclusion or independent professional review.
 
 Ownership is retained as periods rather than a replaceable current percentage. Periods for the same group and company cannot overlap. Closing or correcting a period requires its current concurrency token; a stale screen cannot overwrite another operator's change. Adding or revising a period also changes the group concurrency token so concurrent ownership changes serialize. Every accepted group and ownership change creates a company-scoped business-audit event. Historical reports select the ownership period effective on their as-of date.
 
-Existing undated memberships are migrated with an open period beginning at the minimum supported date. Migration assigns nonblank concurrency tokens. The former one-row-per-company index becomes a group/company/effective-from unique index so later ownership periods can coexist with history.
+Existing undated memberships are migrated with an open period beginning at the minimum supported date, nonblank concurrency tokens, and the legacy **Proportionate interest** basis. Legacy rows are not silently asserted to be controlled or combined. Until an operator records the appropriate rationale and review date, reports identify the legacy basis as unreviewed and incomplete.
 
 ## Controlled translation behavior
 
@@ -28,7 +37,15 @@ Every rate retains its type, period, source label, optional source reference, re
 
 The report accepts a report-period start and as-of date; callers that omit the start use the active parent company's fiscal-year start. Average-translated nominal activity before the period start is excluded. If the resulting source-currency selection does not balance—usually because nominal activity was not closed before the selected period—BrassLedger reports the source imbalance and refuses to disguise it as CTA. Missing, ambiguous, unmapped, or type-inconsistent material balances are likewise excluded with precise warnings, and CTA is not calculated for an incomplete report.
 
-Configure a dedicated CTA reporting account number and name on the consolidation group. When every included member selection balances in its source currency, BrassLedger computes the reporting-currency imbalance created solely by the different controlled translation methods and inserts that amount as an equity balance. The CTA number cannot also be used by a source-account mapping. The report exposes the calculated adjustment and translation method on each row, and rounds ownership-adjusted account results to cents.
+Configure a dedicated CTA reporting account number and name on the consolidation group. When every included member selection balances in its source currency, BrassLedger computes the reporting-currency imbalance created solely by the different controlled translation methods and inserts that amount as an equity balance. The CTA number cannot also be used by a source-account mapping. The report exposes the calculated adjustment and translation method on each row, and rounds basis-adjusted account results to cents.
+
+## Noncontrolling interests
+
+Configure a dedicated NCI account number and name in the group's **Policy**. It must be a separate equity reporting identity and cannot collide with CTA or an effective source-account mapping. BrassLedger fully includes a partially owned controlled subsidiary; it does not multiply that subsidiary's balances by the parent's ownership percentage.
+
+For each partially owned controlled subsidiary and exact report period, a preparer must enter the reviewed, balanced equity reclassification under **Reporting → Consolidation adjustments and eliminations → Noncontrolling-interest reclassification**. The batch retains the subject subsidiary, its exact period, line-level source provenance, preparation, independent review, posting, reversal, concurrency, and audit evidence. Every line must be equity, must identify that same subsidiary, and exactly one line must use the dedicated NCI account. A unique period-and-subsidiary control prevents duplicate retained NCI batches, including concurrent attempts.
+
+BrassLedger deliberately does not infer the NCI amount, acquisition-date fair values, goodwill, purchase-price allocation, changes in ownership, profit attribution, or loss-of-control accounting. Those conclusions require reviewed acquisition and equity schedules not yet present in the product. Without an exact-period posted NCI batch, the report warns that NCI presentation is missing, treats the result as incomplete, and does not calculate CTA. Reversal posts an exact opposite batch and releases the control identity so a corrected replacement can be prepared without deleting history.
 
 ## Controlled adjustments and eliminations
 
@@ -44,4 +61,4 @@ Configure reciprocal, effective-dated customer and vendor links with **Administr
 
 The consolidated balance includes only batches posted for the requested exact period. Original and reversal entries are both included, producing a transparent zero net effect after reversal. When translated source activity and reporting adjustments use the same reporting identity, the report combines the value and labels its derivation **Mixed**.
 
-This remains short of a complete consolidated-financial-statement workflow. Broader fuzzy/partial/settlement and cross-currency matching, controlled account-line derivation, noncontrolling-interest presentation, and consolidated balance sheet, income statement, equity, and cash-flow presentation remain required. Do not distribute the foundational report as framework-compliant consolidated financial statements until those controls and an independent accounting review are complete.
+This remains short of a complete consolidated-financial-statement workflow. Broader fuzzy/partial/settlement and cross-currency matching, controlled elimination-line derivation, acquisition/disposal accounting, goodwill and purchase-price allocation, ownership changes, profit attribution, loss of control, and consolidated balance-sheet, income-statement, equity, and cash-flow presentation remain required. Do not distribute the foundational report as framework-compliant consolidated financial statements until those controls and an independent accounting review are complete.

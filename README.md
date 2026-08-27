@@ -69,6 +69,7 @@ Module-by-module usage links:
 
 Specialized documentation:
 
+- Agent-readable production completion queue: [docs/work-remaining.md](docs/work-remaining.md)
 - Financial statements: [docs/reporting-guide.md#financial-statements](docs/reporting-guide.md#financial-statements)
 - Receivables output: [docs/reporting-guide.md#receivables-output](docs/reporting-guide.md#receivables-output)
 - Payables output: [docs/reporting-guide.md#payables-output](docs/reporting-guide.md#payables-output)

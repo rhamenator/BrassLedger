@@ -559,6 +559,18 @@ public static class ServiceCollectionExtensions
                 && await HasIndexAsync(dbContext, customerIndex, cancellationToken)
                 && await HasIndexAsync(dbContext, vendorIndex, cancellationToken);
         }
+        if (migrationId.EndsWith("_AddExplicitConsolidationBasisAndNci", StringComparison.Ordinal))
+        {
+            return await HasColumnAsync(dbContext, "ConsolidationGroups", "NciAccountNumber", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationGroups", "NciAccountName", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationGroupCompanies", "ConsolidationBasis", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationGroupCompanies", "BasisRationale", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationGroupCompanies", "BasisReviewedOn", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "SubjectCompanyId", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAdjustmentBatches", "ControlKey", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ConsolidationAdjustmentBatches_SubjectCompanyId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ConsolidationAdjustmentBatches_ControlKey", cancellationToken);
+        }
         return false;
     }
 

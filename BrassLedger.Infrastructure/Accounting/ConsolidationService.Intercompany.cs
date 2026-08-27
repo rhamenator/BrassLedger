@@ -79,7 +79,7 @@ public sealed partial class ConsolidationService
         var candidates = customers.Select(item => new ConsolidationTradingPartnerCandidateSnapshot(item.CompanyId, companies[item.CompanyId].Name, "Customer", item.Id, item.CustomerNumber, item.Name))
             .Concat(vendors.Select(item => new ConsolidationTradingPartnerCandidateSnapshot(item.CompanyId, companies[item.CompanyId].Name, "Vendor", item.Id, item.VendorNumber, item.Name))).ToArray();
         return new ConsolidationTradingPartnerWorkspace(group.Id, group.Name,
-            members.OrderBy(item => companies[item.MemberCompanyId].Name).ThenBy(item => item.EffectiveFrom).Select(item => new ConsolidationGroupMemberSnapshot(item.Id, item.MemberCompanyId, companies[item.MemberCompanyId].Name, companies[item.MemberCompanyId].BaseCurrency, item.OwnershipPercentage, item.EffectiveFrom, item.EffectiveThrough, item.ConcurrencyToken)).ToArray(),
+            members.OrderBy(item => companies[item.MemberCompanyId].Name).ThenBy(item => item.EffectiveFrom).Select(item => new ConsolidationGroupMemberSnapshot(item.Id, item.MemberCompanyId, companies[item.MemberCompanyId].Name, companies[item.MemberCompanyId].BaseCurrency, item.OwnershipPercentage, item.EffectiveFrom, item.EffectiveThrough, item.ConcurrencyToken, item.ConsolidationBasis.ToString(), item.BasisRationale, item.BasisReviewedOn)).ToArray(),
             candidates,
             links.Select(link =>
             {

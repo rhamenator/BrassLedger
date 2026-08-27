@@ -51,10 +51,26 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
     {
         var reportingCurrency = NormalizeCurrency(request.ReportingCurrency);
         var ctaNumber = request.CtaAccountNumber?.Trim() ?? string.Empty; var ctaName = request.CtaAccountName?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(request.Name) || reportingCurrency is null || ctaNumber.Length > 64 || ctaName.Length > 160 || (string.IsNullOrWhiteSpace(ctaNumber) != string.IsNullOrWhiteSpace(ctaName))) return TransactionResult.Failure("Provide a group name, a three-letter reporting currency, and either both CTA account fields or neither.");
+        var nciNumber = request.NciAccountNumber?.Trim() ?? string.Empty; var nciName = request.NciAccountName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(request.Name) || reportingCurrency is null || ctaNumber.Length > 64 || ctaName.Length > 160 || nciNumber.Length > 64 || nciName.Length > 160
+            || (string.IsNullOrWhiteSpace(ctaNumber) != string.IsNullOrWhiteSpace(ctaName)) || (string.IsNullOrWhiteSpace(nciNumber) != string.IsNullOrWhiteSpace(nciName))
+            || (!string.IsNullOrWhiteSpace(ctaNumber) && ctaNumber == nciNumber)) return TransactionResult.Failure("Provide a group name, a three-letter reporting currency, paired CTA and NCI account fields, and different CTA and NCI account numbers.");
         if (request.Id is null && (request.Members.Count == 0 || !ValidOwnershipPeriods(request.Members))) return TransactionResult.Failure("Provide at least one valid, non-overlapping ownership period with ownership above 0% and no more than 100%.");
         if (request.Id is not null && request.Members.Count > 0) return TransactionResult.Failure("Edit ownership periods separately so previously effective ownership is not replaced.");
         var companyId = CurrentCompanyId(); if (companyId is null) return TransactionResult.Failure("An active company is required.");
+        var parsedMembers = new List<(ConsolidationMemberRequest Request, ConsolidationBasis Basis)>();
+        foreach (var member in request.Members)
+        {
+            if (!TryConsolidationBasis(member.ConsolidationBasis, out var basis) || !ValidBasisEvidence(basis, member.BasisRationale, member.BasisReviewedOn))
+                return TransactionResult.Failure("Choose a supported consolidation basis and retain a concise rationale and review date for every controlled subsidiary, combined affiliate, or newly classified proportionate interest.");
+            parsedMembers.Add((member, basis));
+        }
+        var initialSchedule = parsedMembers.Select(member => new ConsolidationPeriodPolicy(member.Request.CompanyId, member.Request.OwnershipPercentage, member.Basis,
+            member.Request.BasisRationale ?? string.Empty, member.Request.BasisReviewedOn, member.Request.EffectiveFrom ?? DateOnly.MinValue, member.Request.EffectiveThrough)).ToArray();
+        if (!ValidClassifiedGroupSchedule(initialSchedule, companyId.Value))
+            return TransactionResult.Failure("Every effective classified consolidation schedule requires exactly one 100% reporting-parent period for the active company.");
+        if (parsedMembers.Any(member => member.Basis == ConsolidationBasis.ControlledSubsidiary && member.Request.OwnershipPercentage < 1m) && string.IsNullOrWhiteSpace(nciNumber))
+            return TransactionResult.Failure("Configure a dedicated NCI equity reporting account before adding a partially owned controlled subsidiary.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var userId = CurrentUserId(); if (userId is null || !await db.CompanyMemberships.AnyAsync(member => member.UserId == userId && member.CompanyId == companyId && member.IsOwner && member.IsActive, cancellationToken)) return TransactionResult.Failure("Only the active-company owner can maintain consolidation groups.");
         var allowedCompanies = await db.CompanyMemberships.Where(member => member.UserId == userId && member.IsOwner && member.IsActive).Select(member => member.CompanyId).ToListAsync(cancellationToken);
@@ -62,19 +78,27 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         var entity = request.Id is { } id ? await db.ConsolidationGroups.SingleOrDefaultAsync(group => group.CompanyId == companyId && group.Id == id, cancellationToken) : null;
         if (request.Id is not null && entity is null) return TransactionResult.Failure("The consolidation group was not found in the active company.");
         if (entity is not null && (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(entity.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))) return TransactionResult.Failure("The consolidation group changed after it was displayed. Refresh before saving it.");
+        if (entity is not null && (entity.NciAccountNumber != nciNumber || entity.NciAccountName != nciName) && await db.ConsolidationAdjustmentBatches.AnyAsync(batch => batch.ConsolidationGroupId == entity.Id && batch.Kind == ConsolidationAdjustmentKind.NoncontrollingInterest, cancellationToken))
+            return TransactionResult.Failure("The NCI reporting account cannot change after an NCI reclassification is retained. Create a successor consolidation policy instead.");
+        if (entity is not null && string.IsNullOrWhiteSpace(nciNumber) && await db.ConsolidationGroupCompanies.AnyAsync(member => member.ConsolidationGroupId == entity.Id && member.ConsolidationBasis == ConsolidationBasis.ControlledSubsidiary && member.OwnershipPercentage < 1m, cancellationToken))
+            return TransactionResult.Failure("The NCI reporting account is required while a partially owned controlled-subsidiary period is retained.");
+        if (entity is not null && !string.IsNullOrWhiteSpace(nciNumber) && await db.ConsolidationAccountMappings.AnyAsync(mapping => mapping.ConsolidationGroupId == entity.Id && mapping.ReportingAccountNumber == nciNumber, cancellationToken))
+            return TransactionResult.Failure("The NCI reporting account must be dedicated and cannot also be used by a source-account mapping.");
         entity ??= new ConsolidationGroup { Id = Guid.NewGuid(), CompanyId = companyId.Value };
-        entity.Name = request.Name.Trim(); entity.ReportingCurrency = reportingCurrency; entity.CtaAccountNumber = ctaNumber; entity.CtaAccountName = ctaName; entity.IsActive = request.IsActive; entity.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        entity.Name = request.Name.Trim(); entity.ReportingCurrency = reportingCurrency; entity.CtaAccountNumber = ctaNumber; entity.CtaAccountName = ctaName; entity.NciAccountNumber = nciNumber; entity.NciAccountName = nciName; entity.IsActive = request.IsActive; entity.ConcurrencyToken = Guid.NewGuid().ToString("N");
         if (db.Entry(entity).State == EntityState.Detached)
         {
             db.ConsolidationGroups.Add(entity);
-            db.ConsolidationGroupCompanies.AddRange(request.Members.Select(member => new ConsolidationGroupCompany
+            db.ConsolidationGroupCompanies.AddRange(parsedMembers.Select(member => new ConsolidationGroupCompany
             {
-                Id = Guid.NewGuid(), ConsolidationGroupId = entity.Id, MemberCompanyId = member.CompanyId,
-                OwnershipPercentage = member.OwnershipPercentage, EffectiveFrom = member.EffectiveFrom ?? DateOnly.MinValue,
-                EffectiveThrough = member.EffectiveThrough, ConcurrencyToken = Guid.NewGuid().ToString("N")
+                Id = Guid.NewGuid(), ConsolidationGroupId = entity.Id, MemberCompanyId = member.Request.CompanyId,
+                OwnershipPercentage = member.Request.OwnershipPercentage, ConsolidationBasis = member.Basis,
+                BasisRationale = member.Request.BasisRationale?.Trim() ?? string.Empty, BasisReviewedOn = member.Request.BasisReviewedOn,
+                EffectiveFrom = member.Request.EffectiveFrom ?? DateOnly.MinValue,
+                EffectiveThrough = member.Request.EffectiveThrough, ConcurrencyToken = Guid.NewGuid().ToString("N")
             }));
         }
-        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = request.Id is null ? "consolidation-group.created" : "consolidation-group.updated", EntityType = nameof(ConsolidationGroup), EntityId = entity.Id, DetailJson = JsonSerializer.Serialize(new { entity.Name, entity.ReportingCurrency, entity.CtaAccountNumber, entity.CtaAccountName, entity.IsActive, initialOwnershipPeriods = request.Members.Count }), OccurredAtUtc = DateTimeOffset.UtcNow });
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = request.Id is null ? "consolidation-group.created" : "consolidation-group.updated", EntityType = nameof(ConsolidationGroup), EntityId = entity.Id, DetailJson = JsonSerializer.Serialize(new { entity.Name, entity.ReportingCurrency, entity.CtaAccountNumber, entity.CtaAccountName, entity.NciAccountNumber, entity.NciAccountName, entity.IsActive, initialOwnershipPeriods = request.Members.Count }), OccurredAtUtc = DateTimeOffset.UtcNow });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation group changed while it was being saved. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The consolidation group name or ownership schedule conflicts with another retained record."); }
@@ -83,8 +107,9 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
 
     public async Task<TransactionResult> SaveOwnershipPeriodAsync(SaveConsolidationOwnershipPeriodRequest request, CancellationToken cancellationToken = default)
     {
-        if (request.ConsolidationGroupId == Guid.Empty || request.MemberCompanyId == Guid.Empty || request.OwnershipPercentage is <= 0 or > 1 || request.EffectiveThrough < request.EffectiveFrom)
-            return TransactionResult.Failure("Provide a member company, ownership above 0% and no more than 100%, and a valid effective period.");
+        if (request.ConsolidationGroupId == Guid.Empty || request.MemberCompanyId == Guid.Empty || request.OwnershipPercentage is <= 0 or > 1 || request.EffectiveThrough < request.EffectiveFrom
+            || !TryConsolidationBasis(request.ConsolidationBasis, out var basis) || !ValidBasisEvidence(basis, request.BasisRationale, request.BasisReviewedOn))
+            return TransactionResult.Failure("Provide a member company, ownership above 0% and no more than 100%, a valid effective period, and reviewed consolidation-basis evidence.");
         var companyId = CurrentCompanyId(); var userId = CurrentUserId();
         if (companyId is null || userId is null) return TransactionResult.Failure("An active company and user are required.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -97,14 +122,22 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         if (request.Id is not null && period is null) return TransactionResult.Failure("The ownership period was not found in this consolidation group.");
         if (period is not null && (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(period.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))) return TransactionResult.Failure("The ownership period changed after it was displayed. Refresh before saving it.");
         if (period is not null && period.MemberCompanyId != request.MemberCompanyId) return TransactionResult.Failure("An ownership period cannot be moved to another company. Add a separate period for that company.");
+        if (basis == ConsolidationBasis.ReportingParent && (request.MemberCompanyId != companyId || request.OwnershipPercentage != 1m)) return TransactionResult.Failure("The reporting-parent basis is reserved for a 100% period of the active parent company.");
+        if (basis == ConsolidationBasis.ControlledSubsidiary && request.MemberCompanyId == companyId) return TransactionResult.Failure("Classify the active parent company as ReportingParent, not ControlledSubsidiary.");
+        if (basis == ConsolidationBasis.ControlledSubsidiary && request.OwnershipPercentage < 1m && string.IsNullOrWhiteSpace(group.NciAccountNumber)) return TransactionResult.Failure("Configure the group's dedicated NCI equity reporting account before adding a partially owned controlled subsidiary.");
         var requestedEnd = request.EffectiveThrough ?? DateOnly.MaxValue;
         var overlaps = await db.ConsolidationGroupCompanies.AnyAsync(item => item.ConsolidationGroupId == group.Id && item.MemberCompanyId == request.MemberCompanyId && item.Id != request.Id && item.EffectiveFrom <= requestedEnd && (item.EffectiveThrough == null || item.EffectiveThrough >= request.EffectiveFrom), cancellationToken);
         if (overlaps) return TransactionResult.Failure("Ownership periods for the same company cannot overlap.");
+        var proposedSchedule = (await db.ConsolidationGroupCompanies.AsNoTracking().Where(item => item.ConsolidationGroupId == group.Id && item.Id != request.Id).ToListAsync(cancellationToken))
+            .Select(item => new ConsolidationPeriodPolicy(item.MemberCompanyId, item.OwnershipPercentage, item.ConsolidationBasis, item.BasisRationale, item.BasisReviewedOn, item.EffectiveFrom, item.EffectiveThrough)).ToList();
+        proposedSchedule.Add(new(request.MemberCompanyId, request.OwnershipPercentage, basis, request.BasisRationale ?? string.Empty, request.BasisReviewedOn, request.EffectiveFrom, request.EffectiveThrough));
+        if (!ValidClassifiedGroupSchedule(proposedSchedule, companyId.Value, request.EffectiveFrom, request.EffectiveThrough))
+            return TransactionResult.Failure("Every effective classified consolidation schedule requires exactly one 100% reporting-parent period for the active company.");
         period ??= new ConsolidationGroupCompany { Id = Guid.NewGuid(), ConsolidationGroupId = group.Id };
-        period.MemberCompanyId = request.MemberCompanyId; period.OwnershipPercentage = request.OwnershipPercentage; period.EffectiveFrom = request.EffectiveFrom; period.EffectiveThrough = request.EffectiveThrough; period.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        period.MemberCompanyId = request.MemberCompanyId; period.OwnershipPercentage = request.OwnershipPercentage; period.ConsolidationBasis = basis; period.BasisRationale = request.BasisRationale?.Trim() ?? string.Empty; period.BasisReviewedOn = request.BasisReviewedOn; period.EffectiveFrom = request.EffectiveFrom; period.EffectiveThrough = request.EffectiveThrough; period.ConcurrencyToken = Guid.NewGuid().ToString("N");
         if (db.Entry(period).State == EntityState.Detached) db.ConsolidationGroupCompanies.Add(period);
         group.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = request.Id is null ? "consolidation-ownership.created" : "consolidation-ownership.updated", EntityType = nameof(ConsolidationGroupCompany), EntityId = period.Id, DetailJson = JsonSerializer.Serialize(new { group.Id, period.MemberCompanyId, period.OwnershipPercentage, period.EffectiveFrom, period.EffectiveThrough }), OccurredAtUtc = DateTimeOffset.UtcNow });
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = request.Id is null ? "consolidation-ownership.created" : "consolidation-ownership.updated", EntityType = nameof(ConsolidationGroupCompany), EntityId = period.Id, DetailJson = JsonSerializer.Serialize(new { group.Id, period.MemberCompanyId, period.OwnershipPercentage, consolidationBasis = period.ConsolidationBasis.ToString(), period.BasisRationale, period.BasisReviewedOn, period.EffectiveFrom, period.EffectiveThrough }), OccurredAtUtc = DateTimeOffset.UtcNow });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation group or ownership period changed concurrently. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The ownership period conflicts with another retained record."); }
@@ -120,6 +153,8 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var group = await db.ConsolidationGroups.SingleOrDefaultAsync(item => item.Id == request.ConsolidationGroupId && item.CompanyId == companyId, cancellationToken);
         if (group is null) return TransactionResult.Failure("The consolidation group was not found in the active company.");
+        if (reportingNumber == group.CtaAccountNumber || reportingNumber == group.NciAccountNumber)
+            return TransactionResult.Failure("CTA and NCI reporting accounts are system-controlled and cannot be assigned to a source-account mapping.");
         if (!await db.CompanyMemberships.AnyAsync(member => member.UserId == userId && member.CompanyId == companyId && member.IsOwner && member.IsActive, cancellationToken)
             || !await db.CompanyMemberships.AnyAsync(member => member.UserId == userId && member.CompanyId == request.MemberCompanyId && member.IsOwner && member.IsActive, cancellationToken))
             return TransactionResult.Failure("The current user must be an active owner of the consolidation group and member company.");
@@ -165,7 +200,7 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         var companyIds = members.Select(member => member.MemberCompanyId).Distinct().ToArray();
         var companies = await db.Companies.AsNoTracking().Where(company => companyIds.Contains(company.Id)).ToDictionaryAsync(company => company.Id, cancellationToken);
         return groups.Select(group => new ConsolidationGroupSnapshot(group.Id, group.Name, group.ReportingCurrency, group.IsActive, group.ConcurrencyToken,
-            members.Where(member => member.ConsolidationGroupId == group.Id).OrderBy(member => companies[member.MemberCompanyId].Name).ThenBy(member => member.EffectiveFrom).Select(member => new ConsolidationGroupMemberSnapshot(member.Id, member.MemberCompanyId, companies[member.MemberCompanyId].Name, companies[member.MemberCompanyId].BaseCurrency, member.OwnershipPercentage, member.EffectiveFrom, member.EffectiveThrough, member.ConcurrencyToken)).ToArray(), group.CtaAccountNumber, group.CtaAccountName)).ToArray();
+            members.Where(member => member.ConsolidationGroupId == group.Id).OrderBy(member => companies[member.MemberCompanyId].Name).ThenBy(member => member.EffectiveFrom).Select(member => new ConsolidationGroupMemberSnapshot(member.Id, member.MemberCompanyId, companies[member.MemberCompanyId].Name, companies[member.MemberCompanyId].BaseCurrency, member.OwnershipPercentage, member.EffectiveFrom, member.EffectiveThrough, member.ConcurrencyToken, member.ConsolidationBasis.ToString(), member.BasisRationale, member.BasisReviewedOn)).ToArray(), group.CtaAccountNumber, group.CtaAccountName, group.NciAccountNumber, group.NciAccountName)).ToArray();
     }
 
     public async Task<ConsolidationAccountMappingWorkspace?> GetAccountMappingWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default)
@@ -199,8 +234,12 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
             return TransactionResult.Failure("Provide a concise reference, at least two lines, and an optional concise description and match reference.");
         if (kind == ConsolidationAdjustmentKind.IntercompanyElimination && string.IsNullOrWhiteSpace(matchReference))
             return TransactionResult.Failure("An intercompany elimination requires a match reference.");
-        if (kind == ConsolidationAdjustmentKind.ManualAdjustment && !string.IsNullOrWhiteSpace(matchReference))
-            return TransactionResult.Failure("A manual consolidation adjustment must not carry an intercompany match reference.");
+        if (kind != ConsolidationAdjustmentKind.IntercompanyElimination && !string.IsNullOrWhiteSpace(matchReference))
+            return TransactionResult.Failure("Only an intercompany elimination can carry an intercompany match reference.");
+        if (kind == ConsolidationAdjustmentKind.NoncontrollingInterest && !request.SubjectCompanyId.HasValue)
+            return TransactionResult.Failure("A noncontrolling-interest reclassification requires its controlled subsidiary.");
+        if (kind != ConsolidationAdjustmentKind.NoncontrollingInterest && request.SubjectCompanyId.HasValue)
+            return TransactionResult.Failure("A subject company is reserved for noncontrolling-interest reclassification.");
         var parsedLines = new List<(ConsolidationAdjustmentLineRequest Request, AccountType Type)>();
         foreach (var line in request.Lines)
         {
@@ -224,14 +263,24 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         if (group is null) return TransactionResult.Failure("The active consolidation group was not found in the active company.");
         var membershipError = await ValidateGroupAccessAsync(db, group.Id, userId.Value, request.AsOf, cancellationToken);
         if (membershipError is not null) return TransactionResult.Failure(membershipError);
-        var memberCompanyIds = await EffectiveMemberCompanyIdsAsync(db, group.Id, request.AsOf, cancellationToken);
+        var effectiveMembers = await db.ConsolidationGroupCompanies.AsNoTracking().Where(item => item.ConsolidationGroupId == group.Id && item.EffectiveFrom <= request.AsOf && (item.EffectiveThrough == null || item.EffectiveThrough >= request.AsOf)).ToListAsync(cancellationToken);
+        var memberCompanyIds = effectiveMembers.Select(item => item.MemberCompanyId).ToHashSet();
         var reportingAccounts = await EffectiveReportingAccountsAsync(db, group.Id, request.AsOf, cancellationToken);
+        if (kind == ConsolidationAdjustmentKind.NoncontrollingInterest)
+        {
+            var subject = effectiveMembers.SingleOrDefault(item => item.MemberCompanyId == request.SubjectCompanyId);
+            if (subject is null || subject.ConsolidationBasis != ConsolidationBasis.ControlledSubsidiary || subject.OwnershipPercentage >= 1m)
+                return TransactionResult.Failure("The NCI subject must be a partially owned controlled subsidiary effective on the report date.");
+            if (string.IsNullOrWhiteSpace(group.NciAccountNumber) || string.IsNullOrWhiteSpace(group.NciAccountName))
+                return TransactionResult.Failure("Configure the group's dedicated NCI equity reporting account before preparing an NCI reclassification.");
+        }
         foreach (var (line, type) in parsedLines)
         {
             var number = line.ReportingAccountNumber.Trim(); var name = line.ReportingAccountName.Trim();
             if (number == group.CtaAccountNumber)
                 return TransactionResult.Failure("The configured CTA account is system-controlled and cannot be used in a manual adjustment or elimination.");
-            if (!reportingAccounts.Contains((number, name, type)))
+            var isNciAccount = kind == ConsolidationAdjustmentKind.NoncontrollingInterest && number == group.NciAccountNumber && name == group.NciAccountName && type == AccountType.Equity;
+            if (!isNciAccount && !reportingAccounts.Contains((number, name, type)))
                 return TransactionResult.Failure($"Reporting account {number} · {name} is not established by an effective consolidation mapping for {request.AsOf:yyyy-MM-dd}.");
             if (kind == ConsolidationAdjustmentKind.IntercompanyElimination)
             {
@@ -239,20 +288,29 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
                     || !memberCompanyIds.Contains(line.SourceCompanyId.Value) || !memberCompanyIds.Contains(line.CounterpartyCompanyId.Value))
                     return TransactionResult.Failure("Every elimination line requires two different companies that are members of the consolidation group on the report date.");
             }
+            else if (kind == ConsolidationAdjustmentKind.NoncontrollingInterest)
+            {
+                if (type != AccountType.Equity || line.SourceCompanyId != request.SubjectCompanyId || line.CounterpartyCompanyId.HasValue)
+                    return TransactionResult.Failure("Every NCI reclassification line must use an equity account, retain the exact controlled subsidiary as its subject, and omit counterparty provenance.");
+            }
             else if (line.SourceCompanyId.HasValue || line.CounterpartyCompanyId.HasValue)
                 return TransactionResult.Failure("Company-pair provenance is reserved for intercompany elimination lines.");
         }
+        if (kind == ConsolidationAdjustmentKind.NoncontrollingInterest && parsedLines.Count(line => line.Request.ReportingAccountNumber.Trim() == group.NciAccountNumber && line.Request.ReportingAccountName.Trim() == group.NciAccountName && line.Type == AccountType.Equity) != 1)
+            return TransactionResult.Failure("An NCI reclassification requires exactly one line to the group's dedicated NCI equity account.");
 
         var entity = request.Id is { } id ? await db.ConsolidationAdjustmentBatches.SingleOrDefaultAsync(item => item.Id == id && item.CompanyId == companyId && item.ConsolidationGroupId == group.Id, cancellationToken) : null;
         if (request.Id is not null && entity is null) return TransactionResult.Failure("The consolidation adjustment was not found in this group.");
         if (entity is not null && entity.Status is not ("Draft" or "Rejected")) return TransactionResult.Failure("Only a draft or rejected consolidation adjustment can be edited.");
         if (entity is not null && (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(entity.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)))
             return TransactionResult.Failure("The consolidation adjustment changed after it was displayed. Refresh before saving it.");
-        if (entity is not null && (entity.ConsolidationGroupId != request.ConsolidationGroupId || entity.PeriodStart != request.PeriodStart || entity.AsOf != request.AsOf || entity.Kind != kind))
+        if (entity is not null && (entity.ConsolidationGroupId != request.ConsolidationGroupId || entity.PeriodStart != request.PeriodStart || entity.AsOf != request.AsOf || entity.Kind != kind || entity.SubjectCompanyId != request.SubjectCompanyId))
             return TransactionResult.Failure("A retained adjustment cannot be moved to another group, period, or kind. Create a separate adjustment instead.");
-        entity ??= new ConsolidationAdjustmentBatch { Id = Guid.NewGuid(), CompanyId = companyId.Value, ConsolidationGroupId = group.Id, PeriodStart = request.PeriodStart, AsOf = request.AsOf, Kind = kind };
+        entity ??= new ConsolidationAdjustmentBatch { Id = Guid.NewGuid(), CompanyId = companyId.Value, ConsolidationGroupId = group.Id, PeriodStart = request.PeriodStart, AsOf = request.AsOf, Kind = kind, SubjectCompanyId = request.SubjectCompanyId };
         var matchError = await ControlIntercompanyMatchAsync(db, entity, kind, matchReference, parsedLines.Select(item => item.Request).ToArray(), userId.Value, cancellationToken);
         if (matchError is not null) return TransactionResult.Failure(matchError);
+        entity.SubjectCompanyId = request.SubjectCompanyId;
+        entity.ControlKey = kind == ConsolidationAdjustmentKind.NoncontrollingInterest ? BuildNciControlKey(group.Id, request.PeriodStart, request.AsOf, request.SubjectCompanyId!.Value) : null;
         entity.Reference = reference; entity.Description = description; entity.MatchReference = matchReference; entity.Status = "Draft";
         entity.PreparedByUserId = userId; entity.PreparedAtUtc = DateTimeOffset.UtcNow; entity.ApprovedByUserId = null; entity.ApprovedAtUtc = null; entity.RejectedByUserId = null; entity.RejectedAtUtc = null; entity.DecisionReason = string.Empty; entity.ConcurrencyToken = Guid.NewGuid().ToString("N");
         if (db.Entry(entity).State == EntityState.Detached) db.ConsolidationAdjustmentBatches.Add(entity);
@@ -264,9 +322,10 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
             Debit = line.Request.Debit, Credit = line.Request.Credit, Description = line.Request.Description?.Trim() ?? string.Empty,
             SourceCompanyId = line.Request.SourceCompanyId, CounterpartyCompanyId = line.Request.CounterpartyCompanyId
         }));
-        AddAdjustmentAudit(db, companyId.Value, userId, request.Id is null ? "consolidation-adjustment.prepared" : "consolidation-adjustment.updated", entity, new { entity.Kind, entity.PeriodStart, entity.AsOf, entity.Reference, entity.MatchReference, lineCount = parsedLines.Count });
+        AddAdjustmentAudit(db, companyId.Value, userId, request.Id is null ? "consolidation-adjustment.prepared" : "consolidation-adjustment.updated", entity, new { entity.Kind, entity.PeriodStart, entity.AsOf, entity.Reference, entity.MatchReference, entity.SubjectCompanyId, entity.ControlKey, lineCount = parsedLines.Count });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation adjustment changed concurrently. Refresh and try again."); }
+        catch (DbUpdateException) when (kind == ConsolidationAdjustmentKind.NoncontrollingInterest) { return TransactionResult.Failure("An NCI reclassification for this controlled subsidiary and exact reporting period is already retained."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The adjustment reference conflicts with another retained adjustment for this consolidation period."); }
         return TransactionResult.Success(entity.Id);
     }
@@ -342,7 +401,7 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         var reversal = new ConsolidationAdjustmentBatch
         {
             Id = reversalId, CompanyId = original.CompanyId, ConsolidationGroupId = original.ConsolidationGroupId, PeriodStart = original.PeriodStart, AsOf = original.AsOf, Kind = original.Kind,
-            Reference = reversalReference, Description = Truncate($"Reversal of {original.Reference}: {request.Reason.Trim()}", 1000), MatchReference = original.MatchReference, Status = "Posted",
+            Reference = reversalReference, Description = Truncate($"Reversal of {original.Reference}: {request.Reason.Trim()}", 1000), MatchReference = original.MatchReference, SubjectCompanyId = original.SubjectCompanyId, Status = "Posted",
             PreparedByUserId = userId, PreparedAtUtc = now, ApprovedByUserId = userId, ApprovedAtUtc = now, PostedByUserId = userId, PostedAtUtc = now,
             ReversalOfBatchId = original.Id, ReversalReason = request.Reason.Trim(), ConcurrencyToken = Guid.NewGuid().ToString("N")
         };
@@ -353,8 +412,9 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
             ReportingAccountName = line.ReportingAccountName, ReportingAccountType = line.ReportingAccountType, Debit = line.Credit, Credit = line.Debit,
             Description = Truncate($"Reversal: {line.Description}", 1000), SourceCompanyId = line.SourceCompanyId, CounterpartyCompanyId = line.CounterpartyCompanyId
         }));
-        original.Status = "Reversed"; original.ReversedByBatchId = reversal.Id; original.ReversalReason = request.Reason.Trim(); original.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        AddAdjustmentAudit(db, companyId.Value, userId, "consolidation-adjustment.reversed", original, new { reversalId, reason = request.Reason.Trim() });
+        var releasedControlKey = original.ControlKey;
+        original.Status = "Reversed"; original.ReversedByBatchId = reversal.Id; original.ReversalReason = request.Reason.Trim(); original.ControlKey = null; original.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddAdjustmentAudit(db, companyId.Value, userId, "consolidation-adjustment.reversed", original, new { reversalId, releasedControlKey, reason = request.Reason.Trim() });
         try { await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation adjustment changed concurrently. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The consolidation adjustment was already reversed or conflicts with another retained reversal."); }
@@ -375,16 +435,25 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         var batchIds = batches.Select(item => item.Id).ToArray(); var lines = await db.ConsolidationAdjustmentLines.AsNoTracking().Where(item => batchIds.Contains(item.ConsolidationAdjustmentBatchId)).OrderBy(item => item.Sequence).ToListAsync(cancellationToken);
         var userIds = batches.SelectMany(item => new[] { item.PreparedByUserId, item.ApprovedByUserId, item.RejectedByUserId, item.PostedByUserId }).Where(item => item.HasValue).Select(item => item!.Value).Distinct().ToArray();
         var users = await db.Users.AsNoTracking().Where(item => userIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => string.IsNullOrWhiteSpace(item.DisplayName) ? item.UserName : item.DisplayName, cancellationToken);
-        var reportingAccounts = await db.ConsolidationAccountMappings.AsNoTracking().Where(item => item.ConsolidationGroupId == group.Id).Select(item => new { item.ReportingAccountNumber, item.ReportingAccountName, item.ReportingAccountType }).Distinct().OrderBy(item => item.ReportingAccountNumber).ToListAsync(cancellationToken);
+        var mappedReportingAccounts = await db.ConsolidationAccountMappings.AsNoTracking()
+            .Where(item => item.ConsolidationGroupId == group.Id)
+            .Select(item => new { item.ReportingAccountNumber, item.ReportingAccountName, item.ReportingAccountType })
+            .ToListAsync(cancellationToken);
+        var reportingAccounts = mappedReportingAccounts
+            .Select(item => new ConsolidationReportingAccountSnapshot(item.ReportingAccountNumber, item.ReportingAccountName, item.ReportingAccountType.ToString()))
+            .Distinct()
+            .OrderBy(item => item.AccountNumber)
+            .ToList();
+        if (!string.IsNullOrWhiteSpace(group.NciAccountNumber) && !reportingAccounts.Any(item => item.AccountNumber == group.NciAccountNumber)) reportingAccounts.Add(new(group.NciAccountNumber, group.NciAccountName, nameof(AccountType.Equity)));
         return new ConsolidationAdjustmentWorkspace(group.Id, group.Name, group.ReportingCurrency,
-            reportingAccounts.Select(item => new ConsolidationReportingAccountSnapshot(item.ReportingAccountNumber, item.ReportingAccountName, item.ReportingAccountType.ToString())).ToArray(),
-            members.OrderBy(item => companies[item.MemberCompanyId].Name).ThenBy(item => item.EffectiveFrom).Select(item => new ConsolidationGroupMemberSnapshot(item.Id, item.MemberCompanyId, companies[item.MemberCompanyId].Name, companies[item.MemberCompanyId].BaseCurrency, item.OwnershipPercentage, item.EffectiveFrom, item.EffectiveThrough, item.ConcurrencyToken)).ToArray(),
+            reportingAccounts.OrderBy(item => item.AccountNumber).ToArray(),
+            members.OrderBy(item => companies[item.MemberCompanyId].Name).ThenBy(item => item.EffectiveFrom).Select(item => new ConsolidationGroupMemberSnapshot(item.Id, item.MemberCompanyId, companies[item.MemberCompanyId].Name, companies[item.MemberCompanyId].BaseCurrency, item.OwnershipPercentage, item.EffectiveFrom, item.EffectiveThrough, item.ConcurrencyToken, item.ConsolidationBasis.ToString(), item.BasisRationale, item.BasisReviewedOn)).ToArray(),
             batches.Select(batch => new ConsolidationAdjustmentSnapshot(batch.Id, batch.PeriodStart, batch.AsOf, batch.Kind.ToString(), batch.Reference, batch.Description, batch.MatchReference, batch.Status,
                 batch.PreparedByUserId.HasValue ? users.GetValueOrDefault(batch.PreparedByUserId.Value, "Unavailable user") : "Unavailable user", batch.PreparedAtUtc,
                 batch.ApprovedByUserId.HasValue ? users.GetValueOrDefault(batch.ApprovedByUserId.Value, "Unavailable user") : null, batch.ApprovedAtUtc,
                 batch.RejectedByUserId.HasValue ? users.GetValueOrDefault(batch.RejectedByUserId.Value, "Unavailable user") : null, batch.RejectedAtUtc,
                 batch.PostedByUserId.HasValue ? users.GetValueOrDefault(batch.PostedByUserId.Value, "Unavailable user") : null, batch.PostedAtUtc, batch.DecisionReason, batch.ReversalOfBatchId, batch.ReversedByBatchId, batch.ReversalReason, batch.ConcurrencyToken,
-                lines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id).Select(line => new ConsolidationAdjustmentLineSnapshot(line.Id, line.Sequence, line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType.ToString(), line.Debit, line.Credit, line.Description, line.SourceCompanyId, line.SourceCompanyId.HasValue ? companies.GetValueOrDefault(line.SourceCompanyId.Value)?.Name : null, line.CounterpartyCompanyId, line.CounterpartyCompanyId.HasValue ? companies.GetValueOrDefault(line.CounterpartyCompanyId.Value)?.Name : null)).ToArray())).ToArray());
+                lines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id).Select(line => new ConsolidationAdjustmentLineSnapshot(line.Id, line.Sequence, line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType.ToString(), line.Debit, line.Credit, line.Description, line.SourceCompanyId, line.SourceCompanyId.HasValue ? companies.GetValueOrDefault(line.SourceCompanyId.Value)?.Name : null, line.CounterpartyCompanyId, line.CounterpartyCompanyId.HasValue ? companies.GetValueOrDefault(line.CounterpartyCompanyId.Value)?.Name : null)).ToArray(), batch.SubjectCompanyId, batch.SubjectCompanyId.HasValue ? companies.GetValueOrDefault(batch.SubjectCompanyId.Value)?.Name : null)).ToArray());
     }
 
     public async Task<ConsolidatedBalanceReport?> GetBalanceReportAsync(Guid groupId, DateOnly asOf, CancellationToken cancellationToken = default)
@@ -408,9 +477,26 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         var rates = await db.CurrencyExchangeRates.AsNoTracking().Where(rate => rate.CompanyId == companyId && rate.IsActive && (rate.EffectiveOn <= asOf || (rate.RateType == CurrencyRateType.Average && rate.PeriodStartOn <= asOf))).OrderByDescending(rate => rate.EffectiveOn).ToListAsync(cancellationToken);
         var mappings = await db.ConsolidationAccountMappings.AsNoTracking().Where(mapping => mapping.ConsolidationGroupId == group.Id && mapping.EffectiveFrom <= asOf && (mapping.EffectiveThrough == null || mapping.EffectiveThrough >= asOf)).ToListAsync(cancellationToken);
         var warnings = new List<string>(); var totals = new Dictionary<(string Number, string Name, string Type, string Method), decimal>(); var complete = true;
+        var effectiveSchedule = members.Select(member => new ConsolidationPeriodPolicy(member.MemberCompanyId, member.OwnershipPercentage, member.ConsolidationBasis, member.BasisRationale, member.BasisReviewedOn, member.EffectiveFrom, member.EffectiveThrough)).ToArray();
+        if (!ValidClassifiedGroupSchedule(effectiveSchedule, group.CompanyId, asOf, asOf))
+        {
+            complete = false;
+            warnings.Add("The effective classified schedule does not contain exactly one 100% reporting parent. Correct the retained basis periods before relying on this report.");
+        }
         foreach (var member in members)
         {
             var company = companies[member.MemberCompanyId];
+            var inclusionFactor = member.ConsolidationBasis == ConsolidationBasis.ProportionateInterest ? member.OwnershipPercentage : 1m;
+            if (member.ConsolidationBasis == ConsolidationBasis.ReportingParent && (member.MemberCompanyId != group.CompanyId || member.OwnershipPercentage != 1m))
+            {
+                complete = false;
+                warnings.Add($"{company.Name} has an invalid reporting-parent classification; it must be the 100% active parent company.");
+            }
+            if (member.ConsolidationBasis == ConsolidationBasis.ProportionateInterest && string.IsNullOrWhiteSpace(member.BasisRationale) && !member.BasisReviewedOn.HasValue)
+            {
+                complete = false;
+                warnings.Add($"{company.Name} retains the legacy proportionate-interest basis without reviewed evidence. Classify the relationship before relying on this report.");
+            }
             decimal sourceSignedBalance = 0m;
             var postedLines = await (from line in db.JournalEntryLines.AsNoTracking()
                                      join journal in db.JournalEntries.AsNoTracking() on line.JournalEntryId equals journal.Id
@@ -452,7 +538,7 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
                 if (applicableLines.Length == 0) continue;
                 var applicableNaturalBalance = applicableLines.Sum(line => NaturalAmount(account.Type, line.Debit, line.Credit));
                 if (applicableNaturalBalance == 0m) continue;
-                sourceSignedBalance += (account.Type is AccountType.Asset or AccountType.Expense ? applicableNaturalBalance : -applicableNaturalBalance) * member.OwnershipPercentage;
+                sourceSignedBalance += (account.Type is AccountType.Asset or AccountType.Expense ? applicableNaturalBalance : -applicableNaturalBalance) * inclusionFactor;
                 decimal translated = 0m; string? rateError = null;
                 if (accountMapping.TranslationMethod == ConsolidationTranslationMethod.Closing)
                 {
@@ -477,7 +563,7 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
                     continue;
                 }
                 var key = (accountMapping.ReportingAccountNumber, accountMapping.ReportingAccountName, accountMapping.ReportingAccountType.ToString(), accountMapping.TranslationMethod.ToString());
-                totals[key] = totals.GetValueOrDefault(key) + decimal.Round(translated * member.OwnershipPercentage, 2, MidpointRounding.AwayFromZero);
+                totals[key] = totals.GetValueOrDefault(key) + decimal.Round(translated * inclusionFactor, 2, MidpointRounding.AwayFromZero);
             }
             if (decimal.Round(sourceSignedBalance, 2, MidpointRounding.AwayFromZero) != 0m)
             {
@@ -488,13 +574,26 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
         var adjustmentBatches = await db.ConsolidationAdjustmentBatches.AsNoTracking().Where(batch => batch.CompanyId == companyId && batch.ConsolidationGroupId == group.Id && batch.PeriodStart == periodStart && batch.AsOf == asOf && (batch.Status == "Posted" || batch.Status == "Reversed")).ToListAsync(cancellationToken);
         var adjustmentIds = adjustmentBatches.Select(batch => batch.Id).ToArray();
         var adjustmentLines = await db.ConsolidationAdjustmentLines.AsNoTracking().Where(line => adjustmentIds.Contains(line.ConsolidationAdjustmentBatchId)).ToListAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(group.NciAccountNumber) && mappings.Any(mapping => mapping.ReportingAccountNumber == group.NciAccountNumber))
+        {
+            complete = false;
+            warnings.Add($"NCI account {group.NciAccountNumber} is also used by a source-account mapping. Configure a dedicated equity reporting account.");
+        }
+        foreach (var member in members.Where(item => item.ConsolidationBasis == ConsolidationBasis.ControlledSubsidiary && item.OwnershipPercentage < 1m))
+        {
+            if (!adjustmentBatches.Any(batch => batch.Kind == ConsolidationAdjustmentKind.NoncontrollingInterest && batch.SubjectCompanyId == member.MemberCompanyId && batch.Status == "Posted" && !batch.ReversalOfBatchId.HasValue))
+            {
+                complete = false;
+                warnings.Add($"{companies[member.MemberCompanyId].Name} is fully consolidated with {(1m - member.OwnershipPercentage):P2} noncontrolling ownership, but no posted NCI reclassification exists for this exact reporting period.");
+            }
+        }
         foreach (var batch in adjustmentBatches)
         {
-            var retainedError = ValidateReportAdjustment(batch, adjustmentLines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id).ToArray(), mappings, members.Select(member => member.MemberCompanyId).ToHashSet(), group.CtaAccountNumber);
+            var retainedError = ValidateReportAdjustment(batch, adjustmentLines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id).ToArray(), mappings, members, group.CtaAccountNumber, group.NciAccountNumber, group.NciAccountName);
             if (retainedError is not null) { complete = false; warnings.Add($"Consolidation adjustment {batch.Reference} was excluded: {retainedError}"); continue; }
             foreach (var line in adjustmentLines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id))
             {
-                var key = (line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType.ToString(), "Adjustment");
+                var key = (line.ReportingAccountNumber, line.ReportingAccountName, line.ReportingAccountType.ToString(), batch.Kind == ConsolidationAdjustmentKind.NoncontrollingInterest ? "NCI" : "Adjustment");
                 totals[key] = totals.GetValueOrDefault(key) + NaturalAmount(line.ReportingAccountType, line.Debit, line.Credit);
             }
         }
@@ -531,22 +630,38 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
     {
         var lines = await db.ConsolidationAdjustmentLines.Where(line => line.ConsolidationAdjustmentBatchId == batch.Id).ToListAsync(cancellationToken);
         var mappings = await db.ConsolidationAccountMappings.AsNoTracking().Where(mapping => mapping.ConsolidationGroupId == batch.ConsolidationGroupId && mapping.EffectiveFrom <= batch.AsOf && (mapping.EffectiveThrough == null || mapping.EffectiveThrough >= batch.AsOf)).ToListAsync(cancellationToken);
-        var members = await EffectiveMemberCompanyIdsAsync(db, batch.ConsolidationGroupId, batch.AsOf, cancellationToken);
-        var cta = await db.ConsolidationGroups.Where(group => group.Id == batch.ConsolidationGroupId).Select(group => group.CtaAccountNumber).SingleAsync(cancellationToken);
-        return ValidateReportAdjustment(batch, lines, mappings, members, cta);
+        var members = await db.ConsolidationGroupCompanies.AsNoTracking().Where(member => member.ConsolidationGroupId == batch.ConsolidationGroupId && member.EffectiveFrom <= batch.AsOf && (member.EffectiveThrough == null || member.EffectiveThrough >= batch.AsOf)).ToListAsync(cancellationToken);
+        var group = await db.ConsolidationGroups.AsNoTracking().SingleAsync(group => group.Id == batch.ConsolidationGroupId, cancellationToken);
+        return ValidateReportAdjustment(batch, lines, mappings, members, group.CtaAccountNumber, group.NciAccountNumber, group.NciAccountName);
     }
 
-    private static string? ValidateReportAdjustment(ConsolidationAdjustmentBatch batch, IReadOnlyList<ConsolidationAdjustmentLine> lines, IReadOnlyList<ConsolidationAccountMapping> mappings, IReadOnlySet<Guid> memberCompanyIds, string ctaAccountNumber)
+    private static string? ValidateReportAdjustment(ConsolidationAdjustmentBatch batch, IReadOnlyList<ConsolidationAdjustmentLine> lines, IReadOnlyList<ConsolidationAccountMapping> mappings, IReadOnlyList<ConsolidationGroupCompany> members, string ctaAccountNumber, string nciAccountNumber, string nciAccountName)
     {
         if (batch.PeriodStart > batch.AsOf || lines.Count < 2 || lines.Sum(line => line.Debit) != lines.Sum(line => line.Credit)) return "its retained lines are not a balanced adjustment for a valid period.";
+        var memberCompanyIds = members.Select(member => member.MemberCompanyId).ToHashSet();
+        if (batch.Kind == ConsolidationAdjustmentKind.NoncontrollingInterest)
+        {
+            var subject = members.SingleOrDefault(member => member.MemberCompanyId == batch.SubjectCompanyId);
+            if (subject is null || subject.ConsolidationBasis != ConsolidationBasis.ControlledSubsidiary || subject.OwnershipPercentage >= 1m) return "its NCI subject is not a partially owned controlled subsidiary effective on the report date.";
+            var expectedControlKey = BuildNciControlKey(batch.ConsolidationGroupId, batch.PeriodStart, batch.AsOf, subject.MemberCompanyId);
+            var activeOriginal = !batch.ReversalOfBatchId.HasValue && !batch.ReversedByBatchId.HasValue;
+            if ((activeOriginal && batch.ControlKey != expectedControlKey) || (!activeOriginal && batch.ControlKey is not null)) return "its retained NCI control identity is invalid.";
+            if (string.IsNullOrWhiteSpace(nciAccountNumber) || lines.Count(line => line.ReportingAccountNumber == nciAccountNumber && line.ReportingAccountName == nciAccountName && line.ReportingAccountType == AccountType.Equity) != 1) return "it does not contain exactly one line to the configured NCI equity account.";
+        }
+        else if (batch.SubjectCompanyId.HasValue || batch.ControlKey is not null) return "a non-NCI adjustment contains NCI-only control provenance.";
         foreach (var line in lines)
         {
             if (line.Debit < 0m || line.Credit < 0m || (line.Debit == 0m) == (line.Credit == 0m)) return "a retained line does not contain exactly one positive debit or credit.";
             if (line.ReportingAccountNumber == ctaAccountNumber) return "it targets the system-controlled CTA account.";
-            if (!mappings.Any(mapping => mapping.ReportingAccountNumber == line.ReportingAccountNumber && mapping.ReportingAccountName == line.ReportingAccountName && mapping.ReportingAccountType == line.ReportingAccountType)) return $"reporting account {line.ReportingAccountNumber} is no longer supported by an effective mapping.";
+            var isNciAccount = batch.Kind == ConsolidationAdjustmentKind.NoncontrollingInterest && line.ReportingAccountNumber == nciAccountNumber && line.ReportingAccountName == nciAccountName && line.ReportingAccountType == AccountType.Equity;
+            if (!isNciAccount && !mappings.Any(mapping => mapping.ReportingAccountNumber == line.ReportingAccountNumber && mapping.ReportingAccountName == line.ReportingAccountName && mapping.ReportingAccountType == line.ReportingAccountType)) return $"reporting account {line.ReportingAccountNumber} is no longer supported by an effective mapping.";
             if (batch.Kind == ConsolidationAdjustmentKind.IntercompanyElimination)
             {
                 if (string.IsNullOrWhiteSpace(batch.MatchReference) || !line.SourceCompanyId.HasValue || !line.CounterpartyCompanyId.HasValue || line.SourceCompanyId == line.CounterpartyCompanyId || !memberCompanyIds.Contains(line.SourceCompanyId.Value) || !memberCompanyIds.Contains(line.CounterpartyCompanyId.Value)) return "its intercompany provenance is incomplete or outside the effective membership set.";
+            }
+            else if (batch.Kind == ConsolidationAdjustmentKind.NoncontrollingInterest)
+            {
+                if (!string.IsNullOrWhiteSpace(batch.MatchReference) || line.ReportingAccountType != AccountType.Equity || line.SourceCompanyId != batch.SubjectCompanyId || line.CounterpartyCompanyId.HasValue) return "its NCI line account type or subsidiary provenance is invalid.";
             }
             else if (!string.IsNullOrWhiteSpace(batch.MatchReference) || line.SourceCompanyId.HasValue || line.CounterpartyCompanyId.HasValue) return "a manual adjustment contains intercompany-only provenance.";
         }
@@ -570,6 +685,7 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
     private static void AddAdjustmentAudit(BrassLedgerDbContext db, Guid companyId, Guid? userId, string action, ConsolidationAdjustmentBatch batch, object details) =>
         db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = userId, Action = action, EntityType = nameof(ConsolidationAdjustmentBatch), EntityId = batch.Id, DetailJson = JsonSerializer.Serialize(details), OccurredAtUtc = DateTimeOffset.UtcNow });
 
+    private static string BuildNciControlKey(Guid groupId, DateOnly periodStart, DateOnly asOf, Guid subjectCompanyId) => $"NCI:{groupId:N}:{periodStart:yyyyMMdd}:{asOf:yyyyMMdd}:{subjectCompanyId:N}";
     private static string Truncate(string value, int maximumLength) => value.Length <= maximumLength ? value : value[..maximumLength];
 
     private static RateResolution ResolveRate(string from, string to, CurrencyRateType type, DateOnly on, IReadOnlyList<CurrencyExchangeRate> rates)
@@ -593,6 +709,33 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
     private static bool IsDebitNormal(string accountType) => accountType is nameof(AccountType.Asset) or nameof(AccountType.Expense);
     private sealed record RateResolution(decimal? Factor, string? Error);
     private static string? NormalizeCurrency(string value) => !string.IsNullOrWhiteSpace(value) && value.Trim().ToUpperInvariant() is { Length: 3 } currency && currency.All(character => character is >= 'A' and <= 'Z') ? currency : null;
+    private static bool TryConsolidationBasis(string value, out ConsolidationBasis basis) => Enum.TryParse(value, true, out basis) && Enum.IsDefined(basis);
+    private static bool ValidBasisEvidence(ConsolidationBasis basis, string? rationale, DateOnly? reviewedOn)
+    {
+        var normalized = rationale?.Trim() ?? string.Empty;
+        if (basis == ConsolidationBasis.ReportingParent) return normalized.Length <= 1000 && (!reviewedOn.HasValue || reviewedOn <= DateOnly.FromDateTime(DateTime.UtcNow));
+        if (basis == ConsolidationBasis.ProportionateInterest && normalized.Length == 0 && !reviewedOn.HasValue) return true; // Legacy rows remain explicitly proportionate until reviewed.
+        return normalized is { Length: > 0 and <= 1000 } && reviewedOn.HasValue && reviewedOn <= DateOnly.FromDateTime(DateTime.UtcNow);
+    }
+    private static bool ValidClassifiedGroupSchedule(IReadOnlyCollection<ConsolidationPeriodPolicy> periods, Guid parentCompanyId, DateOnly? coverageFrom = null, DateOnly? coverageThrough = null)
+    {
+        static bool IsClassified(ConsolidationPeriodPolicy period) => period.Basis != ConsolidationBasis.ProportionateInterest || !string.IsNullOrWhiteSpace(period.Rationale) || period.ReviewedOn.HasValue;
+        if (!periods.Any(IsClassified)) return true;
+        var boundaries = periods.Select(period => period.EffectiveFrom)
+            .Concat(periods.Where(period => period.EffectiveThrough.HasValue && period.EffectiveThrough.Value < DateOnly.MaxValue).Select(period => period.EffectiveThrough!.Value.AddDays(1)))
+            .Concat(coverageFrom.HasValue ? [coverageFrom.Value] : [])
+            .Where(value => (!coverageFrom.HasValue || value >= coverageFrom.Value) && (!coverageThrough.HasValue || value <= coverageThrough.Value))
+            .Distinct().OrderBy(value => value);
+        foreach (var boundary in boundaries)
+        {
+            var effective = periods.Where(period => period.EffectiveFrom <= boundary && (!period.EffectiveThrough.HasValue || period.EffectiveThrough.Value >= boundary)).ToArray();
+            if (!effective.Any(IsClassified)) continue;
+            var parents = effective.Where(period => period.Basis == ConsolidationBasis.ReportingParent).ToArray();
+            if (parents.Length != 1 || parents[0].CompanyId != parentCompanyId || parents[0].OwnershipPercentage != 1m) return false;
+        }
+        return true;
+    }
+    private sealed record ConsolidationPeriodPolicy(Guid CompanyId, decimal OwnershipPercentage, ConsolidationBasis Basis, string Rationale, DateOnly? ReviewedOn, DateOnly EffectiveFrom, DateOnly? EffectiveThrough);
     private static bool ValidOwnershipPeriods(IReadOnlyList<ConsolidationMemberRequest> members) =>
         members.All(member => member.CompanyId != Guid.Empty && member.OwnershipPercentage is > 0 and <= 1 && (!member.EffectiveThrough.HasValue || member.EffectiveThrough.Value >= (member.EffectiveFrom ?? DateOnly.MinValue)))
         && members.GroupBy(member => member.CompanyId).All(group =>

@@ -184,19 +184,19 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
             INSERT OR IGNORE INTO "CompanyMemberships" ("Id", "UserId", "CompanyId", "Role", "IsOwner", "IsActive", "GrantedAtUtc")
             SELECT '71000000-0000-0000-0000-000000000013', "Id", '71000000-0000-0000-0000-000000000010', 'Controller', 0, 1, $grantedAtUtc
             FROM "Users" WHERE "UserName" = 'e2e-consolidation-poster';
-            INSERT OR IGNORE INTO "ConsolidationGroups" ("Id", "CompanyId", "Name", "ReportingCurrency", "CtaAccountNumber", "CtaAccountName", "IsActive", "ConcurrencyToken")
-            SELECT '71000000-0000-0000-0000-000000000001', "Id", 'E2E controlled consolidation', 'USD', '39999', 'Cumulative translation adjustment', 1, 'e2e-group-token'
+            INSERT OR IGNORE INTO "ConsolidationGroups" ("Id", "CompanyId", "Name", "ReportingCurrency", "CtaAccountNumber", "CtaAccountName", "NciAccountNumber", "NciAccountName", "IsActive", "ConcurrencyToken")
+            SELECT '71000000-0000-0000-0000-000000000001', "Id", 'E2E controlled consolidation', 'USD', '39999', 'Cumulative translation adjustment', '39998', 'Noncontrolling interests', 1, 'e2e-group-token'
             FROM "Companies" WHERE "Name" = 'Brass Ledger Manufacturing';
-            INSERT OR IGNORE INTO "ConsolidationGroupCompanies" ("Id", "ConsolidationGroupId", "MemberCompanyId", "OwnershipPercentage", "EffectiveFrom", "EffectiveThrough", "ConcurrencyToken")
-            SELECT '71000000-0000-0000-0000-000000000002', '71000000-0000-0000-0000-000000000001', "Id", '1.0', '0001-01-01', NULL, 'e2e-membership-token'
+            INSERT OR IGNORE INTO "ConsolidationGroupCompanies" ("Id", "ConsolidationGroupId", "MemberCompanyId", "OwnershipPercentage", "ConsolidationBasis", "BasisRationale", "BasisReviewedOn", "EffectiveFrom", "EffectiveThrough", "ConcurrencyToken")
+            SELECT '71000000-0000-0000-0000-000000000002', '71000000-0000-0000-0000-000000000001', "Id", '1.0', 0, '', NULL, '0001-01-01', NULL, 'e2e-membership-token'
             FROM "Companies" WHERE "Name" = 'Brass Ledger Manufacturing';
-            INSERT OR IGNORE INTO "ConsolidationGroupCompanies" ("Id", "ConsolidationGroupId", "MemberCompanyId", "OwnershipPercentage", "EffectiveFrom", "EffectiveThrough", "ConcurrencyToken")
-            VALUES ('71000000-0000-0000-0000-000000000014', '71000000-0000-0000-0000-000000000001', '71000000-0000-0000-0000-000000000010', '1.0', '0001-01-01', NULL, 'e2e-affiliate-membership-token');
+            INSERT OR IGNORE INTO "ConsolidationGroupCompanies" ("Id", "ConsolidationGroupId", "MemberCompanyId", "OwnershipPercentage", "ConsolidationBasis", "BasisRationale", "BasisReviewedOn", "EffectiveFrom", "EffectiveThrough", "ConcurrencyToken")
+            VALUES ('71000000-0000-0000-0000-000000000014', '71000000-0000-0000-0000-000000000001', '71000000-0000-0000-0000-000000000010', '0.75', 1, 'E2E reviewed control conclusion', '2026-01-01', '0001-01-01', NULL, 'e2e-affiliate-membership-token');
             INSERT OR IGNORE INTO "ConsolidationAccountMappings" ("Id", "ConsolidationGroupId", "MemberCompanyId", "MemberAccountId", "ReportingAccountNumber", "ReportingAccountName", "ReportingAccountType", "TranslationMethod", "EffectiveFrom", "EffectiveThrough", "IsActive", "ConcurrencyToken")
             SELECT '71000000-0000-0000-0000-000000000003', '71000000-0000-0000-0000-000000000001', "CompanyId", "Id", "Number", "Name", "Type", 0, '0001-01-01', NULL, 1, 'e2e-cash-mapping-token'
             FROM "Accounts" WHERE "Number" = '1000' LIMIT 1;
             INSERT OR IGNORE INTO "ConsolidationAccountMappings" ("Id", "ConsolidationGroupId", "MemberCompanyId", "MemberAccountId", "ReportingAccountNumber", "ReportingAccountName", "ReportingAccountType", "TranslationMethod", "EffectiveFrom", "EffectiveThrough", "IsActive", "ConcurrencyToken")
-            SELECT '71000000-0000-0000-0000-000000000004', '71000000-0000-0000-0000-000000000001', "CompanyId", "Id", "Number", "Name", "Type", 2, '0001-01-01', NULL, 1, 'e2e-equity-mapping-token'
+            SELECT '71000000-0000-0000-0000-000000000004', '71000000-0000-0000-0000-000000000001', "CompanyId", "Id", "Number", "Name", 2, 2, '0001-01-01', NULL, 1, 'e2e-equity-mapping-token'
             FROM "Accounts" WHERE "Number" = '3000' LIMIT 1;
             INSERT OR IGNORE INTO "Customers" ("Id", "CompanyId", "CustomerNumber", "Name", "Email", "State", "CreditLimit", "OpenBalance")
             SELECT '71000000-0000-0000-0000-000000000020', "Id", 'E2E-IC-CUST', 'E2E intercompany affiliate', 'affiliate@example.invalid', 'MI', '10000.0', '125.0'
@@ -347,8 +347,9 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         command.CommandText = """
             DELETE FROM "BusinessAuditEntries" WHERE "Action" LIKE 'consolidation-intercompany-match.%' OR "Action" LIKE 'consolidation-trading-partner.%';
             DELETE FROM "ConsolidationIntercompanyMatches" WHERE "SalesInvoiceId" = '71000000-0000-0000-0000-000000000022';
-            DELETE FROM "ConsolidationAdjustmentLines" WHERE "ConsolidationAdjustmentBatchId" IN (SELECT "Id" FROM "ConsolidationAdjustmentBatches" WHERE "Reference" = 'ELIM-E2E-IC-INV-1001');
-            DELETE FROM "ConsolidationAdjustmentBatches" WHERE "Reference" = 'ELIM-E2E-IC-INV-1001';
+            DELETE FROM "BusinessAuditEntries" WHERE "EntityId" IN (SELECT "Id" FROM "ConsolidationAdjustmentBatches" WHERE "Reference" IN ('ELIM-E2E-IC-INV-1001', 'NCI-E2E-CONTROLLED'));
+            DELETE FROM "ConsolidationAdjustmentLines" WHERE "ConsolidationAdjustmentBatchId" IN (SELECT "Id" FROM "ConsolidationAdjustmentBatches" WHERE "Reference" IN ('ELIM-E2E-IC-INV-1001', 'NCI-E2E-CONTROLLED'));
+            DELETE FROM "ConsolidationAdjustmentBatches" WHERE "Reference" IN ('ELIM-E2E-IC-INV-1001', 'NCI-E2E-CONTROLLED');
             DELETE FROM "ConsolidationTradingPartners" WHERE "CustomerId" = '71000000-0000-0000-0000-000000000020' OR "VendorId" = '71000000-0000-0000-0000-000000000021';
             DELETE FROM "SalesInvoices" WHERE "Id" = '71000000-0000-0000-0000-000000000022';
             DELETE FROM "VendorBills" WHERE "Id" = '71000000-0000-0000-0000-000000000023';

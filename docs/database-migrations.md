@@ -76,6 +76,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddReviewedIntercompanyMatching` adds retained effective-dated customer/vendor-to-member links and persisted exact invoice/bill suggestions. Restrictive company, group, document, and adjustment relationships preserve provenance; unique per-group invoice and bill indexes prevent one document from being silently paired twice. Lost-history adoption requires both tables, every material effective-date, document, review, adjustment-link, and concurrency column, plus all four provider-specific identity indexes. `ConstrainIntercompanyMatchMetadata` records the reviewed metadata-size contract (and applies bounded PostgreSQL column types). Downgrade is prohibited because it could remove link history, review decisions, or the schema contract used to validate retained matching evidence.
 
+`AddExplicitConsolidationBasisAndNci` adds the effective membership's explicit consolidation basis, rationale, and review date; separate group-level NCI account identity; and adjustment subject/control identity. Existing membership rows are deliberately backfilled as enum value `3` (**ProportionateInterest**) so an upgrade never invents a reporting-parent or control conclusion. The unique control-key index serializes one retained NCI batch per group, exact period, and controlled subsidiary, while the restrictive subject-company relationship preserves provenance. Lost-history adoption requires every policy and review column plus the subject/control indexes. Downgrade is prohibited because removing these fields could delete accounting conclusions, NCI presentation, and retained duplicate-prevention evidence.
+
 ## Verification
 
 At minimum, run:

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using BrassLedger.Application.Accounting;
+using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
@@ -52,7 +53,7 @@ public sealed class ConsolidationPostgresTests
             {
                 SetContext(setupScope, companyId, ownerId);
                 var consolidation = setupScope.ServiceProvider.GetRequiredService<IConsolidationService>();
-                var created = await consolidation.SaveGroupAsync(new SaveConsolidationGroupRequest(null, "Concurrent ownership", "USD", [new ConsolidationMemberRequest(companyId, 1m, new DateOnly(2026, 1, 1), new DateOnly(2026, 5, 31))]));
+                var created = await consolidation.SaveGroupAsync(new SaveConsolidationGroupRequest(null, "Concurrent ownership", "USD", [new ConsolidationMemberRequest(companyId, 1m, new DateOnly(2026, 1, 1), new DateOnly(2026, 5, 31), nameof(ConsolidationBasis.ReportingParent))], NciAccountNumber: "39998", NciAccountName: "PostgreSQL noncontrolling interests"));
                 Assert.True(created.Succeeded, created.ErrorMessage); groupId = created.Id!.Value;
             }
 
@@ -64,11 +65,12 @@ public sealed class ConsolidationPostgresTests
             Assert.Single(attempts, result => result.Succeeded);
             Assert.Single(attempts, result => !result.Succeeded);
 
-            Guid sourceAccountId; string sourceNumber; string sourceName; BrassLedger.Domain.Accounting.AccountType sourceType;
+            Guid sourceAccountId; string sourceNumber; string sourceName; BrassLedger.Domain.Accounting.AccountType sourceType; Guid equityAccountId; string equityNumber; string equityName;
             using (var accountScope = provider.CreateScope())
             {
                 var factory = accountScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
                 var source = await db.Accounts.OrderBy(account => account.Number).FirstAsync(); sourceAccountId = source.Id; sourceNumber = source.Number; sourceName = source.Name; sourceType = source.Type;
+                var equity = await db.Accounts.OrderBy(account => account.Number).FirstAsync(account => account.Type == AccountType.Equity); equityAccountId = equity.Id; equityNumber = equity.Number; equityName = equity.Name;
             }
             using var thirdScope = provider.CreateScope(); using var fourthScope = provider.CreateScope(); SetContext(thirdScope, companyId, ownerId); SetContext(fourthScope, companyId, ownerId);
             var mappingAttempts = await Task.WhenAll(
@@ -99,7 +101,7 @@ public sealed class ConsolidationPostgresTests
                 var factory = tradingPartnerSetupScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
                 db.Companies.Add(new BrassLedger.Domain.Accounting.Company { Id = affiliateId, Name = "PostgreSQL intercompany affiliate", LegalName = "PostgreSQL intercompany affiliate LLC", TaxId = $"PG-IC-{Guid.NewGuid():N}", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
                 db.CompanyMemberships.Add(new BrassLedger.Domain.Accounting.CompanyMembership { Id = Guid.NewGuid(), UserId = ownerId, CompanyId = affiliateId, Role = "Controller", IsOwner = true, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
-                db.ConsolidationGroupCompanies.Add(new BrassLedger.Domain.Accounting.ConsolidationGroupCompany { Id = Guid.NewGuid(), ConsolidationGroupId = groupId, MemberCompanyId = affiliateId, OwnershipPercentage = 1m, EffectiveFrom = new DateOnly(2027, 1, 1), ConcurrencyToken = Guid.NewGuid().ToString("N") });
+                db.ConsolidationGroupCompanies.Add(new BrassLedger.Domain.Accounting.ConsolidationGroupCompany { Id = Guid.NewGuid(), ConsolidationGroupId = groupId, MemberCompanyId = affiliateId, OwnershipPercentage = .75m, ConsolidationBasis = ConsolidationBasis.ControlledSubsidiary, BasisRationale = "PostgreSQL reviewed control conclusion", BasisReviewedOn = new DateOnly(2026, 12, 31), EffectiveFrom = new DateOnly(2027, 1, 1), ConcurrencyToken = Guid.NewGuid().ToString("N") });
                 db.Customers.Add(new BrassLedger.Domain.Accounting.Customer { Id = intercompanyCustomerId, CompanyId = companyId, CustomerNumber = "PG-IC-CUST", Name = "PostgreSQL intercompany affiliate", Email = "pg-ic@example.invalid", State = "MI", CreditLimit = 1000m });
                 await db.SaveChangesAsync();
             }
@@ -145,6 +147,7 @@ public sealed class ConsolidationPostgresTests
                 SetContext(adjustmentPreparationScope, companyId, ownerId, BrassLedgerPermissions.JournalPrepare);
                 var service = adjustmentPreparationScope.ServiceProvider.GetRequiredService<IConsolidationService>();
                 var offsetMapping = await service.SaveAccountMappingAsync(new(null, groupId, companyId, offsetAccountId, offsetNumber, offsetName, new DateOnly(2026, 8, 1), null)); Assert.True(offsetMapping.Succeeded, offsetMapping.ErrorMessage);
+                if (equityAccountId != sourceAccountId && equityAccountId != offsetAccountId) { var equityMapping = await service.SaveAccountMappingAsync(new(null, groupId, companyId, equityAccountId, equityNumber, equityName, new DateOnly(2026, 8, 1), null)); Assert.True(equityMapping.Succeeded, equityMapping.ErrorMessage); }
                 var saved = await service.SaveAdjustmentAsync(new(null, groupId, new DateOnly(2026, 1, 1), new DateOnly(2026, 8, 31), "ManualAdjustment", "PG-CONSOL-ADJ-1", "Concurrent PostgreSQL control test", string.Empty,
                 [
                     new(sourceNumber, sourceName, sourceType.ToString(), 10m, 0m),
@@ -152,6 +155,13 @@ public sealed class ConsolidationPostgresTests
                 ]));
                 Assert.True(saved.Succeeded, saved.ErrorMessage); adjustmentId = saved.Id!.Value; draftToken = (await service.GetAdjustmentWorkspaceAsync(groupId))!.Adjustments.Single(item => item.Id == adjustmentId).ConcurrencyToken;
             }
+            using var nciScopeOne = provider.CreateScope(); using var nciScopeTwo = provider.CreateScope(); SetContext(nciScopeOne, companyId, ownerId, BrassLedgerPermissions.JournalPrepare); SetContext(nciScopeTwo, companyId, ownerId, BrassLedgerPermissions.JournalPrepare);
+            SaveConsolidationAdjustmentRequest NciRequest(string reference) => new(null, groupId, new DateOnly(2027, 1, 1), new DateOnly(2027, 3, 31), nameof(ConsolidationAdjustmentKind.NoncontrollingInterest), reference, "PostgreSQL concurrent NCI control", string.Empty,
+                [new(equityNumber, equityName, nameof(AccountType.Equity), 5m, 0m, "Parent equity attribution", affiliateId), new("39998", "PostgreSQL noncontrolling interests", nameof(AccountType.Equity), 0m, 5m, "NCI equity presentation", affiliateId)], SubjectCompanyId: affiliateId);
+            var nciAttempts = await Task.WhenAll(
+                nciScopeOne.ServiceProvider.GetRequiredService<IConsolidationService>().SaveAdjustmentAsync(NciRequest("PG-NCI-A")),
+                nciScopeTwo.ServiceProvider.GetRequiredService<IConsolidationService>().SaveAdjustmentAsync(NciRequest("PG-NCI-B")));
+            Assert.Single(nciAttempts, result => result.Succeeded); Assert.Single(nciAttempts, result => !result.Succeeded);
             using var approvalScopeOne = provider.CreateScope(); using var approvalScopeTwo = provider.CreateScope();
             SetContext(approvalScopeOne, companyId, reviewerOne, BrassLedgerPermissions.JournalApprove); SetContext(approvalScopeTwo, companyId, reviewerTwo, BrassLedgerPermissions.JournalApprove);
             var approvalAttempts = await Task.WhenAll(
@@ -192,7 +202,8 @@ public sealed class ConsolidationPostgresTests
             Assert.Equal(1, await verification.ConsolidationIntercompanyMatches.CountAsync(match => match.ConsolidationGroupId == groupId && match.SalesInvoiceId == intercompanyInvoiceId && match.VendorBillId == intercompanyBillId));
             Assert.Equal(2, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityType == nameof(BrassLedger.Domain.Accounting.CurrencyExchangeRate)));
             Assert.Equal("Reversed", await verification.ConsolidationAdjustmentBatches.Where(batch => batch.Id == adjustmentId).Select(batch => batch.Status).SingleAsync());
-            Assert.Equal(2, await verification.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == groupId));
+            Assert.Equal(3, await verification.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == groupId));
+            Assert.Equal(1, await verification.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == groupId && batch.Kind == ConsolidationAdjustmentKind.NoncontrollingInterest && batch.SubjectCompanyId == affiliateId));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityId == adjustmentId && entry.Action == "consolidation-adjustment.approved"));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityId == adjustmentId && entry.Action == "consolidation-adjustment.posted"));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityId == adjustmentId && entry.Action == "consolidation-adjustment.reversed"));

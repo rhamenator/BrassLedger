@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("35", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("36", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -99,10 +99,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827095525_AddControlledConsolidationAdjustments';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827120437_AddReviewedIntercompanyMatching';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827122336_ConstrainIntercompanyMatchMetadata';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827133355_AddExplicitConsolidationBasisAndNci';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentLines';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'ConsolidationBasis';"));
+        Assert.Equal("3", await ReadScalarAsync(connection, "SELECT dflt_value FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'ConsolidationBasis';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'NciAccountNumber';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAdjustmentBatches') WHERE name = 'SubjectCompanyId';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_ConsolidationAdjustmentBatches_ControlKey';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('CurrencyExchangeRates') WHERE name = 'RateType';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'TranslationMethod';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
@@ -156,7 +162,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("35", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("36", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -191,9 +197,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827095525_AddControlledConsolidationAdjustments';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827120437_AddReviewedIntercompanyMatching';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827122336_ConstrainIntercompanyMatchMetadata';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827133355_AddExplicitConsolidationBasisAndNci';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'ConsolidationBasis';"));
+        Assert.Equal("3", await ReadScalarAsync(verified, "SELECT dflt_value FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'ConsolidationBasis';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'NciAccountNumber';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAdjustmentBatches') WHERE name = 'ControlKey';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_ConsolidationAdjustmentBatches_ControlKey';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('CurrencyExchangeRates') WHERE name = 'RateType';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'CtaAccountNumber';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
@@ -536,7 +548,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var overlappingAverage = await consolidation.SaveExchangeRateAsync(new SaveExchangeRateRequest("USD", "CAD", 1.11m, new DateOnly(2026, 6, 30), "Overlapping average", RateType: "Average", PeriodStartOn: new DateOnly(2026, 4, 1)));
         Assert.False(overlappingAverage.Succeeded);
         Assert.Contains("cannot overlap", overlappingAverage.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        var group = await consolidation.SaveGroupAsync(new SaveConsolidationGroupRequest(null, "North America", "USD", [new ConsolidationMemberRequest(currentCompanyId), new ConsolidationMemberRequest(canadianCompanyId, .8m)], CtaAccountNumber: "39999", CtaAccountName: "Cumulative translation adjustment"));
+        var basisReviewedOn = new DateOnly(2026, 1, 2);
+        var group = await consolidation.SaveGroupAsync(new SaveConsolidationGroupRequest(null, "North America", "USD",
+            [new ConsolidationMemberRequest(currentCompanyId, ConsolidationBasis: nameof(ConsolidationBasis.ReportingParent)), new ConsolidationMemberRequest(canadianCompanyId, .8m, ConsolidationBasis: nameof(ConsolidationBasis.ProportionateInterest), BasisRationale: "Reviewed management-reporting proportionate interest", BasisReviewedOn: basisReviewedOn)],
+            CtaAccountNumber: "39999", CtaAccountName: "Cumulative translation adjustment", NciAccountNumber: "39997", NciAccountName: "Noncontrolling interests"));
         Assert.True(group.Succeeded, group.ErrorMessage);
         var configuredGroups = await consolidation.GetGroupsAsync();
         var configuredGroup = Assert.Single(configuredGroups, item => item.Id == group.Id);
@@ -569,16 +584,22 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var overlapping = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(null, group.Id!.Value, currentCompanyId, .5m, new DateOnly(2026, 4, 1), null));
         Assert.False(overlapping.Succeeded);
         Assert.Contains("cannot overlap", overlapping.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        var closeOriginalPeriod = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(originalParentOwnership.Id, group.Id.Value, currentCompanyId, 1m, originalParentOwnership.EffectiveFrom, new DateOnly(2026, 5, 31), originalParentOwnership.ConcurrencyToken));
+        var removeReportingParent = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(originalParentOwnership.Id, group.Id.Value, currentCompanyId, 1m, originalParentOwnership.EffectiveFrom, originalParentOwnership.EffectiveThrough, originalParentOwnership.ConcurrencyToken, nameof(ConsolidationBasis.CombinedAffiliate), "Invalid attempt to remove reporting parent", basisReviewedOn));
+        Assert.False(removeReportingParent.Succeeded);
+        Assert.Contains("reporting-parent", removeReportingParent.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var closeOriginalPeriod = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(originalParentOwnership.Id, group.Id.Value, currentCompanyId, 1m, originalParentOwnership.EffectiveFrom, new DateOnly(2026, 5, 31), originalParentOwnership.ConcurrencyToken, originalParentOwnership.ConsolidationBasis, originalParentOwnership.BasisRationale, originalParentOwnership.BasisReviewedOn));
         Assert.True(closeOriginalPeriod.Succeeded, closeOriginalPeriod.ErrorMessage);
-        var staleOwnershipEdit = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(originalParentOwnership.Id, group.Id.Value, currentCompanyId, 1m, originalParentOwnership.EffectiveFrom, new DateOnly(2026, 4, 30), originalParentOwnership.ConcurrencyToken));
+        var staleOwnershipEdit = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(originalParentOwnership.Id, group.Id.Value, currentCompanyId, 1m, originalParentOwnership.EffectiveFrom, new DateOnly(2026, 4, 30), originalParentOwnership.ConcurrencyToken, originalParentOwnership.ConsolidationBasis, originalParentOwnership.BasisRationale, originalParentOwnership.BasisReviewedOn));
         Assert.False(staleOwnershipEdit.Succeeded);
         Assert.Contains("changed", staleOwnershipEdit.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var revisedParentOwnership = (await consolidation.GetGroupsAsync()).Single(item => item.Id == group.Id).Members.Single(member => member.Id == originalParentOwnership.Id);
-        var movedOwnership = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(revisedParentOwnership.Id, group.Id.Value, canadianCompanyId, revisedParentOwnership.OwnershipPercentage, revisedParentOwnership.EffectiveFrom, revisedParentOwnership.EffectiveThrough, revisedParentOwnership.ConcurrencyToken));
+        var movedOwnership = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(revisedParentOwnership.Id, group.Id.Value, canadianCompanyId, revisedParentOwnership.OwnershipPercentage, revisedParentOwnership.EffectiveFrom, revisedParentOwnership.EffectiveThrough, revisedParentOwnership.ConcurrencyToken, revisedParentOwnership.ConsolidationBasis, revisedParentOwnership.BasisRationale, revisedParentOwnership.BasisReviewedOn));
         Assert.False(movedOwnership.Succeeded);
         Assert.Contains("cannot be moved", movedOwnership.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        var successorOwnership = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(null, group.Id.Value, currentCompanyId, .5m, new DateOnly(2026, 6, 1), null));
+        var invalidSuccessorOwnership = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(null, group.Id.Value, currentCompanyId, .5m, new DateOnly(2026, 6, 1), null, ConsolidationBasis: nameof(ConsolidationBasis.ProportionateInterest), BasisRationale: "Invalid successor without reporting-parent coverage", BasisReviewedOn: basisReviewedOn));
+        Assert.False(invalidSuccessorOwnership.Succeeded);
+        Assert.Contains("reporting-parent", invalidSuccessorOwnership.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var successorOwnership = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(null, group.Id.Value, currentCompanyId, 1m, new DateOnly(2026, 6, 1), null, ConsolidationBasis: nameof(ConsolidationBasis.ReportingParent)));
         Assert.True(successorOwnership.Succeeded, successorOwnership.ErrorMessage);
         var report = await consolidation.GetBalanceReportAsync(group.Id!.Value, new DateOnly(2026, 5, 1));
         Assert.NotNull(report);
@@ -627,10 +648,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.DoesNotContain(historicalReport!.Accounts, account => account.AccountNumber is "19998" or "39998");
         var laterReport = await consolidation.GetBalanceReportAsync(group.Id!.Value, new DateOnly(2026, 6, 1));
         Assert.NotNull(laterReport);
-        Assert.Equal(62.50m, laterReport!.Accounts.Single(account => account.AccountNumber == "19998").ConvertedBalance);
-        Assert.Equal(62.50m, laterReport.Accounts.Single(account => account.AccountNumber == "39998").ConvertedBalance);
+        Assert.Equal(125m, laterReport!.Accounts.Single(account => account.AccountNumber == "19998").ConvertedBalance);
+        Assert.Equal(125m, laterReport.Accounts.Single(account => account.AccountNumber == "39998").ConvertedBalance);
         var usdAffiliate = await companies.CreateCompanyAsync(new CreateCompanyRequest("US distribution affiliate", "US distribution affiliate LLC", "US-AFFILIATE-TEST", "USD", 1)); Assert.True(usdAffiliate.Succeeded, usdAffiliate.ErrorMessage); var usdAffiliateId = usdAffiliate.CompanyId!.Value;
-        var affiliateOwnership = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(null, group.Id.Value, usdAffiliateId, 1m, DateOnly.MinValue, null)); Assert.True(affiliateOwnership.Succeeded, affiliateOwnership.ErrorMessage);
+        var affiliateOwnership = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(null, group.Id.Value, usdAffiliateId, .75m, DateOnly.MinValue, null, ConsolidationBasis: nameof(ConsolidationBasis.ControlledSubsidiary), BasisRationale: "Reviewed power, variable returns, and ability to affect returns", BasisReviewedOn: basisReviewedOn)); Assert.True(affiliateOwnership.Succeeded, affiliateOwnership.ErrorMessage);
         Guid intercompanyCustomerId = Guid.NewGuid(); Guid intercompanyVendorId = Guid.NewGuid(); Guid intercompanyInvoiceId = Guid.NewGuid(); Guid intercompanyBillId = Guid.NewGuid();
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
         {
@@ -661,7 +682,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
         SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
         var adjustmentWorkspace = await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value); Assert.NotNull(adjustmentWorkspace);
         var adjustmentAsset = adjustmentWorkspace!.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Asset));
-        var adjustmentEquity = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Equity));
+        var adjustmentEquity = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Equity) && account.AccountNumber != "39997");
+        var nciEquity = adjustmentWorkspace.ReportingAccounts.Single(account => account.AccountNumber == "39997" && account.AccountType == nameof(AccountType.Equity));
+        var missingNciReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(missingNciReport);
+        Assert.Contains(missingNciReport!.Warnings, warning => warning.Contains("no posted NCI reclassification", StringComparison.OrdinalIgnoreCase));
+        var savedNci = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.NoncontrollingInterest), "NCI-US-DIST-1", "Reviewed NCI equity attribution", string.Empty,
+            [new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 10m, 0m, "Reclassify parent-attributable equity", usdAffiliateId), new(nciEquity.AccountNumber, nciEquity.AccountName, nciEquity.AccountType, 0m, 10m, "Present NCI within equity", usdAffiliateId)], SubjectCompanyId: usdAffiliateId));
+        Assert.True(savedNci.Succeeded, savedNci.ErrorMessage);
+        var duplicateNci = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.NoncontrollingInterest), "NCI-US-DIST-DUP", "Concurrent-safe duplicate must fail", string.Empty,
+            [new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 10m, 0m, "Duplicate offset", usdAffiliateId), new(nciEquity.AccountNumber, nciEquity.AccountName, nciEquity.AccountType, 0m, 10m, "Duplicate NCI", usdAffiliateId)], SubjectCompanyId: usdAffiliateId));
+        Assert.False(duplicateNci.Succeeded); Assert.Contains("already retained", duplicateNci.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var discovery = await consolidation.DiscoverIntercompanyMatchesAsync(new(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf)); Assert.True(discovery.Succeeded, discovery.ErrorMessage); Assert.Equal(1, discovery.CreatedCount);
         var discoveredMatch = Assert.Single((await consolidation.GetIntercompanyMatchWorkspaceAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf))!.Matches); Assert.Equal("Suggested", discoveredMatch.Status); Assert.Equal("USD", discoveredMatch.Currency); Assert.Equal(125m, discoveredMatch.Amount); Assert.Equal($"IC-{intercompanyInvoiceId:N}-{intercompanyBillId:N}", discoveredMatch.MatchReference);
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
@@ -694,7 +724,6 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var invalidElimination = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.IntercompanyElimination), "ELIM-MISSING-PROVENANCE", "Invalid elimination", "MATCH-1",
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 25m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 25m)]));
         Assert.False(invalidElimination.Succeeded); Assert.Contains("different companies", invalidElimination.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        var beforeAdjustment = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(beforeAdjustment);
         var savedAdjustment = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.IntercompanyElimination), "CONSOL-ADJ-1", "Controlled reporting-only adjustment", discoveredMatch.MatchReference,
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 25m, 0m, "Reporting asset true-up", currentCompanyId, usdAffiliateId), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 25m, "Reporting equity offset", usdAffiliateId, currentCompanyId)]));
         Assert.True(savedAdjustment.Succeeded, savedAdjustment.ErrorMessage);
@@ -703,14 +732,21 @@ public sealed class WorkspaceInitializationTests : IDisposable
             [new(adjustmentAsset.AccountNumber, adjustmentAsset.AccountName, adjustmentAsset.AccountType, 5m, 0m), new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 0m, 5m)]));
         Assert.True(rejectionCandidate.Succeeded, rejectionCandidate.ErrorMessage);
         var draft = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == savedAdjustment.Id);
+        var nciDraft = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == savedNci.Id);
         var rejectionDraft = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == rejectionCandidate.Id);
         SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
         var selfApproval = await consolidation.ApproveAdjustmentAsync(new(group.Id.Value, draft.Id, draft.ConcurrencyToken)); Assert.False(selfApproval.Succeeded); Assert.Contains("prepared", selfApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
         var rejected = await consolidation.RejectAdjustmentAsync(new(group.Id.Value, rejectionDraft.Id, "Provide supporting consolidation schedule", rejectionDraft.ConcurrencyToken)); Assert.True(rejected.Succeeded, rejected.ErrorMessage);
         var rejectedSnapshot = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == rejectionDraft.Id); Assert.Equal("Rejected", rejectedSnapshot.Status); Assert.NotNull(rejectedSnapshot.RejectedBy); Assert.Equal("Provide supporting consolidation schedule", rejectedSnapshot.DecisionReason);
+        var approvedNci = await consolidation.ApproveAdjustmentAsync(new(group.Id.Value, nciDraft.Id, nciDraft.ConcurrencyToken)); Assert.True(approvedNci.Succeeded, approvedNci.ErrorMessage);
         var approved = await consolidation.ApproveAdjustmentAsync(new(group.Id.Value, draft.Id, draft.ConcurrencyToken)); Assert.True(approved.Succeeded, approved.ErrorMessage);
         SetConsolidationUser(posterId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
+        var approvedNciSnapshot = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == nciDraft.Id);
+        var postedNci = await consolidation.PostAdjustmentAsync(new(group.Id.Value, nciDraft.Id, approvedNciSnapshot.ConcurrencyToken)); Assert.True(postedNci.Succeeded, postedNci.ErrorMessage);
+        var beforeAdjustment = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(beforeAdjustment);
+        Assert.DoesNotContain(beforeAdjustment!.Warnings, warning => warning.Contains("no posted NCI reclassification", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(10m, beforeAdjustment.Accounts.Single(account => account.AccountNumber == nciEquity.AccountNumber).ConvertedBalance);
         var stalePost = await consolidation.PostAdjustmentAsync(new(group.Id.Value, draft.Id, draft.ConcurrencyToken)); Assert.False(stalePost.Succeeded); Assert.Contains("changed", stalePost.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var approvedSnapshot = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == draft.Id);
         SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
@@ -735,13 +771,21 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var restoredReport = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(restoredReport);
         Assert.Equal(beforeAdjustment.Accounts.Single(account => account.AccountNumber == adjustmentAsset.AccountNumber).ConvertedBalance, restoredReport!.Accounts.Single(account => account.AccountNumber == adjustmentAsset.AccountNumber).ConvertedBalance);
         Assert.Equal(beforeAdjustment.Accounts.Single(account => account.AccountNumber == adjustmentEquity.AccountNumber).ConvertedBalance, restoredReport.Accounts.Single(account => account.AccountNumber == adjustmentEquity.AccountNumber).ConvertedBalance);
+        var postedNciSnapshot = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == savedNci.Id);
+        var reversedNci = await consolidation.ReverseAdjustmentAsync(new(group.Id.Value, savedNci.Id!.Value, "Replace reviewed NCI reclassification", postedNciSnapshot.ConcurrencyToken)); Assert.True(reversedNci.Succeeded, reversedNci.ErrorMessage);
+        var afterNciReversal = await consolidation.GetBalanceReportAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.Contains(afterNciReversal!.Warnings, warning => warning.Contains("no posted NCI reclassification", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(0m, afterNciReversal.Accounts.Single(account => account.AccountNumber == nciEquity.AccountNumber).ConvertedBalance);
+        SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
+        var replacementNci = await consolidation.SaveAdjustmentAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, nameof(ConsolidationAdjustmentKind.NoncontrollingInterest), "NCI-US-DIST-2", "Replacement reviewed NCI equity attribution", string.Empty,
+            [new(adjustmentEquity.AccountNumber, adjustmentEquity.AccountName, adjustmentEquity.AccountType, 12m, 0m, "Replacement offset", usdAffiliateId), new(nciEquity.AccountNumber, nciEquity.AccountName, nciEquity.AccountType, 0m, 12m, "Replacement NCI", usdAffiliateId)], SubjectCompanyId: usdAffiliateId));
+        Assert.True(replacementNci.Succeeded, replacementNci.ErrorMessage);
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
         {
             Assert.Equal(3, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationGroupCompany)));
             Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationTradingPartner)));
             Assert.Equal(3, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationIntercompanyMatch)));
-            Assert.Equal(6, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationAdjustmentBatch)));
-            Assert.Equal(3, await db.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == group.Id));
+            Assert.Equal(11, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationAdjustmentBatch)));
+            Assert.Equal(6, await db.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == group.Id));
         }
     }
 

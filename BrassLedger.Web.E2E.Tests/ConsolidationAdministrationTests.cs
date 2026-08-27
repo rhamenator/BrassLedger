@@ -78,6 +78,50 @@ public sealed class ConsolidationAdministrationTests(PlaywrightWebAppFixture fix
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task Reporting_PreparesReviewedNciForPartiallyOwnedControlledSubsidiary(BrowserKind browserKind)
+    {
+        await fixture.CreateConsolidationWorkflowAsync();
+        try
+        {
+            await using var session = await fixture.CreateSessionAsync(browserKind);
+            await session.SignInAsync("integration-admin");
+            await session.GotoAsync("/administration");
+            await session.WaitForHeadingAsync("Define role templates, separate duties, and prepare replacement access before it becomes urgent.");
+            var groupRow = session.Page.GetByRole(AriaRole.Row).Filter(new() { HasTextString = "E2E controlled consolidation" });
+            await Assertions.Expect(groupRow).ToContainTextAsync("Controlled subsidiary");
+            await Assertions.Expect(groupRow).ToContainTextAsync("E2E reviewed control conclusion");
+            await Assertions.Expect(groupRow).ToContainTextAsync("NCI: 39998 · Noncontrolling interests");
+            await session.GotoAsync("/reporting");
+            await session.WaitForHeadingAsync("Reports, labels, forms, and print fidelity stay in the product.");
+            await session.Page.Locator("#adjustmentPeriodStart").FillAsync("2026-01-01");
+            await session.Page.Locator("#adjustmentAsOf").FillAsync("2026-08-31");
+            await session.Page.Locator("#adjustmentKind").SelectOptionAsync("NoncontrollingInterest");
+            await Assertions.Expect(session.Page.GetByText("does not infer acquisition accounting, goodwill, or the NCI amount", new() { Exact = false })).ToBeVisibleAsync();
+            await session.Page.Locator("#adjustmentSubjectCompany").SelectOptionAsync("71000000-0000-0000-0000-000000000010");
+            await session.Page.Locator("#adjustmentReference").FillAsync("NCI-E2E-CONTROLLED");
+            await session.Page.Locator("#adjustmentDescription").FillAsync("E2E reviewed NCI equity attribution");
+            var accounts = session.Page.GetByLabel("Reporting account");
+            await accounts.Nth(0).SelectOptionAsync(new SelectOptionValue { Index = 2 });
+            await accounts.Nth(1).SelectOptionAsync(new SelectOptionValue { Index = 3 });
+            await session.Page.GetByLabel("Adjustment debit").Nth(0).FillAsync("10.00");
+            await session.Page.GetByLabel("Adjustment credit").Nth(1).FillAsync("10.00");
+            await session.Page.GetByRole(AriaRole.Button, new() { Name = "Prepare draft" }).ClickAsync();
+
+            await Assertions.Expect(session.Page.GetByText("The consolidation draft was retained for independent review.")).ToBeVisibleAsync();
+            var retained = session.Page.GetByRole(AriaRole.Table, new() { Name = "Retained consolidation adjustments" });
+            await Assertions.Expect(retained).ToContainTextAsync("NCI-E2E-CONTROLLED");
+            await Assertions.Expect(retained).ToContainTextAsync("Noncontrolling-interest reclassification");
+            await Assertions.Expect(retained).ToContainTextAsync("E2E intercompany affiliate");
+            await session.AssertNoUiFailuresAsync("reviewed noncontrolling-interest preparation");
+        }
+        finally
+        {
+            await fixture.RemoveIntercompanyMatchingWorkflowAsync();
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task IntercompanyMatching_ConfiguresReviewsAndPreparesControlledElimination(BrowserKind browserKind)
     {
         await fixture.CreateConsolidationWorkflowAsync();

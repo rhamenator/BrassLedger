@@ -46,22 +46,49 @@ public sealed class ReportingPageTests : TestContext
         Assert.Equal("IC-reviewed-reference", cut.Find("input#adjustmentMatchReference").GetAttribute("value"));
         Assert.Contains("No accounting entry has been inferred or posted", cut.Markup);
     }
+
+    [Fact]
+    public void ReportingPage_PreparesNciWithControlledSubjectAndExplicitProvenance()
+    {
+        var cut = RenderComponent<Reporting>();
+
+        cut.Find("select#adjustmentKind").Change("NoncontrollingInterest");
+        var subject = cut.Find("select#adjustmentSubjectCompany");
+        Assert.Contains("Subsidiary", subject.TextContent);
+        Assert.DoesNotContain("Parent company", subject.TextContent);
+        Assert.Contains("does not infer acquisition accounting, goodwill, or the NCI amount", cut.Markup);
+        subject.Change(StubConsolidationService.SubsidiaryCompanyId.ToString());
+        cut.Find("input#adjustmentReference").Change("NCI-COMPONENT-1");
+        cut.Find("input#adjustmentDescription").Change("Reviewed component NCI attribution");
+        cut.FindAll("select[aria-label='Reporting account']").ToArray()[0].Change("Equity|3000|Retained earnings");
+        cut.FindAll("select[aria-label='Reporting account']").ToArray()[1].Change("Equity|39998|Noncontrolling interests");
+        cut.FindAll("input[aria-label='Adjustment debit']").ToArray()[0].Change("5.00");
+        cut.FindAll("input[aria-label='Adjustment credit']").ToArray()[1].Change("5.00");
+        cut.FindAll("button").Single(button => button.TextContent.Trim() == "Prepare draft").Click();
+
+        var request = Assert.IsType<SaveConsolidationAdjustmentRequest>(_consolidation.LastAdjustmentRequest);
+        Assert.Equal("NoncontrollingInterest", request.Kind);
+        Assert.Equal(StubConsolidationService.SubsidiaryCompanyId, request.SubjectCompanyId);
+        Assert.All(request.Lines, line => Assert.Equal(StubConsolidationService.SubsidiaryCompanyId, line.SourceCompanyId));
+        Assert.Contains(request.Lines, line => line.ReportingAccountNumber == "39998" && line.Credit == 5m);
+    }
 }
 
 internal sealed class StubConsolidationService : IConsolidationService
 {
     private static readonly Guid GroupId = Guid.Parse("70000000-0000-0000-0000-000000000001");
     private static readonly Guid ParentId = Guid.Parse("70000000-0000-0000-0000-000000000002");
-    private static readonly Guid SubsidiaryId = Guid.Parse("70000000-0000-0000-0000-000000000003");
+    internal static readonly Guid SubsidiaryCompanyId = Guid.Parse("70000000-0000-0000-0000-000000000003");
     private static readonly ConsolidationGroupMemberSnapshot[] Members =
     [
-        new(Guid.NewGuid(), ParentId, "Parent company", "USD", 1m, DateOnly.MinValue, null, "parent-token"),
-        new(Guid.NewGuid(), SubsidiaryId, "Subsidiary", "CAD", .8m, DateOnly.MinValue, null, "subsidiary-token")
+        new(Guid.NewGuid(), ParentId, "Parent company", "USD", 1m, DateOnly.MinValue, null, "parent-token", "ReportingParent"),
+        new(Guid.NewGuid(), SubsidiaryCompanyId, "Subsidiary", "CAD", .8m, DateOnly.MinValue, null, "subsidiary-token", "ControlledSubsidiary", "Reviewed control evidence", new DateOnly(2026, 1, 1))
     ];
     private static readonly ConsolidationReportingAccountSnapshot[] ReportingAccounts =
     [
         new("1000", "Cash", "Asset"),
-        new("3000", "Retained earnings", "Equity")
+        new("3000", "Retained earnings", "Equity"),
+        new("39998", "Noncontrolling interests", "Equity")
     ];
     private static readonly ConsolidationAdjustmentSnapshot Draft = new(Guid.Parse("70000000-0000-0000-0000-000000000004"), new DateOnly(2026, 1, 1), new DateOnly(2026, 8, 31), "ManualAdjustment", "CONSOL-TEST-1", "Reporting true-up", string.Empty, "Draft", "Preparer", DateTimeOffset.Parse("2026-08-31T12:00:00Z"), null, null, null, null, null, null, string.Empty, null, null, string.Empty, "draft-token",
     [
@@ -69,12 +96,13 @@ internal sealed class StubConsolidationService : IConsolidationService
         new(Guid.NewGuid(), 2, "3000", "Retained earnings", "Equity", 0m, 10m, "Credit", null, null, null, null)
     ]);
     private static readonly ConsolidationIntercompanyMatchSnapshot Match = new(
-        Guid.Parse("70000000-0000-0000-0000-000000000005"), ParentId, "Parent company", SubsidiaryId, "Subsidiary",
+        Guid.Parse("70000000-0000-0000-0000-000000000005"), ParentId, "Parent company", SubsidiaryCompanyId, "Subsidiary",
         Guid.Parse("70000000-0000-0000-0000-000000000006"), "IC-INV-1001", new DateOnly(2026, 8, 15),
         Guid.Parse("70000000-0000-0000-0000-000000000007"), "ic-inv-1001", new DateOnly(2026, 8, 16),
         "IC-reviewed-reference", "USD", 125m, 125m, 125m, "Suggested", string.Empty, null, null, null, "match-token");
 
     public int DiscoveryCount { get; private set; }
+    public SaveConsolidationAdjustmentRequest? LastAdjustmentRequest { get; private set; }
 
     public Task<TransactionResult> SaveExchangeRateAsync(SaveExchangeRateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<IReadOnlyList<ExchangeRateSnapshot>> GetExchangeRatesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ExchangeRateSnapshot>>([]);
@@ -86,9 +114,9 @@ internal sealed class StubConsolidationService : IConsolidationService
     public Task<ConsolidationIntercompanyDiscoveryResult> DiscoverIntercompanyMatchesAsync(DiscoverConsolidationIntercompanyMatchesRequest request, CancellationToken cancellationToken = default) { DiscoveryCount++; return Task.FromResult(new ConsolidationIntercompanyDiscoveryResult(true, string.Empty, 1, 0, [])); }
     public Task<TransactionResult> SetIntercompanyMatchDecisionAsync(SetConsolidationIntercompanyMatchDecisionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.MatchId));
     public Task<ConsolidationIntercompanyMatchWorkspace?> GetIntercompanyMatchWorkspaceAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default) => Task.FromResult<ConsolidationIntercompanyMatchWorkspace?>(new(GroupId, "North America", periodStart, asOf, [Match]));
-    public Task<IReadOnlyList<ConsolidationGroupSnapshot>> GetGroupsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ConsolidationGroupSnapshot>>([new(GroupId, "North America", "USD", true, "group-token", Members, "39999", "CTA")]);
+    public Task<IReadOnlyList<ConsolidationGroupSnapshot>> GetGroupsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ConsolidationGroupSnapshot>>([new(GroupId, "North America", "USD", true, "group-token", Members, "39999", "CTA", "39998", "Noncontrolling interests")]);
     public Task<ConsolidationAccountMappingWorkspace?> GetAccountMappingWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default) => Task.FromResult<ConsolidationAccountMappingWorkspace?>(null);
-    public Task<TransactionResult> SaveAdjustmentAsync(SaveConsolidationAdjustmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> SaveAdjustmentAsync(SaveConsolidationAdjustmentRequest request, CancellationToken cancellationToken = default) { LastAdjustmentRequest = request; return Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid())); }
     public Task<TransactionResult> ApproveAdjustmentAsync(ConsolidationAdjustmentActionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.AdjustmentBatchId));
     public Task<TransactionResult> RejectAdjustmentAsync(ConsolidationAdjustmentDecisionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.AdjustmentBatchId));
     public Task<TransactionResult> PostAdjustmentAsync(ConsolidationAdjustmentActionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.AdjustmentBatchId));

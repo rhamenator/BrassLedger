@@ -694,6 +694,9 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<CurrencyExchangeRate>().Property(x => x.Rate).HasPrecision(18, 8);
         modelBuilder.Entity<CurrencyExchangeRate>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.OwnershipPercentage).HasPrecision(9, 6);
+        modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.BasisRationale).HasMaxLength(1000);
+        modelBuilder.Entity<ConsolidationGroup>().Property(x => x.NciAccountNumber).HasMaxLength(64);
+        modelBuilder.Entity<ConsolidationGroup>().Property(x => x.NciAccountName).HasMaxLength(160);
         modelBuilder.Entity<ConsolidationGroup>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<ConsolidationAccountMapping>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
@@ -706,6 +709,7 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<ConsolidationIntercompanyMatch>().Property(x => x.Amount));
         ConfigureMoney(modelBuilder.Entity<ConsolidationIntercompanyMatch>().Property(x => x.SellerBalanceDue));
         ConfigureMoney(modelBuilder.Entity<ConsolidationIntercompanyMatch>().Property(x => x.BuyerBalanceDue));
+        modelBuilder.Entity<ConsolidationAdjustmentBatch>().Property(x => x.ControlKey).HasMaxLength(160);
         modelBuilder.Entity<ConsolidationAdjustmentBatch>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         ConfigureMoney(modelBuilder.Entity<ConsolidationAdjustmentLine>().Property(x => x.Debit));
         ConfigureMoney(modelBuilder.Entity<ConsolidationAdjustmentLine>().Property(x => x.Credit));
@@ -1023,8 +1027,10 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<ConsolidationIntercompanyMatch>().HasOne<VendorBill>().WithMany().HasForeignKey(x => x.VendorBillId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<ConsolidationIntercompanyMatch>().HasOne<ConsolidationAdjustmentBatch>().WithOne().HasForeignKey<ConsolidationIntercompanyMatch>(x => x.ConsolidationAdjustmentBatchId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<ConsolidationAdjustmentBatch>().HasIndex(x => new { x.ConsolidationGroupId, x.PeriodStart, x.AsOf, x.Reference }).IsUnique();
+        modelBuilder.Entity<ConsolidationAdjustmentBatch>().HasIndex(x => x.ControlKey).IsUnique();
         modelBuilder.Entity<ConsolidationAdjustmentBatch>().HasOne<ConsolidationGroup>().WithMany().HasForeignKey(x => x.ConsolidationGroupId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<ConsolidationAdjustmentBatch>().HasOne<Company>().WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ConsolidationAdjustmentBatch>().HasOne<Company>().WithMany().HasForeignKey(x => x.SubjectCompanyId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<ConsolidationAdjustmentBatch>().HasOne<ConsolidationAdjustmentBatch>().WithOne().HasForeignKey<ConsolidationAdjustmentBatch>(x => x.ReversalOfBatchId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<ConsolidationAdjustmentLine>().HasIndex(x => new { x.ConsolidationAdjustmentBatchId, x.Sequence }).IsUnique();
         modelBuilder.Entity<ConsolidationAdjustmentLine>().HasOne<ConsolidationAdjustmentBatch>().WithMany().HasForeignKey(x => x.ConsolidationAdjustmentBatchId).OnDelete(DeleteBehavior.Cascade);

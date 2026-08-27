@@ -112,14 +112,22 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains(exchangeRates!, rate => rate.RateType == "Average" && rate.PeriodStartOn == new DateOnly(2026, 1, 1) && rate.SourceReference == "https://example.test/rates");
         var createGroup = await client.PutAsJsonAsync("/api/consolidation-groups", new SaveConsolidationGroupRequest(null, "API group", "USD",
         [
-            new ConsolidationMemberRequest(existingCompany.CompanyId, 1m, new DateOnly(2026, 1, 1)),
-            new ConsolidationMemberRequest(subsidiaryId, .75m, new DateOnly(2026, 2, 1))
-        ], CtaAccountNumber: "39999", CtaAccountName: "Cumulative translation adjustment"));
+            new ConsolidationMemberRequest(existingCompany.CompanyId, 1m, new DateOnly(2026, 1, 1), ConsolidationBasis: nameof(ConsolidationBasis.ReportingParent)),
+            new ConsolidationMemberRequest(subsidiaryId, .75m, new DateOnly(2026, 2, 1), ConsolidationBasis: nameof(ConsolidationBasis.ControlledSubsidiary), BasisRationale: "API reviewed control conclusion", BasisReviewedOn: new DateOnly(2026, 1, 15))
+        ], CtaAccountNumber: "39999", CtaAccountName: "Cumulative translation adjustment", NciAccountNumber: "39998", NciAccountName: "API noncontrolling interests"));
         Assert.Equal(HttpStatusCode.OK, createGroup.StatusCode);
         var groupResult = await createGroup.Content.ReadFromJsonAsync<TransactionResult>();
         var group = Assert.Single(await client.GetFromJsonAsync<IReadOnlyList<ConsolidationGroupSnapshot>>("/api/consolidation-groups") ?? [], item => item.Id == groupResult!.Id);
         Assert.Equal("39999", group.CtaAccountNumber);
-        Assert.Contains(group.Members, member => member.CompanyId == subsidiaryId && member.EffectiveFrom == new DateOnly(2026, 2, 1) && member.OwnershipPercentage == .75m);
+        Assert.Equal("39998", group.NciAccountNumber);
+        Assert.Equal("API noncontrolling interests", group.NciAccountName);
+        Assert.Contains(group.Members, member => member.CompanyId == existingCompany.CompanyId && member.ConsolidationBasis == nameof(ConsolidationBasis.ReportingParent) && member.OwnershipPercentage == 1m);
+        Assert.Contains(group.Members, member => member.CompanyId == subsidiaryId
+            && member.EffectiveFrom == new DateOnly(2026, 2, 1)
+            && member.OwnershipPercentage == .75m
+            && member.ConsolidationBasis == nameof(ConsolidationBasis.ControlledSubsidiary)
+            && member.BasisRationale == "API reviewed control conclusion"
+            && member.BasisReviewedOn == new DateOnly(2026, 1, 15));
         var tradingPartnerWorkspace = await client.GetFromJsonAsync<ConsolidationTradingPartnerWorkspace>($"/api/consolidation-groups/{group.Id}/trading-partners");
         Assert.NotNull(tradingPartnerWorkspace);
         var candidate = tradingPartnerWorkspace.Candidates.First(item => item.CompanyId == existingCompany.CompanyId && item.Kind == "Customer");

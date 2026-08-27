@@ -23,10 +23,19 @@ public enum ConsolidationTranslationMethod
     Historical
 }
 
+public enum ConsolidationBasis
+{
+    ReportingParent,
+    ControlledSubsidiary,
+    CombinedAffiliate,
+    ProportionateInterest
+}
+
 public enum ConsolidationAdjustmentKind
 {
     ManualAdjustment,
-    IntercompanyElimination
+    IntercompanyElimination,
+    NoncontrollingInterest
 }
 
 public sealed class Company
@@ -172,6 +181,8 @@ public sealed class ConsolidationGroup
     public string ReportingCurrency { get; set; } = "USD";
     public string CtaAccountNumber { get; set; } = string.Empty;
     public string CtaAccountName { get; set; } = string.Empty;
+    public string NciAccountNumber { get; set; } = string.Empty;
+    public string NciAccountName { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
@@ -182,6 +193,9 @@ public sealed class ConsolidationGroupCompany
     public Guid ConsolidationGroupId { get; set; }
     public Guid MemberCompanyId { get; set; }
     public decimal OwnershipPercentage { get; set; } = 1m;
+    public ConsolidationBasis ConsolidationBasis { get; set; } = ConsolidationBasis.ProportionateInterest;
+    public string BasisRationale { get; set; } = string.Empty;
+    public DateOnly? BasisReviewedOn { get; set; }
     public DateOnly EffectiveFrom { get; set; } = DateOnly.MinValue;
     public DateOnly? EffectiveThrough { get; set; }
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
@@ -252,6 +266,8 @@ public sealed class ConsolidationAdjustmentBatch
     public string Reference { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string MatchReference { get; set; } = string.Empty;
+    public Guid? SubjectCompanyId { get; set; }
+    public string? ControlKey { get; set; }
     public string Status { get; set; } = "Draft";
     public Guid? PreparedByUserId { get; set; }
     public DateTimeOffset PreparedAtUtc { get; set; }
