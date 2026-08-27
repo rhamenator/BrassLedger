@@ -17,13 +17,13 @@ This is the canonical agent-readable queue for work still required before BrassL
 | --- | --- |
 | Updated | 2026-08-27 EDT |
 | Branch | `codex/tax-content-intake-wip-20260824` |
-| Last pushed commit | `f3cb8e3 feat(reporting): add comparative consolidated statements` |
-| In progress | Controlled consolidated-statement Excel/PDF output |
-| Current evidence | The `f3cb8e3` comparative-statements checkpoint is pushed and gate-complete: clean out-of-tree Release build; SQLite/default 194 plus 10 expected skips; PostgreSQL 204/204; API 35/35; components 14/14; Chromium 35/35; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. It independently generates current and prior packages using each period's effective policies, exposes four side-by-side statements and current-minus-prior variance, retains both periods' section/caption identities so reclassification stays visible, prefixes period-specific warnings, refuses invalid chronology, propagates incompleteness, and provides controlled API, UI, and CSV paths. |
+| Last pushed commit | `7e1db24 feat(reporting): add controlled Excel and PDF exports` |
+| In progress | Consolidated financing-liability and other framework disclosures |
+| Current evidence | The `7e1db24` controlled-document checkpoint is pushed and gate-complete: clean out-of-tree Release build; SQLite/default 194 plus 10 expected skips; PostgreSQL 204/204; API 35/35; components 14/14; Chromium 35/35; both EF models clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. Current and comparative packages now have authorized Excel and PDF downloads with visible completeness state, warnings, reconciliation, statement totals, period-specific presentation, source provenance, attachment filenames, cross-platform embedded fonts, page breaks/repeated headers, and browser/API coverage. |
 
 ## Immediate queue
 
-1. **In progress — CONSOL-STATEMENTS:** add controlled Excel/PDF output, financing-liability and other framework disclosures, and framework review evidence to the pushed comparative-statement foundation.
+1. **In progress — CONSOL-STATEMENTS:** add financing-liability and other framework disclosures plus framework review evidence to the pushed comparative/export foundation.
 2. **Pending — FX-TRANSACTIONS:** implement transaction-currency documents, rate provenance, settlement remeasurement, and realized/unrealized gains and losses.
 3. **Pending — ACCEPTANCE-01:** automate the uninterrupted representative-business scenario from clean installation through encrypted restore and audit trace.
 
@@ -62,6 +62,7 @@ This is the canonical agent-readable queue for work still required before BrassL
 
 ## Recently verified checkpoints
 
+- `7e1db24` — controlled current/comparative Excel and PDF workbooks/documents, explicit incomplete state, warnings and reconciliation, full source provenance, authenticated API/Web attachments, cross-platform embedded fonts, pagination/repeated headers, and full build/test/browser/drift/vulnerability gates. This advances, but does not finish, `CONSOL-STATEMENTS`.
 - `f3cb8e3` — independently generated current/prior consolidated packages, four side-by-side statements, current-minus-prior variance, period-specific presentation/warnings, invalid-chronology rejection, controlled CSV/API/UI paths, and full build/test/browser/drift/vulnerability gates. This advances, but does not finish, `CONSOL-STATEMENTS`.
 - `47e24b7` — separate effective-dated reviewed statement sections/captions/order, current/noncurrent support, explicit unconfigured-account handling, provider migrations/adoption, owner-only administration, API, concurrency, and full build/test/browser/drift/vulnerability gates. This advances, but does not finish, `CONSOL-STATEMENTS`.
 - `076a0a5` — four consolidated statements, source drill-down, cross-statement controls, reviewed direct-cash-flow classifications, explicit incompleteness warnings, CSV output, provider migrations, and complete build/test/browser/drift/vulnerability gates. This proves the foundation, not the full `CONSOL-STATEMENTS` slice.
