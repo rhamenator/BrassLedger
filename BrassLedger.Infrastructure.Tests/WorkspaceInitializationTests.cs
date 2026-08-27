@@ -478,7 +478,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
-    public async Task Consolidation_UsesEffectiveInverseRateAndExposesConfiguredGroup()
+    public async Task Consolidation_UsesEffectiveInverseRateAndPostedAsOfBalances()
     {
         using var services = CreateServiceProvider();
         await services.InitializeBrassLedgerAsync();
@@ -508,6 +508,27 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.NotNull(report);
         Assert.Empty(report!.Warnings);
         Assert.NotEmpty(report.Accounts);
+
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
+        {
+            var futureAsset = new GeneralLedgerAccount { Id = Guid.NewGuid(), CompanyId = currentCompanyId, Number = "19998", Name = "Future consolidation asset", Type = AccountType.Asset, IsActive = false, CurrentBalance = 125m };
+            var futureEquity = new GeneralLedgerAccount { Id = Guid.NewGuid(), CompanyId = currentCompanyId, Number = "39998", Name = "Future consolidation equity", Type = AccountType.Equity, IsActive = false, CurrentBalance = 125m };
+            var futureJournal = new JournalEntry { Id = Guid.NewGuid(), CompanyId = currentCompanyId, PostedOn = new DateOnly(2026, 6, 1), Reference = "FUTURE-CONSOLIDATION", Description = "Must not leak into an earlier as-of report", TotalAmount = 125m, Status = "Posted", IsPosted = true };
+            db.Accounts.AddRange(futureAsset, futureEquity);
+            db.JournalEntries.Add(futureJournal);
+            db.JournalEntryLines.AddRange(
+                new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = futureJournal.Id, AccountId = futureAsset.Id, Debit = 125m, Description = futureJournal.Description },
+                new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = futureJournal.Id, AccountId = futureEquity.Id, Credit = 125m, Description = futureJournal.Description });
+            await db.SaveChangesAsync();
+        }
+
+        var historicalReport = await consolidation.GetBalanceReportAsync(group.Id!.Value, new DateOnly(2026, 5, 1));
+        Assert.NotNull(historicalReport);
+        Assert.DoesNotContain(historicalReport!.Accounts, account => account.AccountNumber is "19998" or "39998");
+        var laterReport = await consolidation.GetBalanceReportAsync(group.Id!.Value, new DateOnly(2026, 6, 1));
+        Assert.NotNull(laterReport);
+        Assert.Equal(125m, laterReport!.Accounts.Single(account => account.AccountNumber == "19998").ConvertedBalance);
+        Assert.Equal(125m, laterReport.Accounts.Single(account => account.AccountNumber == "39998").ConvertedBalance);
     }
 
     [Fact]

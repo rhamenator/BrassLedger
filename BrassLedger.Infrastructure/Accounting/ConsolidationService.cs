@@ -62,8 +62,32 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
         foreach (var member in members)
         {
             var company = companies[member.MemberCompanyId]; var factor = ResolveRate(company.BaseCurrency, group.ReportingCurrency, rates); if (factor is null) { warnings.Add($"No {company.BaseCurrency}/{group.ReportingCurrency} rate is effective for {company.Name} on {asOf:yyyy-MM-dd}."); continue; }
-            var accounts = await db.Accounts.Where(account => account.CompanyId == company.Id && account.IsActive).ToListAsync(cancellationToken);
-            foreach (var account in accounts) { var key = (account.Number, account.Name, account.Type.ToString()); totals[key] = totals.GetValueOrDefault(key) + decimal.Round(account.CurrentBalance * factor.Value * member.OwnershipPercentage, 2); }
+            var postedLines = await (from line in db.JournalEntryLines.AsNoTracking()
+                                     join journal in db.JournalEntries.AsNoTracking() on line.JournalEntryId equals journal.Id
+                                     join account in db.Accounts.AsNoTracking() on line.AccountId equals account.Id
+                                     where journal.CompanyId == company.Id
+                                           && account.CompanyId == company.Id
+                                           && journal.IsPosted
+                                           && journal.PostedOn <= asOf
+                                     select new { account.Id, account.Number, account.Name, account.Type, line.Debit, line.Credit }).ToListAsync(cancellationToken);
+            // SQLite stores decimals as text and cannot translate decimal Sum. Aggregate the bounded,
+            // already-filtered posted lines in .NET so SQLite and PostgreSQL use identical arithmetic.
+            var accountActivity = postedLines.GroupBy(line => new { line.Id, line.Number, line.Name, line.Type }).Select(activity => new
+            {
+                activity.Key.Number,
+                activity.Key.Name,
+                activity.Key.Type,
+                Debit = activity.Sum(line => line.Debit),
+                Credit = activity.Sum(line => line.Credit)
+            });
+            foreach (var account in accountActivity)
+            {
+                var naturalBalance = account.Type is AccountType.Asset or AccountType.Expense
+                    ? account.Debit - account.Credit
+                    : account.Credit - account.Debit;
+                var key = (account.Number, account.Name, account.Type.ToString());
+                totals[key] = totals.GetValueOrDefault(key) + decimal.Round(naturalBalance * factor.Value * member.OwnershipPercentage, 2, MidpointRounding.AwayFromZero);
+            }
         }
         return new ConsolidatedBalanceReport(group.Id, group.Name, group.ReportingCurrency, asOf, totals.OrderBy(item => item.Key.Number).Select(item => new ConsolidatedAccountBalance(item.Key.Number, item.Key.Name, item.Key.Type, item.Value)).ToArray(), warnings);
     }
