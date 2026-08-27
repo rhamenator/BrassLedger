@@ -6003,6 +6003,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(9, 6)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RevenueRecognitionMethod")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateOnly?>("StartDate")
                         .HasColumnType("TEXT");
 
@@ -6018,6 +6023,188 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.ToTable("ProjectJobs");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectWipSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ActualCostToDate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("BilledRevenueToDate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CancellationReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CancelledByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("CompletionPercent")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ContractAmountSnapshot")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("DesiredContractAsset")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("DesiredContractLiability")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("EarnedRevenueToDate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("EstimatedCostSnapshot")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ManualCompletionPercent")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("PostedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PostedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("PostingDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PreparedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PreparedProjectConcurrencyToken")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PreviewFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("PriorContractAsset")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("PriorContractLiability")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RecognitionMethod")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("RejectedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RejectedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RevenueAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("RevenueAdjustment")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("ReversalDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReversalReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ReversedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReversedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("SubmittedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SubmittedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("ThroughDate")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JournalEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("ProjectJobId");
+
+                    b.HasIndex("ReversalJournalEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "ProjectJobId", "ThroughDate", "Status");
+
+                    b.ToTable("ProjectWipSchedules");
                 });
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseInvoiceMatch", b =>
@@ -9619,6 +9806,25 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.Customer", null)
                         .WithMany()
                         .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectWipSchedule", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ProjectJob", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectJobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

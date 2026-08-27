@@ -1603,6 +1603,7 @@ public sealed class ProjectJob
     public DateOnly? ExpectedEndDate { get; set; }
     public DateOnly? ClosedOn { get; set; }
     public string BillingMethod { get; set; } = "TimeAndMaterials";
+    public string RevenueRecognitionMethod { get; set; } = "AsBilled";
     public decimal ContractAmount { get; set; }
     public decimal RetainagePercent { get; set; }
     public decimal BudgetAmount { get; set; }
@@ -1612,6 +1613,54 @@ public sealed class ProjectJob
     public Guid? ClosedByUserId { get; set; }
     public DateTimeOffset? ClosedAtUtc { get; set; }
     public string CloseReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ProjectWipSchedule
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ProjectJobId { get; set; }
+    public DateOnly ThroughDate { get; set; }
+    public DateOnly PostingDate { get; set; }
+    public string RecognitionMethod { get; set; } = string.Empty;
+    public decimal ManualCompletionPercent { get; set; }
+    public decimal ContractAmountSnapshot { get; set; }
+    public decimal EstimatedCostSnapshot { get; set; }
+    public decimal ActualCostToDate { get; set; }
+    public decimal CompletionPercent { get; set; }
+    public decimal EarnedRevenueToDate { get; set; }
+    public decimal BilledRevenueToDate { get; set; }
+    public decimal PriorContractAsset { get; set; }
+    public decimal PriorContractLiability { get; set; }
+    public decimal DesiredContractAsset { get; set; }
+    public decimal DesiredContractLiability { get; set; }
+    public decimal RevenueAdjustment { get; set; }
+    public string RevenueAccountNumber { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string PreviewFingerprint { get; set; } = string.Empty;
+    public string PreparedProjectConcurrencyToken { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
+    public Guid PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? SubmittedByUserId { get; set; }
+    public DateTimeOffset? SubmittedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
+    public Guid? PostedByUserId { get; set; }
+    public DateTimeOffset? PostedAtUtc { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string ReversalReason { get; set; } = string.Empty;
+    public Guid? CancelledByUserId { get; set; }
+    public DateTimeOffset? CancelledAtUtc { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 

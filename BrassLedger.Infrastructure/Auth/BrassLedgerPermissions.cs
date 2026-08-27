@@ -29,6 +29,10 @@ public static class BrassLedgerPermissions
     public const string ProjectChangeOrderPrepare = "projects.change-orders.prepare";
     public const string ProjectChangeOrderApprove = "projects.change-orders.approve";
     public const string ProjectBillingPrepare = "projects.billing.prepare";
+    public const string ProjectWipPrepare = "projects.wip.prepare";
+    public const string ProjectWipApprove = "projects.wip.approve";
+    public const string ProjectWipPost = "projects.wip.post";
+    public const string ProjectWipReverse = "projects.wip.reverse";
     public const string ReportingManage = "reporting.manage";
     public const string TaxManage = "tax.manage";
     public const string PublishManage = "publish.manage";
@@ -64,6 +68,10 @@ public static class BrassLedgerPermissions
         new(ProjectChangeOrderPrepare, "Project change-order preparation", "Prepare, correct, submit, and cancel project change orders."),
         new(ProjectChangeOrderApprove, "Project change-order approval", "Approve or reject independently prepared project change orders."),
         new(ProjectBillingPrepare, "Project billing preparation", "Maintain billing rates and prepare, correct, or cancel source-derived project billing proposals."),
+        new(ProjectWipPrepare, "Project WIP preparation", "Prepare and submit cumulative project WIP and earned-revenue schedules."),
+        new(ProjectWipApprove, "Project WIP approval", "Independently approve or reject project WIP schedules."),
+        new(ProjectWipPost, "Project WIP posting", "Post approved project WIP schedules to contract-asset and contract-liability controls."),
+        new(ProjectWipReverse, "Project WIP reversal", "Reverse the latest posted project WIP schedule with an audit trail."),
         new(ReportingManage, "Reporting", "Run operational reports, forms, and labels."),
         new(TaxManage, "Taxes", "Maintain tax profiles and tax-facing workflows."),
         new(PublishManage, "Publishing", "Prepare packaged outputs and release artifacts."),

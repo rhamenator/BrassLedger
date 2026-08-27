@@ -31,6 +31,10 @@ public static class BrassLedgerAuthorizationPolicies
     public const string PrepareProjectChangeOrders = "PrepareProjectChangeOrders";
     public const string ApproveProjectChangeOrders = "ApproveProjectChangeOrders";
     public const string PrepareProjectBilling = "PrepareProjectBilling";
+    public const string PrepareProjectWip = "PrepareProjectWip";
+    public const string ApproveProjectWip = "ApproveProjectWip";
+    public const string PostProjectWip = "PostProjectWip";
+    public const string ReverseProjectWip = "ReverseProjectWip";
     public const string ManageReporting = "ManageReporting";
     public const string ManagePublishing = "ManagePublishing";
     public const string ManageUsers = "ManageUsers";

@@ -27,7 +27,11 @@ public sealed class LedgerPageTests : TestContext
             BrassLedgerAuthorizationPolicies.AccessProjects,
             BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders,
             BrassLedgerAuthorizationPolicies.ApproveProjectChangeOrders,
-            BrassLedgerAuthorizationPolicies.PrepareProjectBilling);
+            BrassLedgerAuthorizationPolicies.PrepareProjectBilling,
+            BrassLedgerAuthorizationPolicies.PrepareProjectWip,
+            BrassLedgerAuthorizationPolicies.ApproveProjectWip,
+            BrassLedgerAuthorizationPolicies.PostProjectWip,
+            BrassLedgerAuthorizationPolicies.ReverseProjectWip);
         Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(TestWorkspaceData.CreateWorkspace()));
         Services.AddSingleton<IAccountingTransactionService>(new StubAccountingTransactionService());
         Services.AddSingleton<IAccountingInterchangeService>(new StubAccountingInterchangeService());
@@ -106,6 +110,7 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("input[aria-label='Project number']"));
         Assert.NotNull(cut.Find("select[aria-label='Project customer']"));
         Assert.NotNull(cut.Find("select[aria-label='Project billing method']"));
+        Assert.NotNull(cut.Find("select[aria-label='Project revenue recognition method']"));
         Assert.NotNull(cut.Find("input[aria-label='Project retainage percent']"));
         Assert.NotNull(cut.Find("table[aria-label='Project portfolio']"));
         Assert.NotNull(cut.Find("select[aria-label='Change order project']"));
@@ -121,6 +126,8 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("table[aria-label='Project retainage receivable aging']"));
         Assert.Contains("PB-5007-1", cut.Markup);
         Assert.Contains("Control-account balance", cut.Markup);
+        Assert.NotNull(cut.Find("select[aria-label='WIP project']"));
+        Assert.Contains("WIP and earned-revenue schedules", cut.Markup);
         Assert.DoesNotContain("does not reconcile", cut.Markup);
         Assert.Contains("Gross margin", cut.Markup);
         cut.FindAll("button").First(button => button.TextContent.Contains("JOB-5007", StringComparison.Ordinal)).Click();
@@ -232,6 +239,13 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<ProjectBillingPreview> PreviewProjectBillingAsync(ProjectBillingPreviewRequest request, CancellationToken cancellationToken = default) => Task.FromResult(ProjectBillingPreview.Failure("Not configured in this component test."));
     public Task<TransactionResult> SaveProjectBillingProposalAsync(SaveProjectBillingProposalRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> CancelProjectBillingProposalAsync(CancelProjectBillingProposalRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectBillingProposalId));
+    public Task<ProjectWipPreview> PreviewProjectWipScheduleAsync(ProjectWipPreviewRequest request, CancellationToken cancellationToken = default) => Task.FromResult(ProjectWipPreview.Failure("Not configured in this component test."));
+    public Task<TransactionResult> SaveProjectWipScheduleAsync(SaveProjectWipScheduleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
+    public Task<TransactionResult> SubmitProjectWipScheduleAsync(SubmitProjectWipScheduleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectWipScheduleId));
+    public Task<TransactionResult> DecideProjectWipScheduleAsync(DecideProjectWipScheduleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectWipScheduleId));
+    public Task<TransactionResult> PostProjectWipScheduleAsync(PostProjectWipScheduleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectWipScheduleId));
+    public Task<TransactionResult> CancelProjectWipScheduleAsync(CancelProjectWipScheduleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectWipScheduleId));
+    public Task<TransactionResult> ReverseProjectWipScheduleAsync(ReverseProjectWipScheduleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectWipScheduleId));
     public Task<TransactionResult> CancelProjectChangeOrderAsync(CancelProjectChangeOrderRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.ProjectChangeOrderId));
     public Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));

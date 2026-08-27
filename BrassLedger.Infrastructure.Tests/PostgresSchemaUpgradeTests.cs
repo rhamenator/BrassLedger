@@ -69,6 +69,8 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826192207_AddProjectLedgerDimensions';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826210018_AddControlledProjectChangeOrders';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826225620_AddControlledProjectBilling';"));
+            Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827012555_AddProjectWipRevenueRecognition';"));
+            Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ProjectWipSchedules';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"Accounts\" WHERE \"Number\" = '1100' AND \"OperationalRole\" = 'AccountsReceivable';"));
             Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM \"Companies\" WHERE \"Name\" = 'Brass Ledger Manufacturing';"));
             await using var command = connection.CreateCommand();
@@ -115,6 +117,8 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826192207_AddProjectLedgerDimensions';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826210018_AddControlledProjectChangeOrders';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826225620_AddControlledProjectBilling';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260827012555_AddProjectWipRevenueRecognition';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ProjectWipSchedules';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ProjectChangeOrders';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'AccountingSchedules';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'AccountingSchedules' AND column_name = 'DisposalJournalEntryId';"));

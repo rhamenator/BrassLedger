@@ -12,12 +12,14 @@ internal static class DefaultAccountingSetup
         Account(companyId, "1050", "Bank Transfer Clearing", AccountType.Asset, role: AccountingAccountRoles.BankTransferClearing),
         Account(companyId, "1100", "Accounts Receivable", AccountType.Asset, true, AccountingAccountRoles.AccountsReceivable),
         Account(companyId, "1110", "Retainage Receivable", AccountType.Asset, true, AccountingAccountRoles.RetainageReceivable),
+        Account(companyId, "1120", "Contract Asset", AccountType.Asset, true, AccountingAccountRoles.ContractAsset),
         Account(companyId, "1200", "Inventory Asset", AccountType.Asset, true, AccountingAccountRoles.InventoryAsset),
         Account(companyId, "1300", "Vendor Advances", AccountType.Asset, true, AccountingAccountRoles.VendorAdvances),
         Account(companyId, "1400", "Prepaid Expenses", AccountType.Asset),
         Account(companyId, "1500", "Fixed Assets", AccountType.Asset),
         Account(companyId, "1590", "Accumulated Depreciation", AccountType.Asset),
         Account(companyId, "2000", "Accounts Payable", AccountType.Liability, true, AccountingAccountRoles.AccountsPayable),
+        Account(companyId, "2040", "Contract Liability", AccountType.Liability, true, AccountingAccountRoles.ContractLiability),
         Account(companyId, "2050", "Goods Received Not Invoiced", AccountType.Liability, true, AccountingAccountRoles.GoodsReceivedNotInvoiced),
         Account(companyId, "2100", "Sales Tax Payable", AccountType.Liability, true, AccountingAccountRoles.SalesTaxPayable),
         Account(companyId, "2150", "Customer Deposits", AccountType.Liability, true, AccountingAccountRoles.CustomerDeposits),
@@ -68,6 +70,8 @@ internal static class DefaultAccountingSetup
                 await EnsureRoleAccountAsync(dbContext, companyId, "2050", "Goods Received Not Invoiced", AccountType.Liability, true, AccountingAccountRoles.GoodsReceivedNotInvoiced, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "1300", "Vendor Advances", AccountType.Asset, true, AccountingAccountRoles.VendorAdvances, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "1110", "Retainage Receivable", AccountType.Asset, true, AccountingAccountRoles.RetainageReceivable, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "1120", "Contract Asset", AccountType.Asset, true, AccountingAccountRoles.ContractAsset, cancellationToken);
+                await EnsureRoleAccountAsync(dbContext, companyId, "2040", "Contract Liability", AccountType.Liability, true, AccountingAccountRoles.ContractLiability, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "1050", "Bank Transfer Clearing", AccountType.Asset, false, AccountingAccountRoles.BankTransferClearing, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "2150", "Customer Deposits", AccountType.Liability, true, AccountingAccountRoles.CustomerDeposits, cancellationToken);
                 await EnsureRoleAccountAsync(dbContext, companyId, "4300", "Foreign Exchange Gain", AccountType.Revenue, false, AccountingAccountRoles.ForeignExchangeGain, cancellationToken);

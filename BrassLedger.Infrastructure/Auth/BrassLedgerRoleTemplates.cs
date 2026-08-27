@@ -26,7 +26,11 @@ public static class BrassLedgerRoleTemplates
             BrassLedgerPermissions.ProjectsManage,
             BrassLedgerPermissions.ProjectChangeOrderPrepare,
             BrassLedgerPermissions.ProjectChangeOrderApprove,
-            BrassLedgerPermissions.ProjectBillingPrepare
+            BrassLedgerPermissions.ProjectBillingPrepare,
+            BrassLedgerPermissions.ProjectWipPrepare,
+            BrassLedgerPermissions.ProjectWipApprove,
+            BrassLedgerPermissions.ProjectWipPost,
+            BrassLedgerPermissions.ProjectWipReverse
         ]),
         new("project-change-order-preparer", "Project Change Order Preparer", "Prepares and submits project change orders without approval authority.", false, false,
         [
@@ -46,6 +50,25 @@ public static class BrassLedgerRoleTemplates
             BrassLedgerPermissions.ReceivablesManage,
             BrassLedgerPermissions.SubledgerPrepare,
             BrassLedgerPermissions.ProjectBillingPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("project-wip-preparer", "Project WIP Preparer", "Prepares cumulative project WIP schedules without approval or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ProjectWipPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("project-wip-approver", "Project WIP Approver", "Reviews project WIP schedules without preparation or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ProjectWipApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("project-wip-poster", "Project WIP Poster", "Posts and reverses approved project WIP schedules without preparing or approving them.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ProjectWipPost,
+            BrassLedgerPermissions.ProjectWipReverse,
             BrassLedgerPermissions.ReportingManage
         ]),
         new("receivables-preparer", "Receivables Preparer", "Creates customer invoice and recurring invoice drafts without approval or posting authority.", false, false,

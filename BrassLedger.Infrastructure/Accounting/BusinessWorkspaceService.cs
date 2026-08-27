@@ -144,6 +144,7 @@ public sealed class BusinessWorkspaceService(
         var projectChangeOrders = await dbContext.ProjectChangeOrders.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.EffectiveOn).ThenBy(x => x.ChangeOrderNumber).ToListAsync(cancellationToken);
         var projectBillingRates = await dbContext.ProjectBillingRates.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.ProjectJobId).ThenBy(x => x.EarningCode).ThenByDescending(x => x.EffectiveOn).ToListAsync(cancellationToken);
         var projectBillingProposals = await dbContext.ProjectBillingProposals.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderByDescending(x => x.InvoiceDate).ThenBy(x => x.InvoiceNumber).ToListAsync(cancellationToken);
+        var projectWipSchedules = (await dbContext.ProjectWipSchedules.AsNoTracking().Where(x => x.CompanyId == company.Id).ToListAsync(cancellationToken)).OrderByDescending(x => x.ThroughDate).ThenByDescending(x => x.PreparedAtUtc).ToList();
         var projectBillingProposalIds = projectBillingProposals.Select(x => x.Id).ToArray();
         var projectBillingLines = projectBillingProposalIds.Length == 0 ? [] : await dbContext.ProjectBillingLines.AsNoTracking().Where(x => projectBillingProposalIds.Contains(x.ProjectBillingProposalId)).OrderBy(x => x.Sequence).ToListAsync(cancellationToken);
         var projectBillingLineLookup = projectBillingLines.ToLookup(x => x.ProjectBillingProposalId);
@@ -212,6 +213,11 @@ public sealed class BusinessWorkspaceService(
         }).Where(item => item.OutstandingAmount > 0m).OrderByDescending(item => item.AgeDays).ThenBy(item => item.InvoiceNumber).ToArray();
         var retainageReceivable = projectRetainageAging.Sum(item => item.OutstandingAmount);
         var retainageControlBalance = accounts.SingleOrDefault(account => account.OperationalRole == AccountingAccountRoles.RetainageReceivable)?.CurrentBalance ?? 0m;
+        var latestPostedWip = projectWipSchedules.Where(schedule => schedule.Status == "Posted").GroupBy(schedule => schedule.ProjectJobId).Select(group => group.OrderByDescending(schedule => schedule.ThroughDate).ThenByDescending(schedule => schedule.PostedAtUtc).First()).ToArray();
+        var contractAssetSubledger = latestPostedWip.Sum(schedule => schedule.DesiredContractAsset);
+        var contractLiabilitySubledger = latestPostedWip.Sum(schedule => schedule.DesiredContractLiability);
+        var contractAssetBalance = accounts.SingleOrDefault(account => account.OperationalRole == AccountingAccountRoles.ContractAsset)?.CurrentBalance ?? 0m;
+        var contractLiabilityBalance = accounts.SingleOrDefault(account => account.OperationalRole == AccountingAccountRoles.ContractLiability)?.CurrentBalance ?? 0m;
         var projectActualCost = projectLedgerTotals.ToDictionary(item => item.Key, item => item.Value.ActualCost);
         var projectRevenue = projectLedgerTotals.ToDictionary(item => item.Key, item => item.Value.Revenue);
         var projectCommitments = purchaseOrderLines.Where(line => line.ProjectJobId.HasValue && purchaseOrders.Any(order => order.Id == line.PurchaseOrderId && order.Status is "Approved" or "PartiallyReceived" or "Received"))
@@ -511,7 +517,7 @@ public sealed class BusinessWorkspaceService(
                 OpenJobs: projectJobs.Count(x => x.Status is "Active" or "Open" or "Billing"),
                 BudgetAmount: projectJobs.Sum(x => x.BudgetAmount),
                 ActualCost: projectActualCost.Values.Sum(),
-                Jobs: projectJobs.Select(x => new ProjectJobSnapshot(x.JobNumber, x.Name, x.CustomerId.HasValue ? customerNames.GetValueOrDefault(x.CustomerId.Value, x.CustomerName) : x.CustomerName, x.Status, x.BudgetAmount, projectActualCost.GetValueOrDefault(x.Id), x.Id, x.CustomerId, x.StartDate, x.ExpectedEndDate, x.ClosedOn, x.BillingMethod, x.ContractAmount, x.RetainagePercent, projectRevenue.GetValueOrDefault(x.Id), projectCommitments.GetValueOrDefault(x.Id), x.ConcurrencyToken)).ToArray(),
+                Jobs: projectJobs.Select(x => new ProjectJobSnapshot(x.JobNumber, x.Name, x.CustomerId.HasValue ? customerNames.GetValueOrDefault(x.CustomerId.Value, x.CustomerName) : x.CustomerName, x.Status, x.BudgetAmount, projectActualCost.GetValueOrDefault(x.Id), x.Id, x.CustomerId, x.StartDate, x.ExpectedEndDate, x.ClosedOn, x.BillingMethod, x.ContractAmount, x.RetainagePercent, projectRevenue.GetValueOrDefault(x.Id), projectCommitments.GetValueOrDefault(x.Id), x.ConcurrencyToken, x.RevenueRecognitionMethod)).ToArray(),
                 Revenue: projectRevenue.Values.Sum(),
                 Commitments: projectCommitments.Values.Sum(),
                 LedgerLines: projectLedgerRows.Select(row => new ProjectLedgerLineSnapshot(row.LineId, row.ProjectJobId, row.PostedOn, row.Reference, row.SourceModule, row.AccountNumber, row.AccountName, row.LineDescription, row.Debit, row.Credit, row.AccountType == AccountType.Expense ? row.Debit - row.Credit : 0m, row.AccountType == AccountType.Revenue ? row.Credit - row.Debit : 0m, row.EntryId)).ToArray(),
@@ -521,7 +527,14 @@ public sealed class BusinessWorkspaceService(
                 RetainageReceivable: retainageReceivable,
                 RetainageAging: projectRetainageAging,
                 RetainageControlBalance: retainageControlBalance,
-                RetainageReconciliationDifference: retainageControlBalance - retainageReceivable),
+                RetainageReconciliationDifference: retainageControlBalance - retainageReceivable,
+                WipSchedules: projectWipSchedules.Select(schedule => new ProjectWipScheduleSnapshot(schedule.Id, schedule.ProjectJobId, projectById.GetValueOrDefault(schedule.ProjectJobId)?.JobNumber ?? "Unavailable", schedule.ThroughDate, schedule.PostingDate, schedule.RecognitionMethod, schedule.ContractAmountSnapshot, schedule.EstimatedCostSnapshot, schedule.ActualCostToDate, schedule.CompletionPercent, schedule.EarnedRevenueToDate, schedule.BilledRevenueToDate, schedule.PriorContractAsset, schedule.PriorContractLiability, schedule.DesiredContractAsset, schedule.DesiredContractLiability, schedule.RevenueAdjustment, schedule.RevenueAccountNumber, schedule.Description, schedule.Status, schedule.JournalEntryId, schedule.ReversalJournalEntryId, schedule.PreparedAtUtc, schedule.SubmittedAtUtc, schedule.ApprovedAtUtc, schedule.PostedAtUtc, schedule.ReversedAtUtc, schedule.DecisionReason, schedule.ReversalReason, schedule.ConcurrencyToken)).ToArray(),
+                ContractAssetBalance: contractAssetBalance,
+                ContractLiabilityBalance: contractLiabilityBalance,
+                ContractAssetSubledger: contractAssetSubledger,
+                ContractLiabilitySubledger: contractLiabilitySubledger,
+                ContractAssetReconciliationDifference: contractAssetBalance - contractAssetSubledger,
+                ContractLiabilityReconciliationDifference: contractLiabilityBalance - contractLiabilitySubledger),
             Reporting: new ReportingWorkspace(
                 ReportCount: reports.Count,
                 LabelCount: labels.Count,

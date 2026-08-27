@@ -129,7 +129,7 @@ public sealed class LedgerPage
         await reviewer.OpenAsync();
         reviewerAcquisitionRow = reviewerEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
         await reviewerAcquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
-        await Assertions.Expect(reviewer._session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Journal entry approved and ready to post");
+        await reviewer._session.Page.GetByRole(AriaRole.Status).Filter(new() { HasTextString = "Journal entry approved and ready to post" }).WaitForAsync();
         await poster.OpenAsync();
         var posterEntries = poster._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" });
         var posterAcquisitionRow = posterEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
@@ -163,6 +163,7 @@ public sealed class LedgerPage
         await reviewer.OpenAsync();
         var reviewerDepreciationRow = reviewer._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" }).Locator("tbody tr").Filter(new() { HasText = "E2E test asset installment 1" }).First;
         await reviewerDepreciationRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        await reviewer._session.Page.GetByRole(AriaRole.Status).Filter(new() { HasTextString = "Journal entry approved and ready to post" }).WaitForAsync();
         await poster.OpenAsync();
         var posterDepreciationRow = poster._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" }).Locator("tbody tr").Filter(new() { HasText = "E2E test asset installment 1" }).First;
         await posterDepreciationRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
@@ -184,6 +185,7 @@ public sealed class LedgerPage
         await reviewer.OpenAsync();
         var reviewerDisposalRow = reviewer._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" }).Locator("tbody tr").Filter(new() { HasText = "Dispose or retire E2E test asset" }).First;
         await reviewerDisposalRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        await reviewer._session.Page.GetByRole(AriaRole.Status).Filter(new() { HasTextString = "Journal entry approved and ready to post" }).WaitForAsync();
         await poster.OpenAsync();
         var posterDisposalRow = poster._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" }).Locator("tbody tr").Filter(new() { HasText = "Dispose or retire E2E test asset" }).First;
         await posterDisposalRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();

@@ -373,7 +373,14 @@ public sealed record ProjectsWorkspace(
     decimal RetainageReceivable = 0m,
     IReadOnlyList<ProjectRetainageAgingSnapshot>? RetainageAging = null,
     decimal RetainageControlBalance = 0m,
-    decimal RetainageReconciliationDifference = 0m);
+    decimal RetainageReconciliationDifference = 0m,
+    IReadOnlyList<ProjectWipScheduleSnapshot>? WipSchedules = null,
+    decimal ContractAssetBalance = 0m,
+    decimal ContractLiabilityBalance = 0m,
+    decimal ContractAssetSubledger = 0m,
+    decimal ContractLiabilitySubledger = 0m,
+    decimal ContractAssetReconciliationDifference = 0m,
+    decimal ContractLiabilityReconciliationDifference = 0m);
 
 public sealed record ProjectJobSnapshot(
     string JobNumber,
@@ -392,7 +399,8 @@ public sealed record ProjectJobSnapshot(
     decimal RetainagePercent = 0,
     decimal Revenue = 0,
     decimal Commitments = 0,
-    string ConcurrencyToken = "");
+    string ConcurrencyToken = "",
+    string RevenueRecognitionMethod = "AsBilled");
 
 public sealed record ProjectLedgerLineSnapshot(
     Guid Id,
@@ -437,6 +445,7 @@ public sealed record ProjectBillingRateSnapshot(Guid Id, Guid ProjectJobId, stri
 public sealed record ProjectBillingLineSnapshot(int Sequence, string SourceType, Guid? SourceId, string SourceKey, string Description, decimal Quantity, decimal UnitPrice, decimal SourceCost, decimal MarkupAmount, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber);
 public sealed record ProjectBillingProposalSnapshot(Guid Id, Guid ProjectJobId, string ProjectJobNumber, Guid SubledgerDocumentWorkflowId, Guid? RetainageReleaseOfProposalId, string InvoiceNumber, DateOnly BillingThrough, DateOnly InvoiceDate, DateOnly DueDate, string BillingBasis, decimal ProgressPercentToDate, decimal CostMarkupPercent, decimal ContractAmountSnapshot, decimal RetainagePercentSnapshot, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber, string Description, string Status, DateTimeOffset PreparedAtUtc, DateTimeOffset? CancelledAtUtc, string CancellationReason, string ConcurrencyToken, IReadOnlyList<ProjectBillingLineSnapshot> Lines);
 public sealed record ProjectRetainageAgingSnapshot(Guid ProposalId, Guid ProjectJobId, string ProjectJobNumber, string CustomerName, string InvoiceNumber, DateOnly HeldOn, int AgeDays, decimal OriginalRetainage, decimal ReleasedAmount, decimal OutstandingAmount, decimal Days0To30, decimal Days31To60, decimal Days61To90, decimal DaysOver90);
+public sealed record ProjectWipScheduleSnapshot(Guid Id, Guid ProjectJobId, string ProjectJobNumber, DateOnly ThroughDate, DateOnly PostingDate, string RecognitionMethod, decimal ContractAmountSnapshot, decimal EstimatedCostSnapshot, decimal ActualCostToDate, decimal CompletionPercent, decimal EarnedRevenueToDate, decimal BilledRevenueToDate, decimal PriorContractAsset, decimal PriorContractLiability, decimal DesiredContractAsset, decimal DesiredContractLiability, decimal RevenueAdjustment, string RevenueAccountNumber, string Description, string Status, Guid? JournalEntryId, Guid? ReversalJournalEntryId, DateTimeOffset PreparedAtUtc, DateTimeOffset? SubmittedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? PostedAtUtc, DateTimeOffset? ReversedAtUtc, string DecisionReason, string ReversalReason, string ConcurrencyToken);
 
 public sealed record ReportingWorkspace(
     int ReportCount,

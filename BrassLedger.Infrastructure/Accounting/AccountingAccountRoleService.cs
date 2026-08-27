@@ -127,6 +127,7 @@ public sealed class AccountingAccountRoleService(
         {
             AccountingAccountRoles.AccountsReceivable => await db.SalesInvoices.AnyAsync(invoice => invoice.CompanyId == companyId && invoice.BalanceDue != 0m && invoice.Status != "Voided", cancellationToken),
             AccountingAccountRoles.RetainageReceivable => await HasOutstandingRetainageAsync(db, companyId, cancellationToken),
+            AccountingAccountRoles.ContractAsset or AccountingAccountRoles.ContractLiability => await db.ProjectWipSchedules.AnyAsync(schedule => schedule.CompanyId == companyId && schedule.Status == "Posted", cancellationToken),
             AccountingAccountRoles.AccountsPayable => await db.VendorBills.AnyAsync(bill => bill.CompanyId == companyId && bill.BalanceDue != 0m && bill.Status != "Voided", cancellationToken),
             AccountingAccountRoles.GoodsReceivedNotInvoiced =>
                 await db.InventoryReceiptLines.AnyAsync(line =>

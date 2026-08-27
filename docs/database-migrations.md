@@ -54,6 +54,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddControlledProjectBilling` adds effective-dated rates, source-derived proposals and lines, retainage-release provenance, prepared-project concurrency evidence, and reusable source reservations linked one-to-one with controlled receivables drafts. Lost-history adoption requires all four tables, the proposal fingerprint and prepared-project token, workflow link, and unique company/source reservation index. Downgrade is prohibited because it could delete billing derivation, retainage, rate, reservation, and invoice-workflow evidence; restore a verified pre-upgrade backup instead.
 
+`AddProjectWipRevenueRecognition` adds the effective project recognition method and controlled cumulative WIP schedules with retained cost, contract, completion, earned-revenue, billing, contract-position, fingerprint, actor, decision, posting, and reversal evidence. Existing projects are backfilled to `AsBilled`. New standard charts add separate contract-asset and contract-liability controls during minimum setup. Downgrade is prohibited after use because it could delete period-end accounting conclusions and journal provenance; restore a verified pre-upgrade backup instead.
+
 ## Verification
 
 At minimum, run:

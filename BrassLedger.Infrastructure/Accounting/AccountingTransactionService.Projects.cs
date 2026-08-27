@@ -10,6 +10,7 @@ namespace BrassLedger.Infrastructure.Accounting;
 public sealed partial class AccountingTransactionService
 {
     private static readonly string[] SupportedProjectBillingMethods = ["FixedPrice", "TimeAndMaterials", "CostPlus", "Internal"];
+    private static readonly string[] SupportedRevenueRecognitionMethods = ["AsBilled", "CostToCost", "ManualPercent", "CompletedContract"];
     private const decimal MaxProjectAmount = 9_999_999_999_999_999.99m;
 
     public async Task<TransactionResult> SaveProjectJobAsync(SaveProjectJobRequest request, CancellationToken cancellationToken = default)
@@ -18,10 +19,13 @@ public sealed partial class AccountingTransactionService
         var jobNumber = request.JobNumber.Trim();
         var name = request.Name.Trim();
         var billingMethod = request.BillingMethod.Trim();
+        var recognitionMethod = request.RevenueRecognitionMethod.Trim();
         if (jobNumber.Length is < 1 or > 50 || name.Length is < 1 or > 200) return TransactionResult.Failure("A project number of at most 50 characters and a name of at most 200 characters are required.");
         if (request.CustomerId == Guid.Empty) return TransactionResult.Failure("Select a customer for this project.");
         if (request.ExpectedEndDate.HasValue && request.ExpectedEndDate < request.StartDate) return TransactionResult.Failure("The expected end date cannot precede the project start date.");
         if (!SupportedProjectBillingMethods.Contains(billingMethod, StringComparer.Ordinal)) return TransactionResult.Failure("Billing method must be FixedPrice, TimeAndMaterials, CostPlus, or Internal.");
+        if (!SupportedRevenueRecognitionMethods.Contains(recognitionMethod, StringComparer.Ordinal)) return TransactionResult.Failure("Revenue recognition must be AsBilled, CostToCost, ManualPercent, or CompletedContract.");
+        if (billingMethod == "Internal" && recognitionMethod != "AsBilled") return TransactionResult.Failure("Internal projects must use as-billed recognition because they have no customer contract revenue.");
         if (request.ContractAmount < 0m || request.BudgetAmount < 0m || request.ContractAmount > MaxProjectAmount || request.BudgetAmount > MaxProjectAmount || request.RetainagePercent is < 0m or > 1m) return TransactionResult.Failure("Contract and budget values must fit an 18-digit currency amount, cannot be negative, and retainage must be from 0% through 100%.");
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -44,11 +48,14 @@ public sealed partial class AccountingTransactionService
             var billingTermsChanged = request.CustomerId != job.CustomerId
                 || !string.Equals(billingMethod, job.BillingMethod, StringComparison.Ordinal)
                 || request.RetainagePercent != job.RetainagePercent;
+            var recognitionChanged = !string.Equals(recognitionMethod, job.RevenueRecognitionMethod, StringComparison.Ordinal);
             if ((contractChanged || budgetChanged) && (await db.ProjectChangeOrders.AnyAsync(change => change.ProjectJobId == job.Id, cancellationToken) || await HasProjectScopeActivityAsync(db, job.Id, cancellationToken)))
                 return TransactionResult.Failure("Use a controlled project change order to revise contract or budget amounts after project activity begins.");
             if (billingTermsChanged && await db.ProjectBillingProposals.AnyAsync(proposal => proposal.ProjectJobId == job.Id, cancellationToken))
                 return TransactionResult.Failure("Customer, billing method, and retainage cannot be changed after project billing history exists. Create a new project or use the applicable controlled billing workflow.");
-            prior = new { job.JobNumber, job.Name, job.CustomerId, job.CustomerName, job.StartDate, job.ExpectedEndDate, job.BillingMethod, job.ContractAmount, job.BudgetAmount, job.RetainagePercent, job.Status };
+            if (recognitionChanged && await db.ProjectWipSchedules.AnyAsync(schedule => schedule.ProjectJobId == job.Id, cancellationToken))
+                return TransactionResult.Failure("Revenue-recognition method cannot be changed after WIP schedule history exists. Reverse and retain the historical method, or create a new project.");
+            prior = new { job.JobNumber, job.Name, job.CustomerId, job.CustomerName, job.StartDate, job.ExpectedEndDate, job.BillingMethod, job.RevenueRecognitionMethod, job.ContractAmount, job.BudgetAmount, job.RetainagePercent, job.Status };
         }
         else
         {
@@ -63,11 +70,12 @@ public sealed partial class AccountingTransactionService
         job.StartDate = request.StartDate;
         job.ExpectedEndDate = request.ExpectedEndDate;
         job.BillingMethod = billingMethod;
+        job.RevenueRecognitionMethod = recognitionMethod;
         job.ContractAmount = RoundCurrency(request.ContractAmount);
         job.BudgetAmount = RoundCurrency(request.BudgetAmount);
         job.RetainagePercent = request.RetainagePercent;
         job.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        AddProjectAudit(db, companyId, prior is null ? "project.created" : "project.updated", job, new { prior, current = new { job.JobNumber, job.Name, job.CustomerId, job.StartDate, job.ExpectedEndDate, job.BillingMethod, job.ContractAmount, job.BudgetAmount, job.RetainagePercent, job.Status } });
+        AddProjectAudit(db, companyId, prior is null ? "project.created" : "project.updated", job, new { prior, current = new { job.JobNumber, job.Name, job.CustomerId, job.StartDate, job.ExpectedEndDate, job.BillingMethod, job.RevenueRecognitionMethod, job.ContractAmount, job.BudgetAmount, job.RetainagePercent, job.Status } });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The project changed while it was being saved. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The project number is already in use or its related records changed. Refresh and try again."); }
@@ -110,6 +118,8 @@ public sealed partial class AccountingTransactionService
         if (job is null) return TransactionResult.Failure("Project not found.");
         if (job.Status != "Closed") return TransactionResult.Failure("Only a closed project can be reopened.");
         if (!string.Equals(job.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The project changed after it was displayed. Refresh before reopening it.");
+        if (job.RevenueRecognitionMethod == "CompletedContract" && await db.ProjectWipSchedules.AnyAsync(schedule => schedule.CompanyId == companyId && schedule.ProjectJobId == job.Id && schedule.Status == "Posted", cancellationToken))
+            return TransactionResult.Failure("Reverse posted completed-contract WIP before reopening the project so recognized revenue does not remain based on a completed status that is no longer true.");
         var priorClosedOn = job.ClosedOn;
         var priorCloseReason = job.CloseReason;
         job.Status = "Active";
@@ -296,6 +306,7 @@ public sealed partial class AccountingTransactionService
     {
         if (await db.ProjectChangeOrders.AnyAsync(changeOrder => changeOrder.CompanyId == companyId && changeOrder.ProjectJobId == projectJobId && changeOrder.Status != "Approved" && changeOrder.Status != "Cancelled", cancellationToken)) return true;
         if (await db.ProjectBillingProposals.AnyAsync(proposal => proposal.CompanyId == companyId && proposal.ProjectJobId == projectJobId && proposal.Status != "Posted" && proposal.Status != "Cancelled" && proposal.Status != "Voided", cancellationToken)) return true;
+        if (await db.ProjectWipSchedules.AnyAsync(schedule => schedule.CompanyId == companyId && schedule.ProjectJobId == projectJobId && schedule.Status != "Posted" && schedule.Status != "Cancelled" && schedule.Status != "Reversed", cancellationToken)) return true;
         if (await db.JournalEntryLines.Where(line => line.ProjectJobId == projectJobId).Join(db.JournalEntries.Where(entry => entry.CompanyId == companyId && !entry.IsPosted && entry.Status != "Cancelled"), line => line.JournalEntryId, entry => entry.Id, (_, _) => true).AnyAsync(cancellationToken)) return true;
         if (await db.SalesQuoteLines.Where(line => line.ProjectJobId == projectJobId).Join(db.SalesQuotes.Where(quote => quote.CompanyId == companyId && (quote.Status == "Draft" || quote.Status == "Approved")), line => line.SalesQuoteId, quote => quote.Id, (_, _) => true).AnyAsync(cancellationToken)) return true;
         if (await db.SalesOrderLines.Where(line => line.ProjectJobId == projectJobId).Join(db.SalesOrders.Where(order => order.CompanyId == companyId && order.Status != "Closed" && order.Status != "Cancelled"), line => line.SalesOrderId, order => order.Id, (_, _) => true).AnyAsync(cancellationToken)) return true;
@@ -319,6 +330,7 @@ public sealed partial class AccountingTransactionService
         if (await db.PurchaseOrderLines.AnyAsync(line => line.ProjectJobId == projectJobId, cancellationToken)) return true;
         if (await db.PayrollTimeEntries.AnyAsync(line => line.ProjectJobId == projectJobId, cancellationToken)) return true;
         if (await db.ProjectBillingProposals.AnyAsync(proposal => proposal.ProjectJobId == projectJobId, cancellationToken)) return true;
+        if (await db.ProjectWipSchedules.AnyAsync(schedule => schedule.ProjectJobId == projectJobId, cancellationToken)) return true;
         return await db.PayrollEarningLines.AnyAsync(line => line.ProjectJobId == projectJobId, cancellationToken);
     }
 

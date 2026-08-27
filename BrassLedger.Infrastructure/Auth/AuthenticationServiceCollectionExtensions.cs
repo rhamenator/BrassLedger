@@ -149,13 +149,25 @@ public static class AuthenticationServiceCollectionExtensions
                     context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectsManage)
                     || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectChangeOrderPrepare)
                     || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectChangeOrderApprove)
-                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectBillingPrepare)));
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectBillingPrepare)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectWipPrepare)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectWipApprove)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectWipPost)
+                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectWipReverse)));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectChangeOrderPrepare));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ApproveProjectChangeOrders, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectChangeOrderApprove));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.PrepareProjectBilling, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectBillingPrepare));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.PrepareProjectWip, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectWipPrepare));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ApproveProjectWip, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectWipApprove));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.PostProjectWip, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectWipPost));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ReverseProjectWip, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ProjectWipReverse));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageReporting, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManagePublishing, policy =>

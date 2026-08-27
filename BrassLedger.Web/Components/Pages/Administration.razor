@@ -773,7 +773,7 @@ else
     }
 
     private static string DescribeEntityType(string entityType) => entityType switch { "accounts" => "account", "customers" => "customer", "vendors" => "vendor", _ => "record" };
-    private static string DescribeControlPurpose(string purpose) => purpose switch { "AccountsReceivable" => "A/R control", "RetainageReceivable" => "retainage A/R control", "AccountsPayable" => "A/P control", _ => "other control" };
+    private static string DescribeControlPurpose(string purpose) => purpose switch { "AccountsReceivable" => "A/R control", "RetainageReceivable" => "retainage A/R control", "ContractAsset" => "project contract-asset control", "ContractLiability" => "project contract-liability control", "AccountsPayable" => "A/P control", _ => "other control" };
     private static string DescribeQuickBooksRun(QuickBooksSyncRunSnapshot run) => run.Direction == "Mapping" ? run.IsDryRun ? "Mapping review" : "Mapping change" : run.IsDryRun ? "Import preview" : "Import";
 
     private async Task DisconnectQuickBooksAsync(Guid connectionId)

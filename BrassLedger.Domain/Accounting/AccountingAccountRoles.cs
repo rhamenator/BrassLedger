@@ -7,9 +7,11 @@ public static class AccountingAccountRoles
     public const string BankTransferClearing = "BankTransferClearing";
     public const string AccountsReceivable = "AccountsReceivable";
     public const string RetainageReceivable = "RetainageReceivable";
+    public const string ContractAsset = "ContractAsset";
     public const string InventoryAsset = "InventoryAsset";
     public const string VendorAdvances = "VendorAdvances";
     public const string AccountsPayable = "AccountsPayable";
+    public const string ContractLiability = "ContractLiability";
     public const string GoodsReceivedNotInvoiced = "GoodsReceivedNotInvoiced";
     public const string SalesTaxPayable = "SalesTaxPayable";
     public const string CustomerDeposits = "CustomerDeposits";
@@ -29,9 +31,11 @@ public static class AccountingAccountRoles
         new(BankTransferClearing, "Bank-transfer clearing", "Clearing account used for the two sides of an internal bank transfer.", AccountType.Asset, false, true),
         new(AccountsReceivable, "Accounts receivable", "Control account used by customer invoices, credits, and payment applications.", AccountType.Asset, true, true),
         new(RetainageReceivable, "Retainage receivable", "Control account used for project-billing amounts contractually held until release.", AccountType.Asset, true, true),
+        new(ContractAsset, "Contract asset", "Control account used when cumulative earned project revenue exceeds cumulative billings.", AccountType.Asset, true, true),
         new(InventoryAsset, "Inventory asset", "Control account used for inventory value and quantity adjustments.", AccountType.Asset, true, true),
         new(VendorAdvances, "Vendor advances", "Control account used for unapplied vendor payments and refunds.", AccountType.Asset, true, true),
         new(AccountsPayable, "Accounts payable", "Control account used by vendor bills, credits, and payment applications.", AccountType.Liability, true, true),
+        new(ContractLiability, "Contract liability", "Control account used when cumulative project billings exceed cumulative earned revenue.", AccountType.Liability, true, true),
         new(GoodsReceivedNotInvoiced, "Goods received not invoiced", "Control account used for received inventory awaiting a matched vendor invoice.", AccountType.Liability, true, true),
         new(SalesTaxPayable, "Sales-tax payable", "Control account used for sales-tax liabilities.", AccountType.Liability, true, true),
         new(CustomerDeposits, "Customer deposits", "Control account used for unapplied customer receipts and refunds.", AccountType.Liability, true, true),

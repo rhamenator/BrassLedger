@@ -394,6 +394,15 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "ProjectBillingProposals", "PreparedProjectConcurrencyToken", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ProjectBillingProposals_SubledgerDocumentWorkflowId", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ProjectBillingSourceReservations_CompanyId_SourceKey", cancellationToken);
+        if (migrationId.EndsWith("_AddProjectWipRevenueRecognition", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "ProjectJobs", "RevenueRecognitionMethod", cancellationToken)
+                && await HasTableAsync(dbContext, "ProjectWipSchedules", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectWipSchedules", "PreviewFingerprint", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectWipSchedules", "DesiredContractAsset", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectWipSchedules", "DesiredContractLiability", cancellationToken)
+                && await HasColumnAsync(dbContext, "ProjectWipSchedules", "ReversalJournalEntryId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ProjectWipSchedules_JournalEntryId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ProjectWipSchedules_ReversalJournalEntryId", cancellationToken);
         return false;
     }
 

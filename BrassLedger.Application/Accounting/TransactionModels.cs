@@ -61,7 +61,8 @@ public sealed record SaveProjectJobRequest(
     decimal ContractAmount,
     decimal BudgetAmount,
     decimal RetainagePercent,
-    string ConcurrencyToken = "");
+    string ConcurrencyToken = "",
+    string RevenueRecognitionMethod = "AsBilled");
 public sealed record CloseProjectJobRequest(Guid ProjectJobId, DateOnly ClosedOn, string Reason, string ConcurrencyToken);
 public sealed record ReopenProjectJobRequest(Guid ProjectJobId, string Reason, string ConcurrencyToken);
 public sealed record SaveProjectChangeOrderDraftRequest(Guid? Id, Guid ProjectJobId, string ChangeOrderNumber, string Description, string Reason, DateOnly RequestedOn, DateOnly EffectiveOn, decimal ContractAmountChange, decimal BudgetAmountChange, string ConcurrencyToken = "");
@@ -94,6 +95,17 @@ public sealed record ProjectBillingPreview(bool Succeeded, string ErrorMessage, 
 }
 public sealed record SaveProjectBillingProposalRequest(Guid? Id, ProjectBillingPreviewRequest PreviewRequest, string PreviewFingerprint, string ProjectConcurrencyToken, string ConcurrencyToken = "");
 public sealed record CancelProjectBillingProposalRequest(Guid ProjectBillingProposalId, string Reason, string ConcurrencyToken);
+public sealed record ProjectWipPreviewRequest(Guid ProjectJobId, DateOnly ThroughDate, DateOnly PostingDate, string RevenueAccountNumber, string Description, decimal ManualCompletionPercent = 0m, Guid? ExistingScheduleId = null);
+public sealed record ProjectWipPreview(bool Succeeded, string ErrorMessage, Guid ProjectJobId, string ProjectConcurrencyToken, string RecognitionMethod, decimal ContractAmount, decimal EstimatedCost, decimal ActualCostToDate, decimal CompletionPercent, decimal EarnedRevenueToDate, decimal BilledRevenueToDate, decimal PriorContractAsset, decimal PriorContractLiability, decimal DesiredContractAsset, decimal DesiredContractLiability, decimal RevenueAdjustment, string Fingerprint)
+{
+    public static ProjectWipPreview Failure(string error) => new(false, error, Guid.Empty, string.Empty, string.Empty, 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m, string.Empty);
+}
+public sealed record SaveProjectWipScheduleRequest(Guid? Id, ProjectWipPreviewRequest PreviewRequest, string PreviewFingerprint, string ProjectConcurrencyToken, string ConcurrencyToken = "");
+public sealed record SubmitProjectWipScheduleRequest(Guid ProjectWipScheduleId, string ConcurrencyToken);
+public sealed record DecideProjectWipScheduleRequest(Guid ProjectWipScheduleId, bool Approve, string Reason, string ConcurrencyToken);
+public sealed record PostProjectWipScheduleRequest(Guid ProjectWipScheduleId, string ConcurrencyToken);
+public sealed record CancelProjectWipScheduleRequest(Guid ProjectWipScheduleId, string Reason, string ConcurrencyToken);
+public sealed record ReverseProjectWipScheduleRequest(Guid ProjectWipScheduleId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record EmployeePayrollInput(Guid EmployeeId, decimal GrossPay, IReadOnlyList<PayrollEarningInput>? Earnings = null, IReadOnlyList<PayrollDeductionInput>? Deductions = null);
 public sealed record PostEmployeePayrollRunRequest(Guid BankAccountId, DateOnly PayDate, string Reference, IReadOnlyList<EmployeePayrollInput> Employees, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null, string RunType = "Regular", IReadOnlyList<Guid>? ApprovedTimecardIds = null, Guid? Id = null, string ConcurrencyToken = "");
 public sealed record PayrollTaxEstimate(string ObligationCode, string JurisdictionCode, string JurisdictionName, string TaxType, decimal TaxableWages, decimal YearToDateTaxableWagesBefore, decimal EmployeeAmount, decimal EmployerAmount, Guid? TaxRuleSetId, Guid? TaxContentPackageId, string ContentVersion, string Source, string CalculationTraceJson);
@@ -272,6 +284,13 @@ public interface IAccountingTransactionService
     Task<ProjectBillingPreview> PreviewProjectBillingAsync(ProjectBillingPreviewRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveProjectBillingProposalAsync(SaveProjectBillingProposalRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> CancelProjectBillingProposalAsync(CancelProjectBillingProposalRequest request, CancellationToken cancellationToken = default);
+    Task<ProjectWipPreview> PreviewProjectWipScheduleAsync(ProjectWipPreviewRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveProjectWipScheduleAsync(SaveProjectWipScheduleRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SubmitProjectWipScheduleAsync(SubmitProjectWipScheduleRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> DecideProjectWipScheduleAsync(DecideProjectWipScheduleRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> PostProjectWipScheduleAsync(PostProjectWipScheduleRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> CancelProjectWipScheduleAsync(CancelProjectWipScheduleRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseProjectWipScheduleAsync(ReverseProjectWipScheduleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SavePayrollJurisdictionRuleAsync(SavePayrollJurisdictionRuleRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordInventoryAdjustmentAsync(RecordInventoryAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveInventoryWarehouseAsync(SaveInventoryWarehouseRequest request, CancellationToken cancellationToken = default);

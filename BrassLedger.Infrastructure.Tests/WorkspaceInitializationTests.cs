@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("23", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("24", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -87,6 +87,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826192156_AddProjectLedgerDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826210012_AddControlledProjectChangeOrders';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826225614_AddControlledProjectBilling';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827012549_AddProjectWipRevenueRecognition';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectWipSchedules';"));
+        Assert.Equal("AsBilled", await ReadScalarAsync(connection, "SELECT RevenueRecognitionMethod FROM ProjectJobs ORDER BY JobNumber LIMIT 1;"));
+        Assert.Equal("ContractAsset", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1120';"));
+        Assert.Equal("ContractLiability", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '2040';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectBillingProposals';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectChangeOrders';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingSchedules';"));
@@ -119,7 +124,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("23", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("24", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -142,6 +147,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826192156_AddProjectLedgerDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826210012_AddControlledProjectChangeOrders';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826225614_AddControlledProjectBilling';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827012549_AddProjectWipRevenueRecognition';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectWipSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'W2ReportingJson';"));
@@ -701,6 +708,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains(roles, role => role.Name == "Project Change Order Preparer" && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderPrepare, StringComparison.Ordinal));
         Assert.Contains(roles, role => role.Name == "Project Change Order Approver" && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderApprove, StringComparison.Ordinal));
         Assert.Contains(roles, role => role.Name == "Controller" && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderPrepare, StringComparison.Ordinal) && role.Permissions.Contains(BrassLedgerPermissions.ProjectChangeOrderApprove, StringComparison.Ordinal));
+        Assert.Contains(roles, role => role.Name == "Project WIP Preparer" && role.Permissions.Contains(BrassLedgerPermissions.ProjectWipPrepare, StringComparison.Ordinal));
+        Assert.Contains(roles, role => role.Name == "Project WIP Approver" && role.Permissions.Contains(BrassLedgerPermissions.ProjectWipApprove, StringComparison.Ordinal));
+        Assert.Contains(roles, role => role.Name == "Project WIP Poster" && role.Permissions.Contains(BrassLedgerPermissions.ProjectWipPost, StringComparison.Ordinal) && role.Permissions.Contains(BrassLedgerPermissions.ProjectWipReverse, StringComparison.Ordinal));
         Assert.Contains(roles, role => role.Name == "Project Billing Preparer" && role.Permissions.Contains(BrassLedgerPermissions.ProjectBillingPrepare, StringComparison.Ordinal) && role.Permissions.Contains(BrassLedgerPermissions.SubledgerPrepare, StringComparison.Ordinal));
     }
 
@@ -4960,6 +4970,160 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(posted.Succeeded, posted.ErrorMessage);
         await using (var db = await factory.CreateDbContextAsync()) match = await db.PurchaseInvoiceMatches.SingleAsync(item => item.Id == saved.Id);
         return (match.Id, match.VendorBillId!.Value);
+    }
+
+    [Fact]
+    public async Task ProjectWip_ControlsCumulativeRevenueContractPositionAndExactReversal()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; Guid customerId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(x => x.Id).SingleAsync();
+            customerId = await db.Customers.OrderBy(x => x.CustomerNumber).Select(x => x.Id).FirstAsync();
+        }
+        void SetUser(Guid userId, params string[] permissions)
+        {
+            var claims = permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)).ToList();
+            claims.Add(new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()));
+            claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+        var preparerId = Guid.NewGuid(); var reviewerId = Guid.NewGuid(); var posterId = Guid.NewGuid();
+        SetUser(preparerId, BrassLedgerPermissions.ProjectsManage);
+        var projectResult = await transactions.SaveProjectJobAsync(new(null, "JOB-WIP-1", "Controlled WIP", customerId, new DateOnly(2026, 8, 1), null, "FixedPrice", 10_000m, 5_000m, 0m, RevenueRecognitionMethod: "CostToCost"));
+        Assert.True(projectResult.Succeeded, projectResult.ErrorMessage);
+        var projectId = projectResult.Id!.Value;
+
+        SetUser(preparerId, BrassLedgerPermissions.JournalPrepare);
+        var costDraft = await transactions.SaveJournalEntryDraftAsync(new(null, new DateOnly(2026, 8, 20), "WIP-COST-1", "Project costs through August", [new("5100", 1_000m, 0m, "Project costs", projectId), new("1000", 0m, 1_000m, "Cash cost", projectId)]));
+        Assert.True(costDraft.Succeeded, costDraft.ErrorMessage);
+        SetUser(reviewerId, BrassLedgerPermissions.JournalApprove); Assert.True((await transactions.ApproveJournalEntryAsync(costDraft.Id!.Value)).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.JournalPost); Assert.True((await transactions.PostApprovedJournalEntryAsync(costDraft.Id.Value)).Succeeded);
+
+        var firstRequest = new ProjectWipPreviewRequest(projectId, new DateOnly(2026, 8, 31), new DateOnly(2026, 8, 31), "4000", "August WIP true-up");
+        SetUser(preparerId, BrassLedgerPermissions.ProjectWipPrepare);
+        var firstPreview = await transactions.PreviewProjectWipScheduleAsync(firstRequest);
+        Assert.True(firstPreview.Succeeded, firstPreview.ErrorMessage);
+        Assert.Equal(1_000m, firstPreview.ActualCostToDate); Assert.Equal(0.2m, firstPreview.CompletionPercent); Assert.Equal(2_000m, firstPreview.EarnedRevenueToDate); Assert.Equal(2_000m, firstPreview.DesiredContractAsset); Assert.Equal(2_000m, firstPreview.RevenueAdjustment);
+        var firstSaved = await transactions.SaveProjectWipScheduleAsync(new(null, firstRequest, firstPreview.Fingerprint, firstPreview.ProjectConcurrencyToken));
+        Assert.True(firstSaved.Succeeded, firstSaved.ErrorMessage);
+        ProjectWipSchedule first;
+        await using (var db = await factory.CreateDbContextAsync()) first = await db.ProjectWipSchedules.SingleAsync(x => x.Id == firstSaved.Id);
+        Assert.True((await transactions.SubmitProjectWipScheduleAsync(new(first.Id, first.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) first = await db.ProjectWipSchedules.SingleAsync(x => x.Id == first.Id);
+        SetUser(preparerId, BrassLedgerPermissions.ProjectWipApprove);
+        var selfApproval = await transactions.DecideProjectWipScheduleAsync(new(first.Id, true, "Self review must fail", first.ConcurrencyToken)); Assert.False(selfApproval.Succeeded);
+        SetUser(reviewerId, BrassLedgerPermissions.ProjectWipApprove); Assert.True((await transactions.DecideProjectWipScheduleAsync(new(first.Id, true, "Cost and contract reviewed", first.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) first = await db.ProjectWipSchedules.SingleAsync(x => x.Id == first.Id);
+        SetUser(reviewerId, BrassLedgerPermissions.ProjectWipPost); Assert.False((await transactions.PostProjectWipScheduleAsync(new(first.Id, first.ConcurrencyToken))).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.ProjectWipPost); Assert.True((await transactions.PostProjectWipScheduleAsync(new(first.Id, first.ConcurrencyToken))).Succeeded);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            first = await db.ProjectWipSchedules.SingleAsync(x => x.Id == first.Id);
+            var asset = await db.Accounts.SingleAsync(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.ContractAsset);
+            Assert.Equal(2_000m, asset.CurrentBalance);
+            var journalLines = await db.JournalEntryLines.Where(x => x.JournalEntryId == first.JournalEntryId).ToListAsync();
+            Assert.Equal(2, journalLines.Count); Assert.All(journalLines, line => Assert.Equal(projectId, line.ProjectJobId));
+        }
+
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var billingRequest = new ProjectBillingPreviewRequest(projectId, "WIP-BILL-1", new DateOnly(2026, 9, 30), new DateOnly(2026, 9, 30), new DateOnly(2026, 10, 30), "4000", "September progress billing", ProgressPercentToDate: 0.3m);
+        var billingPreview = await transactions.PreviewProjectBillingAsync(billingRequest); Assert.True(billingPreview.Succeeded, billingPreview.ErrorMessage);
+        var billingSaved = await transactions.SaveProjectBillingProposalAsync(new(null, billingRequest, billingPreview.Fingerprint, billingPreview.ProjectConcurrencyToken)); Assert.True(billingSaved.Succeeded, billingSaved.ErrorMessage);
+        Guid billingWorkflowId;
+        await using (var db = await factory.CreateDbContextAsync()) billingWorkflowId = await db.ProjectBillingProposals.Where(x => x.Id == billingSaved.Id).Select(x => x.SubledgerDocumentWorkflowId).SingleAsync();
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove); Assert.True((await transactions.ApproveSubledgerDocumentAsync(billingWorkflowId)).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost); Assert.True((await transactions.PostApprovedSubledgerDocumentAsync(billingWorkflowId)).Succeeded);
+
+        var secondRequest = firstRequest with { ThroughDate = new DateOnly(2026, 9, 30), PostingDate = new DateOnly(2026, 9, 30), Description = "September WIP true-up" };
+        SetUser(preparerId, BrassLedgerPermissions.ProjectWipPrepare);
+        var secondPreview = await transactions.PreviewProjectWipScheduleAsync(secondRequest); Assert.True(secondPreview.Succeeded, secondPreview.ErrorMessage);
+        Assert.Equal(3_000m, secondPreview.BilledRevenueToDate); Assert.Equal(2_000m, secondPreview.PriorContractAsset); Assert.Equal(1_000m, secondPreview.DesiredContractLiability); Assert.Equal(-3_000m, secondPreview.RevenueAdjustment);
+        var secondSaved = await transactions.SaveProjectWipScheduleAsync(new(null, secondRequest, secondPreview.Fingerprint, secondPreview.ProjectConcurrencyToken)); Assert.True(secondSaved.Succeeded, secondSaved.ErrorMessage);
+        ProjectWipSchedule second;
+        await using (var db = await factory.CreateDbContextAsync()) second = await db.ProjectWipSchedules.SingleAsync(x => x.Id == secondSaved.Id);
+        Assert.True((await transactions.SubmitProjectWipScheduleAsync(new(second.Id, second.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) second = await db.ProjectWipSchedules.SingleAsync(x => x.Id == second.Id);
+        SetUser(reviewerId, BrassLedgerPermissions.ProjectWipApprove); Assert.True((await transactions.DecideProjectWipScheduleAsync(new(second.Id, true, "Cumulative position reviewed", second.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) second = await db.ProjectWipSchedules.SingleAsync(x => x.Id == second.Id);
+        SetUser(posterId, BrassLedgerPermissions.ProjectWipPost); Assert.True((await transactions.PostProjectWipScheduleAsync(new(second.Id, second.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            second = await db.ProjectWipSchedules.SingleAsync(x => x.Id == second.Id);
+            Assert.Equal(0m, (await db.Accounts.SingleAsync(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.ContractAsset)).CurrentBalance);
+            Assert.Equal(1_000m, (await db.Accounts.SingleAsync(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.ContractLiability)).CurrentBalance);
+            var projectRevenue = await (from line in db.JournalEntryLines join entry in db.JournalEntries on line.JournalEntryId equals entry.Id join account in db.Accounts on line.AccountId equals account.Id where entry.CompanyId == companyId && entry.IsPosted && line.ProjectJobId == projectId && account.Type == AccountType.Revenue select line.Credit - line.Debit).ToListAsync();
+            Assert.Equal(2_000m, projectRevenue.Sum());
+        }
+        var reconciledWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        Assert.Equal(0m, reconciledWorkspace.Projects.ContractAssetReconciliationDifference); Assert.Equal(0m, reconciledWorkspace.Projects.ContractLiabilityReconciliationDifference);
+        Assert.Equal(1_000m, reconciledWorkspace.Projects.ContractLiabilitySubledger);
+        accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.ProjectWipReverse);
+        var unidentifiedReversal = await transactions.ReverseProjectWipScheduleAsync(new(second.Id, new DateOnly(2026, 10, 1), "Missing actor must fail", second.ConcurrencyToken));
+        Assert.False(unidentifiedReversal.Succeeded); Assert.Contains("identity", unidentifiedReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetUser(posterId, BrassLedgerPermissions.ProjectWipReverse);
+        var reversed = await transactions.ReverseProjectWipScheduleAsync(new(second.Id, new DateOnly(2026, 10, 1), "Reverse September WIP for correction", second.ConcurrencyToken)); Assert.True(reversed.Succeeded, reversed.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            second = await db.ProjectWipSchedules.SingleAsync(x => x.Id == second.Id); Assert.Equal("Reversed", second.Status); Assert.NotNull(second.ReversalJournalEntryId);
+            Assert.Equal(2_000m, (await db.Accounts.SingleAsync(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.ContractAsset)).CurrentBalance);
+            Assert.Equal(0m, (await db.Accounts.SingleAsync(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.ContractLiability)).CurrentBalance);
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(x => x.EntityId == second.Id && x.Action == "project-wip.reversed"));
+        }
+        var restoredWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        Assert.Equal(2_000m, restoredWorkspace.Projects.ContractAssetSubledger); Assert.Equal(0m, restoredWorkspace.Projects.ContractAssetReconciliationDifference); Assert.Equal(0m, restoredWorkspace.Projects.ContractLiabilityReconciliationDifference);
+
+        var ordinaryInvoiceRequest = new CreateInvoiceRequest(customerId, "WIP-ORDINARY-1", new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31), 0m, 0m, "4000", "Ordinary project-tagged invoice",
+            [new SalesInvoiceLineRequest("Additional project billing", 1m, 500m, 0m, 0m, "4000", projectId)]);
+        SetUser(preparerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var ordinaryDraft = await transactions.SaveInvoiceDraftAsync(ordinaryInvoiceRequest); Assert.True(ordinaryDraft.Succeeded, ordinaryDraft.ErrorMessage);
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(ordinaryDraft.Id!.Value)).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        var ordinaryPosted = await transactions.PostApprovedSubledgerDocumentAsync(ordinaryDraft.Id.Value); Assert.True(ordinaryPosted.Succeeded, ordinaryPosted.ErrorMessage);
+
+        var ordinaryRequest = secondRequest with { ThroughDate = new DateOnly(2026, 10, 31), PostingDate = new DateOnly(2026, 10, 31), Description = "October WIP with ordinary project billing" };
+        SetUser(preparerId, BrassLedgerPermissions.ProjectWipPrepare);
+        var ordinaryPreview = await transactions.PreviewProjectWipScheduleAsync(ordinaryRequest); Assert.True(ordinaryPreview.Succeeded, ordinaryPreview.ErrorMessage);
+        Assert.Equal(3_500m, ordinaryPreview.BilledRevenueToDate);
+
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PaymentReverse);
+        var ordinaryVoid = await transactions.VoidInvoiceAsync(new(ordinaryPosted.Id!.Value, new DateOnly(2026, 10, 2), "Remove ordinary project billing")); Assert.True(ordinaryVoid.Succeeded, ordinaryVoid.ErrorMessage);
+        SetUser(preparerId, BrassLedgerPermissions.ProjectWipPrepare);
+        var afterVoidPreview = await transactions.PreviewProjectWipScheduleAsync(ordinaryRequest); Assert.True(afterVoidPreview.Succeeded, afterVoidPreview.ErrorMessage);
+        Assert.Equal(3_000m, afterVoidPreview.BilledRevenueToDate);
+
+        SetUser(preparerId, BrassLedgerPermissions.ProjectsManage);
+        var completedResult = await transactions.SaveProjectJobAsync(new(null, "JOB-WIP-CC", "Completed-contract WIP", customerId, new DateOnly(2026, 10, 1), null, "FixedPrice", 1_000m, 500m, 0m, RevenueRecognitionMethod: "CompletedContract"));
+        Assert.True(completedResult.Succeeded, completedResult.ErrorMessage);
+        ProjectJob completedProject;
+        await using (var db = await factory.CreateDbContextAsync()) completedProject = await db.ProjectJobs.SingleAsync(x => x.Id == completedResult.Id);
+        var completedClose = await transactions.CloseProjectJobAsync(new(completedProject.Id, new DateOnly(2026, 10, 31), "Contract performance completed", completedProject.ConcurrencyToken)); Assert.True(completedClose.Succeeded, completedClose.ErrorMessage);
+
+        var completedRequest = new ProjectWipPreviewRequest(completedProject.Id, new DateOnly(2026, 10, 31), new DateOnly(2026, 10, 31), "4000", "Recognize completed contract");
+        SetUser(preparerId, BrassLedgerPermissions.ProjectWipPrepare);
+        var completedPreview = await transactions.PreviewProjectWipScheduleAsync(completedRequest); Assert.True(completedPreview.Succeeded, completedPreview.ErrorMessage); Assert.Equal(1_000m, completedPreview.EarnedRevenueToDate);
+        var completedSaved = await transactions.SaveProjectWipScheduleAsync(new(null, completedRequest, completedPreview.Fingerprint, completedPreview.ProjectConcurrencyToken)); Assert.True(completedSaved.Succeeded, completedSaved.ErrorMessage);
+        ProjectWipSchedule completedSchedule;
+        await using (var db = await factory.CreateDbContextAsync()) completedSchedule = await db.ProjectWipSchedules.SingleAsync(x => x.Id == completedSaved.Id);
+        Assert.True((await transactions.SubmitProjectWipScheduleAsync(new(completedSchedule.Id, completedSchedule.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) completedSchedule = await db.ProjectWipSchedules.SingleAsync(x => x.Id == completedSchedule.Id);
+        SetUser(reviewerId, BrassLedgerPermissions.ProjectWipApprove); Assert.True((await transactions.DecideProjectWipScheduleAsync(new(completedSchedule.Id, true, "Completion evidence reviewed", completedSchedule.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) completedSchedule = await db.ProjectWipSchedules.SingleAsync(x => x.Id == completedSchedule.Id);
+        SetUser(posterId, BrassLedgerPermissions.ProjectWipPost); Assert.True((await transactions.PostProjectWipScheduleAsync(new(completedSchedule.Id, completedSchedule.ConcurrencyToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync()) { completedProject = await db.ProjectJobs.SingleAsync(x => x.Id == completedProject.Id); completedSchedule = await db.ProjectWipSchedules.SingleAsync(x => x.Id == completedSchedule.Id); }
+        SetUser(preparerId, BrassLedgerPermissions.ProjectsManage);
+        var unsafeReopen = await transactions.ReopenProjectJobAsync(new(completedProject.Id, "Additional work discovered", completedProject.ConcurrencyToken)); Assert.False(unsafeReopen.Succeeded); Assert.Contains("Reverse", unsafeReopen.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetUser(posterId, BrassLedgerPermissions.ProjectWipReverse); Assert.True((await transactions.ReverseProjectWipScheduleAsync(new(completedSchedule.Id, new DateOnly(2026, 11, 1), "Reopen contract for additional work", completedSchedule.ConcurrencyToken))).Succeeded);
+        SetUser(preparerId, BrassLedgerPermissions.ProjectsManage);
+        var safeReopen = await transactions.ReopenProjectJobAsync(new(completedProject.Id, "Additional work discovered", completedProject.ConcurrencyToken)); Assert.True(safeReopen.Succeeded, safeReopen.ErrorMessage);
     }
 
     private ServiceProvider CreateServiceProvider()

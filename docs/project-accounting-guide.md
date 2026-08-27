@@ -4,7 +4,7 @@ BrassLedger can assign accounting and operational lines to a company-scoped proj
 
 ## Project setup and lifecycle
 
-Open **Projects** to create or edit a job number, name, customer, start and expected-end dates, billing method, contract amount, cost budget, and retainage percentage. Job numbers are unique inside the active company. Supported billing methods are **Time and materials**, **Fixed price**, **Cost plus**, and **Internal**. The first three drive the controlled billing preview described below; Internal projects cannot create customer billing.
+Open **Projects** to create or edit a job number, name, customer, start and expected-end dates, billing method, revenue-recognition method, contract amount, cost budget, and retainage percentage. Job numbers are unique inside the active company. Supported billing methods are **Time and materials**, **Fixed price**, **Cost plus**, and **Internal**. The first three drive the controlled billing preview described below; Internal projects cannot create customer billing. Revenue recognition defaults to **As billed** for existing and new projects unless the operator deliberately selects cost-to-cost, reviewed manual percentage, or completed-contract recognition.
 
 Only an active project can receive new activity. BrassLedger rejects missing, closed, or other-company project references in journals, invoices, bills, quotes, sales orders, purchase requisitions, purchase orders, timecards, and payroll runs. Optimistic concurrency prevents one operator from silently overwriting another operator's project changes.
 
@@ -35,6 +35,20 @@ Retainage is calculated line by line with the final line absorbing rounding so p
 After the source proposal posts, use **Release retainage** to create one or more controlled release invoice drafts. Posting a release debits ordinary accounts receivable and credits retainage receivable; it does not recognize the same revenue a second time. Cumulative active releases cannot exceed the source proposal's retained amount. The Projects page ages each posted source invoice's outstanding holdback in 0–30, 31–60, 61–90, and over-90-day buckets, subtracting only posted releases. It also compares the aging total with the configured control-account balance and displays a prominent investigation warning when they differ. Do not use an unreconciled aging report for financial reporting.
 
 An original invoice cannot be voided while a retainage release remains active. Voiding a fully open release restores its amount to retainage receivable; voiding the original invoice then reverses ordinary receivables, retainage receivable, and gross revenue and marks its proposal Voided. The original source reservations are released so corrected billing can be prepared without erasing history. Timecards containing reserved or billed project time cannot be voided, and source journals containing reserved or billed project cost cannot be reversed, until the related billing is cancelled or voided. Reservation creation rotates the source parent concurrency token so a simultaneous source reversal and billing save cannot both commit.
+
+## Controlled WIP and earned revenue
+
+Projects configured for **Cost-to-cost** recognize cumulative earned revenue as authorized contract value multiplied by posted project expense through the cutoff divided by the current cost budget, capped at 100%. A zero estimate or abnormal negative project cost fails validation. **Manual percentage** uses a reviewed cumulative percentage from 0% through 100%. **Completed contract** recognizes the authorized contract only after the project is closed. **As billed** does not create WIP schedules.
+
+The preview independently derives cumulative cost, completion, earned revenue, and posted project billings. Billings include gross controlled project proposals, including retained amounts but excluding retainage releases, plus net pretax lines from other posted itemized invoices carrying the project dimension. Voided invoices are excluded. Earned revenue less billings becomes a contract asset when positive or a contract liability when negative. It compares that desired cumulative position with all posted and reversed WIP control lines through the cutoff, then proposes only the incremental true-up. A move from asset to liability therefore credits the prior contract asset, credits the new contract liability, and debits revenue in one balanced posting; it does not recognize or defer the same amount twice.
+
+Saving retains a SHA-256 fingerprint covering project terms and concurrency, every cost source, every posted billing source, every prior control line, calculation inputs, and results. It also advances the project token atomically so two preparers cannot reserve the same cumulative starting point. Submit the draft for independent review. Its preparer or submitter cannot decide it, and its approver cannot post it. Approval and posting both recompute the preview and reject changed costs, billings, project terms, control activity, source identity, or retained calculation values. The posting date must be on or after the cutoff and outside closed periods.
+
+Standard charts route underbillings to the `1120` **Contract asset** control account and overbillings to the `2040` **Contract liability** control account. Administrators may assign other eligible company accounts, but neither role can move while it has a balance or any posted WIP remains. Once a project has posted WIP, subsequent schedules retain the same revenue account unless all WIP is reversed. The Projects page compares the latest posted cumulative schedule for each project with both general-ledger controls and displays an alert for either difference.
+
+Only the latest posted schedule for a project may be reversed. Reversal creates the exact inverse journal on an open date and restores the preceding cumulative schedule as the active subledger position. A zero-dollar schedule still preserves its reviewed period-end conclusion and can be reversed without inventing a journal. Revenue-recognition method cannot change after WIP history exists. A completed-contract project cannot be reopened while completed-contract WIP remains posted; reverse that recognition first so its accounting remains consistent with the reopened lifecycle.
+
+These methods provide controlled billing-independent recognition and WIP accounting; they do not by themselves establish that a contract satisfies a particular financial-reporting framework. Variable consideration, multiple performance obligations, expected-loss provisions, and method selection still require documented accounting policy and qualified review until their dedicated workflows are implemented.
 
 ## Assigning activity
 
@@ -73,8 +87,7 @@ QuickBooks products and subscriptions expose project and class tracking differen
 The following project-accounting capabilities remain future work and must not be represented as complete:
 
 - committed-cost forecasting beyond unreceived purchase-order value;
-- WIP schedules and over/under-billing entries;
-- percentage-of-completion or other automated revenue recognition;
+- variable consideration, multiple performance obligations, and expected-loss provisions;
 - project-specific budgets by account, period, phase, task, department, or cost code;
 - full historical project-ledger pagination/export beyond the recent workspace drill-down.
 
