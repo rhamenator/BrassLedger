@@ -193,6 +193,14 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains("Record Type,Statement,Section", statementCsv, StringComparison.Ordinal);
         Assert.Contains("\"Reconciliation\"", statementCsv, StringComparison.Ordinal);
         Assert.Contains("\"Incomplete\"", statementCsv, StringComparison.Ordinal);
+        var statementExcelResponse = await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements.xlsx?periodStart=2026-01-01&asOf=2026-06-30");
+        Assert.Equal(HttpStatusCode.OK, statementExcelResponse.StatusCode);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", statementExcelResponse.Content.Headers.ContentType?.MediaType);
+        Assert.True((await statementExcelResponse.Content.ReadAsByteArrayAsync()).AsSpan().StartsWith("PK"u8));
+        var statementPdfResponse = await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements.pdf?periodStart=2026-01-01&asOf=2026-06-30");
+        Assert.Equal(HttpStatusCode.OK, statementPdfResponse.StatusCode);
+        Assert.Equal("application/pdf", statementPdfResponse.Content.Headers.ContentType?.MediaType);
+        Assert.True((await statementPdfResponse.Content.ReadAsByteArrayAsync()).AsSpan().StartsWith("%PDF"u8));
         var comparativeStatements = await client.GetFromJsonAsync<ConsolidatedComparativeStatementPackage>($"/api/consolidation-groups/{group.Id}/statements/comparative?currentPeriodStart=2026-01-01&currentAsOf=2026-06-30&comparisonPeriodStart=2025-01-01&comparisonAsOf=2025-06-30");
         Assert.NotNull(comparativeStatements);
         Assert.Equal(group.Id, comparativeStatements!.GroupId);
@@ -207,7 +215,16 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains("Current Amount,Comparison Section Code,Comparison Section,Comparison Caption,Comparison Amount,Variance", comparativeCsv, StringComparison.Ordinal);
         Assert.Contains("2026-06-30,2025-01-01,2025-06-30", comparativeCsv, StringComparison.Ordinal);
         Assert.Contains("\"Reconciliation\"", comparativeCsv, StringComparison.Ordinal);
+        var comparativeExcelResponse = await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements/comparative.xlsx?currentPeriodStart=2026-01-01&currentAsOf=2026-06-30&comparisonPeriodStart=2025-01-01&comparisonAsOf=2025-06-30");
+        Assert.Equal(HttpStatusCode.OK, comparativeExcelResponse.StatusCode);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", comparativeExcelResponse.Content.Headers.ContentType?.MediaType);
+        Assert.True((await comparativeExcelResponse.Content.ReadAsByteArrayAsync()).AsSpan().StartsWith("PK"u8));
+        var comparativePdfResponse = await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements/comparative.pdf?currentPeriodStart=2026-01-01&currentAsOf=2026-06-30&comparisonPeriodStart=2025-01-01&comparisonAsOf=2025-06-30");
+        Assert.Equal(HttpStatusCode.OK, comparativePdfResponse.StatusCode);
+        Assert.Equal("application/pdf", comparativePdfResponse.Content.Headers.ContentType?.MediaType);
+        Assert.True((await comparativePdfResponse.Content.ReadAsByteArrayAsync()).AsSpan().StartsWith("%PDF"u8));
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements/comparative?currentPeriodStart=2026-01-01&currentAsOf=2026-06-30&comparisonPeriodStart=2026-01-01&comparisonAsOf=2026-06-30")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements/comparative.pdf?currentPeriodStart=2026-01-01&currentAsOf=2026-06-30&comparisonPeriodStart=2026-01-01&comparisonAsOf=2026-06-30")).StatusCode);
     }
 
     [Fact]

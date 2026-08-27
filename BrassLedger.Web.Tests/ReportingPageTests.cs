@@ -91,6 +91,10 @@ public sealed class ReportingPageTests : TestContext
         Assert.Contains("1 source contribution(s)", cut.Markup);
         var exportLink = cut.FindAll("a").Single(link => link.TextContent.Trim() == "Download statement package CSV");
         Assert.Contains("/consolidation-groups/70000000-0000-0000-0000-000000000001/statements.csv?periodStart=", exportLink.OuterHtml);
+        var excelLink = cut.FindAll("a").Single(link => link.TextContent.Trim() == "Download statement package Excel");
+        Assert.Contains("/statements.xlsx?periodStart=", excelLink.OuterHtml);
+        Assert.Equal("false", excelLink.GetAttribute("data-enhance-nav"));
+        Assert.Contains("/statements.pdf?periodStart=", cut.FindAll("a").Single(link => link.TextContent.Trim() == "Download statement package PDF").OuterHtml);
     }
 
     [Fact]
@@ -112,6 +116,10 @@ public sealed class ReportingPageTests : TestContext
         var exportLink = cut.FindAll("a").Single(link => link.TextContent.Trim() == "Download comparative statement CSV");
         Assert.Contains("/statements/comparative.csv?currentPeriodStart=", exportLink.OuterHtml);
         Assert.Contains("comparisonPeriodStart=2025-01-01&amp;comparisonAsOf=2025-08-31", exportLink.OuterHtml);
+        Assert.Contains("/statements/comparative.xlsx?currentPeriodStart=", cut.FindAll("a").Single(link => link.TextContent.Trim() == "Download comparative statement Excel").OuterHtml);
+        var pdfLink = cut.FindAll("a").Single(link => link.TextContent.Trim() == "Download comparative statement PDF");
+        Assert.Contains("/statements/comparative.pdf?currentPeriodStart=", pdfLink.OuterHtml);
+        Assert.Equal("false", pdfLink.GetAttribute("data-enhance-nav"));
     }
 }
 
@@ -179,6 +187,8 @@ internal sealed class StubConsolidationService : IConsolidationService
         return Task.FromResult<ConsolidatedStatementPackage?>(new(GroupId, "North America", "USD", periodStart, asOf, balance, income, changes, cash, new(10m, 0m, 10m, 0m, 10m, 0m, 10m, 0m, 10m, 0m, 10m, 10m, 0m, 0m, 0m), ["Cash flow pending classification"], false));
     }
     public Task<string?> ExportStatementPackageCsvAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default) => Task.FromResult<string?>("Record Type,Statement\n");
+    public Task<byte[]?> ExportStatementPackageExcelAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default) => Task.FromResult<byte[]?>([0x50, 0x4b]);
+    public Task<byte[]?> ExportStatementPackagePdfAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default) => Task.FromResult<byte[]?>("%PDF"u8.ToArray());
     public async Task<ConsolidatedComparativeStatementPackage?> GetComparativeStatementPackageAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default)
     {
         var current = await GetStatementPackageAsync(groupId, currentPeriodStart, currentAsOf, cancellationToken);
@@ -197,4 +207,6 @@ internal sealed class StubConsolidationService : IConsolidationService
         return new(GroupId, "North America", "USD", current, comparison, statements, ["Current period: Cash flow pending classification"], false);
     }
     public Task<string?> ExportComparativeStatementPackageCsvAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default) => Task.FromResult<string?>("Record Type,Statement,Current Amount,Comparison Amount,Variance\n");
+    public Task<byte[]?> ExportComparativeStatementPackageExcelAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default) => Task.FromResult<byte[]?>([0x50, 0x4b]);
+    public Task<byte[]?> ExportComparativeStatementPackagePdfAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default) => Task.FromResult<byte[]?>("%PDF"u8.ToArray());
 }

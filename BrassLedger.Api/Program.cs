@@ -1002,6 +1002,16 @@ api.MapGet("/consolidation-groups/{groupId:guid}/statements.csv", async (Guid gr
     var csv = await service.ExportStatementPackageCsvAsync(groupId, periodStart, asOf, cancellationToken);
     return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"consolidated-statements-{groupId:N}-{asOf:yyyyMMdd}.csv");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/consolidation-groups/{groupId:guid}/statements.xlsx", async (Guid groupId, DateOnly periodStart, DateOnly asOf, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.ExportStatementPackageExcelAsync(groupId, periodStart, asOf, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"consolidated-statements-{groupId:N}-{asOf:yyyyMMdd}.xlsx");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/consolidation-groups/{groupId:guid}/statements.pdf", async (Guid groupId, DateOnly periodStart, DateOnly asOf, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.ExportStatementPackagePdfAsync(groupId, periodStart, asOf, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file, "application/pdf", $"consolidated-statements-{groupId:N}-{asOf:yyyyMMdd}.pdf");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative", async (Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, IConsolidationService service, CancellationToken cancellationToken) =>
 {
     var package = await service.GetComparativeStatementPackageAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
@@ -1011,6 +1021,16 @@ api.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative.csv", as
 {
     var csv = await service.ExportComparativeStatementPackageCsvAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
     return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"consolidated-comparative-{groupId:N}-{currentAsOf:yyyyMMdd}.csv");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative.xlsx", async (Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.ExportComparativeStatementPackageExcelAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"consolidated-comparative-{groupId:N}-{currentAsOf:yyyyMMdd}.xlsx");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative.pdf", async (Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.ExportComparativeStatementPackagePdfAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file, "application/pdf", $"consolidated-comparative-{groupId:N}-{currentAsOf:yyyyMMdd}.pdf");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapPut("/accounting-periods", async (SaveAccountingPeriodRequest request, IAccountingPeriodService service, CancellationToken cancellationToken) =>
 {

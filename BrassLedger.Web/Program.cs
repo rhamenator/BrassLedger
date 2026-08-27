@@ -126,10 +126,34 @@ app.MapGet("/consolidation-groups/{groupId:guid}/statements.csv", async (Guid gr
     return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"consolidated-statements-{groupId:N}-{asOf:yyyyMMdd}.csv");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 
+app.MapGet("/consolidation-groups/{groupId:guid}/statements.xlsx", async (Guid groupId, DateOnly periodStart, DateOnly asOf, BrassLedger.Application.Accounting.IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.ExportStatementPackageExcelAsync(groupId, periodStart, asOf, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"consolidated-statements-{groupId:N}-{asOf:yyyyMMdd}.xlsx");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+
+app.MapGet("/consolidation-groups/{groupId:guid}/statements.pdf", async (Guid groupId, DateOnly periodStart, DateOnly asOf, BrassLedger.Application.Accounting.IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.ExportStatementPackagePdfAsync(groupId, periodStart, asOf, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file, "application/pdf", $"consolidated-statements-{groupId:N}-{asOf:yyyyMMdd}.pdf");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+
 app.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative.csv", async (Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, BrassLedger.Application.Accounting.IConsolidationService service, CancellationToken cancellationToken) =>
 {
     var csv = await service.ExportComparativeStatementPackageCsvAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
     return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"consolidated-comparative-{groupId:N}-{currentAsOf:yyyyMMdd}.csv");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+
+app.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative.xlsx", async (Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, BrassLedger.Application.Accounting.IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.ExportComparativeStatementPackageExcelAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"consolidated-comparative-{groupId:N}-{currentAsOf:yyyyMMdd}.xlsx");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+
+app.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative.pdf", async (Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, BrassLedger.Application.Accounting.IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var file = await service.ExportComparativeStatementPackagePdfAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+    return file is null ? Results.NotFound() : Results.File(file, "application/pdf", $"consolidated-comparative-{groupId:N}-{currentAsOf:yyyyMMdd}.pdf");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 
 app.MapGet("/payroll/reports/{payrollRunId:guid}/register.csv", async (Guid payrollRunId, BrassLedger.Application.Accounting.IPayrollReportingService service, CancellationToken cancellationToken) =>

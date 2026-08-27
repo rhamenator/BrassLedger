@@ -26,8 +26,12 @@ public interface IConsolidationService
     Task<ConsolidatedBalanceReport?> GetBalanceReportAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default);
     Task<ConsolidatedStatementPackage?> GetStatementPackageAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default);
     Task<string?> ExportStatementPackageCsvAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default);
+    Task<byte[]?> ExportStatementPackageExcelAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default);
+    Task<byte[]?> ExportStatementPackagePdfAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default);
     Task<ConsolidatedComparativeStatementPackage?> GetComparativeStatementPackageAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default);
     Task<string?> ExportComparativeStatementPackageCsvAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default);
+    Task<byte[]?> ExportComparativeStatementPackageExcelAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default);
+    Task<byte[]?> ExportComparativeStatementPackagePdfAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default);
 }
 
 public sealed record SaveExchangeRateRequest(string BaseCurrency, string QuoteCurrency, decimal Rate, DateOnly EffectiveOn, string Source, Guid? Id = null, string RateType = "Closing", DateOnly? PeriodStartOn = null, string SourceReference = "", DateOnly? RetrievedOn = null, bool IsActive = true, string ConcurrencyToken = "");

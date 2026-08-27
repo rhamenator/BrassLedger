@@ -5,12 +5,14 @@ using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Accounting;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
+using ClosedXML.Excel;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using PdfSharp.Pdf.IO;
 
 namespace BrassLedger.Infrastructure.Tests;
 
@@ -813,6 +815,22 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("\"Contribution\"", statementCsv, StringComparison.Ordinal);
         Assert.Contains("\"Reconciliation\"", statementCsv, StringComparison.Ordinal);
         Assert.Contains("NCI-US-DIST-1", statementCsv, StringComparison.Ordinal);
+        var statementExcel = await consolidation.ExportStatementPackageExcelAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementExcel);
+        using (var workbook = new XLWorkbook(new MemoryStream(statementExcel!)))
+        {
+            Assert.Equal(6, workbook.Worksheets.Count);
+            Assert.Contains("INCOMPLETE", workbook.Worksheet("Summary").Cell("A3").GetString(), StringComparison.Ordinal);
+            Assert.Equal("Section code", workbook.Worksheet("Balance sheet").Cell("A6").GetString());
+            Assert.Contains("NCI-US-DIST-1", workbook.Worksheet("Source detail").CellsUsed().Select(cell => cell.GetString()));
+        }
+        var statementPdf = await consolidation.ExportStatementPackagePdfAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementPdf);
+        Assert.True(statementPdf!.AsSpan().StartsWith("%PDF"u8));
+        using (var document = PdfReader.Open(new MemoryStream(statementPdf), PdfDocumentOpenMode.Import))
+        {
+            Assert.True(document.PageCount >= 6);
+            Assert.Contains("consolidated statements", document.Info.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Incomplete", document.Info.Subject, StringComparison.OrdinalIgnoreCase);
+        }
         var comparisonPeriodStart = adjustmentPeriodStart.AddYears(-1);
         var comparisonAsOf = adjustmentAsOf.AddYears(-1);
         var comparativeStatements = await consolidation.GetComparativeStatementPackageAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, comparisonPeriodStart, comparisonAsOf); Assert.NotNull(comparativeStatements);
@@ -828,6 +846,21 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("Current Amount,Comparison Section Code,Comparison Section,Comparison Caption,Comparison Amount,Variance", comparativeCsv, StringComparison.Ordinal);
         Assert.Contains("\"Reconciliation\"", comparativeCsv, StringComparison.Ordinal);
         Assert.Contains(comparisonAsOf.ToString("yyyy-MM-dd"), comparativeCsv, StringComparison.Ordinal);
+        var comparativeExcel = await consolidation.ExportComparativeStatementPackageExcelAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, comparisonPeriodStart, comparisonAsOf); Assert.NotNull(comparativeExcel);
+        using (var workbook = new XLWorkbook(new MemoryStream(comparativeExcel!)))
+        {
+            Assert.Equal(7, workbook.Worksheets.Count);
+            Assert.Equal("Current minus comparison", workbook.Worksheet("Summary").Cell("B7").GetString());
+            Assert.Equal("Variance", workbook.Worksheet("Balance sheet").Cell("I7").GetString());
+            Assert.Equal(comparativeAsset.Variance, workbook.Worksheet("Balance sheet").RowsUsed().Single(row => row.Cell(1).GetString() == comparativeAsset.AccountNumber).Cell(9).GetValue<decimal>());
+        }
+        var comparativePdf = await consolidation.ExportComparativeStatementPackagePdfAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, comparisonPeriodStart, comparisonAsOf); Assert.NotNull(comparativePdf);
+        Assert.True(comparativePdf!.AsSpan().StartsWith("%PDF"u8));
+        using (var document = PdfReader.Open(new MemoryStream(comparativePdf), PdfDocumentOpenMode.Import))
+        {
+            Assert.True(document.PageCount >= 7);
+            Assert.Contains("comparative consolidated statements", document.Info.Title, StringComparison.OrdinalIgnoreCase);
+        }
         Assert.Null(await consolidation.GetComparativeStatementPackageAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, adjustmentPeriodStart, adjustmentAsOf));
         var stalePost = await consolidation.PostAdjustmentAsync(new(group.Id.Value, draft.Id, draft.ConcurrencyToken)); Assert.False(stalePost.Succeeded); Assert.Contains("changed", stalePost.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var approvedSnapshot = (await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value))!.Adjustments.Single(item => item.Id == draft.Id);

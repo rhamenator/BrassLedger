@@ -1,0 +1,556 @@
+using ClosedXML.Excel;
+using PdfSharp;
+using PdfSharp.Drawing;
+using PdfSharp.Fonts;
+using PdfSharp.Pdf;
+using PdfSharp.WPFonts;
+using BrassLedger.Application.Accounting;
+
+namespace BrassLedger.Infrastructure.Accounting;
+
+public sealed partial class ConsolidationService
+{
+    public async Task<byte[]?> ExportStatementPackageExcelAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default)
+    {
+        var package = await GetStatementPackageAsync(groupId, periodStart, asOf, cancellationToken);
+        return package is null ? null : ConsolidatedStatementDocumentExporter.CreateExcel(package);
+    }
+
+    public async Task<byte[]?> ExportStatementPackagePdfAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default)
+    {
+        var package = await GetStatementPackageAsync(groupId, periodStart, asOf, cancellationToken);
+        return package is null ? null : ConsolidatedStatementDocumentExporter.CreatePdf(package);
+    }
+
+    public async Task<byte[]?> ExportComparativeStatementPackageExcelAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf,
+        DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default)
+    {
+        var package = await GetComparativeStatementPackageAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+        return package is null ? null : ConsolidatedStatementDocumentExporter.CreateComparativeExcel(package);
+    }
+
+    public async Task<byte[]?> ExportComparativeStatementPackagePdfAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf,
+        DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default)
+    {
+        var package = await GetComparativeStatementPackageAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+        return package is null ? null : ConsolidatedStatementDocumentExporter.CreateComparativePdf(package);
+    }
+}
+
+internal static class ConsolidatedStatementDocumentExporter
+{
+    private const string MoneyFormat = "#,##0.00;[Red](#,##0.00)";
+    private static readonly XLColor Navy = XLColor.FromHtml("#17324D");
+    private static readonly XLColor Brass = XLColor.FromHtml("#B88746");
+    private static readonly XLColor PaleBrass = XLColor.FromHtml("#F4EBDD");
+    private static readonly XLColor Warning = XLColor.FromHtml("#FDE8E8");
+
+    public static byte[] CreateExcel(ConsolidatedStatementPackage package)
+    {
+        using var workbook = NewWorkbook($"{package.GroupName} consolidated statements", package.IsComplete);
+        AddStatementSummary(workbook, package);
+        foreach (var statement in PackageStatements(package)) AddStatementWorksheet(workbook, package, statement);
+        AddSourceWorksheet(workbook, "Source detail", package, "Current");
+        return SaveWorkbook(workbook);
+    }
+
+    public static byte[] CreateComparativeExcel(ConsolidatedComparativeStatementPackage package)
+    {
+        using var workbook = NewWorkbook($"{package.GroupName} comparative consolidated statements", package.IsComplete);
+        AddComparativeSummary(workbook, package);
+        foreach (var statement in package.Statements) AddComparativeWorksheet(workbook, package, statement);
+        AddSourceWorksheet(workbook, "Current sources", package.Current, "Current");
+        AddSourceWorksheet(workbook, "Comparison sources", package.Comparison, "Comparison");
+        return SaveWorkbook(workbook);
+    }
+
+    public static byte[] CreatePdf(ConsolidatedStatementPackage package)
+    {
+        var report = new PdfReport($"{package.GroupName} consolidated statements", package.ReportingCurrency, package.IsComplete,
+            $"Period {package.PeriodStart:yyyy-MM-dd} to {package.AsOf:yyyy-MM-dd}", true);
+        report.AddSummary(package.Warnings, StatementControls(package));
+        foreach (var statement in PackageStatements(package)) report.AddStatement(statement);
+        report.AddSources(package, "Source detail");
+        return report.Save();
+    }
+
+    public static byte[] CreateComparativePdf(ConsolidatedComparativeStatementPackage package)
+    {
+        var period = $"Current {package.Current.PeriodStart:yyyy-MM-dd} to {package.Current.AsOf:yyyy-MM-dd} | Comparison {package.Comparison.PeriodStart:yyyy-MM-dd} to {package.Comparison.AsOf:yyyy-MM-dd}";
+        var report = new PdfReport($"{package.GroupName} comparative consolidated statements", package.ReportingCurrency, package.IsComplete, period, true);
+        report.AddComparativeSummary(package.Warnings, ComparativeControlsForDocuments(package));
+        foreach (var statement in package.Statements) report.AddComparativeStatement(statement, package.Current.AsOf, package.Comparison.AsOf);
+        report.AddSources(package.Current, "Current-period source detail");
+        report.AddSources(package.Comparison, "Comparison-period source detail");
+        return report.Save();
+    }
+
+    private static XLWorkbook NewWorkbook(string title, bool isComplete)
+    {
+        var workbook = new XLWorkbook();
+        workbook.Properties.Title = title;
+        workbook.Properties.Subject = isComplete ? "Complete controlled consolidated statement package" : "Incomplete controlled consolidated statement package";
+        workbook.Properties.Author = "BrassLedger";
+        workbook.Properties.Company = "BrassLedger";
+        return workbook;
+    }
+
+    private static void AddStatementSummary(XLWorkbook workbook, ConsolidatedStatementPackage package)
+    {
+        var sheet = workbook.Worksheets.Add("Summary");
+        WriteTitle(sheet, package.GroupName, "Consolidated statement package", package.ReportingCurrency, package.IsComplete);
+        WriteLabelValue(sheet, 5, "Period", $"{package.PeriodStart:yyyy-MM-dd} to {package.AsOf:yyyy-MM-dd}");
+        var row = 7;
+        row = WriteWarnings(sheet, row, package.Warnings);
+        row++;
+        WriteTableHeader(sheet, row++, ["Reconciliation control", "Amount"]);
+        foreach (var control in StatementControls(package))
+        {
+            sheet.Cell(row, 1).Value = control.Name;
+            sheet.Cell(row, 2).Value = control.Amount;
+            sheet.Cell(row, 2).Style.NumberFormat.Format = MoneyFormat;
+            row++;
+        }
+        FinishSheet(sheet, 2, row - 1, [42d, 20d]);
+    }
+
+    private static void AddComparativeSummary(XLWorkbook workbook, ConsolidatedComparativeStatementPackage package)
+    {
+        var sheet = workbook.Worksheets.Add("Summary");
+        WriteTitle(sheet, package.GroupName, "Comparative consolidated statement package", package.ReportingCurrency, package.IsComplete);
+        WriteLabelValue(sheet, 5, "Current period", $"{package.Current.PeriodStart:yyyy-MM-dd} to {package.Current.AsOf:yyyy-MM-dd}");
+        WriteLabelValue(sheet, 6, "Comparison period", $"{package.Comparison.PeriodStart:yyyy-MM-dd} to {package.Comparison.AsOf:yyyy-MM-dd}");
+        WriteLabelValue(sheet, 7, "Variance convention", "Current minus comparison");
+        var row = 9;
+        row = WriteWarnings(sheet, row, package.Warnings);
+        row++;
+        WriteTableHeader(sheet, row++, ["Reconciliation control", "Current", "Comparison", "Variance"]);
+        foreach (var control in ComparativeControlsForDocuments(package))
+        {
+            sheet.Cell(row, 1).Value = control.Name;
+            sheet.Cell(row, 2).Value = control.Current;
+            sheet.Cell(row, 3).Value = control.Comparison;
+            sheet.Cell(row, 4).Value = control.Variance;
+            sheet.Range(row, 2, row, 4).Style.NumberFormat.Format = MoneyFormat;
+            row++;
+        }
+        FinishSheet(sheet, 4, row - 1, [42d, 18d, 18d, 18d]);
+    }
+
+    private static void AddStatementWorksheet(XLWorkbook workbook, ConsolidatedStatementPackage package, ConsolidatedFinancialStatement statement)
+    {
+        var sheet = workbook.Worksheets.Add(StatementSheetName(statement.Code));
+        WriteTitle(sheet, statement.Name, $"{package.PeriodStart:yyyy-MM-dd} to {package.AsOf:yyyy-MM-dd}", package.ReportingCurrency, package.IsComplete);
+        var row = 6;
+        WriteTableHeader(sheet, row++, ["Section code", "Section", "Account", "Line caption", "Type", "Amount", "Sources"]);
+        foreach (var section in statement.Sections)
+        {
+            foreach (var account in section.Accounts)
+            {
+                sheet.Cell(row, 1).Value = section.Code;
+                sheet.Cell(row, 2).Value = section.Name;
+                sheet.Cell(row, 3).Value = account.AccountNumber;
+                sheet.Cell(row, 4).Value = account.AccountName;
+                sheet.Cell(row, 5).Value = account.AccountType;
+                sheet.Cell(row, 6).Value = account.Amount;
+                sheet.Cell(row, 6).Style.NumberFormat.Format = MoneyFormat;
+                sheet.Cell(row, 7).Value = account.Contributions.Count;
+                row++;
+            }
+            sheet.Cell(row, 5).Value = $"{section.Name} total";
+            sheet.Cell(row, 6).Value = section.Total;
+            StyleTotal(sheet.Range(row, 5, row, 6));
+            row++;
+        }
+        sheet.Cell(row, 5).Value = "Statement total";
+        sheet.Cell(row, 6).Value = statement.Total;
+        StyleGrandTotal(sheet.Range(row, 5, row, 6));
+        FinishSheet(sheet, 7, row, [18d, 24d, 16d, 38d, 16d, 18d, 12d], 6);
+    }
+
+    private static void AddComparativeWorksheet(XLWorkbook workbook, ConsolidatedComparativeStatementPackage package, ConsolidatedComparativeFinancialStatement statement)
+    {
+        var sheet = workbook.Worksheets.Add(StatementSheetName(statement.Code));
+        WriteTitle(sheet, statement.Name, "Current minus comparison variance", package.ReportingCurrency, package.IsComplete);
+        WriteLabelValue(sheet, 5, "Periods", $"{package.Current.AsOf:yyyy-MM-dd} compared with {package.Comparison.AsOf:yyyy-MM-dd}");
+        var row = 7;
+        WriteTableHeader(sheet, row++, ["Account", "Type", "Current section code", "Current section / caption", "Current", "Comparison section code", "Comparison section / caption", "Comparison", "Variance"]);
+        foreach (var line in statement.Lines)
+        {
+            sheet.Cell(row, 1).Value = line.AccountNumber;
+            sheet.Cell(row, 2).Value = line.AccountType;
+            sheet.Cell(row, 3).Value = line.CurrentSectionCode;
+            sheet.Cell(row, 4).Value = JoinPresentation(line.CurrentSectionName, line.CurrentLineCaption);
+            sheet.Cell(row, 5).Value = line.CurrentAmount;
+            sheet.Cell(row, 6).Value = line.ComparisonSectionCode;
+            sheet.Cell(row, 7).Value = JoinPresentation(line.ComparisonSectionName, line.ComparisonLineCaption);
+            sheet.Cell(row, 8).Value = line.ComparisonAmount;
+            sheet.Cell(row, 9).Value = line.Variance;
+            sheet.Range(row, 5, row, 9).Style.NumberFormat.Format = MoneyFormat;
+            row++;
+        }
+        sheet.Cell(row, 4).Value = "Statement total";
+        sheet.Cell(row, 5).Value = statement.CurrentTotal;
+        sheet.Cell(row, 8).Value = statement.ComparisonTotal;
+        sheet.Cell(row, 9).Value = statement.Variance;
+        StyleGrandTotal(sheet.Range(row, 4, row, 9));
+        FinishSheet(sheet, 9, row, [16d, 14d, 22d, 40d, 18d, 22d, 40d, 18d, 18d], 7);
+    }
+
+    private static void AddSourceWorksheet(XLWorkbook workbook, string name, ConsolidatedStatementPackage package, string periodLabel)
+    {
+        var sheet = workbook.Worksheets.Add(name);
+        WriteTitle(sheet, $"{periodLabel}-period source detail", $"{package.PeriodStart:yyyy-MM-dd} to {package.AsOf:yyyy-MM-dd}", package.ReportingCurrency, package.IsComplete);
+        var row = 6;
+        WriteTableHeader(sheet, row++, ["Statement", "Section", "Reporting account", "Line caption", "Company", "Source account", "Source kind", "Reference", "Translation", "Amount"]);
+        foreach (var statement in PackageStatements(package))
+        foreach (var section in statement.Sections)
+        foreach (var account in section.Accounts)
+        foreach (var source in account.Contributions)
+        {
+            var values = new[] { statement.Name, section.Name, account.AccountNumber, account.AccountName, source.CompanyName, $"{source.SourceAccountNumber} — {source.SourceAccountName}", source.SourceKind, source.Reference, source.TranslationMethod };
+            for (var column = 0; column < values.Length; column++) sheet.Cell(row, column + 1).Value = values[column];
+            sheet.Cell(row, 10).Value = source.ConvertedBalance;
+            sheet.Cell(row, 10).Style.NumberFormat.Format = MoneyFormat;
+            row++;
+        }
+        if (row == 7) { sheet.Cell(row, 1).Value = "No source contributions were retained for this package."; row++; }
+        FinishSheet(sheet, 10, row - 1, [34d, 24d, 18d, 34d, 28d, 34d, 18d, 28d, 16d, 18d], 6);
+    }
+
+    private static void WriteTitle(IXLWorksheet sheet, string title, string subtitle, string currency, bool isComplete)
+    {
+        sheet.Cell(1, 1).Value = title;
+        sheet.Range(1, 1, 1, 10).Merge().Style.Font.SetBold().Font.SetFontSize(18).Font.SetFontColor(XLColor.White).Fill.SetBackgroundColor(Navy);
+        sheet.Cell(2, 1).Value = subtitle;
+        sheet.Range(2, 1, 2, 10).Merge().Style.Font.SetItalic().Font.SetFontColor(XLColor.White).Fill.SetBackgroundColor(Navy);
+        sheet.Cell(3, 1).Value = isComplete ? "COMPLETE" : "INCOMPLETE — DO NOT USE EXTERNALLY UNTIL EVERY WARNING IS RESOLVED";
+        sheet.Range(3, 1, 3, 10).Merge().Style.Font.SetBold().Fill.SetBackgroundColor(isComplete ? PaleBrass : Warning);
+        WriteLabelValue(sheet, 4, "Reporting currency", currency);
+    }
+
+    private static void WriteLabelValue(IXLWorksheet sheet, int row, string label, string value)
+    {
+        sheet.Cell(row, 1).Value = label;
+        sheet.Cell(row, 1).Style.Font.SetBold();
+        sheet.Cell(row, 2).Value = value;
+    }
+
+    private static int WriteWarnings(IXLWorksheet sheet, int row, IReadOnlyList<string> warnings)
+    {
+        sheet.Cell(row, 1).Value = "Warnings";
+        sheet.Cell(row, 1).Style.Font.SetBold();
+        row++;
+        if (warnings.Count == 0) { sheet.Cell(row++, 1).Value = "None"; return row; }
+        foreach (var warning in warnings)
+        {
+            sheet.Cell(row, 1).Value = warning;
+            sheet.Range(row, 1, row, 4).Merge().Style.Fill.SetBackgroundColor(Warning).Alignment.SetWrapText();
+            row++;
+        }
+        return row;
+    }
+
+    private static void WriteTableHeader(IXLWorksheet sheet, int row, IReadOnlyList<string> headings)
+    {
+        for (var column = 0; column < headings.Count; column++) sheet.Cell(row, column + 1).Value = headings[column];
+        sheet.Range(row, 1, row, headings.Count).Style.Font.SetBold().Font.SetFontColor(XLColor.White).Fill.SetBackgroundColor(Navy).Alignment.SetWrapText();
+    }
+
+    private static void FinishSheet(IXLWorksheet sheet, int columnCount, int lastRow, IReadOnlyList<double> widths, int freezeRows = 1)
+    {
+        for (var column = 1; column <= widths.Count; column++) sheet.Column(column).Width = widths[column - 1];
+        sheet.SheetView.FreezeRows(freezeRows);
+        sheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+        sheet.PageSetup.PagesWide = 1;
+        sheet.PageSetup.Margins.SetLeft(0.25).SetRight(0.25).SetTop(0.5).SetBottom(0.5);
+        sheet.Range(1, 1, Math.Max(lastRow, 1), columnCount).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
+        sheet.Rows(1, Math.Max(lastRow, 1)).AdjustToContents();
+    }
+
+    private static void StyleTotal(IXLRange range) => range.Style.Font.SetBold().Fill.SetBackgroundColor(PaleBrass).NumberFormat.SetFormat(MoneyFormat);
+    private static void StyleGrandTotal(IXLRange range) => range.Style.Font.SetBold().Font.SetFontColor(XLColor.White).Fill.SetBackgroundColor(Brass).NumberFormat.SetFormat(MoneyFormat);
+    private static byte[] SaveWorkbook(XLWorkbook workbook) { using var stream = new MemoryStream(); workbook.SaveAs(stream); return stream.ToArray(); }
+    private static string JoinPresentation(string section, string caption) => string.IsNullOrWhiteSpace(section) ? "Not present" : $"{section} — {caption}";
+    private static string StatementSheetName(string code) => code switch { "BALANCE-SHEET" => "Balance sheet", "INCOME-STATEMENT" => "Income statement", "EQUITY-STATEMENT" => "Changes in equity", "CASH-FLOW" => "Cash flows", _ => code[..Math.Min(code.Length, 31)] };
+
+    private static IEnumerable<ConsolidatedFinancialStatement> PackageStatements(ConsolidatedStatementPackage package) =>
+        [package.BalanceSheet, package.IncomeStatement, package.EquityStatement, package.CashFlowStatement];
+
+    private static IEnumerable<(string Name, decimal Amount)> StatementControls(ConsolidatedStatementPackage package)
+    {
+        yield return ("Balance sheet difference", package.Reconciliation.BalanceSheetDifference);
+        yield return ("Equity statement difference", package.Reconciliation.EquityStatementDifference);
+        yield return ("Net cash change", package.Reconciliation.NetCashChange);
+        yield return ("Cash-flow difference", package.Reconciliation.CashFlowDifference);
+    }
+
+    private static IEnumerable<(string Name, decimal Current, decimal Comparison, decimal Variance)> ComparativeControlsForDocuments(ConsolidatedComparativeStatementPackage package)
+    {
+        yield return ComparativeControl("Balance sheet difference", package.Current.Reconciliation.BalanceSheetDifference, package.Comparison.Reconciliation.BalanceSheetDifference);
+        yield return ComparativeControl("Equity statement difference", package.Current.Reconciliation.EquityStatementDifference, package.Comparison.Reconciliation.EquityStatementDifference);
+        yield return ComparativeControl("Net cash change", package.Current.Reconciliation.NetCashChange, package.Comparison.Reconciliation.NetCashChange);
+        yield return ComparativeControl("Cash-flow difference", package.Current.Reconciliation.CashFlowDifference, package.Comparison.Reconciliation.CashFlowDifference);
+    }
+
+    private static (string Name, decimal Current, decimal Comparison, decimal Variance) ComparativeControl(string name, decimal current, decimal comparison) =>
+        (name, current, comparison, decimal.Round(current - comparison, 2, MidpointRounding.AwayFromZero));
+
+    private sealed class PdfReport
+    {
+        private const double Margin = 36;
+        private readonly PdfDocument _document = new();
+        private readonly string _title;
+        private readonly string _currency;
+        private readonly string _period;
+        private readonly bool _complete;
+        private readonly bool _landscape;
+        private readonly XFont _regular;
+        private readonly XFont _bold;
+        private readonly XFont _small;
+        private PdfPage? _page;
+        private XGraphics? _graphics;
+        private double _y;
+
+        public PdfReport(string title, string currency, bool complete, string period, bool landscape)
+        {
+            EnsurePdfFontResolver();
+            _title = title; _currency = currency; _complete = complete; _period = period; _landscape = landscape;
+            var options = new XPdfFontOptions(PdfFontEncoding.Unicode);
+            _regular = new XFont("Segoe WP", 8, XFontStyleEx.Regular, options);
+            _bold = new XFont("Segoe WP", 8, XFontStyleEx.Bold, options);
+            _small = new XFont("Segoe WP", 7, XFontStyleEx.Regular, options);
+            _document.Info.Title = title;
+            _document.Info.Subject = complete ? "Complete controlled consolidated statement package" : "Incomplete controlled consolidated statement package";
+            _document.Info.Author = "BrassLedger";
+            _document.Info.Creator = "BrassLedger controlled reporting";
+        }
+
+        public void AddSummary(IReadOnlyList<string> warnings, IEnumerable<(string Name, decimal Amount)> controls)
+        {
+            NewPage("Package summary");
+            DrawStatus();
+            DrawHeading("Warnings");
+            if (warnings.Count == 0) DrawParagraph("None"); else foreach (var warning in warnings) DrawParagraph(warning, true);
+            DrawHeading("Reconciliation controls");
+            DrawRows(["Control", $"Amount ({_currency})"], [0.72, 0.28], controls.Select(control => new[] { control.Name, Money(control.Amount) }));
+        }
+
+        public void AddComparativeSummary(IReadOnlyList<string> warnings, IEnumerable<(string Name, decimal Current, decimal Comparison, decimal Variance)> controls)
+        {
+            NewPage("Package summary");
+            DrawStatus();
+            DrawParagraph("Variance convention: current minus comparison.");
+            DrawHeading("Warnings");
+            if (warnings.Count == 0) DrawParagraph("None"); else foreach (var warning in warnings) DrawParagraph(warning, true);
+            DrawHeading("Reconciliation controls");
+            DrawRows(["Control", "Current", "Comparison", "Variance"], [0.52, 0.16, 0.16, 0.16], controls.Select(control => new[] { control.Name, Money(control.Current), Money(control.Comparison), Money(control.Variance) }));
+        }
+
+        public void AddStatement(ConsolidatedFinancialStatement statement)
+        {
+            NewPage(statement.Name);
+            foreach (var section in statement.Sections)
+            {
+                DrawSection($"{section.Code} — {section.Name}");
+                DrawRows(["Account", "Line caption", "Type", $"Amount ({_currency})"], [0.18, 0.49, 0.15, 0.18],
+                    section.Accounts.Select(account => new[] { account.AccountNumber, account.AccountName, account.AccountType, Money(account.Amount) }));
+                DrawTotal($"{section.Name} total", section.Total);
+            }
+            DrawTotal("Statement total", statement.Total, true);
+            DrawParagraph($"Reconciliation difference: {Money(statement.ReconciliationDifference)} {_currency}");
+        }
+
+        public void AddComparativeStatement(ConsolidatedComparativeFinancialStatement statement, DateOnly currentAsOf, DateOnly comparisonAsOf)
+        {
+            NewPage(statement.Name);
+            DrawRows(["Account", "Current presentation", currentAsOf.ToString("yyyy-MM-dd"), "Comparison presentation", comparisonAsOf.ToString("yyyy-MM-dd"), "Variance"],
+                [0.10, 0.24, 0.14, 0.24, 0.14, 0.14], statement.Lines.Select(line => new[]
+                {
+                    $"{line.AccountNumber} ({line.AccountType})", JoinPresentation(line.CurrentSectionCode, line.CurrentSectionName, line.CurrentLineCaption), Money(line.CurrentAmount),
+                    JoinPresentation(line.ComparisonSectionCode, line.ComparisonSectionName, line.ComparisonLineCaption), Money(line.ComparisonAmount), Money(line.Variance)
+                }));
+            DrawComparativeTotal(statement.CurrentTotal, statement.ComparisonTotal, statement.Variance);
+        }
+
+        public void AddSources(ConsolidatedStatementPackage package, string heading)
+        {
+            NewPage(heading);
+            var rows = PackageStatements(package).SelectMany(statement => statement.Sections.SelectMany(section => section.Accounts.SelectMany(account => account.Contributions.Select(source => new[]
+            {
+                statement.Code, $"{section.Code} — {section.Name}", account.AccountNumber, account.AccountName, source.CompanyName,
+                $"{source.SourceAccountNumber} — {source.SourceAccountName}", source.SourceKind, source.Reference, source.TranslationMethod, Money(source.ConvertedBalance)
+            }))));
+            DrawRows(["Statement", "Section", "Report acct", "Line caption", "Company", "Source account", "Kind", "Reference", "Translation", "Amount"],
+                [0.08, 0.10, 0.08, 0.14, 0.12, 0.16, 0.08, 0.10, 0.07, 0.07], rows);
+        }
+
+        public byte[] Save()
+        {
+            _graphics?.Dispose();
+            using var stream = new MemoryStream();
+            _document.Save(stream);
+            return stream.ToArray();
+        }
+
+        private void NewPage(string heading)
+        {
+            _graphics?.Dispose();
+            _page = _document.AddPage();
+            _page.Size = PageSize.Letter;
+            _page.Orientation = _landscape ? PageOrientation.Landscape : PageOrientation.Portrait;
+            _graphics = XGraphics.FromPdfPage(_page);
+            _y = Margin;
+            _graphics.DrawString(_title, new XFont("Segoe WP", 13, XFontStyleEx.Bold, new XPdfFontOptions(PdfFontEncoding.Unicode)), XBrushes.DarkSlateGray, new XRect(Margin, _y, ContentWidth, 18), XStringFormats.TopLeft);
+            _y += 20;
+            _graphics.DrawString(_period, _small, XBrushes.DarkSlateGray, new XRect(Margin, _y, ContentWidth, 13), XStringFormats.TopLeft);
+            _y += 16;
+            _graphics.DrawString(heading, new XFont("Segoe WP", 11, XFontStyleEx.Bold, new XPdfFontOptions(PdfFontEncoding.Unicode)), XBrushes.Black, new XRect(Margin, _y, ContentWidth, 16), XStringFormats.TopLeft);
+            _y += 22;
+            _graphics.DrawString($"Page {_document.PageCount} | {_currency} | {(_complete ? "COMPLETE" : "INCOMPLETE")}", _small, XBrushes.Gray,
+                new XRect(Margin, PageHeight - 24, ContentWidth, 10), XStringFormats.TopRight);
+        }
+
+        private void EnsureSpace(double height, string continuationHeading = "Continued") { if (_y + height > PageHeight - 34) NewPage(continuationHeading); }
+        private double PageHeight => _page!.Height.Point;
+        private double ContentWidth => _page!.Width.Point - 2 * Margin;
+
+        private void DrawStatus()
+        {
+            EnsureSpace(30);
+            var text = _complete ? "COMPLETE" : "INCOMPLETE — DO NOT USE EXTERNALLY UNTIL EVERY WARNING IS RESOLVED";
+            _graphics!.DrawRectangle(new XSolidBrush(_complete ? XColor.FromArgb(244, 235, 221) : XColor.FromArgb(253, 232, 232)), Margin, _y, ContentWidth, 24);
+            _graphics.DrawString(text, _bold, XBrushes.Black, new XRect(Margin + 6, _y + 6, ContentWidth - 12, 12), XStringFormats.TopLeft);
+            _y += 32;
+        }
+
+        private void DrawHeading(string text)
+        {
+            EnsureSpace(24, text);
+            _graphics!.DrawString(text, _bold, XBrushes.Black, new XRect(Margin, _y, ContentWidth, 14), XStringFormats.TopLeft);
+            _y += 18;
+        }
+
+        private void DrawSection(string text)
+        {
+            EnsureSpace(24, text);
+            _graphics!.DrawRectangle(new XSolidBrush(XColor.FromArgb(244, 235, 221)), Margin, _y, ContentWidth, 18);
+            _graphics.DrawString(text, _bold, XBrushes.Black, new XRect(Margin + 4, _y + 4, ContentWidth - 8, 11), XStringFormats.TopLeft);
+            _y += 22;
+        }
+
+        private void DrawParagraph(string text, bool warning = false)
+        {
+            var lines = Wrap(text, ContentWidth - 8, _small);
+            var height = Math.Max(22, lines.Count * 10 + 10);
+            EnsureSpace(height + 3);
+            if (warning) _graphics!.DrawRectangle(new XSolidBrush(XColor.FromArgb(253, 232, 232)), Margin, _y, ContentWidth, height);
+            for (var index = 0; index < lines.Count; index++)
+                _graphics!.DrawString(lines[index], _small, XBrushes.Black, new XRect(Margin + 4, _y + 5 + index * 10, ContentWidth - 8, 10), XStringFormats.TopLeft);
+            _y += height + 3;
+        }
+
+        private void DrawRows(IReadOnlyList<string> headings, IReadOnlyList<double> proportions, IEnumerable<string[]> rows)
+        {
+            EnsureSpace(TableRowHeight(headings, proportions, _bold));
+            DrawTableRow(headings, proportions, true);
+            foreach (var row in rows)
+            {
+                var height = TableRowHeight(row, proportions, _small);
+                if (_y + height > PageHeight - 34)
+                {
+                    NewPage("Continued");
+                    DrawTableRow(headings, proportions, true);
+                }
+                DrawTableRow(row, proportions, false);
+            }
+        }
+
+        private void DrawTableRow(IReadOnlyList<string> values, IReadOnlyList<double> proportions, bool header)
+        {
+            var graphics = _graphics!;
+            var font = header ? _bold : _small;
+            var height = TableRowHeight(values, proportions, font);
+            var x = Margin;
+            for (var index = 0; index < values.Count; index++)
+            {
+                var width = ContentWidth * proportions[index];
+                graphics.DrawRectangle(XPens.LightGray, header ? new XSolidBrush(XColor.FromArgb(23, 50, 77)) : XBrushes.White, x, _y, width, height);
+                var lines = Wrap(values[index], width - 6, font);
+                for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
+                    graphics.DrawString(lines[lineIndex], font, header ? XBrushes.White : XBrushes.Black,
+                        new XRect(x + 3, _y + 4 + lineIndex * 9, width - 6, 9), IsMoney(values[index]) ? XStringFormats.TopRight : XStringFormats.TopLeft);
+                x += width;
+            }
+            _y += height;
+        }
+
+        private double TableRowHeight(IReadOnlyList<string> values, IReadOnlyList<double> proportions, XFont font)
+        {
+            var lines = values.Select((value, index) => Wrap(value, ContentWidth * proportions[index] - 6, font).Count).DefaultIfEmpty(1).Max();
+            return Math.Max(18, lines * 9 + 8);
+        }
+
+        private void DrawTotal(string label, decimal amount, bool grand = false)
+        {
+            EnsureSpace(20);
+            var brush = new XSolidBrush(grand ? XColor.FromArgb(184, 135, 70) : XColor.FromArgb(244, 235, 221));
+            _graphics!.DrawRectangle(brush, Margin, _y, ContentWidth, 18);
+            _graphics.DrawString(label, _bold, grand ? XBrushes.White : XBrushes.Black, new XRect(Margin + 4, _y + 4, ContentWidth * .75, 10), XStringFormats.TopLeft);
+            _graphics.DrawString(Money(amount), _bold, grand ? XBrushes.White : XBrushes.Black, new XRect(Margin + ContentWidth * .75, _y + 4, ContentWidth * .24, 10), XStringFormats.TopRight);
+            _y += 22;
+        }
+
+        private void DrawComparativeTotal(decimal current, decimal comparison, decimal variance)
+        {
+            EnsureSpace(22);
+            _graphics!.DrawRectangle(new XSolidBrush(XColor.FromArgb(184, 135, 70)), Margin, _y, ContentWidth, 18);
+            _graphics.DrawString("Statement total", _bold, XBrushes.White, new XRect(Margin + 4, _y + 4, ContentWidth * .24, 10), XStringFormats.TopLeft);
+            _graphics.DrawString($"Current {Money(current)} | Comparison {Money(comparison)} | Variance {Money(variance)}", _bold, XBrushes.White,
+                new XRect(Margin + ContentWidth * .25, _y + 4, ContentWidth * .74, 10), XStringFormats.TopRight);
+            _y += 22;
+        }
+
+        private IReadOnlyList<string> Wrap(string value, double width, XFont font)
+        {
+            if (string.IsNullOrEmpty(value)) return [string.Empty];
+            var result = new List<string>();
+            var remaining = value;
+            while (remaining.Length > 0)
+            {
+                if (_graphics!.MeasureString(remaining, font).Width <= width) { result.Add(remaining); break; }
+                var split = remaining.Length;
+                while (split > 1 && _graphics.MeasureString(remaining[..split], font).Width > width) split--;
+                var wordBreak = remaining.LastIndexOf(' ', Math.Min(split, remaining.Length - 1), Math.Min(split, remaining.Length - 1));
+                if (wordBreak > 0) split = wordBreak;
+                result.Add(remaining[..split].TrimEnd());
+                remaining = remaining[split..].TrimStart();
+            }
+            return result;
+        }
+
+        private static bool IsMoney(string value) => (value.Contains('.') || value.StartsWith('(')) && decimal.TryParse(value.Replace(",", string.Empty).Replace("(", "-").Replace(")", string.Empty), out _);
+        private static string Money(decimal value) => value < 0 ? $"({Math.Abs(value):N2})" : value.ToString("N2");
+    }
+
+    private static string JoinPresentation(string code, string section, string caption) =>
+        string.IsNullOrWhiteSpace(section) ? "Not present" : $"{code} — {section} — {caption}";
+
+    private static readonly object FontResolverLock = new();
+    private static void EnsurePdfFontResolver()
+    {
+        if (GlobalFontSettings.FontResolver is not null) return;
+        lock (FontResolverLock)
+        {
+            GlobalFontSettings.FontResolver ??= new SegoeWpFontResolver();
+        }
+    }
+
+    private sealed class SegoeWpFontResolver : IFontResolver
+    {
+        private const string RegularFace = "SegoeWP";
+        private const string BoldFace = "SegoeWPBold";
+        public FontResolverInfo ResolveTypeface(string familyName, bool isBold, bool isItalic) => new(isBold ? BoldFace : RegularFace, false, isItalic);
+        public byte[] GetFont(string faceName) => faceName == BoldFace ? FontDataHelper.SegoeWPBold : FontDataHelper.SegoeWP;
+    }
+}
