@@ -684,6 +684,7 @@ public sealed class BrassLedgerDbContext(
 
         ConfigureMoney(modelBuilder.Entity<GeneralLedgerAccount>().Property(x => x.CurrentBalance));
         modelBuilder.Entity<CurrencyExchangeRate>().Property(x => x.Rate).HasPrecision(18, 8);
+        modelBuilder.Entity<CurrencyExchangeRate>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.OwnershipPercentage).HasPrecision(9, 6);
         modelBuilder.Entity<ConsolidationGroup>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
@@ -976,7 +977,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<AccountActionToken>().HasIndex(x => new { x.UserId, x.Purpose, x.ExpiresAtUtc });
         modelBuilder.Entity<SecurityEmailOutboxMessage>().HasIndex(x => new { x.Status, x.NextAttemptAtUtc, x.LeaseExpiresAtUtc });
         modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.UserId, x.CompanyId }).IsUnique();
-        modelBuilder.Entity<CurrencyExchangeRate>().HasIndex(x => new { x.CompanyId, x.BaseCurrency, x.QuoteCurrency, x.EffectiveOn }).IsUnique();
+        modelBuilder.Entity<CurrencyExchangeRate>().HasIndex(x => new { x.CompanyId, x.BaseCurrency, x.QuoteCurrency, x.RateType, x.EffectiveOn }).IsUnique().HasDatabaseName("IX_CurrencyExchangeRates_TypedEffective");
         modelBuilder.Entity<ConsolidationGroup>().HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();
         modelBuilder.Entity<ConsolidationGroupCompany>().HasIndex(x => new { x.ConsolidationGroupId, x.MemberCompanyId, x.EffectiveFrom }).IsUnique();
         modelBuilder.Entity<ConsolidationAccountMapping>().HasIndex(x => new { x.ConsolidationGroupId, x.MemberCompanyId, x.MemberAccountId, x.EffectiveFrom }).IsUnique();

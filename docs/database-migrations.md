@@ -70,6 +70,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddConsolidationAccountMappings` adds retained effective-dated mappings from each member-company account to an explicit reporting number, name, and type. Restrictive foreign keys preserve the group, company, and source-account provenance. Lost-history adoption requires the mapping table, reporting identity, lifecycle and concurrency columns, and provider-specific source mapping index. Downgrade is prohibited because it would delete the classification evidence used to reproduce consolidated reports.
 
+`AddControlledConsolidationTranslation` separates closing, period-average, and historical exchange-rate evidence; adds source reference, retrieval, approval, and concurrency controls; retains each account mapping's translation policy; and adds the consolidation group's dedicated CTA reporting identity. Existing rates are preserved as active closing rates with nonblank concurrency tokens. Existing asset and liability mappings remain closing, revenue and expense mappings become average, and equity mappings become historical. Lost-history adoption requires the rate-policy and provenance columns, CTA identity, mapping method, and provider-specific typed-rate index. Downgrade is prohibited because it could delete the policy evidence needed to reproduce translated balances.
+
 ## Verification
 
 At minimum, run:

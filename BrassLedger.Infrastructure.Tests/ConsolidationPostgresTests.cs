@@ -77,11 +77,28 @@ public sealed class ConsolidationPostgresTests
             Assert.Single(mappingAttempts, result => result.Succeeded);
             Assert.Single(mappingAttempts, result => !result.Succeeded);
 
+            Guid rateId; string rateToken;
+            using (var rateSetupScope = provider.CreateScope())
+            {
+                SetContext(rateSetupScope, companyId, ownerId);
+                var service = rateSetupScope.ServiceProvider.GetRequiredService<IConsolidationService>();
+                var savedRate = await service.SaveExchangeRateAsync(new("USD", "CAD", 1.25m, new DateOnly(2026, 6, 30), "Concurrent test closing rate"));
+                Assert.True(savedRate.Succeeded, savedRate.ErrorMessage); rateId = savedRate.Id!.Value;
+                rateToken = (await service.GetExchangeRatesAsync()).Single(rate => rate.Id == rateId).ConcurrencyToken;
+            }
+            using var fifthScope = provider.CreateScope(); using var sixthScope = provider.CreateScope(); SetContext(fifthScope, companyId, ownerId); SetContext(sixthScope, companyId, ownerId);
+            var rateAttempts = await Task.WhenAll(
+                fifthScope.ServiceProvider.GetRequiredService<IConsolidationService>().SaveExchangeRateAsync(new("USD", "CAD", 1.26m, new DateOnly(2026, 6, 30), "Concurrent correction A", rateId, ConcurrencyToken: rateToken)),
+                sixthScope.ServiceProvider.GetRequiredService<IConsolidationService>().SaveExchangeRateAsync(new("USD", "CAD", 1.27m, new DateOnly(2026, 6, 30), "Concurrent correction B", rateId, ConcurrencyToken: rateToken)));
+            Assert.Single(rateAttempts, result => result.Succeeded);
+            Assert.Single(rateAttempts, result => !result.Succeeded);
+
             using var verificationScope = provider.CreateScope(); var verificationFactory = verificationScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var verification = await verificationFactory.CreateDbContextAsync();
             Assert.Equal(2, await verification.ConsolidationGroupCompanies.CountAsync(period => period.ConsolidationGroupId == groupId));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-ownership.created" && entry.EntityType == "ConsolidationGroupCompany"));
             Assert.Equal(1, await verification.ConsolidationAccountMappings.CountAsync(mapping => mapping.ConsolidationGroupId == groupId && mapping.MemberAccountId == sourceAccountId));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-account-mapping.created" && entry.EntityType == "ConsolidationAccountMapping"));
+            Assert.Equal(2, await verification.BusinessAuditEntries.CountAsync(entry => entry.EntityType == nameof(BrassLedger.Domain.Accounting.CurrencyExchangeRate)));
         }
         finally
         {

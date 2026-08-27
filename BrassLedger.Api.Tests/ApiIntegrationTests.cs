@@ -106,14 +106,19 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
             db.CompanyMemberships.Add(new CompanyMembership { Id = Guid.NewGuid(), UserId = controller.Id, CompanyId = subsidiaryId, Role = controller.Role, IsOwner = true, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
             await db.SaveChangesAsync();
         }
+        var exchangeRateResponse = await client.PutAsJsonAsync("/api/exchange-rates", new SaveExchangeRateRequest("USD", "CAD", 1.25m, new DateOnly(2026, 6, 30), "API verified average", RateType: "Average", PeriodStartOn: new DateOnly(2026, 1, 1), SourceReference: "https://example.test/rates", RetrievedOn: new DateOnly(2026, 6, 30)));
+        Assert.Equal(HttpStatusCode.OK, exchangeRateResponse.StatusCode);
+        var exchangeRates = await client.GetFromJsonAsync<IReadOnlyList<ExchangeRateSnapshot>>("/api/exchange-rates");
+        Assert.Contains(exchangeRates!, rate => rate.RateType == "Average" && rate.PeriodStartOn == new DateOnly(2026, 1, 1) && rate.SourceReference == "https://example.test/rates");
         var createGroup = await client.PutAsJsonAsync("/api/consolidation-groups", new SaveConsolidationGroupRequest(null, "API group", "USD",
         [
             new ConsolidationMemberRequest(existingCompany.CompanyId, 1m, new DateOnly(2026, 1, 1)),
             new ConsolidationMemberRequest(subsidiaryId, .75m, new DateOnly(2026, 2, 1))
-        ]));
+        ], CtaAccountNumber: "39999", CtaAccountName: "Cumulative translation adjustment"));
         Assert.Equal(HttpStatusCode.OK, createGroup.StatusCode);
         var groupResult = await createGroup.Content.ReadFromJsonAsync<TransactionResult>();
         var group = Assert.Single(await client.GetFromJsonAsync<IReadOnlyList<ConsolidationGroupSnapshot>>("/api/consolidation-groups") ?? [], item => item.Id == groupResult!.Id);
+        Assert.Equal("39999", group.CtaAccountNumber);
         Assert.Contains(group.Members, member => member.CompanyId == subsidiaryId && member.EffectiveFrom == new DateOnly(2026, 2, 1) && member.OwnershipPercentage == .75m);
         var overlapping = new SaveConsolidationOwnershipPeriodRequest(null, group.Id, subsidiaryId, .8m, new DateOnly(2026, 3, 1), null);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/ownership-periods", overlapping)).StatusCode);
@@ -125,7 +130,9 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", mappingRequest)).StatusCode);
         var savedMappings = await client.GetFromJsonAsync<ConsolidationAccountMappingWorkspace>($"/api/consolidation-groups/{group.Id}/account-mappings");
         Assert.Contains(savedMappings!.Mappings, mapping => mapping.AccountId == sourceAccount.AccountId && mapping.ReportingAccountNumber == "CON-" + sourceAccount.AccountNumber);
+        Assert.Contains(savedMappings.Mappings, mapping => mapping.AccountId == sourceAccount.AccountId && mapping.TranslationMethod is "Closing" or "Average" or "Historical");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", mappingRequest with { EffectiveFrom = new DateOnly(2026, 2, 1) })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/consolidation-groups/{group.Id}/balances?periodStart=2026-01-01&asOf=2026-06-30")).StatusCode);
     }
 
     [Fact]

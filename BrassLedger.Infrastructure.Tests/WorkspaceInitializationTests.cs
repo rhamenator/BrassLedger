@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("31", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("32", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -95,6 +95,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827062326_AddTrackingDimensionsToSourceLines';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827071655_AddEffectiveDatedConsolidationOwnership';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827080436_AddConsolidationAccountMappings';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827091057_AddControlledConsolidationTranslation';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('CurrencyExchangeRates') WHERE name = 'RateType';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'TranslationMethod';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveThrough';"));
@@ -146,7 +149,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("31", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("32", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -177,6 +180,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827062326_AddTrackingDimensionsToSourceLines';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827071655_AddEffectiveDatedConsolidationOwnership';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827080436_AddConsolidationAccountMappings';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827091057_AddControlledConsolidationTranslation';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('CurrencyExchangeRates') WHERE name = 'RateType';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'CtaAccountNumber';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'ConcurrencyToken';"));
@@ -510,7 +516,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var canadianCompanyId = secondCompany.CompanyId!.Value;
         var rate = await consolidation.SaveExchangeRateAsync(new SaveExchangeRateRequest("USD", "CAD", 1.25m, new DateOnly(2026, 1, 1), "Test rate"));
         Assert.True(rate.Succeeded, rate.ErrorMessage);
-        var group = await consolidation.SaveGroupAsync(new SaveConsolidationGroupRequest(null, "North America", "USD", [new ConsolidationMemberRequest(currentCompanyId), new ConsolidationMemberRequest(canadianCompanyId, .8m)]));
+        var averageRate = await consolidation.SaveExchangeRateAsync(new SaveExchangeRateRequest("USD", "CAD", 1.10m, new DateOnly(2026, 12, 31), "Test average", RateType: "Average", PeriodStartOn: new DateOnly(2026, 1, 1)));
+        Assert.True(averageRate.Succeeded, averageRate.ErrorMessage);
+        var historicalRate = await consolidation.SaveExchangeRateAsync(new SaveExchangeRateRequest("USD", "CAD", 1m, DateOnly.MinValue, "Test historical", RateType: "Historical"));
+        Assert.True(historicalRate.Succeeded, historicalRate.ErrorMessage);
+        var overlappingAverage = await consolidation.SaveExchangeRateAsync(new SaveExchangeRateRequest("USD", "CAD", 1.11m, new DateOnly(2026, 6, 30), "Overlapping average", RateType: "Average", PeriodStartOn: new DateOnly(2026, 4, 1)));
+        Assert.False(overlappingAverage.Succeeded);
+        Assert.Contains("cannot overlap", overlappingAverage.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var group = await consolidation.SaveGroupAsync(new SaveConsolidationGroupRequest(null, "North America", "USD", [new ConsolidationMemberRequest(currentCompanyId), new ConsolidationMemberRequest(canadianCompanyId, .8m)], CtaAccountNumber: "39999", CtaAccountName: "Cumulative translation adjustment"));
         Assert.True(group.Succeeded, group.ErrorMessage);
         var configuredGroups = await consolidation.GetGroupsAsync();
         var configuredGroup = Assert.Single(configuredGroups, item => item.Id == group.Id);
@@ -521,6 +534,19 @@ public sealed class WorkspaceInitializationTests : IDisposable
         {
             var mapping = await consolidation.SaveAccountMappingAsync(new SaveConsolidationAccountMappingRequest(null, group.Id.Value, sourceAccount.CompanyId, sourceAccount.AccountId, sourceAccount.AccountNumber, sourceAccount.AccountName, DateOnly.MinValue, null));
             Assert.True(mapping.Succeeded, mapping.ErrorMessage);
+        }
+        await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
+        {
+            var foreignAsset = await db.Accounts.FirstAsync(account => account.CompanyId == canadianCompanyId && account.Type == AccountType.Asset);
+            var foreignEquity = await db.Accounts.FirstAsync(account => account.CompanyId == canadianCompanyId && account.Type == AccountType.Equity);
+            var foreignRevenue = await db.Accounts.FirstAsync(account => account.CompanyId == canadianCompanyId && account.Type == AccountType.Revenue);
+            var foreignJournal = new JournalEntry { Id = Guid.NewGuid(), CompanyId = canadianCompanyId, PostedOn = new DateOnly(2026, 2, 1), Reference = "CAD-CTA-TEST", Description = "Different closing, average, and historical rates create CTA", TotalAmount = 150m, Status = "Posted", IsPosted = true };
+            db.JournalEntries.Add(foreignJournal);
+            db.JournalEntryLines.AddRange(
+                new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = foreignJournal.Id, AccountId = foreignAsset.Id, Debit = 150m, Description = foreignJournal.Description },
+                new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = foreignJournal.Id, AccountId = foreignEquity.Id, Credit = 100m, Description = foreignJournal.Description },
+                new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = foreignJournal.Id, AccountId = foreignRevenue.Id, Credit = 50m, Description = foreignJournal.Description });
+            await db.SaveChangesAsync();
         }
         var firstSource = mappingWorkspace.SourceAccounts.First();
         var overlappingMapping = await consolidation.SaveAccountMappingAsync(new SaveConsolidationAccountMappingRequest(null, group.Id.Value, firstSource.CompanyId, firstSource.AccountId, firstSource.AccountNumber, firstSource.AccountName, new DateOnly(2026, 1, 1), null));
@@ -543,8 +569,22 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(successorOwnership.Succeeded, successorOwnership.ErrorMessage);
         var report = await consolidation.GetBalanceReportAsync(group.Id!.Value, new DateOnly(2026, 5, 1));
         Assert.NotNull(report);
-        Assert.Empty(report!.Warnings);
+        Assert.Equal(new DateOnly(2026, 1, 1), report!.PeriodStart);
+        Assert.Empty(report.Warnings);
         Assert.NotEmpty(report.Accounts);
+        Assert.Equal(-20.36m, report.TranslationAdjustment);
+        Assert.Equal(-20.36m, report.Accounts.Single(account => account.AccountNumber == "39999").ConvertedBalance);
+        Assert.Contains(report.Accounts, account => account.AccountType == "Revenue" && account.TranslationMethod == "Average");
+        Assert.Equal(0m, report.Accounts.Sum(account => account.AccountType is "Asset" or "Expense" ? account.ConvertedBalance : -account.ConvertedBalance));
+        var averageSnapshot = (await consolidation.GetExchangeRatesAsync()).Single(item => item.Id == averageRate.Id);
+        var retractAverage = await consolidation.SaveExchangeRateAsync(new SaveExchangeRateRequest(averageSnapshot.BaseCurrency, averageSnapshot.QuoteCurrency, averageSnapshot.Rate, averageSnapshot.EffectiveOn, averageSnapshot.Source, averageSnapshot.Id, averageSnapshot.RateType, averageSnapshot.PeriodStartOn, averageSnapshot.SourceReference, averageSnapshot.RetrievedOn, false, averageSnapshot.ConcurrencyToken));
+        Assert.True(retractAverage.Succeeded, retractAverage.ErrorMessage);
+        var missingAverageReport = await consolidation.GetBalanceReportAsync(group.Id.Value, new DateOnly(2026, 5, 1));
+        Assert.Contains(missingAverageReport!.Warnings, warning => warning.Contains("average", StringComparison.OrdinalIgnoreCase) && warning.Contains("excluded", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(missingAverageReport.Warnings, warning => warning.Contains("CTA was not calculated", StringComparison.OrdinalIgnoreCase));
+        var retractedAverage = (await consolidation.GetExchangeRatesAsync()).Single(item => item.Id == averageRate.Id);
+        var restoreAverage = await consolidation.SaveExchangeRateAsync(new SaveExchangeRateRequest(retractedAverage.BaseCurrency, retractedAverage.QuoteCurrency, retractedAverage.Rate, retractedAverage.EffectiveOn, retractedAverage.Source, retractedAverage.Id, retractedAverage.RateType, retractedAverage.PeriodStartOn, retractedAverage.SourceReference, retractedAverage.RetrievedOn, true, retractedAverage.ConcurrencyToken));
+        Assert.True(restoreAverage.Succeeded, restoreAverage.ErrorMessage);
 
         await using (var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>().CreateDbContextAsync())
         {

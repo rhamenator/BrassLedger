@@ -1009,6 +1009,9 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<int>("ReportingAccountType")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("TranslationMethod")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.HasIndex("MemberAccountId");
@@ -1034,6 +1037,14 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.Property<string>("ConcurrencyToken")
                         .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CtaAccountName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CtaAccountNumber")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -1104,7 +1115,18 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<DateOnly>("EffectiveOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly?>("PeriodStartOn")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("QuoteCurrency")
@@ -1115,14 +1137,25 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 8)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("RateType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly?>("RetrievedOn")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceReference")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CompanyId", "BaseCurrency", "QuoteCurrency", "EffectiveOn")
-                        .IsUnique();
+                    b.HasIndex("CompanyId", "BaseCurrency", "QuoteCurrency", "RateType", "EffectiveOn")
+                        .IsUnique()
+                        .HasDatabaseName("IX_CurrencyExchangeRates_TypedEffective");
 
                     b.ToTable("CurrencyExchangeRates");
                 });

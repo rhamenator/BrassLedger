@@ -473,6 +473,17 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "ConcurrencyToken", cancellationToken)
                 && await HasIndexAsync(dbContext, sourceIndex, cancellationToken);
         }
+        if (migrationId.EndsWith("_AddControlledConsolidationTranslation", StringComparison.Ordinal))
+        {
+            const string rateIndex = "IX_CurrencyExchangeRates_TypedEffective";
+            return await HasColumnAsync(dbContext, "CurrencyExchangeRates", "RateType", cancellationToken)
+                && await HasColumnAsync(dbContext, "CurrencyExchangeRates", "PeriodStartOn", cancellationToken)
+                && await HasColumnAsync(dbContext, "CurrencyExchangeRates", "SourceReference", cancellationToken)
+                && await HasColumnAsync(dbContext, "CurrencyExchangeRates", "ConcurrencyToken", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationGroups", "CtaAccountNumber", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "TranslationMethod", cancellationToken)
+                && await HasIndexAsync(dbContext, rateIndex, cancellationToken);
+        }
         return false;
     }
 

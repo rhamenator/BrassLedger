@@ -9,6 +9,20 @@ public enum AccountType
     Expense
 }
 
+public enum CurrencyRateType
+{
+    Closing,
+    Average,
+    Historical
+}
+
+public enum ConsolidationTranslationMethod
+{
+    Closing,
+    Average,
+    Historical
+}
+
 public sealed class Company
 {
     public Guid Id { get; set; }
@@ -134,8 +148,14 @@ public sealed class CurrencyExchangeRate
     public string BaseCurrency { get; set; } = string.Empty;
     public string QuoteCurrency { get; set; } = string.Empty;
     public decimal Rate { get; set; }
+    public CurrencyRateType RateType { get; set; }
+    public DateOnly? PeriodStartOn { get; set; }
     public DateOnly EffectiveOn { get; set; }
     public string Source { get; set; } = string.Empty;
+    public string SourceReference { get; set; } = string.Empty;
+    public DateOnly? RetrievedOn { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 public sealed class ConsolidationGroup
@@ -144,6 +164,8 @@ public sealed class ConsolidationGroup
     public Guid CompanyId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string ReportingCurrency { get; set; } = "USD";
+    public string CtaAccountNumber { get; set; } = string.Empty;
+    public string CtaAccountName { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
@@ -168,6 +190,7 @@ public sealed class ConsolidationAccountMapping
     public string ReportingAccountNumber { get; set; } = string.Empty;
     public string ReportingAccountName { get; set; } = string.Empty;
     public AccountType ReportingAccountType { get; set; }
+    public ConsolidationTranslationMethod TranslationMethod { get; set; }
     public DateOnly EffectiveFrom { get; set; } = DateOnly.MinValue;
     public DateOnly? EffectiveThrough { get; set; }
     public bool IsActive { get; set; } = true;

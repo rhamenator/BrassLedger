@@ -886,6 +886,7 @@ api.MapPut("/exchange-rates", async (SaveExchangeRateRequest request, IConsolida
     var result = await service.SaveExchangeRateAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["exchangeRate"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/exchange-rates", async (IConsolidationService service, CancellationToken cancellationToken) => Results.Ok(await service.GetExchangeRatesAsync(cancellationToken))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapPut("/consolidation-groups", async (SaveConsolidationGroupRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SaveGroupAsync(request, cancellationToken);
@@ -909,9 +910,12 @@ api.MapGet("/consolidation-groups/{groupId:guid}/account-mappings", async (Guid 
     return workspace is null ? Results.NotFound() : Results.Ok(workspace);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapGet("/consolidation-groups", async (IConsolidationService service, CancellationToken cancellationToken) => Results.Ok(await service.GetGroupsAsync(cancellationToken))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
-api.MapGet("/consolidation-groups/{groupId:guid}/balances", async (Guid groupId, DateOnly? asOf, IConsolidationService service, CancellationToken cancellationToken) =>
+api.MapGet("/consolidation-groups/{groupId:guid}/balances", async (Guid groupId, DateOnly? periodStart, DateOnly? asOf, IConsolidationService service, CancellationToken cancellationToken) =>
 {
-    var report = await service.GetBalanceReportAsync(groupId, asOf ?? DateOnly.FromDateTime(DateTime.UtcNow), cancellationToken);
+    var reportDate = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+    var report = periodStart.HasValue
+        ? await service.GetBalanceReportAsync(groupId, periodStart.Value, reportDate, cancellationToken)
+        : await service.GetBalanceReportAsync(groupId, reportDate, cancellationToken);
     return report is null ? Results.NotFound() : Results.Ok(report);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapPut("/accounting-periods", async (SaveAccountingPeriodRequest request, IAccountingPeriodService service, CancellationToken cancellationToken) =>

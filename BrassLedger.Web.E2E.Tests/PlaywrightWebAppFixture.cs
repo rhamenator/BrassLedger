@@ -127,6 +127,20 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
+    public async Task CreateConsolidationAdministratorAsync()
+    {
+        await CreateQuickBooksAdministratorAsync();
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE "CompanyMemberships"
+            SET "IsOwner" = 1
+            WHERE "UserId" = (SELECT "Id" FROM "Users" WHERE "UserName" = 'integration-admin');
+            """;
+        await command.ExecuteNonQueryAsync();
+    }
+
     public async Task CreateSubledgerWorkflowUsersAsync()
     {
         await using var connection = new SqliteConnection(_sqliteConnectionString);
