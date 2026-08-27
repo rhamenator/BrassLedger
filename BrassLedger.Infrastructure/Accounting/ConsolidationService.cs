@@ -85,6 +85,42 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
         return TransactionResult.Success(period.Id);
     }
 
+    public async Task<TransactionResult> SaveAccountMappingAsync(SaveConsolidationAccountMappingRequest request, CancellationToken cancellationToken = default)
+    {
+        var reportingNumber = request.ReportingAccountNumber?.Trim() ?? string.Empty; var reportingName = request.ReportingAccountName?.Trim() ?? string.Empty;
+        if (request.ConsolidationGroupId == Guid.Empty || request.MemberCompanyId == Guid.Empty || request.MemberAccountId == Guid.Empty || string.IsNullOrWhiteSpace(reportingNumber) || reportingNumber.Length > 64 || string.IsNullOrWhiteSpace(reportingName) || reportingName.Length > 160 || request.EffectiveThrough < request.EffectiveFrom || (!request.IsActive && !request.EffectiveThrough.HasValue))
+            return TransactionResult.Failure("Provide a source account, reporting account number and name, and valid effective period; an inactive mapping requires an effective-through date so historical reports remain reproducible.");
+        var companyId = CurrentCompanyId(); var userId = CurrentUserId(); if (companyId is null || userId is null) return TransactionResult.Failure("An active company and user are required.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var group = await db.ConsolidationGroups.SingleOrDefaultAsync(item => item.Id == request.ConsolidationGroupId && item.CompanyId == companyId, cancellationToken);
+        if (group is null) return TransactionResult.Failure("The consolidation group was not found in the active company.");
+        if (!await db.CompanyMemberships.AnyAsync(member => member.UserId == userId && member.CompanyId == companyId && member.IsOwner && member.IsActive, cancellationToken)
+            || !await db.CompanyMemberships.AnyAsync(member => member.UserId == userId && member.CompanyId == request.MemberCompanyId && member.IsOwner && member.IsActive, cancellationToken))
+            return TransactionResult.Failure("The current user must be an active owner of the consolidation group and member company.");
+        var requestedEnd = request.EffectiveThrough ?? DateOnly.MaxValue;
+        if (!await db.ConsolidationGroupCompanies.AnyAsync(period => period.ConsolidationGroupId == group.Id && period.MemberCompanyId == request.MemberCompanyId && period.EffectiveFrom <= requestedEnd && (period.EffectiveThrough == null || period.EffectiveThrough >= request.EffectiveFrom), cancellationToken))
+            return TransactionResult.Failure("The mapping period must overlap retained ownership of the member company.");
+        var sourceAccount = await db.Accounts.SingleOrDefaultAsync(account => account.Id == request.MemberAccountId && account.CompanyId == request.MemberCompanyId, cancellationToken);
+        if (sourceAccount is null) return TransactionResult.Failure("The source account was not found in the selected member company.");
+        var mapping = request.Id is { } id ? await db.ConsolidationAccountMappings.SingleOrDefaultAsync(item => item.Id == id && item.ConsolidationGroupId == group.Id, cancellationToken) : null;
+        if (request.Id is not null && mapping is null) return TransactionResult.Failure("The account mapping was not found in this consolidation group.");
+        if (mapping is not null && (string.IsNullOrWhiteSpace(request.ConcurrencyToken) || !string.Equals(mapping.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))) return TransactionResult.Failure("The account mapping changed after it was displayed. Refresh before saving it.");
+        if (mapping is not null && (mapping.MemberCompanyId != request.MemberCompanyId || mapping.MemberAccountId != request.MemberAccountId)) return TransactionResult.Failure("A retained mapping cannot be moved to another source account. Add a separate mapping instead.");
+        if (await db.ConsolidationAccountMappings.AnyAsync(item => item.ConsolidationGroupId == group.Id && item.MemberCompanyId == request.MemberCompanyId && item.MemberAccountId == request.MemberAccountId && item.Id != request.Id && item.EffectiveFrom <= requestedEnd && (item.EffectiveThrough == null || item.EffectiveThrough >= request.EffectiveFrom), cancellationToken))
+            return TransactionResult.Failure("Active mappings for the same source account cannot overlap.");
+        if (await db.ConsolidationAccountMappings.AnyAsync(item => item.ConsolidationGroupId == group.Id && item.Id != request.Id && item.ReportingAccountNumber == reportingNumber && item.EffectiveFrom <= requestedEnd && (item.EffectiveThrough == null || item.EffectiveThrough >= request.EffectiveFrom) && (item.ReportingAccountName != reportingName || item.ReportingAccountType != sourceAccount.Type), cancellationToken))
+            return TransactionResult.Failure("A reporting account number must retain one name and account type throughout overlapping mapping periods.");
+        mapping ??= new ConsolidationAccountMapping { Id = Guid.NewGuid(), ConsolidationGroupId = group.Id, MemberCompanyId = request.MemberCompanyId, MemberAccountId = request.MemberAccountId };
+        mapping.ReportingAccountNumber = reportingNumber; mapping.ReportingAccountName = reportingName; mapping.ReportingAccountType = sourceAccount.Type; mapping.EffectiveFrom = request.EffectiveFrom; mapping.EffectiveThrough = request.EffectiveThrough; mapping.IsActive = request.IsActive; mapping.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        if (db.Entry(mapping).State == EntityState.Detached) db.ConsolidationAccountMappings.Add(mapping);
+        group.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = request.Id is null ? "consolidation-account-mapping.created" : "consolidation-account-mapping.updated", EntityType = nameof(ConsolidationAccountMapping), EntityId = mapping.Id, DetailJson = JsonSerializer.Serialize(new { group.Id, mapping.MemberCompanyId, mapping.MemberAccountId, mapping.ReportingAccountNumber, mapping.ReportingAccountName, reportingAccountType = mapping.ReportingAccountType.ToString(), mapping.EffectiveFrom, mapping.EffectiveThrough, mapping.IsActive }), OccurredAtUtc = DateTimeOffset.UtcNow });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The consolidation group or account mapping changed concurrently. Refresh and try again."); }
+        catch (DbUpdateException) { return TransactionResult.Failure("The account mapping conflicts with another retained mapping."); }
+        return TransactionResult.Success(mapping.Id);
+    }
+
     public async Task<IReadOnlyList<ConsolidationGroupSnapshot>> GetGroupsAsync(CancellationToken cancellationToken = default)
     {
         var companyId = CurrentCompanyId();
@@ -99,6 +135,26 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
             members.Where(member => member.ConsolidationGroupId == group.Id).OrderBy(member => companies[member.MemberCompanyId].Name).ThenBy(member => member.EffectiveFrom).Select(member => new ConsolidationGroupMemberSnapshot(member.Id, member.MemberCompanyId, companies[member.MemberCompanyId].Name, companies[member.MemberCompanyId].BaseCurrency, member.OwnershipPercentage, member.EffectiveFrom, member.EffectiveThrough, member.ConcurrencyToken)).ToArray())).ToArray();
     }
 
+    public async Task<ConsolidationAccountMappingWorkspace?> GetAccountMappingWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default)
+    {
+        var companyId = CurrentCompanyId(); var userId = CurrentUserId(); if (companyId is null || userId is null) return null;
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var group = await db.ConsolidationGroups.AsNoTracking().SingleOrDefaultAsync(item => item.Id == groupId && item.CompanyId == companyId, cancellationToken); if (group is null) return null;
+        var memberCompanyIds = await db.ConsolidationGroupCompanies.AsNoTracking().Where(period => period.ConsolidationGroupId == group.Id).Select(period => period.MemberCompanyId).Distinct().ToArrayAsync(cancellationToken);
+        var ownedCompanyIds = await db.CompanyMemberships.AsNoTracking().Where(member => member.UserId == userId && member.IsOwner && member.IsActive).Select(member => member.CompanyId).ToArrayAsync(cancellationToken);
+        if (!ownedCompanyIds.Contains(companyId.Value) || memberCompanyIds.Any(memberCompanyId => !ownedCompanyIds.Contains(memberCompanyId))) return null;
+        var companies = await db.Companies.AsNoTracking().Where(company => memberCompanyIds.Contains(company.Id)).ToDictionaryAsync(company => company.Id, cancellationToken);
+        var accounts = await db.Accounts.AsNoTracking().Where(account => memberCompanyIds.Contains(account.CompanyId)).OrderBy(account => account.CompanyId).ThenBy(account => account.Number).ToListAsync(cancellationToken);
+        var mappings = await db.ConsolidationAccountMappings.AsNoTracking().Where(mapping => mapping.ConsolidationGroupId == group.Id).OrderBy(mapping => mapping.ReportingAccountNumber).ThenBy(mapping => mapping.EffectiveFrom).ToListAsync(cancellationToken);
+        return new ConsolidationAccountMappingWorkspace(group.Id, group.Name,
+            accounts.Select(account => new ConsolidationSourceAccountSnapshot(account.CompanyId, companies[account.CompanyId].Name, account.Id, account.Number, account.Name, account.Type.ToString())).ToArray(),
+            mappings.Select(mapping =>
+            {
+                var account = accounts.Single(item => item.Id == mapping.MemberAccountId && item.CompanyId == mapping.MemberCompanyId);
+                return new ConsolidationAccountMappingSnapshot(mapping.Id, mapping.MemberCompanyId, companies[mapping.MemberCompanyId].Name, mapping.MemberAccountId, account.Number, account.Name, account.Type.ToString(), mapping.ReportingAccountNumber, mapping.ReportingAccountName, mapping.ReportingAccountType.ToString(), mapping.EffectiveFrom, mapping.EffectiveThrough, mapping.IsActive, mapping.ConcurrencyToken);
+            }).ToArray());
+    }
+
     public async Task<ConsolidatedBalanceReport?> GetBalanceReportAsync(Guid groupId, DateOnly asOf, CancellationToken cancellationToken = default)
     {
         var companyId = CurrentCompanyId(); var userId = CurrentUserId(); if (companyId is null || userId is null) return null;
@@ -106,7 +162,7 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
         var group = await db.ConsolidationGroups.SingleOrDefaultAsync(item => item.CompanyId == companyId && item.Id == groupId && item.IsActive, cancellationToken); if (group is null) return null;
         var members = await db.ConsolidationGroupCompanies.Where(item => item.ConsolidationGroupId == group.Id && item.EffectiveFrom <= asOf && (item.EffectiveThrough == null || item.EffectiveThrough >= asOf)).ToListAsync(cancellationToken); var permitted = await db.CompanyMemberships.Where(item => item.UserId == userId && item.IsActive).Select(item => item.CompanyId).ToListAsync(cancellationToken); if (members.Any(member => !permitted.Contains(member.MemberCompanyId))) return null;
         var companies = await db.Companies.Where(company => members.Select(member => member.MemberCompanyId).Contains(company.Id)).ToDictionaryAsync(company => company.Id, cancellationToken);
-        var rates = await db.CurrencyExchangeRates.Where(rate => rate.CompanyId == companyId && rate.EffectiveOn <= asOf).OrderByDescending(rate => rate.EffectiveOn).ToListAsync(cancellationToken); var warnings = new List<string>(); var totals = new Dictionary<(string Number, string Name, string Type), decimal>();
+        var rates = await db.CurrencyExchangeRates.Where(rate => rate.CompanyId == companyId && rate.EffectiveOn <= asOf).OrderByDescending(rate => rate.EffectiveOn).ToListAsync(cancellationToken); var mappings = await db.ConsolidationAccountMappings.AsNoTracking().Where(mapping => mapping.ConsolidationGroupId == group.Id && mapping.EffectiveFrom <= asOf && (mapping.EffectiveThrough == null || mapping.EffectiveThrough >= asOf)).ToListAsync(cancellationToken); var warnings = new List<string>(); var totals = new Dictionary<(string Number, string Name, string Type), decimal>();
         foreach (var member in members)
         {
             var company = companies[member.MemberCompanyId]; var factor = ResolveRate(company.BaseCurrency, group.ReportingCurrency, rates); if (factor is null) { warnings.Add($"No {company.BaseCurrency}/{group.ReportingCurrency} rate is effective for {company.Name} on {asOf:yyyy-MM-dd}."); continue; }
@@ -122,6 +178,7 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
             // already-filtered posted lines in .NET so SQLite and PostgreSQL use identical arithmetic.
             var accountActivity = postedLines.GroupBy(line => new { line.Id, line.Number, line.Name, line.Type }).Select(activity => new
             {
+                activity.Key.Id,
                 activity.Key.Number,
                 activity.Key.Name,
                 activity.Key.Type,
@@ -133,7 +190,18 @@ public sealed class ConsolidationService(IDbContextFactory<BrassLedgerDbContext>
                 var naturalBalance = account.Type is AccountType.Asset or AccountType.Expense
                     ? account.Debit - account.Credit
                     : account.Credit - account.Debit;
-                var key = (account.Number, account.Name, account.Type.ToString());
+                if (naturalBalance == 0m) continue;
+                var accountMappings = mappings.Where(mapping => mapping.MemberCompanyId == company.Id && mapping.MemberAccountId == account.Id).ToArray();
+                if (accountMappings.Length != 1)
+                {
+                    warnings.Add(accountMappings.Length == 0
+                        ? $"{company.Name} account {account.Number} · {account.Name} has no active consolidation mapping on {asOf:yyyy-MM-dd}; its {naturalBalance:N2} {company.BaseCurrency} balance was excluded."
+                        : $"{company.Name} account {account.Number} · {account.Name} has overlapping consolidation mappings on {asOf:yyyy-MM-dd}; its balance was excluded.");
+                    continue;
+                }
+                var accountMapping = accountMappings[0];
+                if (accountMapping.ReportingAccountType != account.Type) { warnings.Add($"{company.Name} account {account.Number} · {account.Name} has a reporting type inconsistent with its source type; its balance was excluded."); continue; }
+                var key = (accountMapping.ReportingAccountNumber, accountMapping.ReportingAccountName, accountMapping.ReportingAccountType.ToString());
                 totals[key] = totals.GetValueOrDefault(key) + decimal.Round(naturalBalance * factor.Value * member.OwnershipPercentage, 2, MidpointRounding.AwayFromZero);
             }
         }

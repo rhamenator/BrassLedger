@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("30", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("31", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -94,6 +94,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827055010_AddTrackingDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827062326_AddTrackingDimensionsToSourceLines';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827071655_AddEffectiveDatedConsolidationOwnership';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827080436_AddConsolidationAccountMappings';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveThrough';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectPhases';"));
@@ -144,7 +146,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("30", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("31", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -174,6 +176,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827055010_AddTrackingDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827062326_AddTrackingDimensionsToSourceLines';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827071655_AddEffectiveDatedConsolidationOwnership';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827080436_AddConsolidationAccountMappings';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'ConcurrencyToken';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('SalesOrderLines') WHERE name = 'ClassId';"));
@@ -511,6 +515,17 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var configuredGroups = await consolidation.GetGroupsAsync();
         var configuredGroup = Assert.Single(configuredGroups, item => item.Id == group.Id);
         Assert.Equal(2, configuredGroup.Members.Count);
+        var mappingWorkspace = await consolidation.GetAccountMappingWorkspaceAsync(group.Id!.Value);
+        Assert.NotNull(mappingWorkspace);
+        foreach (var sourceAccount in mappingWorkspace!.SourceAccounts)
+        {
+            var mapping = await consolidation.SaveAccountMappingAsync(new SaveConsolidationAccountMappingRequest(null, group.Id.Value, sourceAccount.CompanyId, sourceAccount.AccountId, sourceAccount.AccountNumber, sourceAccount.AccountName, DateOnly.MinValue, null));
+            Assert.True(mapping.Succeeded, mapping.ErrorMessage);
+        }
+        var firstSource = mappingWorkspace.SourceAccounts.First();
+        var overlappingMapping = await consolidation.SaveAccountMappingAsync(new SaveConsolidationAccountMappingRequest(null, group.Id.Value, firstSource.CompanyId, firstSource.AccountId, firstSource.AccountNumber, firstSource.AccountName, new DateOnly(2026, 1, 1), null));
+        Assert.False(overlappingMapping.Succeeded);
+        Assert.Contains("cannot overlap", overlappingMapping.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var originalParentOwnership = configuredGroup.Members.Single(member => member.CompanyId == currentCompanyId);
         var overlapping = await consolidation.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(null, group.Id!.Value, currentCompanyId, .5m, new DateOnly(2026, 4, 1), null));
         Assert.False(overlapping.Succeeded);
@@ -542,6 +557,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
                 new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = futureJournal.Id, AccountId = futureAsset.Id, Debit = 125m, Description = futureJournal.Description },
                 new JournalEntryLine { Id = Guid.NewGuid(), JournalEntryId = futureJournal.Id, AccountId = futureEquity.Id, Credit = 125m, Description = futureJournal.Description });
             await db.SaveChangesAsync();
+        }
+        var unmappedReport = await consolidation.GetBalanceReportAsync(group.Id.Value, new DateOnly(2026, 6, 1));
+        Assert.NotNull(unmappedReport);
+        Assert.DoesNotContain(unmappedReport!.Accounts, account => account.AccountNumber is "19998" or "39998");
+        Assert.Contains(unmappedReport.Warnings, warning => warning.Contains("19998", StringComparison.Ordinal) && warning.Contains("excluded", StringComparison.OrdinalIgnoreCase));
+        var futureMappingWorkspace = await consolidation.GetAccountMappingWorkspaceAsync(group.Id.Value);
+        foreach (var sourceAccount in futureMappingWorkspace!.SourceAccounts.Where(account => account.AccountNumber is "19998" or "39998"))
+        {
+            var mapping = await consolidation.SaveAccountMappingAsync(new SaveConsolidationAccountMappingRequest(null, group.Id.Value, sourceAccount.CompanyId, sourceAccount.AccountId, sourceAccount.AccountNumber, sourceAccount.AccountName, new DateOnly(2026, 6, 1), null));
+            Assert.True(mapping.Succeeded, mapping.ErrorMessage);
         }
 
         var historicalReport = await consolidation.GetBalanceReportAsync(group.Id!.Value, new DateOnly(2026, 5, 1));

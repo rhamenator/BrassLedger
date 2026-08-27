@@ -68,6 +68,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddEffectiveDatedConsolidationOwnership` converts consolidation membership from one replaceable company percentage into retained ownership periods. Existing memberships begin at the minimum supported date, both group and period rows receive nonblank concurrency tokens, and the uniqueness constraint moves to group/company/effective-from. Lost-history adoption requires both effective-date columns, both concurrency columns, and the provider-specific ownership index. Downgrade is prohibited because restoring one membership row per company could delete later ownership periods and concurrency evidence.
 
+`AddConsolidationAccountMappings` adds retained effective-dated mappings from each member-company account to an explicit reporting number, name, and type. Restrictive foreign keys preserve the group, company, and source-account provenance. Lost-history adoption requires the mapping table, reporting identity, lifecycle and concurrency columns, and provider-specific source mapping index. Downgrade is prohibited because it would delete the classification evidence used to reproduce consolidated reports.
+
 ## Verification
 
 At minimum, run:

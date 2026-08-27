@@ -461,6 +461,18 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "ConsolidationGroupCompanies", "EffectiveThrough", cancellationToken)
                 && await HasIndexAsync(dbContext, ownershipIndex, cancellationToken);
         }
+        if (migrationId.EndsWith("_AddConsolidationAccountMappings", StringComparison.Ordinal))
+        {
+            var sourceIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationAccountMappings_ConsolidationGroupId_MemberCom~"
+                : "IX_ConsolidationAccountMappings_ConsolidationGroupId_MemberCompanyId_MemberAccountId_EffectiveFrom";
+            return await HasTableAsync(dbContext, "ConsolidationAccountMappings", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "ReportingAccountNumber", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "ReportingAccountType", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "EffectiveThrough", cancellationToken)
+                && await HasColumnAsync(dbContext, "ConsolidationAccountMappings", "ConcurrencyToken", cancellationToken)
+                && await HasIndexAsync(dbContext, sourceIndex, cancellationToken);
+        }
         return false;
     }
 

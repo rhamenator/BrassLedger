@@ -118,6 +118,14 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var overlapping = new SaveConsolidationOwnershipPeriodRequest(null, group.Id, subsidiaryId, .8m, new DateOnly(2026, 3, 1), null);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/ownership-periods", overlapping)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/ownership-periods", overlapping)).StatusCode);
+        var mappingWorkspace = await client.GetFromJsonAsync<ConsolidationAccountMappingWorkspace>($"/api/consolidation-groups/{group.Id}/account-mappings");
+        var sourceAccount = mappingWorkspace!.SourceAccounts.First(account => account.CompanyId == existingCompany.CompanyId);
+        var mappingRequest = new SaveConsolidationAccountMappingRequest(null, group.Id, sourceAccount.CompanyId, sourceAccount.AccountId, "CON-" + sourceAccount.AccountNumber, sourceAccount.AccountName, new DateOnly(2026, 1, 1), null);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/account-mappings", mappingRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", mappingRequest)).StatusCode);
+        var savedMappings = await client.GetFromJsonAsync<ConsolidationAccountMappingWorkspace>($"/api/consolidation-groups/{group.Id}/account-mappings");
+        Assert.Contains(savedMappings!.Mappings, mapping => mapping.AccountId == sourceAccount.AccountId && mapping.ReportingAccountNumber == "CON-" + sourceAccount.AccountNumber);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/account-mappings", mappingRequest with { EffectiveFrom = new DateOnly(2026, 2, 1) })).StatusCode);
     }
 
     [Fact]

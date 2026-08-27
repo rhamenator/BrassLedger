@@ -64,9 +64,24 @@ public sealed class ConsolidationPostgresTests
             Assert.Single(attempts, result => result.Succeeded);
             Assert.Single(attempts, result => !result.Succeeded);
 
+            Guid sourceAccountId; string sourceNumber; string sourceName;
+            using (var accountScope = provider.CreateScope())
+            {
+                var factory = accountScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+                var source = await db.Accounts.OrderBy(account => account.Number).FirstAsync(); sourceAccountId = source.Id; sourceNumber = source.Number; sourceName = source.Name;
+            }
+            using var thirdScope = provider.CreateScope(); using var fourthScope = provider.CreateScope(); SetContext(thirdScope, companyId, ownerId); SetContext(fourthScope, companyId, ownerId);
+            var mappingAttempts = await Task.WhenAll(
+                thirdScope.ServiceProvider.GetRequiredService<IConsolidationService>().SaveAccountMappingAsync(new(null, groupId, companyId, sourceAccountId, sourceNumber, sourceName, new DateOnly(2026, 7, 1), null)),
+                fourthScope.ServiceProvider.GetRequiredService<IConsolidationService>().SaveAccountMappingAsync(new(null, groupId, companyId, sourceAccountId, sourceNumber, sourceName, new DateOnly(2026, 8, 1), null)));
+            Assert.Single(mappingAttempts, result => result.Succeeded);
+            Assert.Single(mappingAttempts, result => !result.Succeeded);
+
             using var verificationScope = provider.CreateScope(); var verificationFactory = verificationScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var verification = await verificationFactory.CreateDbContextAsync();
             Assert.Equal(2, await verification.ConsolidationGroupCompanies.CountAsync(period => period.ConsolidationGroupId == groupId));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-ownership.created" && entry.EntityType == "ConsolidationGroupCompany"));
+            Assert.Equal(1, await verification.ConsolidationAccountMappings.CountAsync(mapping => mapping.ConsolidationGroupId == groupId && mapping.MemberAccountId == sourceAccountId));
+            Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-account-mapping.created" && entry.EntityType == "ConsolidationAccountMapping"));
         }
         finally
         {

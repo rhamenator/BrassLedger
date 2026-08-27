@@ -159,6 +159,21 @@ public sealed class ConsolidationGroupCompany
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
+public sealed class ConsolidationAccountMapping
+{
+    public Guid Id { get; set; }
+    public Guid ConsolidationGroupId { get; set; }
+    public Guid MemberCompanyId { get; set; }
+    public Guid MemberAccountId { get; set; }
+    public string ReportingAccountNumber { get; set; } = string.Empty;
+    public string ReportingAccountName { get; set; } = string.Empty;
+    public AccountType ReportingAccountType { get; set; }
+    public DateOnly EffectiveFrom { get; set; } = DateOnly.MinValue;
+    public DateOnly? EffectiveThrough { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
 public sealed class AccountingPeriod
 {
     public Guid Id { get; set; }

@@ -897,6 +897,17 @@ api.MapPut("/consolidation-groups/{groupId:guid}/ownership-periods", async (Guid
     var result = await service.SaveOwnershipPeriodAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["ownershipPeriod"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapPut("/consolidation-groups/{groupId:guid}/account-mappings", async (Guid groupId, SaveConsolidationAccountMappingRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId) return Results.BadRequest(new { error = "consolidation_group_id_mismatch" });
+    var result = await service.SaveAccountMappingAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["accountMapping"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/consolidation-groups/{groupId:guid}/account-mappings", async (Guid groupId, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var workspace = await service.GetAccountMappingWorkspaceAsync(groupId, cancellationToken);
+    return workspace is null ? Results.NotFound() : Results.Ok(workspace);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapGet("/consolidation-groups", async (IConsolidationService service, CancellationToken cancellationToken) => Results.Ok(await service.GetGroupsAsync(cancellationToken))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapGet("/consolidation-groups/{groupId:guid}/balances", async (Guid groupId, DateOnly? asOf, IConsolidationService service, CancellationToken cancellationToken) =>
 {

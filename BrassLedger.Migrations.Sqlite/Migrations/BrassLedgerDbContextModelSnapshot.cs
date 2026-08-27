@@ -969,6 +969,60 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("CompanyMemberships");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationAccountMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConsolidationGroupId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("EffectiveFrom")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("EffectiveThrough")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MemberAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MemberCompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReportingAccountName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReportingAccountNumber")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ReportingAccountType")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberAccountId");
+
+                    b.HasIndex("MemberCompanyId");
+
+                    b.HasIndex("ConsolidationGroupId", "ReportingAccountNumber");
+
+                    b.HasIndex("ConsolidationGroupId", "MemberCompanyId", "MemberAccountId", "EffectiveFrom")
+                        .IsUnique();
+
+                    b.ToTable("ConsolidationAccountMappings");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationGroup", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9373,6 +9427,27 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.BankAccount", null)
                         .WithMany()
                         .HasForeignKey("ToBankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ConsolidationAccountMapping", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.ConsolidationGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ConsolidationGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("MemberAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.Company", null)
+                        .WithMany()
+                        .HasForeignKey("MemberCompanyId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

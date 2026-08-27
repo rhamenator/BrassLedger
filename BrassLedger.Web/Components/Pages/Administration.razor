@@ -324,10 +324,17 @@ else
             </div>
             @if (ConsolidationGroups.Count > 0)
             {
-                <table class="data-table"><thead><tr><th>Group</th><th>Ownership periods</th><th>Reporting currency</th><th></th></tr></thead><tbody>@foreach (var group in ConsolidationGroups) { <tr><td>@group.Name</td><td><ul class="feature-list">@foreach (var member in group.Members) { <li>@member.CompanyName (@member.OwnershipPercentage.ToString("P2"), @member.EffectiveFrom.ToString("yyyy-MM-dd")–@(member.EffectiveThrough?.ToString("yyyy-MM-dd") ?? "open")) <button class="action-secondary" type="button" @onclick="() => LoadOwnershipPeriod(group.Id, member)">Edit period</button></li> }</ul></td><td>@group.ReportingCurrency</td><td><button class="action-secondary" type="button" @onclick="() => LoadConsolidatedBalanceAsync(group.Id)">View balance</button></td></tr> }</tbody></table>
+                <table class="data-table"><thead><tr><th>Group</th><th>Ownership periods</th><th>Reporting currency</th><th></th></tr></thead><tbody>@foreach (var group in ConsolidationGroups) { <tr><td>@group.Name</td><td><ul class="feature-list">@foreach (var member in group.Members) { <li>@member.CompanyName (@member.OwnershipPercentage.ToString("P2"), @member.EffectiveFrom.ToString("yyyy-MM-dd")–@(member.EffectiveThrough?.ToString("yyyy-MM-dd") ?? "open")) <button class="action-secondary" type="button" @onclick="() => LoadOwnershipPeriod(group.Id, member)">Edit period</button></li> }</ul></td><td>@group.ReportingCurrency</td><td><button class="action-secondary" type="button" @onclick="() => LoadAccountMappingsAsync(group.Id)">Map accounts</button> <button class="action-secondary" type="button" @onclick="() => LoadConsolidatedBalanceAsync(group.Id)">View balance</button></td></tr> }</tbody></table>
                 <EditForm Model="OwnershipForm" OnValidSubmit="SaveOwnershipPeriodAsync">
                     <div class="auth-form"><h3>@(OwnershipForm.Id.HasValue ? "Correct or close ownership period" : "Add ownership period")</h3><div class="field-group"><label class="field-label">Consolidation group</label><InputSelect aria-label="Ownership consolidation group" class="field-input" @bind-Value="OwnershipForm.ConsolidationGroupId" disabled="@OwnershipForm.Id.HasValue"><option value="@Guid.Empty">Select group</option>@foreach (var group in ConsolidationGroups.Where(item => item.IsActive)) { <option value="@group.Id">@group.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Member company</label><InputSelect aria-label="Ownership member company" class="field-input" @bind-Value="OwnershipForm.MemberCompanyId" disabled="@OwnershipForm.Id.HasValue"><option value="@Guid.Empty">Select company</option>@foreach (var company in Companies.Where(item => item.IsOwner)) { <option value="@company.CompanyId">@company.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Ownership percentage (decimal)</label><InputNumber aria-label="Ownership period percentage" class="field-input" @bind-Value="OwnershipForm.OwnershipPercentage" /></div><div class="field-group"><label class="field-label">Effective from</label><InputDate aria-label="Ownership period effective from" class="field-input" @bind-Value="OwnershipForm.EffectiveFrom" /></div><div class="field-group"><label class="field-label">Effective through (optional)</label><InputDate aria-label="Ownership period effective through" class="field-input" @bind-Value="OwnershipForm.EffectiveThrough" /></div><button class="action-primary" type="submit">Save ownership period</button>@if (OwnershipForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelOwnershipEdit">Cancel edit</button> }</div>
                 </EditForm>
+            }
+            @if (AccountMappingWorkspace is not null)
+            {
+                <h3>@AccountMappingWorkspace.GroupName account mappings</h3>
+                <p class="page-intro">Every material source balance needs one effective mapping. Unmapped or overlapping balances are excluded from the report with a visible warning.</p>
+                <EditForm Model="AccountMappingForm" OnValidSubmit="SaveAccountMappingAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Source account</label><select aria-label="Consolidation source account" class="field-input" value="@AccountMappingForm.MemberAccountId" @onchange="SelectMappingSource" disabled="@AccountMappingForm.Id.HasValue"><option value="@Guid.Empty">Select source account</option>@foreach (var account in AccountMappingWorkspace.SourceAccounts) { <option value="@account.AccountId">@account.CompanyName · @account.AccountNumber · @account.AccountName (@account.AccountType)</option> }</select></div><div class="field-group"><label class="field-label">Reporting account number</label><InputText aria-label="Consolidation reporting account number" class="field-input" @bind-Value="AccountMappingForm.ReportingAccountNumber" /></div><div class="field-group"><label class="field-label">Reporting account name</label><InputText aria-label="Consolidation reporting account name" class="field-input" @bind-Value="AccountMappingForm.ReportingAccountName" /></div><div class="field-group"><label class="field-label">Effective from</label><InputDate aria-label="Account mapping effective from" class="field-input" @bind-Value="AccountMappingForm.EffectiveFrom" /></div><div class="field-group"><label class="field-label">Effective through (optional)</label><InputDate aria-label="Account mapping effective through" class="field-input" @bind-Value="AccountMappingForm.EffectiveThrough" /></div><label><InputCheckbox @bind-Value="AccountMappingForm.IsActive" /> Active</label><button class="action-primary" type="submit">Save account mapping</button>@if (AccountMappingForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelMappingEdit">Cancel edit</button> }</div></EditForm>
+                @if (AccountMappingWorkspace.Mappings.Count > 0) { <div class="table-scroll"><table class="data-table" aria-label="Consolidation account mappings"><thead><tr><th>Source</th><th>Reporting account</th><th>Effective</th><th>Status</th><th></th></tr></thead><tbody>@foreach (var mapping in AccountMappingWorkspace.Mappings) { <tr><td>@mapping.CompanyName · @mapping.AccountNumber · @mapping.AccountName (@mapping.AccountType)</td><td>@mapping.ReportingAccountNumber · @mapping.ReportingAccountName (@mapping.ReportingAccountType)</td><td>@mapping.EffectiveFrom.ToString("yyyy-MM-dd")–@(mapping.EffectiveThrough?.ToString("yyyy-MM-dd") ?? "open")</td><td>@(mapping.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => LoadAccountMapping(mapping)">Edit</button></td></tr> }</tbody></table></div> }
             }
             @if (ConsolidatedBalance is not null)
             {
@@ -506,6 +513,8 @@ else
     private ExchangeRateEditor ExchangeRateForm { get; set; } = new();
     private ConsolidationGroupEditor ConsolidationForm { get; set; } = new();
     private ConsolidationOwnershipEditor OwnershipForm { get; set; } = new();
+    private ConsolidationAccountMappingWorkspace? AccountMappingWorkspace { get; set; }
+    private ConsolidationAccountMappingEditor AccountMappingForm { get; set; } = new();
     private IReadOnlyList<ConsolidationGroupSnapshot> ConsolidationGroups { get; set; } = [];
     private ConsolidatedBalanceReport? ConsolidatedBalance { get; set; }
     private AccountingControlsSnapshot AccountingControls { get; set; } = new([], []);
@@ -908,6 +917,30 @@ else
 
     private void CancelOwnershipEdit() { OwnershipForm = new(); StatusMessage = "Ownership-period edit cancelled."; }
 
+    private async Task LoadAccountMappingsAsync(Guid groupId)
+    {
+        AccountMappingWorkspace = await ConsolidationService.GetAccountMappingWorkspaceAsync(groupId);
+        AccountMappingForm = new() { ConsolidationGroupId = groupId };
+        StatusMessage = AccountMappingWorkspace is null ? "Account mappings are unavailable because every member company must remain owned by this operator." : null;
+    }
+
+    private void SelectMappingSource(ChangeEventArgs args)
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out var accountId) || AccountMappingWorkspace is null) return;
+        var source = AccountMappingWorkspace.SourceAccounts.Single(account => account.AccountId == accountId);
+        AccountMappingForm.MemberAccountId = source.AccountId; AccountMappingForm.MemberCompanyId = source.CompanyId; AccountMappingForm.ReportingAccountNumber = source.AccountNumber; AccountMappingForm.ReportingAccountName = source.AccountName;
+    }
+
+    private async Task SaveAccountMappingAsync()
+    {
+        var result = await ConsolidationService.SaveAccountMappingAsync(new SaveConsolidationAccountMappingRequest(AccountMappingForm.Id, AccountMappingForm.ConsolidationGroupId, AccountMappingForm.MemberCompanyId, AccountMappingForm.MemberAccountId, AccountMappingForm.ReportingAccountNumber, AccountMappingForm.ReportingAccountName, AccountMappingForm.EffectiveFrom, AccountMappingForm.EffectiveThrough, AccountMappingForm.IsActive, AccountMappingForm.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Account mapping saved with retained effective-date history." : result.ErrorMessage;
+        if (result.Succeeded) await LoadAccountMappingsAsync(AccountMappingForm.ConsolidationGroupId);
+    }
+
+    private void LoadAccountMapping(ConsolidationAccountMappingSnapshot mapping) => AccountMappingForm = new() { Id = mapping.Id, ConsolidationGroupId = AccountMappingWorkspace!.GroupId, MemberCompanyId = mapping.CompanyId, MemberAccountId = mapping.AccountId, ReportingAccountNumber = mapping.ReportingAccountNumber, ReportingAccountName = mapping.ReportingAccountName, EffectiveFrom = mapping.EffectiveFrom, EffectiveThrough = mapping.EffectiveThrough, IsActive = mapping.IsActive, ConcurrencyToken = mapping.ConcurrencyToken };
+    private void CancelMappingEdit() { var groupId = AccountMappingForm.ConsolidationGroupId; AccountMappingForm = new() { ConsolidationGroupId = groupId }; StatusMessage = "Account-mapping edit cancelled."; }
+
     private void ToggleConsolidationMember(Guid companyId, object? value)
     {
         var selected = value is bool boolValue ? boolValue : string.Equals(value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
@@ -995,6 +1028,7 @@ else
     private sealed class ExchangeRateEditor { public string BaseCurrency { get; set; } = "USD"; public string QuoteCurrency { get; set; } = "CAD"; public decimal Rate { get; set; } = 1m; public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Source { get; set; } = string.Empty; }
     private sealed class ConsolidationGroupEditor { public string Name { get; set; } = string.Empty; public string ReportingCurrency { get; set; } = "USD"; public DateOnly EffectiveFrom { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly? EffectiveThrough { get; set; } public HashSet<Guid> MemberCompanyIds { get; } = []; public Dictionary<Guid, decimal> OwnershipPercentages { get; } = []; }
     private sealed class ConsolidationOwnershipEditor { public Guid? Id { get; set; } public Guid ConsolidationGroupId { get; set; } public Guid MemberCompanyId { get; set; } public decimal OwnershipPercentage { get; set; } = 1m; public DateOnly EffectiveFrom { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly? EffectiveThrough { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class ConsolidationAccountMappingEditor { public Guid? Id { get; set; } public Guid ConsolidationGroupId { get; set; } public Guid MemberCompanyId { get; set; } public Guid MemberAccountId { get; set; } public string ReportingAccountNumber { get; set; } = string.Empty; public string ReportingAccountName { get; set; } = string.Empty; public DateOnly EffectiveFrom { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly? EffectiveThrough { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; }
     private sealed class AccountingPeriodEditor { public DateOnly StartsOn { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly EndsOn { get; set; } = new(DateTime.Today.Year, 12, 31); public string Notes { get; set; } = string.Empty; }
     private sealed class IntegrationConnectionEditor { public string ProviderCode { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public string SettingsJson { get; set; } = "{}"; public string CredentialsJson { get; set; } = "{}"; public bool Enable { get; set; } }
     private sealed class QuickBooksConnectionEditor { public string ConnectionName { get; set; } = "Primary QuickBooks company"; }

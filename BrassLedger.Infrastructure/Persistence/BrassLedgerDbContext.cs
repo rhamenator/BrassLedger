@@ -19,6 +19,7 @@ public sealed class BrassLedgerDbContext(
     public DbSet<CurrencyExchangeRate> CurrencyExchangeRates => Set<CurrencyExchangeRate>();
     public DbSet<ConsolidationGroup> ConsolidationGroups => Set<ConsolidationGroup>();
     public DbSet<ConsolidationGroupCompany> ConsolidationGroupCompanies => Set<ConsolidationGroupCompany>();
+    public DbSet<ConsolidationAccountMapping> ConsolidationAccountMappings => Set<ConsolidationAccountMapping>();
     public DbSet<AccountingPeriod> AccountingPeriods => Set<AccountingPeriod>();
     public DbSet<BusinessAuditEntry> BusinessAuditEntries => Set<BusinessAuditEntry>();
     public DbSet<AccountingInterchangeBatch> AccountingInterchangeBatches => Set<AccountingInterchangeBatch>();
@@ -159,6 +160,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<CurrencyExchangeRate>().HasKey(x => x.Id);
         modelBuilder.Entity<ConsolidationGroup>().HasKey(x => x.Id);
         modelBuilder.Entity<ConsolidationGroupCompany>().HasKey(x => x.Id);
+        modelBuilder.Entity<ConsolidationAccountMapping>().HasKey(x => x.Id);
         modelBuilder.Entity<AccountingPeriod>().HasKey(x => x.Id);
         modelBuilder.Entity<AccountingSchedule>().HasKey(x => x.Id);
         modelBuilder.Entity<AccountingScheduleInstallment>().HasKey(x => x.Id);
@@ -685,6 +687,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.OwnershipPercentage).HasPrecision(9, 6);
         modelBuilder.Entity<ConsolidationGroup>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         modelBuilder.Entity<ConsolidationGroupCompany>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        modelBuilder.Entity<ConsolidationAccountMapping>().Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         ConfigureMoney(modelBuilder.Entity<JournalEntry>().Property(x => x.TotalAmount));
         ConfigureMoney(modelBuilder.Entity<JournalEntryLine>().Property(x => x.Debit));
         ConfigureMoney(modelBuilder.Entity<JournalEntryLine>().Property(x => x.Credit));
@@ -976,6 +979,11 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<CurrencyExchangeRate>().HasIndex(x => new { x.CompanyId, x.BaseCurrency, x.QuoteCurrency, x.EffectiveOn }).IsUnique();
         modelBuilder.Entity<ConsolidationGroup>().HasIndex(x => new { x.CompanyId, x.Name }).IsUnique();
         modelBuilder.Entity<ConsolidationGroupCompany>().HasIndex(x => new { x.ConsolidationGroupId, x.MemberCompanyId, x.EffectiveFrom }).IsUnique();
+        modelBuilder.Entity<ConsolidationAccountMapping>().HasIndex(x => new { x.ConsolidationGroupId, x.MemberCompanyId, x.MemberAccountId, x.EffectiveFrom }).IsUnique();
+        modelBuilder.Entity<ConsolidationAccountMapping>().HasIndex(x => new { x.ConsolidationGroupId, x.ReportingAccountNumber });
+        modelBuilder.Entity<ConsolidationAccountMapping>().HasOne<ConsolidationGroup>().WithMany().HasForeignKey(x => x.ConsolidationGroupId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ConsolidationAccountMapping>().HasOne<Company>().WithMany().HasForeignKey(x => x.MemberCompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ConsolidationAccountMapping>().HasOne<GeneralLedgerAccount>().WithMany().HasForeignKey(x => x.MemberAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<AccountingPeriod>().HasIndex(x => new { x.CompanyId, x.StartsOn, x.EndsOn }).IsUnique();
         modelBuilder.Entity<BusinessAuditEntry>().HasIndex(x => new { x.CompanyId, x.OccurredAtUtc });
         modelBuilder.Entity<AccountingInterchangeBatch>().HasIndex(x => new { x.CompanyId, x.ProviderCode, x.EntityType, x.ProcessedAtUtc });
