@@ -126,6 +126,12 @@ app.MapGet("/consolidation-groups/{groupId:guid}/statements.csv", async (Guid gr
     return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"consolidated-statements-{groupId:N}-{asOf:yyyyMMdd}.csv");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 
+app.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative.csv", async (Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, BrassLedger.Application.Accounting.IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var csv = await service.ExportComparativeStatementPackageCsvAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+    return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"consolidated-comparative-{groupId:N}-{currentAsOf:yyyyMMdd}.csv");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+
 app.MapGet("/payroll/reports/{payrollRunId:guid}/register.csv", async (Guid payrollRunId, BrassLedger.Application.Accounting.IPayrollReportingService service, CancellationToken cancellationToken) =>
 {
     var csv = await service.ExportRegisterCsvAsync(payrollRunId, cancellationToken);

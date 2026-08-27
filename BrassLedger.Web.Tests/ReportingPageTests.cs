@@ -92,6 +92,27 @@ public sealed class ReportingPageTests : TestContext
         var exportLink = cut.FindAll("a").Single(link => link.TextContent.Trim() == "Download statement package CSV");
         Assert.Contains("/consolidation-groups/70000000-0000-0000-0000-000000000001/statements.csv?periodStart=", exportLink.OuterHtml);
     }
+
+    [Fact]
+    public void ReportingPage_RendersComparativeStatementsWithPeriodSpecificPresentationAndExport()
+    {
+        var cut = RenderComponent<Reporting>();
+
+        cut.Find("input#comparisonPeriodStart").Change("2025-01-01");
+        cut.Find("input#comparisonAsOf").Change("2025-08-31");
+        cut.FindAll("button").Single(button => button.TextContent.Trim() == "Compare statement periods").Click();
+
+        Assert.Contains("North America comparative statements", cut.Markup);
+        Assert.Contains("Incomplete — resolve warnings in both periods before external use", cut.Markup);
+        Assert.Equal(4, cut.FindAll("table[aria-label$=' comparison']").Count);
+        Assert.Contains("Current assets · Cash", cut.Markup);
+        Assert.Contains("Prior assets · Prior-period cash", cut.Markup);
+        Assert.Contains("Variance", cut.Markup);
+        Assert.Contains("current minus comparison", cut.Markup);
+        var exportLink = cut.FindAll("a").Single(link => link.TextContent.Trim() == "Download comparative statement CSV");
+        Assert.Contains("/statements/comparative.csv?currentPeriodStart=", exportLink.OuterHtml);
+        Assert.Contains("comparisonPeriodStart=2025-01-01&amp;comparisonAsOf=2025-08-31", exportLink.OuterHtml);
+    }
 }
 
 internal sealed class StubConsolidationService : IConsolidationService
@@ -158,4 +179,22 @@ internal sealed class StubConsolidationService : IConsolidationService
         return Task.FromResult<ConsolidatedStatementPackage?>(new(GroupId, "North America", "USD", periodStart, asOf, balance, income, changes, cash, new(10m, 0m, 10m, 0m, 10m, 0m, 10m, 0m, 10m, 0m, 10m, 10m, 0m, 0m, 0m), ["Cash flow pending classification"], false));
     }
     public Task<string?> ExportStatementPackageCsvAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default) => Task.FromResult<string?>("Record Type,Statement\n");
+    public async Task<ConsolidatedComparativeStatementPackage?> GetComparativeStatementPackageAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default)
+    {
+        var current = await GetStatementPackageAsync(groupId, currentPeriodStart, currentAsOf, cancellationToken);
+        var comparisonSource = await GetStatementPackageAsync(groupId, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+        if (current is null || comparisonSource is null) return null;
+        var priorAccount = new ConsolidatedStatementAccount("1000", "Prior-period cash", "Asset", 7m, []);
+        var comparison = comparisonSource with { BalanceSheet = new("BALANCE-SHEET", "Consolidated balance sheet", [new("PRIOR-ASSETS", "Prior assets", [priorAccount], 7m)], 7m, 0m) };
+        var line = new ConsolidatedComparativeStatementLine("1000", "Asset", "ASSETS", "Current assets", "Cash", 10m, "PRIOR-ASSETS", "Prior assets", "Prior-period cash", 7m, 3m);
+        var statements = new[]
+        {
+            new ConsolidatedComparativeFinancialStatement("BALANCE-SHEET", "Consolidated balance sheet", 10m, 7m, 3m, [line]),
+            new ConsolidatedComparativeFinancialStatement("INCOME-STATEMENT", "Consolidated income statement", 0m, 0m, 0m, []),
+            new ConsolidatedComparativeFinancialStatement("EQUITY-STATEMENT", "Consolidated statement of changes in equity", 10m, 10m, 0m, []),
+            new ConsolidatedComparativeFinancialStatement("CASH-FLOW", "Consolidated statement of cash flows", 0m, 0m, 0m, [])
+        };
+        return new(GroupId, "North America", "USD", current, comparison, statements, ["Current period: Cash flow pending classification"], false);
+    }
+    public Task<string?> ExportComparativeStatementPackageCsvAsync(Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, CancellationToken cancellationToken = default) => Task.FromResult<string?>("Record Type,Statement,Current Amount,Comparison Amount,Variance\n");
 }

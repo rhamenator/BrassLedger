@@ -193,6 +193,21 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Contains("Record Type,Statement,Section", statementCsv, StringComparison.Ordinal);
         Assert.Contains("\"Reconciliation\"", statementCsv, StringComparison.Ordinal);
         Assert.Contains("\"Incomplete\"", statementCsv, StringComparison.Ordinal);
+        var comparativeStatements = await client.GetFromJsonAsync<ConsolidatedComparativeStatementPackage>($"/api/consolidation-groups/{group.Id}/statements/comparative?currentPeriodStart=2026-01-01&currentAsOf=2026-06-30&comparisonPeriodStart=2025-01-01&comparisonAsOf=2025-06-30");
+        Assert.NotNull(comparativeStatements);
+        Assert.Equal(group.Id, comparativeStatements!.GroupId);
+        Assert.Equal(new DateOnly(2026, 6, 30), comparativeStatements.Current.AsOf);
+        Assert.Equal(new DateOnly(2025, 6, 30), comparativeStatements.Comparison.AsOf);
+        Assert.Equal(4, comparativeStatements.Statements.Count);
+        Assert.All(comparativeStatements.Statements.SelectMany(statement => statement.Lines), line => Assert.Equal(line.CurrentAmount - line.ComparisonAmount, line.Variance));
+        var comparativeCsvResponse = await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements/comparative.csv?currentPeriodStart=2026-01-01&currentAsOf=2026-06-30&comparisonPeriodStart=2025-01-01&comparisonAsOf=2025-06-30");
+        Assert.Equal(HttpStatusCode.OK, comparativeCsvResponse.StatusCode);
+        Assert.Equal("text/csv", comparativeCsvResponse.Content.Headers.ContentType?.MediaType);
+        var comparativeCsv = await comparativeCsvResponse.Content.ReadAsStringAsync();
+        Assert.Contains("Current Amount,Comparison Section Code,Comparison Section,Comparison Caption,Comparison Amount,Variance", comparativeCsv, StringComparison.Ordinal);
+        Assert.Contains("2026-06-30,2025-01-01,2025-06-30", comparativeCsv, StringComparison.Ordinal);
+        Assert.Contains("\"Reconciliation\"", comparativeCsv, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements/comparative?currentPeriodStart=2026-01-01&currentAsOf=2026-06-30&comparisonPeriodStart=2026-01-01&comparisonAsOf=2026-06-30")).StatusCode);
     }
 
     [Fact]

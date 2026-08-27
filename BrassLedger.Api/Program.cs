@@ -1002,6 +1002,16 @@ api.MapGet("/consolidation-groups/{groupId:guid}/statements.csv", async (Guid gr
     var csv = await service.ExportStatementPackageCsvAsync(groupId, periodStart, asOf, cancellationToken);
     return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"consolidated-statements-{groupId:N}-{asOf:yyyyMMdd}.csv");
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative", async (Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var package = await service.GetComparativeStatementPackageAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+    return package is null ? Results.NotFound() : Results.Ok(package);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapGet("/consolidation-groups/{groupId:guid}/statements/comparative.csv", async (Guid groupId, DateOnly currentPeriodStart, DateOnly currentAsOf, DateOnly comparisonPeriodStart, DateOnly comparisonAsOf, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var csv = await service.ExportComparativeStatementPackageCsvAsync(groupId, currentPeriodStart, currentAsOf, comparisonPeriodStart, comparisonAsOf, cancellationToken);
+    return csv is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"consolidated-comparative-{groupId:N}-{currentAsOf:yyyyMMdd}.csv");
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 api.MapPut("/accounting-periods", async (SaveAccountingPeriodRequest request, IAccountingPeriodService service, CancellationToken cancellationToken) =>
 {
     var result = await service.SavePeriodAsync(request, cancellationToken); return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["period"] = [result.ErrorMessage] });

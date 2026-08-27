@@ -157,6 +157,8 @@ else
                     </div>
                     <div class="field-group"><label class="field-label" for="adjustmentPeriodStart">Period starts</label><InputDate id="adjustmentPeriodStart" class="field-input" @bind-Value="AdjustmentForm.PeriodStart" /></div>
                     <div class="field-group"><label class="field-label" for="adjustmentAsOf">As of</label><InputDate id="adjustmentAsOf" class="field-input" @bind-Value="AdjustmentForm.AsOf" /></div>
+                    <div class="field-group"><label class="field-label" for="comparisonPeriodStart">Comparison period starts</label><InputDate id="comparisonPeriodStart" class="field-input" @bind-Value="ComparisonForm.PeriodStart" /></div>
+                    <div class="field-group"><label class="field-label" for="comparisonAsOf">Comparison as of</label><InputDate id="comparisonAsOf" class="field-input" @bind-Value="ComparisonForm.AsOf" /><small class="muted-copy">The comparison as-of date must precede the current as-of date.</small></div>
                     <div class="field-group"><label class="field-label" for="adjustmentKind">Entry kind</label><InputSelect id="adjustmentKind" class="field-input" @bind-Value="AdjustmentForm.Kind"><option value="ManualAdjustment">Manual adjustment</option><option value="IntercompanyElimination">Intercompany elimination</option><option value="NoncontrollingInterest">Noncontrolling-interest reclassification</option></InputSelect></div>
                     <div class="field-group"><label class="field-label" for="adjustmentReference">Reference</label><InputText id="adjustmentReference" class="field-input" maxlength="64" @bind-Value="AdjustmentForm.Reference" /></div>
                     <div class="field-group"><label class="field-label" for="adjustmentDescription">Description</label><InputText id="adjustmentDescription" class="field-input" maxlength="1000" @bind-Value="AdjustmentForm.Description" /></div>
@@ -209,7 +211,7 @@ else
                                 <tfoot><tr><th>Totals</th><th>@AdjustmentForm.Lines.Sum(line => line.Debit).ToString("N2")</th><th>@AdjustmentForm.Lines.Sum(line => line.Credit).ToString("N2")</th><th colspan="@(AdjustmentForm.Kind == "IntercompanyElimination" ? 4 : 2)">Difference: @((AdjustmentForm.Lines.Sum(line => line.Debit) - AdjustmentForm.Lines.Sum(line => line.Credit)).ToString("N2"))</th></tr></tfoot>
                             </table>
                         </div>
-                        <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddAdjustmentLine">Add line</button><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="adjustmentPreparationAuthorization"><button class="action-primary" type="submit">@(AdjustmentForm.Id.HasValue ? "Save corrected draft" : "Prepare draft")</button></AuthorizeView>@if (AdjustmentForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetAdjustmentForm">Cancel edit</button> }<button class="action-secondary" type="button" @onclick="RunConsolidatedReportAsync">Preview consolidated balance</button><button class="action-primary" type="button" @onclick="RunConsolidatedStatementsAsync">Run statement package</button></div>
+                        <div class="hero-actions"><button class="action-secondary" type="button" @onclick="AddAdjustmentLine">Add line</button><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="adjustmentPreparationAuthorization"><button class="action-primary" type="submit">@(AdjustmentForm.Id.HasValue ? "Save corrected draft" : "Prepare draft")</button></AuthorizeView>@if (AdjustmentForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetAdjustmentForm">Cancel edit</button> }<button class="action-secondary" type="button" @onclick="RunConsolidatedReportAsync">Preview consolidated balance</button><button class="action-primary" type="button" @onclick="RunConsolidatedStatementsAsync">Run statement package</button><button class="action-secondary" type="button" @onclick="RunComparativeStatementsAsync">Compare statement periods</button></div>
                     </EditForm>
 
                     <div class="field-group"><label class="field-label" for="adjustmentDecisionReason">Rejection, exclusion, or reversal reason</label><InputText id="adjustmentDecisionReason" class="field-input" maxlength="1000" @bind-Value="DecisionReason" /></div>
@@ -258,6 +260,26 @@ else
                             </tbody></table></div>
                         </section>
                     }
+                    @if (ComparativeStatements is not null)
+                    {
+                        <section aria-labelledby="comparativeStatementsHeading">
+                            <h3 id="comparativeStatementsHeading">@ComparativeStatements.GroupName comparative statements</h3>
+                            <p><strong>Current:</strong> @ComparativeStatements.Current.PeriodStart to @ComparativeStatements.Current.AsOf · <strong>Comparison:</strong> @ComparativeStatements.Comparison.PeriodStart to @ComparativeStatements.Comparison.AsOf · <strong>Variance:</strong> current minus comparison</p>
+                            <p role="status"><strong>Status:</strong> @(ComparativeStatements.IsComplete ? "Complete" : "Incomplete — resolve warnings in both periods before external use")</p>
+                            <p><a class="action-secondary" href="@ComparativeStatementCsvUrl()">Download comparative statement CSV</a></p>
+                            @foreach (var warning in ComparativeStatements.Warnings) { <div class="auth-error" role="alert">@warning</div> }
+                            @foreach (var statement in ComparativeStatements.Statements)
+                            {
+                                <h4>@statement.Name comparison</h4>
+                                <div class="table-scroll"><table class="data-table" aria-label="@($"{statement.Name} comparison")"><thead><tr><th>Account</th><th>Current section / caption</th><th>@ComparativeStatements.Current.AsOf</th><th>Comparison section / caption</th><th>@ComparativeStatements.Comparison.AsOf</th><th>Variance</th></tr></thead><tbody>
+                                @foreach (var line in statement.Lines)
+                                {
+                                    <tr><td>@line.AccountNumber (@line.AccountType)</td><td>@(string.IsNullOrWhiteSpace(line.CurrentSectionName) ? "Not present" : $"{line.CurrentSectionName} · {line.CurrentLineCaption}")</td><td>@line.CurrentAmount.ToString("N2")</td><td>@(string.IsNullOrWhiteSpace(line.ComparisonSectionName) ? "Not present" : $"{line.ComparisonSectionName} · {line.ComparisonLineCaption}")</td><td>@line.ComparisonAmount.ToString("N2")</td><td>@line.Variance.ToString("N2")</td></tr>
+                                }
+                                </tbody><tfoot><tr><th colspan="2">Statement total</th><th>@statement.CurrentTotal.ToString("N2")</th><th></th><th>@statement.ComparisonTotal.ToString("N2")</th><th>@statement.Variance.ToString("N2")</th></tr></tfoot></table></div>
+                            }
+                        </section>
+                    }
                 }
             }
         </section>
@@ -271,8 +293,10 @@ else
     private ConsolidationIntercompanyMatchWorkspace? IntercompanyMatchWorkspace;
     private ConsolidatedBalanceReport? ConsolidatedReport;
     private ConsolidatedStatementPackage? ConsolidatedStatements;
+    private ConsolidatedComparativeStatementPackage? ComparativeStatements;
     private Guid SelectedGroupId;
     private AdjustmentEditor AdjustmentForm = NewAdjustmentEditor();
+    private ComparisonEditor ComparisonForm = new();
     private string DecisionReason = string.Empty;
     private string ConsolidationMessage = string.Empty;
     private bool ConsolidationError;
@@ -288,7 +312,7 @@ else
     {
         if (Guid.TryParse(args.Value?.ToString(), out var groupId)) { SelectedGroupId = groupId; ResetAdjustmentForm(); await LoadAdjustmentWorkspaceAsync(); }
     }
-    private async Task LoadAdjustmentWorkspaceAsync() { AdjustmentWorkspace = await ConsolidationService.GetAdjustmentWorkspaceAsync(SelectedGroupId); IntercompanyMatchWorkspace = await ConsolidationService.GetIntercompanyMatchWorkspaceAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); ConsolidatedReport = null; ConsolidatedStatements = null; }
+    private async Task LoadAdjustmentWorkspaceAsync() { AdjustmentWorkspace = await ConsolidationService.GetAdjustmentWorkspaceAsync(SelectedGroupId); IntercompanyMatchWorkspace = await ConsolidationService.GetIntercompanyMatchWorkspaceAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); ConsolidatedReport = null; ConsolidatedStatements = null; ComparativeStatements = null; }
     private static AdjustmentEditor NewAdjustmentEditor() => new() { Lines = [new(), new()] };
     private void ResetAdjustmentForm() { AdjustmentForm = NewAdjustmentEditor(); DecisionReason = string.Empty; ConsolidationMessage = string.Empty; ConsolidationError = false; }
     private void AddAdjustmentLine() => AdjustmentForm.Lines.Add(new());
@@ -342,8 +366,10 @@ else
     private async Task RunAdjustmentActionAsync(Func<Task<TransactionResult>> action, string successMessage) { var result = await action(); SetConsolidationMessage(result.Succeeded ? successMessage : result.ErrorMessage, !result.Succeeded); if (result.Succeeded) { DecisionReason = string.Empty; await LoadAdjustmentWorkspaceAsync(); ConsolidationMessage = successMessage; } }
     private async Task RunConsolidatedReportAsync() { ConsolidatedReport = await ConsolidationService.GetBalanceReportAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); if (ConsolidatedReport is null) SetConsolidationMessage("The consolidated balance could not be produced for this period and access context.", true); }
     private async Task RunConsolidatedStatementsAsync() { ConsolidatedStatements = await ConsolidationService.GetStatementPackageAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf); if (ConsolidatedStatements is null) SetConsolidationMessage("The consolidated statement package could not be produced for this period and access context.", true); }
+    private async Task RunComparativeStatementsAsync() { ComparativeStatements = await ConsolidationService.GetComparativeStatementPackageAsync(SelectedGroupId, AdjustmentForm.PeriodStart, AdjustmentForm.AsOf, ComparisonForm.PeriodStart, ComparisonForm.AsOf); if (ComparativeStatements is null) SetConsolidationMessage("Choose valid current and comparison periods with the comparison as-of date before the current as-of date.", true); }
     private IEnumerable<ConsolidatedFinancialStatement> StatementSet() => ConsolidatedStatements is null ? [] : [ConsolidatedStatements.BalanceSheet, ConsolidatedStatements.IncomeStatement, ConsolidatedStatements.EquityStatement, ConsolidatedStatements.CashFlowStatement];
     private string StatementCsvUrl() => ConsolidatedStatements is null ? "#" : $"/consolidation-groups/{ConsolidatedStatements.GroupId}/statements.csv?periodStart={ConsolidatedStatements.PeriodStart:yyyy-MM-dd}&asOf={ConsolidatedStatements.AsOf:yyyy-MM-dd}";
+    private string ComparativeStatementCsvUrl() => ComparativeStatements is null ? "#" : $"/consolidation-groups/{ComparativeStatements.GroupId}/statements/comparative.csv?currentPeriodStart={ComparativeStatements.Current.PeriodStart:yyyy-MM-dd}&currentAsOf={ComparativeStatements.Current.AsOf:yyyy-MM-dd}&comparisonPeriodStart={ComparativeStatements.Comparison.PeriodStart:yyyy-MM-dd}&comparisonAsOf={ComparativeStatements.Comparison.AsOf:yyyy-MM-dd}";
     private void SetConsolidationMessage(string message, bool error) { ConsolidationMessage = message; ConsolidationError = error; }
     private static string DisplayKind(string kind) => kind switch { "IntercompanyElimination" => "Intercompany elimination", "NoncontrollingInterest" => "Noncontrolling-interest reclassification", _ => "Manual adjustment" };
 
@@ -360,6 +386,7 @@ else
         public string ConcurrencyToken { get; set; } = string.Empty;
         public List<AdjustmentLineEditor> Lines { get; set; } = [];
     }
+    private sealed class ComparisonEditor { public DateOnly PeriodStart { get; set; } = new(DateTime.UtcNow.Year - 1, 1, 1); public DateOnly AsOf { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-1); }
     private sealed class AdjustmentLineEditor
     {
         public string AccountKey { get; set; } = string.Empty;

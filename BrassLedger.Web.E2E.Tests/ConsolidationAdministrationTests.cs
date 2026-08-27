@@ -129,6 +129,16 @@ public sealed class ConsolidationAdministrationTests(PlaywrightWebAppFixture fix
             await Assertions.Expect(session.Page.GetByRole(AriaRole.Table, new() { Name = "Consolidated statement reconciliation" })).ToBeVisibleAsync();
             await Assertions.Expect(session.Page.GetByText("source contribution(s)", new() { Exact = false }).First).ToBeVisibleAsync();
             await Assertions.Expect(session.Page.GetByRole(AriaRole.Link, new() { Name = "Download statement package CSV" })).ToHaveAttributeAsync("href", new System.Text.RegularExpressions.Regex("/consolidation-groups/.+/statements\\.csv\\?periodStart=2026-01-01&asOf=2026-08-31"));
+            await session.Page.Locator("#comparisonPeriodStart").FillAsync("2025-01-01");
+            await session.Page.Locator("#comparisonAsOf").FillAsync("2025-08-31");
+            await session.Page.GetByRole(AriaRole.Button, new() { Name = "Compare statement periods" }).ClickAsync();
+            await Assertions.Expect(session.Page.GetByRole(AriaRole.Heading, new() { Name = "E2E controlled consolidation comparative statements" })).ToBeVisibleAsync();
+            await Assertions.Expect(session.Page.GetByRole(AriaRole.Table, new() { Name = "Consolidated balance sheet comparison" })).ToBeVisibleAsync();
+            await Assertions.Expect(session.Page.GetByRole(AriaRole.Table, new() { Name = "Consolidated income statement comparison" })).ToBeVisibleAsync();
+            await Assertions.Expect(session.Page.GetByRole(AriaRole.Table, new() { Name = "Consolidated statement of changes in equity comparison" })).ToBeVisibleAsync();
+            await Assertions.Expect(session.Page.GetByRole(AriaRole.Table, new() { Name = "Consolidated statement of cash flows comparison" })).ToBeVisibleAsync();
+            await Assertions.Expect(session.Page.GetByRole(AriaRole.Table, new() { Name = "Consolidated balance sheet comparison" })).ToContainTextAsync("Variance");
+            await Assertions.Expect(session.Page.GetByRole(AriaRole.Link, new() { Name = "Download comparative statement CSV" })).ToHaveAttributeAsync("href", new System.Text.RegularExpressions.Regex("/consolidation-groups/.+/statements/comparative\\.csv\\?currentPeriodStart=2026-01-01&currentAsOf=2026-08-31&comparisonPeriodStart=2025-01-01&comparisonAsOf=2025-08-31"));
             await session.Page.Locator("#adjustmentKind").SelectOptionAsync("NoncontrollingInterest");
             await Assertions.Expect(session.Page.GetByText("does not infer acquisition accounting, goodwill, or the NCI amount", new() { Exact = false })).ToBeVisibleAsync();
             await session.Page.Locator("#adjustmentSubjectCompany").SelectOptionAsync("71000000-0000-0000-0000-000000000010");
