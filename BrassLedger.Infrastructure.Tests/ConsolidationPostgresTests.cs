@@ -151,6 +151,21 @@ public sealed class ConsolidationPostgresTests
                     db.CompanyMemberships.Add(new BrassLedger.Domain.Accounting.CompanyMembership { Id = Guid.NewGuid(), UserId = actor, CompanyId = companyId, Role = "Accounting", IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
                 await db.SaveChangesAsync();
             }
+            var disclosureContent = new ConsolidationDisclosureDocument(1,
+                [new("PG-DEBT", "PostgreSQL term debt", "Long-term debt", 100m, -10m, 0m, 0m, 2m, 0m, 0m, 92m, string.Empty, "PostgreSQL debt working paper")], [], []);
+            using var disclosureScopeOne = provider.CreateScope(); using var disclosureScopeTwo = provider.CreateScope(); SetContext(disclosureScopeOne, companyId, ownerId, BrassLedgerPermissions.JournalPrepare); SetContext(disclosureScopeTwo, companyId, ownerId, BrassLedgerPermissions.JournalPrepare);
+            SaveConsolidationDisclosurePackageRequest DisclosureRequest() => new(null, groupId, new DateOnly(2026, 1, 1), new DateOnly(2026, 8, 31), "US-GAAP", "2026 annual", disclosureContent);
+            var disclosureAttempts = await Task.WhenAll(
+                disclosureScopeOne.ServiceProvider.GetRequiredService<IConsolidationService>().SaveDisclosurePackageAsync(DisclosureRequest()),
+                disclosureScopeTwo.ServiceProvider.GetRequiredService<IConsolidationService>().SaveDisclosurePackageAsync(DisclosureRequest()));
+            Assert.Single(disclosureAttempts, result => result.Succeeded); Assert.Single(disclosureAttempts, result => !result.Succeeded);
+            Guid disclosureId; string disclosureToken;
+            using (var disclosureReadScope = provider.CreateScope()) { SetContext(disclosureReadScope, companyId, ownerId); var retained = Assert.Single((await disclosureReadScope.ServiceProvider.GetRequiredService<IConsolidationService>().GetDisclosureWorkspaceAsync(groupId))!.Packages); disclosureId = retained.Id; disclosureToken = retained.ConcurrencyToken; }
+            using var disclosureApprovalScopeOne = provider.CreateScope(); using var disclosureApprovalScopeTwo = provider.CreateScope(); SetContext(disclosureApprovalScopeOne, companyId, reviewerOne, BrassLedgerPermissions.JournalApprove); SetContext(disclosureApprovalScopeTwo, companyId, reviewerTwo, BrassLedgerPermissions.JournalApprove);
+            var disclosureApprovalAttempts = await Task.WhenAll(
+                disclosureApprovalScopeOne.ServiceProvider.GetRequiredService<IConsolidationService>().ApproveDisclosurePackageAsync(new(groupId, disclosureId, disclosureToken)),
+                disclosureApprovalScopeTwo.ServiceProvider.GetRequiredService<IConsolidationService>().ApproveDisclosurePackageAsync(new(groupId, disclosureId, disclosureToken)));
+            Assert.Single(disclosureApprovalAttempts, result => result.Succeeded); Assert.Single(disclosureApprovalAttempts, result => !result.Succeeded);
             Guid adjustmentId; string draftToken;
             using (var adjustmentPreparationScope = provider.CreateScope())
             {
@@ -209,6 +224,8 @@ public sealed class ConsolidationPostgresTests
                 && entry.EntityType == "ConsolidationAccountMapping"
                 && entry.EntityId == sourceMappingId));
             Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-statement-presentation.created" && entry.EntityType == nameof(ConsolidationStatementPresentation)));
+            Assert.Equal(1, await verification.ConsolidationDisclosurePackages.CountAsync(package => package.ConsolidationGroupId == groupId && package.Status == "Approved"));
+            Assert.Equal(1, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-disclosure.approved" && entry.EntityType == nameof(ConsolidationDisclosurePackage)));
             Assert.Equal(1, await verification.ConsolidationTradingPartners.CountAsync(link => link.ConsolidationGroupId == groupId && link.CustomerId == intercompanyCustomerId));
             Assert.Equal(2, await verification.BusinessAuditEntries.CountAsync(entry => entry.Action == "consolidation-trading-partner.created" && entry.EntityType == "ConsolidationTradingPartner"));
             Assert.Equal(1, await verification.ConsolidationIntercompanyMatches.CountAsync(match => match.ConsolidationGroupId == groupId && match.SalesInvoiceId == intercompanyInvoiceId && match.VendorBillId == intercompanyBillId));

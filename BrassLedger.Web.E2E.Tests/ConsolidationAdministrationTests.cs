@@ -78,6 +78,48 @@ public sealed class ConsolidationAdministrationTests(PlaywrightWebAppFixture fix
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task Reporting_PreparesApprovesAndPublishesVersionedFrameworkDisclosures(BrowserKind browserKind)
+    {
+        await fixture.CreateConsolidationWorkflowAsync();
+        try
+        {
+            await using (var preparer = await fixture.CreateSessionAsync(browserKind))
+            {
+                await preparer.SignInAsync("integration-admin"); await preparer.GotoAsync("/reporting");
+                await preparer.Page.Locator("#disclosurePeriodStart").FillAsync("2026-01-01");
+                await preparer.Page.Locator("#disclosureAsOf").FillAsync("2026-08-31");
+                await preparer.Page.GetByRole(AriaRole.Button, new() { Name = "Add narrative disclosure" }).ClickAsync();
+                await preparer.Page.GetByLabel("Disclosure category").FillAsync("GoingConcern");
+                await preparer.Page.GetByLabel("Disclosure code").FillAsync("E2E-GC-1");
+                await preparer.Page.GetByLabel("Disclosure title").FillAsync("E2E going concern assessment");
+                await preparer.Page.GetByLabel("Disclosure narrative").FillAsync("Management reviewed twelve months of liquidity forecasts and covenant headroom.");
+                await preparer.Page.GetByLabel("Disclosure source reference").FillAsync("E2E board package WP-9");
+                await preparer.Page.GetByRole(AriaRole.Button, new() { Name = "Prepare disclosure package" }).ClickAsync();
+                await Assertions.Expect(preparer.Page.GetByText("The disclosure package was retained for independent review.")).ToBeVisibleAsync();
+                await Assertions.Expect(preparer.Page.GetByRole(AriaRole.Table, new() { Name = "Retained consolidation disclosure packages" })).ToContainTextAsync("1 narrative disclosure");
+                await preparer.AssertNoUiFailuresAsync("framework disclosure preparation");
+            }
+            await using (var reviewer = await fixture.CreateSessionAsync(browserKind))
+            {
+                await reviewer.SignInAsync("e2e-consolidation-reviewer"); await reviewer.GotoAsync("/reporting");
+                var disclosureRow = reviewer.Page.GetByRole(AriaRole.Row).Filter(new() { HasTextString = "2026 annual" });
+                await disclosureRow.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+                await Assertions.Expect(reviewer.Page.GetByText("The disclosure package was independently approved.")).ToBeVisibleAsync();
+                await reviewer.Page.Locator("#adjustmentPeriodStart").FillAsync("2026-01-01"); await reviewer.Page.Locator("#adjustmentAsOf").FillAsync("2026-08-31");
+                await reviewer.Page.GetByRole(AriaRole.Button, new() { Name = "Run statement package" }).ClickAsync();
+                await Assertions.Expect(reviewer.Page.GetByRole(AriaRole.Heading, new() { Name = "US-GAAP disclosures · 2026 annual" })).ToBeVisibleAsync();
+                await Assertions.Expect(reviewer.Page.GetByText("Management reviewed twelve months of liquidity forecasts", new() { Exact = false })).ToBeVisibleAsync();
+                await reviewer.AssertNoUiFailuresAsync("approved framework disclosure statement output");
+            }
+        }
+        finally
+        {
+            await fixture.RemoveIntercompanyMatchingWorkflowAsync();
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task Reporting_PreparesReviewedNciForPartiallyOwnedControlledSubsidiary(BrowserKind browserKind)
     {
         await fixture.CreateConsolidationWorkflowAsync();

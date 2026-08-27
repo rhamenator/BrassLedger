@@ -98,7 +98,7 @@ General rules:
 
 ## Release checklist for reports and forms
 
-Consolidated statement packages can be downloaded as CSV, Excel, or PDF from **Reporting** after running either the current-period or comparative package. Excel is the full working-paper format with statement and source-detail sheets. PDF is the controlled presentation format with repeated headers and wrapped evidence. Both formats display the reporting currency, exact dates, reconciliation, warnings, and completion state. An **Incomplete** banner means the file is not ready for external use; downloading it does not waive any unresolved accounting warning.
+Consolidated statement packages can be downloaded as CSV, Excel, or PDF from **Reporting** after running either the current-period or comparative package. Excel is the full working-paper format with statement, source-detail, and independently approved framework-disclosure sheets. PDF is the controlled presentation format with repeated headers and wrapped statement, source, financing-liability, supplier-finance, and narrative evidence. Both formats display the reporting currency, exact dates, reconciliation, warnings, and completion state. Disclosure pages retain framework edition, JSON schema, content SHA-256, approval identity/time, source references, and period-specific content. An **Incomplete** banner means the file is not ready for external use; downloading it does not waive any unresolved accounting warning.
 
 1. Confirm the dataset matches the intended filters and period.
 2. Reconcile totals to the owning module or ledger account.

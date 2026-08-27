@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace BrassLedger.Application.Accounting;
 
 public interface IConsolidationService
@@ -16,6 +18,10 @@ public interface IConsolidationService
     Task<ConsolidationAccountMappingWorkspace?> GetAccountMappingWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveStatementPresentationAsync(SaveConsolidationStatementPresentationRequest request, CancellationToken cancellationToken = default);
     Task<ConsolidationStatementPresentationWorkspace?> GetStatementPresentationWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default);
+    Task<TransactionResult> SaveDisclosurePackageAsync(SaveConsolidationDisclosurePackageRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ApproveDisclosurePackageAsync(ConsolidationDisclosureActionRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> RejectDisclosurePackageAsync(ConsolidationDisclosureDecisionRequest request, CancellationToken cancellationToken = default);
+    Task<ConsolidationDisclosureWorkspace?> GetDisclosureWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveAdjustmentAsync(SaveConsolidationAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ApproveAdjustmentAsync(ConsolidationAdjustmentActionRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RejectAdjustmentAsync(ConsolidationAdjustmentDecisionRequest request, CancellationToken cancellationToken = default);
@@ -49,6 +55,19 @@ public sealed record SaveConsolidationStatementPresentationRequest(Guid? Id, Gui
 public sealed record ConsolidationStatementPresentationCandidate(string StatementCode, string ReportingAccountNumber, string ReportingAccountName, string ReportingAccountType);
 public sealed record ConsolidationStatementPresentationSnapshot(Guid Id, string StatementCode, string ReportingAccountNumber, string ReportingAccountName, string ReportingAccountType, string SectionCode, string SectionName, int SectionSortOrder, string LineCaption, int LineSortOrder, string Rationale, DateOnly ReviewedOn, DateOnly EffectiveFrom, DateOnly? EffectiveThrough, bool IsActive, string ConcurrencyToken);
 public sealed record ConsolidationStatementPresentationWorkspace(Guid GroupId, string GroupName, IReadOnlyList<ConsolidationStatementPresentationCandidate> Candidates, IReadOnlyList<ConsolidationStatementPresentationSnapshot> Presentations);
+public sealed record FinancingLiabilityDisclosureRow(string LiabilityCode, string LiabilityName, string BalanceSheetLine, decimal OpeningBalance, decimal FinancingCashFlows, decimal Acquisitions, decimal Disposals, decimal ForeignExchangeChanges, decimal FairValueChanges, decimal OtherNonCashChanges, decimal ClosingBalance, string OtherNonCashExplanation, string SourceReference,
+    Dictionary<string, JsonElement>? Extensions = null);
+public sealed record SupplierFinanceDisclosureRow(string ArrangementCode, string ArrangementName, string KeyTerms, string BalanceSheetLine, decimal OpeningOutstanding, decimal ObligationsConfirmed, decimal ObligationsPaid, decimal ClosingOutstanding, decimal SuppliersAlreadyPaid, int? PaymentDueMinimumDays, int? PaymentDueMaximumDays, int? ComparablePayablesDueMinimumDays, int? ComparablePayablesDueMaximumDays, string SecurityOrGuarantees, string LiquidityRiskNotes, string SourceReference,
+    Dictionary<string, JsonElement>? Extensions = null);
+public sealed record ConsolidationNarrativeDisclosure(string Category, string Code, string Title, int SortOrder, string Narrative, string SourceReference,
+    Dictionary<string, JsonElement>? Extensions = null);
+public sealed record ConsolidationDisclosureDocument(int SchemaVersion, IReadOnlyList<FinancingLiabilityDisclosureRow> FinancingLiabilities, IReadOnlyList<SupplierFinanceDisclosureRow> SupplierFinanceArrangements, IReadOnlyList<ConsolidationNarrativeDisclosure> NarrativeDisclosures,
+    Dictionary<string, JsonElement>? Extensions = null);
+public sealed record SaveConsolidationDisclosurePackageRequest(Guid? Id, Guid ConsolidationGroupId, DateOnly PeriodStart, DateOnly AsOf, string FrameworkCode, string FrameworkEdition, ConsolidationDisclosureDocument Content, string ReviewNotes = "", string ConcurrencyToken = "");
+public sealed record ConsolidationDisclosureActionRequest(Guid ConsolidationGroupId, Guid DisclosurePackageId, string ConcurrencyToken);
+public sealed record ConsolidationDisclosureDecisionRequest(Guid ConsolidationGroupId, Guid DisclosurePackageId, string Reason, string ConcurrencyToken);
+public sealed record ConsolidationDisclosurePackageSnapshot(Guid Id, DateOnly PeriodStart, DateOnly AsOf, string FrameworkCode, string FrameworkEdition, int SchemaVersion, string ContentSha256, ConsolidationDisclosureDocument Content, string Status, string PreparedBy, DateTimeOffset PreparedAtUtc, string? ApprovedBy, DateTimeOffset? ApprovedAtUtc, string? RejectedBy, DateTimeOffset? RejectedAtUtc, string DecisionReason, string ReviewNotes, string ConcurrencyToken);
+public sealed record ConsolidationDisclosureWorkspace(Guid GroupId, string GroupName, string ReportingCurrency, IReadOnlyList<ConsolidationDisclosurePackageSnapshot> Packages);
 public sealed record SaveConsolidationTradingPartnerRequest(Guid? Id, Guid ConsolidationGroupId, Guid MemberCompanyId, Guid CounterpartyCompanyId, Guid? CustomerId, Guid? VendorId, DateOnly EffectiveFrom, DateOnly? EffectiveThrough, bool IsActive = true, string ConcurrencyToken = "");
 public sealed record ConsolidationTradingPartnerCandidateSnapshot(Guid CompanyId, string CompanyName, string Kind, Guid CounterpartyRecordId, string Number, string Name);
 public sealed record ConsolidationTradingPartnerSnapshot(Guid Id, Guid MemberCompanyId, string MemberCompanyName, Guid CounterpartyCompanyId, string CounterpartyCompanyName, string Kind, Guid CounterpartyRecordId, string Number, string Name, DateOnly EffectiveFrom, DateOnly? EffectiveThrough, bool IsActive, string ConcurrencyToken);
@@ -74,7 +93,7 @@ public sealed record ConsolidatedStatementAccount(string AccountNumber, string A
 public sealed record ConsolidatedStatementSection(string Code, string Name, IReadOnlyList<ConsolidatedStatementAccount> Accounts, decimal Total);
 public sealed record ConsolidatedFinancialStatement(string Code, string Name, IReadOnlyList<ConsolidatedStatementSection> Sections, decimal Total, decimal ReconciliationDifference);
 public sealed record ConsolidatedStatementReconciliation(decimal Assets, decimal Liabilities, decimal RecordedEquity, decimal NetIncome, decimal LiabilitiesAndEquity, decimal BalanceSheetDifference, decimal OpeningEquity, decimal DirectEquityMovement, decimal PresentedEndingEquity, decimal EquityStatementDifference, decimal OpeningCash, decimal EndingCash, decimal NetCashChange, decimal PresentedCashChange, decimal CashFlowDifference);
-public sealed record ConsolidatedStatementPackage(Guid GroupId, string GroupName, string ReportingCurrency, DateOnly PeriodStart, DateOnly AsOf, ConsolidatedFinancialStatement BalanceSheet, ConsolidatedFinancialStatement IncomeStatement, ConsolidatedFinancialStatement EquityStatement, ConsolidatedFinancialStatement CashFlowStatement, ConsolidatedStatementReconciliation Reconciliation, IReadOnlyList<string> Warnings, bool IsComplete);
+public sealed record ConsolidatedStatementPackage(Guid GroupId, string GroupName, string ReportingCurrency, DateOnly PeriodStart, DateOnly AsOf, ConsolidatedFinancialStatement BalanceSheet, ConsolidatedFinancialStatement IncomeStatement, ConsolidatedFinancialStatement EquityStatement, ConsolidatedFinancialStatement CashFlowStatement, ConsolidatedStatementReconciliation Reconciliation, IReadOnlyList<string> Warnings, bool IsComplete, IReadOnlyList<ConsolidationDisclosurePackageSnapshot>? DisclosurePackages = null);
 public sealed record ConsolidatedComparativeStatementLine(string AccountNumber, string AccountType, string CurrentSectionCode, string CurrentSectionName, string CurrentLineCaption, decimal CurrentAmount, string ComparisonSectionCode, string ComparisonSectionName, string ComparisonLineCaption, decimal ComparisonAmount, decimal Variance);
 public sealed record ConsolidatedComparativeFinancialStatement(string Code, string Name, decimal CurrentTotal, decimal ComparisonTotal, decimal Variance, IReadOnlyList<ConsolidatedComparativeStatementLine> Lines);
 public sealed record ConsolidatedComparativeStatementPackage(Guid GroupId, string GroupName, string ReportingCurrency, ConsolidatedStatementPackage Current, ConsolidatedStatementPackage Comparison, IReadOnlyList<ConsolidatedComparativeFinancialStatement> Statements, IReadOnlyList<string> Warnings, bool IsComplete);

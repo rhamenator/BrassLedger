@@ -954,6 +954,29 @@ api.MapPut("/consolidation-groups/{groupId:guid}/adjustments", async (Guid group
     var result = await service.SaveAdjustmentAsync(request, cancellationToken);
     return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["adjustment"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.PrepareJournals);
+api.MapPut("/consolidation-groups/{groupId:guid}/disclosures", async (Guid groupId, SaveConsolidationDisclosurePackageRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId) return Results.BadRequest(new { error = "consolidation_group_id_mismatch" });
+    var result = await service.SaveDisclosurePackageAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["disclosurePackage"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.PrepareJournals);
+api.MapGet("/consolidation-groups/{groupId:guid}/disclosures", async (Guid groupId, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    var workspace = await service.GetDisclosureWorkspaceAsync(groupId, cancellationToken);
+    return workspace is null ? Results.NotFound() : Results.Ok(workspace);
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
+api.MapPost("/consolidation-groups/{groupId:guid}/disclosures/{packageId:guid}/approve", async (Guid groupId, Guid packageId, ConsolidationDisclosureActionRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.DisclosurePackageId != packageId) return Results.BadRequest(new { error = "consolidation_disclosure_id_mismatch" });
+    var result = await service.ApproveDisclosurePackageAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["disclosurePackage"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.ApproveJournals);
+api.MapPost("/consolidation-groups/{groupId:guid}/disclosures/{packageId:guid}/reject", async (Guid groupId, Guid packageId, ConsolidationDisclosureDecisionRequest request, IConsolidationService service, CancellationToken cancellationToken) =>
+{
+    if (request.ConsolidationGroupId != groupId || request.DisclosurePackageId != packageId) return Results.BadRequest(new { error = "consolidation_disclosure_id_mismatch" });
+    var result = await service.RejectDisclosurePackageAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["disclosurePackage"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting, BrassLedgerAuthorizationPolicies.ApproveJournals);
 api.MapGet("/consolidation-groups/{groupId:guid}/adjustments", async (Guid groupId, IConsolidationService service, CancellationToken cancellationToken) =>
 {
     var workspace = await service.GetAdjustmentWorkspaceAsync(groupId, cancellationToken);

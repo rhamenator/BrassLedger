@@ -47,7 +47,25 @@ public sealed partial class ConsolidationService
         foreach (var warning in package.Warnings)
             AppendComparativeCsvRow(csv, "Warning", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, warning, 0m, string.Empty, string.Empty, string.Empty, 0m, 0m,
                 package, package.IsComplete ? "Complete" : "Incomplete");
+        AppendComparativeDisclosureCsvRows(csv, package.Current, package, "Current disclosure", true);
+        AppendComparativeDisclosureCsvRows(csv, package.Comparison, package, "Comparison disclosure", false);
         return csv.ToString();
+    }
+
+    private static void AppendComparativeDisclosureCsvRows(StringBuilder csv, ConsolidatedStatementPackage source, ConsolidatedComparativeStatementPackage package, string recordType, bool current)
+    {
+        foreach (var disclosure in source.DisclosurePackages ?? [])
+        {
+            foreach (var item in disclosure.Content.FinancingLiabilities)
+                AppendComparativeCsvRow(csv, recordType, disclosure.FrameworkCode, item.LiabilityCode, "Financing liability", current ? "FINANCING-LIABILITIES" : string.Empty, current ? item.BalanceSheetLine : string.Empty, current ? $"{item.LiabilityName}; source {item.SourceReference}" : string.Empty, current ? item.ClosingBalance : 0m,
+                    current ? string.Empty : "FINANCING-LIABILITIES", current ? string.Empty : item.BalanceSheetLine, current ? string.Empty : $"{item.LiabilityName}; source {item.SourceReference}", current ? 0m : item.ClosingBalance, current ? item.ClosingBalance : -item.ClosingBalance, package, disclosure.Status);
+            foreach (var item in disclosure.Content.SupplierFinanceArrangements)
+                AppendComparativeCsvRow(csv, recordType, disclosure.FrameworkCode, item.ArrangementCode, "Supplier finance", current ? "SUPPLIER-FINANCE" : string.Empty, current ? item.BalanceSheetLine : string.Empty, current ? $"{item.ArrangementName}; {item.KeyTerms}; source {item.SourceReference}" : string.Empty, current ? item.ClosingOutstanding : 0m,
+                    current ? string.Empty : "SUPPLIER-FINANCE", current ? string.Empty : item.BalanceSheetLine, current ? string.Empty : $"{item.ArrangementName}; {item.KeyTerms}; source {item.SourceReference}", current ? 0m : item.ClosingOutstanding, current ? item.ClosingOutstanding : -item.ClosingOutstanding, package, disclosure.Status);
+            foreach (var item in disclosure.Content.NarrativeDisclosures.OrderBy(item => item.SortOrder).ThenBy(item => item.Code))
+                AppendComparativeCsvRow(csv, recordType, disclosure.FrameworkCode, item.Code, item.Category, current ? "NARRATIVE" : string.Empty, current ? item.Title : string.Empty, current ? $"{item.Narrative}; source {item.SourceReference}" : string.Empty, 0m,
+                    current ? string.Empty : "NARRATIVE", current ? string.Empty : item.Title, current ? string.Empty : $"{item.Narrative}; source {item.SourceReference}", 0m, 0m, package, disclosure.Status);
+        }
     }
 
     private static ConsolidatedComparativeFinancialStatement CompareStatement(ConsolidatedFinancialStatement current, ConsolidatedFinancialStatement comparison)

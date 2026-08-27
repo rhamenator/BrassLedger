@@ -249,6 +249,29 @@ public sealed class ConsolidationStatementPresentation
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }
 
+public sealed class ConsolidationDisclosurePackage
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid ConsolidationGroupId { get; set; }
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly AsOf { get; set; }
+    public string FrameworkCode { get; set; } = string.Empty;
+    public string FrameworkEdition { get; set; } = string.Empty;
+    public int SchemaVersion { get; set; } = 1;
+    public string ContentJson { get; set; } = "{}";
+    public string Status { get; set; } = "Draft";
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
+    public string ReviewNotes { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
 public sealed class ConsolidationTradingPartner
 {
     public Guid Id { get; set; }

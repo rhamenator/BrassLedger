@@ -33,7 +33,23 @@ public sealed partial class ConsolidationService
             ("Cash-flow difference", package.Reconciliation.CashFlowDifference)
         })
             AppendStatementCsvRow(csv, "Reconciliation", string.Empty, string.Empty, string.Empty, control.Item1, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, control.Item2, package, package.IsComplete ? "Complete" : "Incomplete");
+        AppendDisclosureCsvRows(csv, package);
         return csv.ToString();
+    }
+
+    private static void AppendDisclosureCsvRows(StringBuilder csv, ConsolidatedStatementPackage package)
+    {
+        foreach (var disclosure in package.DisclosurePackages ?? [])
+        {
+            foreach (var item in disclosure.Content.FinancingLiabilities)
+            foreach (var movement in new[] { ("Opening balance", item.OpeningBalance), ("Financing cash flows", item.FinancingCashFlows), ("Acquisitions", item.Acquisitions), ("Disposals", item.Disposals), ("Foreign exchange", item.ForeignExchangeChanges), ("Fair value", item.FairValueChanges), ("Other noncash", item.OtherNonCashChanges), ("Closing balance", item.ClosingBalance) })
+                AppendStatementCsvRow(csv, "Disclosure", disclosure.FrameworkCode, "Financing liabilities", item.LiabilityCode, item.LiabilityName, item.BalanceSheetLine, movement.Item1, item.SourceReference, "Approved disclosure", item.OtherNonCashExplanation, disclosure.FrameworkEdition, movement.Item2, package, disclosure.Status);
+            foreach (var item in disclosure.Content.SupplierFinanceArrangements)
+            foreach (var measure in new[] { ("Opening outstanding", item.OpeningOutstanding), ("Obligations confirmed", item.ObligationsConfirmed), ("Obligations paid", item.ObligationsPaid), ("Closing outstanding", item.ClosingOutstanding), ("Suppliers already paid", item.SuppliersAlreadyPaid) })
+                AppendStatementCsvRow(csv, "Disclosure", disclosure.FrameworkCode, "Supplier finance", item.ArrangementCode, item.ArrangementName, item.BalanceSheetLine, measure.Item1, item.SourceReference, "Approved disclosure", $"{item.KeyTerms} | Arrangement due {DayRange(item.PaymentDueMinimumDays, item.PaymentDueMaximumDays)} days; comparable {DayRange(item.ComparablePayablesDueMinimumDays, item.ComparablePayablesDueMaximumDays)} days. {item.SecurityOrGuarantees} {item.LiquidityRiskNotes}", disclosure.FrameworkEdition, measure.Item2, package, disclosure.Status);
+            foreach (var item in disclosure.Content.NarrativeDisclosures.OrderBy(item => item.SortOrder).ThenBy(item => item.Code))
+                AppendStatementCsvRow(csv, "Disclosure", disclosure.FrameworkCode, item.Category, item.Code, item.Title, "Narrative", item.Narrative, item.SourceReference, "Approved disclosure", item.SourceReference, disclosure.FrameworkEdition, 0m, package, disclosure.Status);
+        }
     }
 
     public async Task<ConsolidatedStatementPackage?> GetStatementPackageAsync(Guid groupId, DateOnly periodStart, DateOnly asOf, CancellationToken cancellationToken = default)
@@ -110,11 +126,30 @@ public sealed partial class ConsolidationService
         if (balanceDifference != 0m) warnings.Add($"The balance sheet is out of balance by {balanceDifference:N2} {current.ReportingCurrency}.");
         if (equityDifference != 0m) warnings.Add($"The equity statement does not reconcile to closing presented equity by {equityDifference:N2} {current.ReportingCurrency}.");
 
+        var currentCompanyId = CurrentCompanyId();
+        var disclosureEntities = await db.ConsolidationDisclosurePackages.AsNoTracking()
+            .Where(item => item.CompanyId == currentCompanyId && item.ConsolidationGroupId == groupId && item.PeriodStart == periodStart && item.AsOf == asOf)
+            .OrderBy(item => item.FrameworkCode).ToArrayAsync(cancellationToken);
+        var disclosureUserIds = disclosureEntities.SelectMany(item => new[] { item.PreparedByUserId, item.ApprovedByUserId, item.RejectedByUserId }).Where(item => item.HasValue).Select(item => item!.Value).Distinct().ToArray();
+        var disclosureUsers = await db.Users.AsNoTracking().Where(item => disclosureUserIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => string.IsNullOrWhiteSpace(item.DisplayName) ? item.UserName : item.DisplayName, cancellationToken);
+        var approvedDisclosures = new List<ConsolidationDisclosurePackageSnapshot>();
+        foreach (var disclosure in disclosureEntities)
+        {
+            var snapshot = ToDisclosureSnapshot(disclosure, disclosureUsers);
+            if (snapshot is null)
+            {
+                warnings.Add($"The retained {disclosure.FrameworkCode} disclosure package contains unreadable or incompatible JSON and was excluded.");
+                continue;
+            }
+            if (disclosure.Status == "Approved") approvedDisclosures.Add(snapshot);
+            else warnings.Add($"The {disclosure.FrameworkCode} {disclosure.FrameworkEdition} disclosure package is {disclosure.Status.ToLowerInvariant()} and was excluded until independent approval.");
+        }
+
         var reconciliation = new ConsolidatedStatementReconciliation(totalAssets, totalLiabilities, totalRecordedEquity, netIncome, liabilitiesAndEquity,
             balanceDifference, openingEquity, directEquityMovement, equityEnding, equityDifference, openingCash, endingCash, netCashChange, cashFlowResult.PresentedChange, cashFlow.ReconciliationDifference);
         var isComplete = warnings.Count == 0 && balanceDifference == 0m && equityDifference == 0m && cashFlow.ReconciliationDifference == 0m;
         return new(current.GroupId, current.GroupName, current.ReportingCurrency, periodStart, asOf, balanceSheet, incomeStatement, equityStatement, cashFlow,
-            reconciliation, warnings, isComplete);
+            reconciliation, warnings, isComplete, approvedDisclosures);
     }
 
     private static ConsolidatedStatementSection Section(string code, string name, IReadOnlyList<ConsolidatedStatementAccount> accounts) =>
@@ -169,6 +204,7 @@ public sealed partial class ConsolidationService
             .Append(package.PeriodStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append(',').Append(package.AsOf.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append(',').Append(StatementCsv(status)).AppendLine();
 
     private static string StatementCsv(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
+    private static string DayRange(int? minimum, int? maximum) => minimum.HasValue && maximum.HasValue ? $"{minimum}-{maximum}" : "Not provided";
 
     private static async Task<IReadOnlySet<(string Number, string Name)>> EffectiveCashReportingAccountsAsync(BrassLedgerDbContext db, Guid groupId, DateOnly asOf, CancellationToken cancellationToken)
     {

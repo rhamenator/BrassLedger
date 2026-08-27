@@ -258,6 +258,20 @@ else
                                 <tr><td>Ending cash less opening cash</td><td>@ConsolidatedStatements.Reconciliation.NetCashChange.ToString("N2")</td></tr>
                                 <tr><td>Cash-flow statement reconciliation</td><td>@ConsolidatedStatements.Reconciliation.CashFlowDifference.ToString("N2")</td></tr>
                             </tbody></table></div>
+                            @foreach (var disclosure in ConsolidatedStatements.DisclosurePackages ?? [])
+                            {
+                                <h4>@disclosure.FrameworkCode disclosures · @disclosure.FrameworkEdition</h4>
+                                <p><strong>Review:</strong> approved by @disclosure.ApprovedBy at @disclosure.ApprovedAtUtc?.LocalDateTime · JSON schema @disclosure.SchemaVersion · SHA-256 <code>@disclosure.ContentSha256</code></p>
+                                @if (disclosure.Content.FinancingLiabilities.Count > 0)
+                                {
+                                    <div class="table-scroll"><table class="data-table" aria-label="@($"{disclosure.FrameworkCode} financing liability disclosures")"><thead><tr><th>Liability / presentation</th><th>Opening</th><th>Cash flows</th><th>Noncash movements</th><th>Closing</th><th>Source</th></tr></thead><tbody>@foreach (var item in disclosure.Content.FinancingLiabilities) { <tr><td>@item.LiabilityCode — @item.LiabilityName<br /><small>@item.BalanceSheetLine</small></td><td>@item.OpeningBalance.ToString("N2")</td><td>@item.FinancingCashFlows.ToString("N2")</td><td>Acquisitions @item.Acquisitions.ToString("N2"); disposals @item.Disposals.ToString("N2"); FX @item.ForeignExchangeChanges.ToString("N2"); fair value @item.FairValueChanges.ToString("N2"); other @item.OtherNonCashChanges.ToString("N2")@if (!string.IsNullOrWhiteSpace(item.OtherNonCashExplanation)) { <br /><small>@item.OtherNonCashExplanation</small> }</td><td>@item.ClosingBalance.ToString("N2")</td><td>@item.SourceReference</td></tr> }</tbody></table></div>
+                                }
+                                @if (disclosure.Content.SupplierFinanceArrangements.Count > 0)
+                                {
+                                    <div class="table-scroll"><table class="data-table" aria-label="@($"{disclosure.FrameworkCode} supplier finance disclosures")"><thead><tr><th>Arrangement / terms</th><th>Opening</th><th>Confirmed</th><th>Paid</th><th>Closing / suppliers paid</th><th>Risk / source</th></tr></thead><tbody>@foreach (var item in disclosure.Content.SupplierFinanceArrangements) { <tr><td>@item.ArrangementCode — @item.ArrangementName<br /><small>@item.KeyTerms · @item.BalanceSheetLine</small></td><td>@item.OpeningOutstanding.ToString("N2")</td><td>@item.ObligationsConfirmed.ToString("N2")</td><td>@item.ObligationsPaid.ToString("N2")</td><td>@item.ClosingOutstanding.ToString("N2") / @item.SuppliersAlreadyPaid.ToString("N2")</td><td>@item.LiquidityRiskNotes<br /><small>@item.SourceReference</small></td></tr> }</tbody></table></div>
+                                }
+                                @foreach (var item in disclosure.Content.NarrativeDisclosures.OrderBy(item => item.SortOrder).ThenBy(item => item.Code)) { <h5>@item.Title</h5><p>@item.Narrative</p><p class="muted-copy">@item.Category · @item.Code · Source: @item.SourceReference</p> }
+                            }
                         </section>
                     }
                     @if (ComparativeStatements is not null)
@@ -268,6 +282,7 @@ else
                             <p role="status"><strong>Status:</strong> @(ComparativeStatements.IsComplete ? "Complete" : "Incomplete — resolve warnings in both periods before external use")</p>
                             <p class="hero-actions"><a class="action-secondary" data-enhance-nav="false" href="@ComparativeStatementCsvUrl()">Download comparative statement CSV</a><a class="action-secondary" data-enhance-nav="false" href="@ComparativeStatementExcelUrl()">Download comparative statement Excel</a><a class="action-secondary" data-enhance-nav="false" href="@ComparativeStatementPdfUrl()">Download comparative statement PDF</a></p>
                             @foreach (var warning in ComparativeStatements.Warnings) { <div class="auth-error" role="alert">@warning</div> }
+                            <p><strong>Approved disclosure packages:</strong> current @(ComparativeStatements.Current.DisclosurePackages?.Count ?? 0), comparison @(ComparativeStatements.Comparison.DisclosurePackages?.Count ?? 0). Period-specific packages are included in Excel, PDF, CSV, and JSON output.</p>
                             @foreach (var statement in ComparativeStatements.Statements)
                             {
                                 <h4>@statement.Name comparison</h4>
@@ -280,6 +295,7 @@ else
                             }
                         </section>
                     }
+                    <ConsolidationDisclosureEditor GroupId="SelectedGroupId" PeriodStart="AdjustmentForm.PeriodStart" AsOf="AdjustmentForm.AsOf" />
                 }
             }
         </section>

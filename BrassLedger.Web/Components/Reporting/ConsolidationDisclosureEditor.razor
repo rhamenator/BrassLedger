@@ -1,0 +1,159 @@
+@using BrassLedger.Application.Accounting
+@using BrassLedger.Infrastructure.Auth
+@inject IConsolidationService ConsolidationService
+
+<section class="panel" aria-labelledby="consolidationDisclosuresHeading">
+    <h3 id="consolidationDisclosuresHeading">Framework disclosures</h3>
+    <p class="page-intro">Prepare an exact-period, versioned disclosure package. Amounts must reconcile before saving; a different operator must approve it before it appears in statement downloads. New standard-specific fields can remain in the versioned JSON document without changing accounting tables.</p>
+    @if (!string.IsNullOrWhiteSpace(Message)) { <div class="@(IsError ? "auth-error" : "muted-copy")" role="@(IsError ? "alert" : "status")">@Message</div> }
+    @if (Workspace is null)
+    {
+        <p class="muted-copy">Disclosure packages are unavailable because this user does not have access to every retained group member.</p>
+    }
+    else
+    {
+        <EditForm Model="Editor" OnValidSubmit="SaveAsync">
+            <div class="content-grid">
+                <div class="field-group"><label class="field-label" for="disclosurePeriodStart">Period starts</label><InputDate id="disclosurePeriodStart" class="field-input" @bind-Value="Editor.PeriodStart" /></div>
+                <div class="field-group"><label class="field-label" for="disclosureAsOf">As of</label><InputDate id="disclosureAsOf" class="field-input" @bind-Value="Editor.AsOf" /></div>
+                <div class="field-group"><label class="field-label" for="disclosureFramework">Framework</label><InputText id="disclosureFramework" class="field-input" maxlength="32" list="frameworkChoices" @bind-Value="Editor.FrameworkCode" /><datalist id="frameworkChoices"><option value="US-GAAP"></option><option value="IFRS"></option><option value="IFRS-SME"></option><option value="Other"></option></datalist></div>
+                <div class="field-group"><label class="field-label" for="disclosureEdition">Framework edition</label><InputText id="disclosureEdition" class="field-input" maxlength="80" placeholder="For example, 2026 annual" @bind-Value="Editor.FrameworkEdition" /></div>
+                <div class="field-group"><label class="field-label" for="disclosureReviewNotes">Preparation and review notes</label><InputTextArea id="disclosureReviewNotes" class="field-input" maxlength="2000" @bind-Value="Editor.ReviewNotes" /></div>
+            </div>
+
+            <h4>Financing-liability reconciliation</h4>
+            <p class="muted-copy">Closing must equal opening plus every cash and noncash movement. Enter disposals and other reductions as negative amounts.</p>
+            @foreach (var row in Editor.FinancingLiabilities)
+            {
+                <fieldset class="panel" @key="row"><legend>@(string.IsNullOrWhiteSpace(row.LiabilityName) ? "Financing liability" : row.LiabilityName)</legend>
+                    <div class="content-grid">
+                        <div class="field-group"><label class="field-label">Code</label><InputText aria-label="Financing liability code" class="field-input" maxlength="64" @bind-Value="row.LiabilityCode" /></div>
+                        <div class="field-group"><label class="field-label">Name</label><InputText aria-label="Financing liability name" class="field-input" maxlength="160" @bind-Value="row.LiabilityName" /></div>
+                        <div class="field-group"><label class="field-label">Balance-sheet line</label><InputText aria-label="Financing liability balance-sheet line" class="field-input" maxlength="160" @bind-Value="row.BalanceSheetLine" /></div>
+                        <div class="field-group"><label class="field-label">Opening</label><InputNumber aria-label="Financing liability opening balance" class="field-input" step="0.01" @bind-Value="row.OpeningBalance" /></div>
+                        <div class="field-group"><label class="field-label">Financing cash flows</label><InputNumber aria-label="Financing cash flows" class="field-input" step="0.01" @bind-Value="row.FinancingCashFlows" /></div>
+                        <div class="field-group"><label class="field-label">Acquisitions</label><InputNumber aria-label="Financing liability acquisitions" class="field-input" step="0.01" @bind-Value="row.Acquisitions" /></div>
+                        <div class="field-group"><label class="field-label">Disposals</label><InputNumber aria-label="Financing liability disposals" class="field-input" step="0.01" @bind-Value="row.Disposals" /></div>
+                        <div class="field-group"><label class="field-label">Foreign exchange</label><InputNumber aria-label="Financing liability foreign exchange changes" class="field-input" step="0.01" @bind-Value="row.ForeignExchangeChanges" /></div>
+                        <div class="field-group"><label class="field-label">Fair value</label><InputNumber aria-label="Financing liability fair value changes" class="field-input" step="0.01" @bind-Value="row.FairValueChanges" /></div>
+                        <div class="field-group"><label class="field-label">Other noncash</label><InputNumber aria-label="Financing liability other noncash changes" class="field-input" step="0.01" @bind-Value="row.OtherNonCashChanges" /></div>
+                        <div class="field-group"><label class="field-label">Closing</label><InputNumber aria-label="Financing liability closing balance" class="field-input" step="0.01" @bind-Value="row.ClosingBalance" /><small>Calculated difference: @FinancingDifference(row).ToString("N2")</small></div>
+                        <div class="field-group"><label class="field-label">Other-noncash explanation</label><InputTextArea aria-label="Financing liability other noncash explanation" class="field-input" maxlength="2000" @bind-Value="row.OtherNonCashExplanation" /></div>
+                        <div class="field-group"><label class="field-label">Source reference</label><InputText aria-label="Financing liability source reference" class="field-input" maxlength="1000" @bind-Value="row.SourceReference" /></div>
+                    </div><button class="action-secondary" type="button" @onclick="() => Editor.FinancingLiabilities.Remove(row)">Remove liability</button>
+                </fieldset>
+            }
+            <button class="action-secondary" type="button" @onclick="() => Editor.FinancingLiabilities.Add(new())">Add financing liability</button>
+
+            <h4>Supplier-finance arrangements</h4>
+            @foreach (var row in Editor.SupplierFinanceArrangements)
+            {
+                <fieldset class="panel" @key="row"><legend>@(string.IsNullOrWhiteSpace(row.ArrangementName) ? "Supplier-finance arrangement" : row.ArrangementName)</legend>
+                    <div class="content-grid">
+                        <div class="field-group"><label class="field-label">Code</label><InputText aria-label="Supplier finance code" class="field-input" maxlength="64" @bind-Value="row.ArrangementCode" /></div>
+                        <div class="field-group"><label class="field-label">Name</label><InputText aria-label="Supplier finance name" class="field-input" maxlength="160" @bind-Value="row.ArrangementName" /></div>
+                        <div class="field-group"><label class="field-label">Key terms</label><InputTextArea aria-label="Supplier finance key terms" class="field-input" maxlength="4000" @bind-Value="row.KeyTerms" /></div>
+                        <div class="field-group"><label class="field-label">Balance-sheet line</label><InputText aria-label="Supplier finance balance-sheet line" class="field-input" maxlength="160" @bind-Value="row.BalanceSheetLine" /></div>
+                        <div class="field-group"><label class="field-label">Opening outstanding</label><InputNumber aria-label="Supplier finance opening outstanding" class="field-input" step="0.01" min="0" @bind-Value="row.OpeningOutstanding" /></div>
+                        <div class="field-group"><label class="field-label">Obligations confirmed</label><InputNumber aria-label="Supplier finance obligations confirmed" class="field-input" step="0.01" min="0" @bind-Value="row.ObligationsConfirmed" /></div>
+                        <div class="field-group"><label class="field-label">Obligations paid</label><InputNumber aria-label="Supplier finance obligations paid" class="field-input" step="0.01" min="0" @bind-Value="row.ObligationsPaid" /></div>
+                        <div class="field-group"><label class="field-label">Closing outstanding</label><InputNumber aria-label="Supplier finance closing outstanding" class="field-input" step="0.01" min="0" @bind-Value="row.ClosingOutstanding" /><small>Calculated difference: @SupplierDifference(row).ToString("N2")</small></div>
+                        <div class="field-group"><label class="field-label">Suppliers already paid</label><InputNumber aria-label="Supplier finance suppliers already paid" class="field-input" step="0.01" min="0" @bind-Value="row.SuppliersAlreadyPaid" /></div>
+                        <div class="field-group"><label class="field-label">Arrangement due days (minimum / maximum)</label><div class="hero-actions"><InputNumber aria-label="Supplier finance minimum due days" class="field-input" min="0" @bind-Value="row.PaymentDueMinimumDays" /><InputNumber aria-label="Supplier finance maximum due days" class="field-input" min="0" @bind-Value="row.PaymentDueMaximumDays" /></div></div>
+                        <div class="field-group"><label class="field-label">Comparable payables due days (minimum / maximum)</label><div class="hero-actions"><InputNumber aria-label="Comparable payables minimum due days" class="field-input" min="0" @bind-Value="row.ComparablePayablesDueMinimumDays" /><InputNumber aria-label="Comparable payables maximum due days" class="field-input" min="0" @bind-Value="row.ComparablePayablesDueMaximumDays" /></div></div>
+                        <div class="field-group"><label class="field-label">Security or guarantees</label><InputTextArea aria-label="Supplier finance security or guarantees" class="field-input" maxlength="2000" @bind-Value="row.SecurityOrGuarantees" /></div>
+                        <div class="field-group"><label class="field-label">Liquidity-risk notes</label><InputTextArea aria-label="Supplier finance liquidity risk notes" class="field-input" maxlength="4000" @bind-Value="row.LiquidityRiskNotes" /></div>
+                        <div class="field-group"><label class="field-label">Source reference</label><InputText aria-label="Supplier finance source reference" class="field-input" maxlength="1000" @bind-Value="row.SourceReference" /></div>
+                    </div><button class="action-secondary" type="button" @onclick="() => Editor.SupplierFinanceArrangements.Remove(row)">Remove arrangement</button>
+                </fieldset>
+            }
+            <button class="action-secondary" type="button" @onclick="() => Editor.SupplierFinanceArrangements.Add(new())">Add supplier-finance arrangement</button>
+
+            <h4>Other disclosures</h4>
+            <p class="muted-copy">Choose a common category or enter a custom one. This section is intentionally extensible for future framework requirements.</p>
+            @foreach (var row in Editor.NarrativeDisclosures)
+            {
+                <fieldset class="panel" @key="row"><legend>@(string.IsNullOrWhiteSpace(row.Title) ? "Narrative disclosure" : row.Title)</legend>
+                    <div class="content-grid">
+                        <div class="field-group"><label class="field-label">Category</label><InputText aria-label="Disclosure category" class="field-input" maxlength="64" list="disclosureCategories" @bind-Value="row.Category" /></div>
+                        <div class="field-group"><label class="field-label">Code</label><InputText aria-label="Disclosure code" class="field-input" maxlength="64" @bind-Value="row.Code" /></div>
+                        <div class="field-group"><label class="field-label">Title</label><InputText aria-label="Disclosure title" class="field-input" maxlength="200" @bind-Value="row.Title" /></div>
+                        <div class="field-group"><label class="field-label">Order</label><InputNumber aria-label="Disclosure sort order" class="field-input" min="0" @bind-Value="row.SortOrder" /></div>
+                        <div class="field-group"><label class="field-label">Disclosure</label><InputTextArea aria-label="Disclosure narrative" class="field-input" maxlength="20000" @bind-Value="row.Narrative" /></div>
+                        <div class="field-group"><label class="field-label">Source reference</label><InputText aria-label="Disclosure source reference" class="field-input" maxlength="1000" @bind-Value="row.SourceReference" /></div>
+                    </div><button class="action-secondary" type="button" @onclick="() => Editor.NarrativeDisclosures.Remove(row)">Remove disclosure</button>
+                </fieldset>
+            }
+            <datalist id="disclosureCategories">@foreach (var category in Categories) { <option value="@category"></option> }</datalist>
+            <div class="hero-actions"><button class="action-secondary" type="button" @onclick="() => Editor.NarrativeDisclosures.Add(new())">Add narrative disclosure</button><button class="action-secondary" type="button" @onclick="UseReportPeriod">Use statement period</button><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="disclosurePreparationAuthorization"><button class="action-primary" type="submit">@(Editor.Id.HasValue ? "Save corrected package" : "Prepare disclosure package")</button></AuthorizeView>@if (Editor.Id.HasValue) { <button class="action-secondary" type="button" @onclick="ResetEditor">Cancel edit</button> }</div>
+        </EditForm>
+
+        <div class="field-group"><label class="field-label" for="disclosureDecisionReason">Rejection reason</label><InputText id="disclosureDecisionReason" class="field-input" maxlength="1000" @bind-Value="DecisionReason" /></div>
+        @if (Workspace.Packages.Count == 0) { <p class="muted-copy">No disclosure packages have been retained for this group.</p> }
+        else
+        {
+            <div class="table-scroll"><table class="data-table" aria-label="Retained consolidation disclosure packages"><thead><tr><th>Period / framework</th><th>Content</th><th>Status</th><th>Control history</th><th>Actions</th></tr></thead><tbody>
+            @foreach (var package in Workspace.Packages)
+            {
+                <tr><td>@package.PeriodStart to @package.AsOf<br /><strong>@package.FrameworkCode · @package.FrameworkEdition</strong><br /><small>JSON schema @package.SchemaVersion</small></td><td>@package.Content.FinancingLiabilities.Count financing liability row(s)<br />@package.Content.SupplierFinanceArrangements.Count supplier-finance arrangement(s)<br />@package.Content.NarrativeDisclosures.Count narrative disclosure(s)</td><td>@package.Status@if (!string.IsNullOrWhiteSpace(package.DecisionReason)) { <br /><small>@package.DecisionReason</small> }</td><td>Prepared by @package.PreparedBy<br /><small>@package.PreparedAtUtc.LocalDateTime</small>@if (package.ApprovedBy is not null) { <br /><span>Approved by @package.ApprovedBy</span> }@if (package.RejectedBy is not null) { <br /><span>Rejected by @package.RejectedBy</span> }</td><td><div class="hero-actions">@if (package.Status is "Draft" or "Rejected") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => Edit(package)">Edit</button></AuthorizeView> }@if (package.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-primary" type="button" @onclick="() => ApproveAsync(package)">Approve</button><button class="action-secondary" type="button" @onclick="() => RejectAsync(package)">Reject</button></AuthorizeView> }</div></td></tr>
+            }
+            </tbody></table></div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid GroupId { get; set; }
+    [Parameter] public DateOnly PeriodStart { get; set; }
+    [Parameter] public DateOnly AsOf { get; set; }
+    private Guid LoadedGroupId;
+    private ConsolidationDisclosureWorkspace? Workspace;
+    private DisclosureEditor Editor = new();
+    private string DecisionReason = string.Empty;
+    private string Message = string.Empty;
+    private bool IsError;
+    private static readonly string[] Categories = ["AccountingPolicies", "GoingConcern", "SubsequentEvents", "RelatedParties", "CommitmentsAndContingencies", "DebtAndCovenants", "LiquidityAndMaturity", "IncomeTaxes", "Leases", "Revenue", "Inventory", "FixedAssets", "EmployeeBenefits", "EarningsPerShare", "Segments", "FairValue", "Other"];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (GroupId == Guid.Empty || GroupId == LoadedGroupId) return;
+        LoadedGroupId = GroupId;
+        Workspace = await ConsolidationService.GetDisclosureWorkspaceAsync(GroupId);
+        ResetEditor();
+    }
+
+    private void UseReportPeriod() { Editor.PeriodStart = PeriodStart; Editor.AsOf = AsOf; }
+    private void ResetEditor() { Editor = new() { PeriodStart = PeriodStart, AsOf = AsOf }; DecisionReason = string.Empty; }
+    private static decimal FinancingDifference(FinancingEditor row) => row.ClosingBalance - (row.OpeningBalance + row.FinancingCashFlows + row.Acquisitions + row.Disposals + row.ForeignExchangeChanges + row.FairValueChanges + row.OtherNonCashChanges);
+    private static decimal SupplierDifference(SupplierEditor row) => row.ClosingOutstanding - (row.OpeningOutstanding + row.ObligationsConfirmed - row.ObligationsPaid);
+
+    private async Task SaveAsync()
+    {
+        var content = new ConsolidationDisclosureDocument(1,
+            Editor.FinancingLiabilities.Select(row => new FinancingLiabilityDisclosureRow(row.LiabilityCode, row.LiabilityName, row.BalanceSheetLine, row.OpeningBalance, row.FinancingCashFlows, row.Acquisitions, row.Disposals, row.ForeignExchangeChanges, row.FairValueChanges, row.OtherNonCashChanges, row.ClosingBalance, row.OtherNonCashExplanation, row.SourceReference)).ToArray(),
+            Editor.SupplierFinanceArrangements.Select(row => new SupplierFinanceDisclosureRow(row.ArrangementCode, row.ArrangementName, row.KeyTerms, row.BalanceSheetLine, row.OpeningOutstanding, row.ObligationsConfirmed, row.ObligationsPaid, row.ClosingOutstanding, row.SuppliersAlreadyPaid, row.PaymentDueMinimumDays, row.PaymentDueMaximumDays, row.ComparablePayablesDueMinimumDays, row.ComparablePayablesDueMaximumDays, row.SecurityOrGuarantees, row.LiquidityRiskNotes, row.SourceReference)).ToArray(),
+            Editor.NarrativeDisclosures.Select(row => new ConsolidationNarrativeDisclosure(row.Category, row.Code, row.Title, row.SortOrder, row.Narrative, row.SourceReference)).ToArray());
+        var result = await ConsolidationService.SaveDisclosurePackageAsync(new(Editor.Id, GroupId, Editor.PeriodStart, Editor.AsOf, Editor.FrameworkCode, Editor.FrameworkEdition, content, Editor.ReviewNotes, Editor.ConcurrencyToken));
+        SetMessage(result.Succeeded ? "The disclosure package was retained for independent review." : result.ErrorMessage, !result.Succeeded);
+        if (result.Succeeded) { Workspace = await ConsolidationService.GetDisclosureWorkspaceAsync(GroupId); ResetEditor(); Message = "The disclosure package was retained for independent review."; }
+    }
+
+    private void Edit(ConsolidationDisclosurePackageSnapshot package)
+    {
+        Editor = new() { Id = package.Id, PeriodStart = package.PeriodStart, AsOf = package.AsOf, FrameworkCode = package.FrameworkCode, FrameworkEdition = package.FrameworkEdition, ReviewNotes = package.ReviewNotes, ConcurrencyToken = package.ConcurrencyToken,
+            FinancingLiabilities = package.Content.FinancingLiabilities.Select(row => new FinancingEditor { LiabilityCode = row.LiabilityCode, LiabilityName = row.LiabilityName, BalanceSheetLine = row.BalanceSheetLine, OpeningBalance = row.OpeningBalance, FinancingCashFlows = row.FinancingCashFlows, Acquisitions = row.Acquisitions, Disposals = row.Disposals, ForeignExchangeChanges = row.ForeignExchangeChanges, FairValueChanges = row.FairValueChanges, OtherNonCashChanges = row.OtherNonCashChanges, ClosingBalance = row.ClosingBalance, OtherNonCashExplanation = row.OtherNonCashExplanation, SourceReference = row.SourceReference }).ToList(),
+            SupplierFinanceArrangements = package.Content.SupplierFinanceArrangements.Select(row => new SupplierEditor { ArrangementCode = row.ArrangementCode, ArrangementName = row.ArrangementName, KeyTerms = row.KeyTerms, BalanceSheetLine = row.BalanceSheetLine, OpeningOutstanding = row.OpeningOutstanding, ObligationsConfirmed = row.ObligationsConfirmed, ObligationsPaid = row.ObligationsPaid, ClosingOutstanding = row.ClosingOutstanding, SuppliersAlreadyPaid = row.SuppliersAlreadyPaid, PaymentDueMinimumDays = row.PaymentDueMinimumDays, PaymentDueMaximumDays = row.PaymentDueMaximumDays, ComparablePayablesDueMinimumDays = row.ComparablePayablesDueMinimumDays, ComparablePayablesDueMaximumDays = row.ComparablePayablesDueMaximumDays, SecurityOrGuarantees = row.SecurityOrGuarantees, LiquidityRiskNotes = row.LiquidityRiskNotes, SourceReference = row.SourceReference }).ToList(),
+            NarrativeDisclosures = package.Content.NarrativeDisclosures.Select(row => new NarrativeEditor { Category = row.Category, Code = row.Code, Title = row.Title, SortOrder = row.SortOrder, Narrative = row.Narrative, SourceReference = row.SourceReference }).ToList() };
+        SetMessage($"Editing {package.FrameworkCode} disclosures for {package.AsOf:yyyy-MM-dd}.", false);
+    }
+
+    private async Task ApproveAsync(ConsolidationDisclosurePackageSnapshot package) => await DecideAsync(await ConsolidationService.ApproveDisclosurePackageAsync(new(GroupId, package.Id, package.ConcurrencyToken)), "The disclosure package was independently approved.");
+    private async Task RejectAsync(ConsolidationDisclosurePackageSnapshot package) => await DecideAsync(await ConsolidationService.RejectDisclosurePackageAsync(new(GroupId, package.Id, DecisionReason, package.ConcurrencyToken)), "The disclosure package was rejected for correction.");
+    private async Task DecideAsync(TransactionResult result, string success) { SetMessage(result.Succeeded ? success : result.ErrorMessage, !result.Succeeded); if (result.Succeeded) { DecisionReason = string.Empty; Workspace = await ConsolidationService.GetDisclosureWorkspaceAsync(GroupId); } }
+    private void SetMessage(string value, bool error) { Message = value; IsError = error; }
+
+    private sealed class DisclosureEditor { public Guid? Id { get; set; } public DateOnly PeriodStart { get; set; } public DateOnly AsOf { get; set; } public string FrameworkCode { get; set; } = "US-GAAP"; public string FrameworkEdition { get; set; } = "2026 annual"; public string ReviewNotes { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty; public List<FinancingEditor> FinancingLiabilities { get; set; } = []; public List<SupplierEditor> SupplierFinanceArrangements { get; set; } = []; public List<NarrativeEditor> NarrativeDisclosures { get; set; } = []; }
+    private sealed class FinancingEditor { public string LiabilityCode { get; set; } = string.Empty; public string LiabilityName { get; set; } = string.Empty; public string BalanceSheetLine { get; set; } = string.Empty; public decimal OpeningBalance { get; set; } public decimal FinancingCashFlows { get; set; } public decimal Acquisitions { get; set; } public decimal Disposals { get; set; } public decimal ForeignExchangeChanges { get; set; } public decimal FairValueChanges { get; set; } public decimal OtherNonCashChanges { get; set; } public decimal ClosingBalance { get; set; } public string OtherNonCashExplanation { get; set; } = string.Empty; public string SourceReference { get; set; } = string.Empty; }
+    private sealed class SupplierEditor { public string ArrangementCode { get; set; } = string.Empty; public string ArrangementName { get; set; } = string.Empty; public string KeyTerms { get; set; } = string.Empty; public string BalanceSheetLine { get; set; } = string.Empty; public decimal OpeningOutstanding { get; set; } public decimal ObligationsConfirmed { get; set; } public decimal ObligationsPaid { get; set; } public decimal ClosingOutstanding { get; set; } public decimal SuppliersAlreadyPaid { get; set; } public int? PaymentDueMinimumDays { get; set; } public int? PaymentDueMaximumDays { get; set; } public int? ComparablePayablesDueMinimumDays { get; set; } public int? ComparablePayablesDueMaximumDays { get; set; } public string SecurityOrGuarantees { get; set; } = string.Empty; public string LiquidityRiskNotes { get; set; } = string.Empty; public string SourceReference { get; set; } = string.Empty; }
+    private sealed class NarrativeEditor { public string Category { get; set; } = "AccountingPolicies"; public string Code { get; set; } = string.Empty; public string Title { get; set; } = string.Empty; public int SortOrder { get; set; } public string Narrative { get; set; } = string.Empty; public string SourceReference { get; set; } = string.Empty; }
+}

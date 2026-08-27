@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PdfSharp.Pdf.IO;
+using System.Text.Json;
 
 namespace BrassLedger.Infrastructure.Tests;
 
@@ -65,7 +66,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("38", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("39", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -104,6 +105,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827133355_AddExplicitConsolidationBasisAndNci';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827151409_AddConsolidatedCashFlowClassification';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827160327_AddConsolidatedStatementPresentation';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827185331_AddConsolidationDisclosurePackages';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
@@ -120,6 +122,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'CashFlowReviewedOn';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'SectionCode';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'ReviewedOn';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationDisclosurePackages') WHERE name = 'ContentJson';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_ConsolidationDisclosurePackages_ConsolidationGroupId_PeriodStart_AsOf_FrameworkCode';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveThrough';"));
@@ -171,7 +175,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("38", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("39", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -209,6 +213,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827133355_AddExplicitConsolidationBasisAndNci';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827151409_AddConsolidatedCashFlowClassification';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827160327_AddConsolidatedStatementPresentation';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827185331_AddConsolidationDisclosurePackages';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
@@ -223,6 +228,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationAccountMappings') WHERE name = 'CashFlowReviewedOn';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'SectionCode';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationStatementPresentations') WHERE name = 'ReviewedOn';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationDisclosurePackages') WHERE name = 'ContentJson';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroups') WHERE name = 'CtaAccountNumber';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAccountMappings';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ConsolidationGroupCompanies') WHERE name = 'EffectiveFrom';"));
@@ -716,6 +722,31 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
         var adjustmentPeriodStart = new DateOnly(2026, 1, 1); var adjustmentAsOf = new DateOnly(2026, 5, 1);
         SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
+        var invalidDisclosureContent = new ConsolidationDisclosureDocument(1,
+            [new("DEBT-1", "Term debt", "Long-term debt", 100m, -20m, 0m, 0m, 5m, 0m, 0m, 90m, string.Empty, "Debt rollforward WP-1")], [], []);
+        var invalidDisclosure = await consolidation.SaveDisclosurePackageAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, "US-GAAP", "2026 annual", invalidDisclosureContent));
+        Assert.False(invalidDisclosure.Succeeded); Assert.Contains("does not reconcile", invalidDisclosure.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var disclosureContent = new ConsolidationDisclosureDocument(1,
+            [new("DEBT-1", "Term debt", "Long-term debt", 100m, -20m, 0m, 0m, 5m, 0m, 0m, 85m, string.Empty, "Debt rollforward WP-1")],
+            [new("SCF-1", "Primary supplier finance program", "Optional early payment; entity pays financier on extended terms.", "Accounts payable", 50m, 30m, 20m, 60m, 10m, 45, 90, 30, 45, "No security or guarantees", "Monitored within the weekly liquidity forecast.", "Treasury confirmation WP-2")],
+            [new("AccountingPolicies", "CONSOL-BASIS", "Basis of consolidation", 100, "Controlled entities are consolidated from the date control begins.", "Consolidation policy WP-3", new() { ["futureStandardField"] = JsonDocument.Parse("{\"required\":true,\"label\":\"Extensible evidence\"}").RootElement.Clone() })]);
+        var savedDisclosure = await consolidation.SaveDisclosurePackageAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, "us-gaap", "2026 annual", disclosureContent, "Prepared from controller-reviewed working papers."));
+        Assert.True(savedDisclosure.Succeeded, savedDisclosure.ErrorMessage);
+        var duplicateDisclosure = await consolidation.SaveDisclosurePackageAsync(new(null, group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, "US-GAAP", "2026 annual", disclosureContent));
+        Assert.False(duplicateDisclosure.Succeeded); Assert.Contains("already retained", duplicateDisclosure.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var disclosureWorkspace = await consolidation.GetDisclosureWorkspaceAsync(group.Id.Value); Assert.NotNull(disclosureWorkspace);
+        var disclosureDraft = Assert.Single(disclosureWorkspace!.Packages); Assert.Equal("Draft", disclosureDraft.Status); Assert.Equal("US-GAAP", disclosureDraft.FrameworkCode); Assert.Equal(85m, Assert.Single(disclosureDraft.Content.FinancingLiabilities).ClosingBalance);
+        Assert.True(Assert.Single(disclosureDraft.Content.NarrativeDisclosures).Extensions!["futureStandardField"].GetProperty("required").GetBoolean());
+        SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
+        var selfDisclosureApproval = await consolidation.ApproveDisclosurePackageAsync(new(group.Id.Value, disclosureDraft.Id, disclosureDraft.ConcurrencyToken));
+        Assert.False(selfDisclosureApproval.Succeeded); Assert.Contains("prepared", selfDisclosureApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        SetConsolidationUser(reviewerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalApprove);
+        var approvedDisclosure = await consolidation.ApproveDisclosurePackageAsync(new(group.Id.Value, disclosureDraft.Id, disclosureDraft.ConcurrencyToken));
+        Assert.True(approvedDisclosure.Succeeded, approvedDisclosure.ErrorMessage);
+        var staleDisclosureReview = await consolidation.RejectDisclosurePackageAsync(new(group.Id.Value, disclosureDraft.Id, "Stale review", disclosureDraft.ConcurrencyToken));
+        Assert.False(staleDisclosureReview.Succeeded);
+        var reviewedDisclosure = Assert.Single((await consolidation.GetDisclosureWorkspaceAsync(group.Id.Value))!.Packages); Assert.Equal("Approved", reviewedDisclosure.Status); Assert.Equal("Unavailable user", reviewedDisclosure.ApprovedBy);
+        SetConsolidationUser(preparerId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPrepare);
         var adjustmentWorkspace = await consolidation.GetAdjustmentWorkspaceAsync(group.Id.Value); Assert.NotNull(adjustmentWorkspace);
         var adjustmentAsset = adjustmentWorkspace!.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Asset));
         var adjustmentEquity = adjustmentWorkspace.ReportingAccounts.First(account => account.AccountType == nameof(AccountType.Equity) && account.AccountNumber != "39997");
@@ -797,6 +828,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         SetConsolidationUser(posterId, BrassLedgerPermissions.ReportingManage, BrassLedgerPermissions.JournalPost);
         var statementPackage = await consolidation.GetStatementPackageAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementPackage);
         Assert.False(statementPackage!.IsComplete);
+        var statementDisclosure = Assert.Single(statementPackage.DisclosurePackages!); Assert.Equal("US-GAAP", statementDisclosure.FrameworkCode); Assert.Equal("Approved", statementDisclosure.Status);
         Assert.DoesNotContain(statementPackage.Warnings, warning => warning.Contains("has no effective operating, investing, or financing classification", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(0m, statementPackage.Reconciliation.BalanceSheetDifference);
         Assert.Equal(0m, statementPackage.Reconciliation.EquityStatementDifference);
@@ -815,19 +847,23 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains("\"Contribution\"", statementCsv, StringComparison.Ordinal);
         Assert.Contains("\"Reconciliation\"", statementCsv, StringComparison.Ordinal);
         Assert.Contains("NCI-US-DIST-1", statementCsv, StringComparison.Ordinal);
+        Assert.Contains("\"Disclosure\",\"US-GAAP\",\"Financing liabilities\"", statementCsv, StringComparison.Ordinal);
+        Assert.Contains("Treasury confirmation WP-2", statementCsv, StringComparison.Ordinal);
         var statementExcel = await consolidation.ExportStatementPackageExcelAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementExcel);
         using (var workbook = new XLWorkbook(new MemoryStream(statementExcel!)))
         {
-            Assert.Equal(6, workbook.Worksheets.Count);
+            Assert.Equal(7, workbook.Worksheets.Count);
             Assert.Contains("INCOMPLETE", workbook.Worksheet("Summary").Cell("A3").GetString(), StringComparison.Ordinal);
             Assert.Equal("Section code", workbook.Worksheet("Balance sheet").Cell("A6").GetString());
             Assert.Contains("NCI-US-DIST-1", workbook.Worksheet("Source detail").CellsUsed().Select(cell => cell.GetString()));
+            Assert.Equal("Financing-liability reconciliation", workbook.Worksheet("Current US-GAAP notes").Cell("A8").GetString());
+            Assert.Contains("Treasury confirmation WP-2", workbook.Worksheet("Current US-GAAP notes").CellsUsed().Select(cell => cell.GetString()));
         }
         var statementPdf = await consolidation.ExportStatementPackagePdfAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf); Assert.NotNull(statementPdf);
         Assert.True(statementPdf!.AsSpan().StartsWith("%PDF"u8));
         using (var document = PdfReader.Open(new MemoryStream(statementPdf), PdfDocumentOpenMode.Import))
         {
-            Assert.True(document.PageCount >= 6);
+            Assert.True(document.PageCount >= 7);
             Assert.Contains("consolidated statements", document.Info.Title, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Incomplete", document.Info.Subject, StringComparison.OrdinalIgnoreCase);
         }
@@ -849,16 +885,17 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var comparativeExcel = await consolidation.ExportComparativeStatementPackageExcelAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, comparisonPeriodStart, comparisonAsOf); Assert.NotNull(comparativeExcel);
         using (var workbook = new XLWorkbook(new MemoryStream(comparativeExcel!)))
         {
-            Assert.Equal(7, workbook.Worksheets.Count);
+            Assert.Equal(8, workbook.Worksheets.Count);
             Assert.Equal("Current minus comparison", workbook.Worksheet("Summary").Cell("B7").GetString());
             Assert.Equal("Variance", workbook.Worksheet("Balance sheet").Cell("I7").GetString());
             Assert.Equal(comparativeAsset.Variance, workbook.Worksheet("Balance sheet").RowsUsed().Single(row => row.Cell(1).GetString() == comparativeAsset.AccountNumber).Cell(9).GetValue<decimal>());
+            Assert.True(workbook.TryGetWorksheet("Current US-GAAP notes", out _));
         }
         var comparativePdf = await consolidation.ExportComparativeStatementPackagePdfAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, comparisonPeriodStart, comparisonAsOf); Assert.NotNull(comparativePdf);
         Assert.True(comparativePdf!.AsSpan().StartsWith("%PDF"u8));
         using (var document = PdfReader.Open(new MemoryStream(comparativePdf), PdfDocumentOpenMode.Import))
         {
-            Assert.True(document.PageCount >= 7);
+            Assert.True(document.PageCount >= 8);
             Assert.Contains("comparative consolidated statements", document.Info.Title, StringComparison.OrdinalIgnoreCase);
         }
         Assert.Null(await consolidation.GetComparativeStatementPackageAsync(group.Id.Value, adjustmentPeriodStart, adjustmentAsOf, adjustmentPeriodStart, adjustmentAsOf));
@@ -901,6 +938,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal(3, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationIntercompanyMatch)));
             Assert.Equal(11, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationAdjustmentBatch)));
             Assert.Equal(6, await db.ConsolidationAdjustmentBatches.CountAsync(batch => batch.ConsolidationGroupId == group.Id));
+            Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == currentCompanyId && entry.EntityType == nameof(ConsolidationDisclosurePackage)));
         }
     }
 

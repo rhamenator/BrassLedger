@@ -165,6 +165,17 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/statement-presentations", presentationRequest)).StatusCode);
         presentationWorkspace = await client.GetFromJsonAsync<ConsolidationStatementPresentationWorkspace>($"/api/consolidation-groups/{group.Id}/statement-presentations");
         Assert.Contains(presentationWorkspace!.Presentations, presentation => presentation.LineCaption == "API reviewed line caption" && presentation.Rationale == "API reviewed presentation rationale");
+        var disclosureContent = new ConsolidationDisclosureDocument(1,
+            [new("API-DEBT", "API term debt", "Long-term debt", 100m, -10m, 0m, 0m, 2m, 0m, 0m, 92m, string.Empty, "API debt working paper")], [],
+            [new("AccountingPolicies", "API-POLICY", "API consolidation policy", 100, "Controlled entities are consolidated.", "API policy working paper")]);
+        var disclosureRequest = new SaveConsolidationDisclosurePackageRequest(null, group.Id, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), "US-GAAP", "2026 annual", disclosureContent);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/consolidation-groups/{Guid.NewGuid()}/disclosures", disclosureRequest)).StatusCode);
+        var disclosureResponse = await client.PutAsJsonAsync($"/api/consolidation-groups/{group.Id}/disclosures", disclosureRequest); Assert.Equal(HttpStatusCode.OK, disclosureResponse.StatusCode);
+        var disclosureResult = await disclosureResponse.Content.ReadFromJsonAsync<TransactionResult>();
+        var disclosureWorkspace = await client.GetFromJsonAsync<ConsolidationDisclosureWorkspace>($"/api/consolidation-groups/{group.Id}/disclosures");
+        var disclosure = Assert.Single(disclosureWorkspace!.Packages, item => item.Id == disclosureResult!.Id); Assert.Equal("Draft", disclosure.Status); Assert.Equal(92m, Assert.Single(disclosure.Content.FinancingLiabilities).ClosingBalance);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/disclosures/{Guid.NewGuid()}/approve", new ConsolidationDisclosureActionRequest(group.Id, disclosure.Id, disclosure.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/consolidation-groups/{group.Id}/disclosures/{disclosure.Id}/approve", new ConsolidationDisclosureActionRequest(group.Id, disclosure.Id, disclosure.ConcurrencyToken))).StatusCode);
         var adjustmentRequest = new SaveConsolidationAdjustmentRequest(null, group.Id, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), "ManualAdjustment", "API-CONSOL-ADJ-1", "API reporting-only adjustment", string.Empty,
         [
             new(debitMapping.ReportingAccountNumber, debitMapping.ReportingAccountName, debitMapping.ReportingAccountType, 10m, 0m, "API debit"),
@@ -185,6 +196,8 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal("EQUITY-STATEMENT", statements.EquityStatement.Code);
         Assert.Equal("CASH-FLOW", statements.CashFlowStatement.Code);
         Assert.False(statements.IsComplete);
+        Assert.Empty(statements.DisclosurePackages ?? []);
+        Assert.Contains(statements.Warnings, warning => warning.Contains("disclosure package is draft", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(statements.Warnings, warning => warning.Contains("operating, investing, or financing", StringComparison.OrdinalIgnoreCase));
         var statementCsvResponse = await client.GetAsync($"/api/consolidation-groups/{group.Id}/statements.csv?periodStart=2026-01-01&asOf=2026-06-30");
         Assert.Equal(HttpStatusCode.OK, statementCsvResponse.StatusCode);

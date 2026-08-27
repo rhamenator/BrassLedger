@@ -121,6 +121,28 @@ public sealed class ReportingPageTests : TestContext
         Assert.Contains("/statements/comparative.pdf?currentPeriodStart=", pdfLink.OuterHtml);
         Assert.Equal("false", pdfLink.GetAttribute("data-enhance-nav"));
     }
+
+    [Fact]
+    public void ReportingPage_PreparesExtensibleFrameworkDisclosurePackage()
+    {
+        var cut = RenderComponent<Reporting>();
+
+        Assert.Contains("Framework disclosures", cut.Markup);
+        Assert.Contains("versioned JSON document", cut.Markup);
+        cut.FindAll("button").Single(button => button.TextContent.Trim() == "Add narrative disclosure").Click();
+        cut.Find("input[aria-label='Disclosure category']").Change("GoingConcern");
+        cut.Find("input[aria-label='Disclosure code']").Change("GC-1");
+        cut.Find("input[aria-label='Disclosure title']").Change("Going concern assessment");
+        cut.Find("textarea[aria-label='Disclosure narrative']").Change("Management reviewed twelve months of liquidity forecasts.");
+        cut.Find("input[aria-label='Disclosure source reference']").Change("Board package WP-9");
+        cut.FindAll("button").Single(button => button.TextContent.Trim() == "Prepare disclosure package").Click();
+
+        var request = Assert.IsType<SaveConsolidationDisclosurePackageRequest>(_consolidation.LastDisclosureRequest);
+        Assert.Equal("US-GAAP", request.FrameworkCode);
+        var narrative = Assert.Single(request.Content.NarrativeDisclosures);
+        Assert.Equal("GoingConcern", narrative.Category);
+        Assert.Equal("Board package WP-9", narrative.SourceReference);
+    }
 }
 
 internal sealed class StubConsolidationService : IConsolidationService
@@ -152,6 +174,7 @@ internal sealed class StubConsolidationService : IConsolidationService
 
     public int DiscoveryCount { get; private set; }
     public SaveConsolidationAdjustmentRequest? LastAdjustmentRequest { get; private set; }
+    public SaveConsolidationDisclosurePackageRequest? LastDisclosureRequest { get; private set; }
 
     public Task<TransactionResult> SaveExchangeRateAsync(SaveExchangeRateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<IReadOnlyList<ExchangeRateSnapshot>> GetExchangeRatesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ExchangeRateSnapshot>>([]);
@@ -167,6 +190,10 @@ internal sealed class StubConsolidationService : IConsolidationService
     public Task<IReadOnlyList<ConsolidationGroupSnapshot>> GetGroupsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ConsolidationGroupSnapshot>>([new(GroupId, "North America", "USD", true, "group-token", Members, "39999", "CTA", "39998", "Noncontrolling interests")]);
     public Task<ConsolidationAccountMappingWorkspace?> GetAccountMappingWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default) => Task.FromResult<ConsolidationAccountMappingWorkspace?>(null);
     public Task<ConsolidationStatementPresentationWorkspace?> GetStatementPresentationWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default) => Task.FromResult<ConsolidationStatementPresentationWorkspace?>(null);
+    public Task<TransactionResult> SaveDisclosurePackageAsync(SaveConsolidationDisclosurePackageRequest request, CancellationToken cancellationToken = default) { LastDisclosureRequest = request; return Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid())); }
+    public Task<TransactionResult> ApproveDisclosurePackageAsync(ConsolidationDisclosureActionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.DisclosurePackageId));
+    public Task<TransactionResult> RejectDisclosurePackageAsync(ConsolidationDisclosureDecisionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.DisclosurePackageId));
+    public Task<ConsolidationDisclosureWorkspace?> GetDisclosureWorkspaceAsync(Guid groupId, CancellationToken cancellationToken = default) => Task.FromResult<ConsolidationDisclosureWorkspace?>(new(GroupId, "North America", "USD", []));
     public Task<TransactionResult> SaveAdjustmentAsync(SaveConsolidationAdjustmentRequest request, CancellationToken cancellationToken = default) { LastAdjustmentRequest = request; return Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid())); }
     public Task<TransactionResult> ApproveAdjustmentAsync(ConsolidationAdjustmentActionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.AdjustmentBatchId));
     public Task<TransactionResult> RejectAdjustmentAsync(ConsolidationAdjustmentDecisionRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.AdjustmentBatchId));

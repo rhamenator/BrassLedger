@@ -51,6 +51,7 @@ internal static class ConsolidatedStatementDocumentExporter
         AddStatementSummary(workbook, package);
         foreach (var statement in PackageStatements(package)) AddStatementWorksheet(workbook, package, statement);
         AddSourceWorksheet(workbook, "Source detail", package, "Current");
+        AddDisclosureWorksheets(workbook, package, "Current");
         return SaveWorkbook(workbook);
     }
 
@@ -61,6 +62,8 @@ internal static class ConsolidatedStatementDocumentExporter
         foreach (var statement in package.Statements) AddComparativeWorksheet(workbook, package, statement);
         AddSourceWorksheet(workbook, "Current sources", package.Current, "Current");
         AddSourceWorksheet(workbook, "Comparison sources", package.Comparison, "Comparison");
+        AddDisclosureWorksheets(workbook, package.Current, "Current");
+        AddDisclosureWorksheets(workbook, package.Comparison, "Comparison");
         return SaveWorkbook(workbook);
     }
 
@@ -71,6 +74,7 @@ internal static class ConsolidatedStatementDocumentExporter
         report.AddSummary(package.Warnings, StatementControls(package));
         foreach (var statement in PackageStatements(package)) report.AddStatement(statement);
         report.AddSources(package, "Source detail");
+        report.AddDisclosures(package, "Current-period");
         return report.Save();
     }
 
@@ -82,6 +86,8 @@ internal static class ConsolidatedStatementDocumentExporter
         foreach (var statement in package.Statements) report.AddComparativeStatement(statement, package.Current.AsOf, package.Comparison.AsOf);
         report.AddSources(package.Current, "Current-period source detail");
         report.AddSources(package.Comparison, "Comparison-period source detail");
+        report.AddDisclosures(package.Current, "Current-period");
+        report.AddDisclosures(package.Comparison, "Comparison-period");
         return report.Save();
     }
 
@@ -217,6 +223,60 @@ internal static class ConsolidatedStatementDocumentExporter
         if (row == 7) { sheet.Cell(row, 1).Value = "No source contributions were retained for this package."; row++; }
         FinishSheet(sheet, 10, row - 1, [34d, 24d, 18d, 34d, 28d, 34d, 18d, 28d, 16d, 18d], 6);
     }
+
+    private static void AddDisclosureWorksheets(XLWorkbook workbook, ConsolidatedStatementPackage package, string periodLabel)
+    {
+        foreach (var disclosure in package.DisclosurePackages ?? [])
+        {
+            var proposedName = $"{periodLabel} {disclosure.FrameworkCode} notes";
+            var sheet = workbook.Worksheets.Add(proposedName[..Math.Min(31, proposedName.Length)]);
+            WriteTitle(sheet, $"{disclosure.FrameworkCode} disclosures", $"{disclosure.FrameworkEdition} · {package.PeriodStart:yyyy-MM-dd} to {package.AsOf:yyyy-MM-dd}", package.ReportingCurrency, true);
+            WriteLabelValue(sheet, 5, "Review control", $"Approved by {disclosure.ApprovedBy ?? "Unavailable user"} at {disclosure.ApprovedAtUtc:O}; JSON schema {disclosure.SchemaVersion}; SHA-256 {disclosure.ContentSha256}");
+            WriteLabelValue(sheet, 6, "Preparation notes", disclosure.ReviewNotes);
+            var row = 8;
+            if (disclosure.Content.FinancingLiabilities.Count > 0)
+            {
+                sheet.Cell(row++, 1).Value = "Financing-liability reconciliation";
+                WriteTableHeader(sheet, row++, ["Code", "Liability", "Balance-sheet line", "Opening", "Financing cash flows", "Acquisitions", "Disposals", "Foreign exchange", "Fair value", "Other noncash", "Closing", "Other explanation", "Source"]);
+                foreach (var item in disclosure.Content.FinancingLiabilities)
+                {
+                    var values = new[] { item.LiabilityCode, item.LiabilityName, item.BalanceSheetLine };
+                    for (var column = 0; column < values.Length; column++) sheet.Cell(row, column + 1).Value = values[column];
+                    var amounts = new[] { item.OpeningBalance, item.FinancingCashFlows, item.Acquisitions, item.Disposals, item.ForeignExchangeChanges, item.FairValueChanges, item.OtherNonCashChanges, item.ClosingBalance };
+                    for (var column = 0; column < amounts.Length; column++) { sheet.Cell(row, column + 4).Value = amounts[column]; sheet.Cell(row, column + 4).Style.NumberFormat.Format = MoneyFormat; }
+                    sheet.Cell(row, 12).Value = item.OtherNonCashExplanation; sheet.Cell(row, 13).Value = item.SourceReference; row++;
+                }
+                row++;
+            }
+            if (disclosure.Content.SupplierFinanceArrangements.Count > 0)
+            {
+                sheet.Cell(row++, 1).Value = "Supplier-finance arrangements";
+                WriteTableHeader(sheet, row++, ["Code", "Arrangement", "Key terms", "Balance-sheet line", "Opening", "Confirmed", "Paid", "Closing", "Suppliers already paid", "Arrangement due days", "Comparable due days", "Security / guarantees", "Liquidity risk", "Source"]);
+                foreach (var item in disclosure.Content.SupplierFinanceArrangements)
+                {
+                    sheet.Cell(row, 1).Value = item.ArrangementCode; sheet.Cell(row, 2).Value = item.ArrangementName; sheet.Cell(row, 3).Value = item.KeyTerms; sheet.Cell(row, 4).Value = item.BalanceSheetLine;
+                    var amounts = new[] { item.OpeningOutstanding, item.ObligationsConfirmed, item.ObligationsPaid, item.ClosingOutstanding, item.SuppliersAlreadyPaid };
+                    for (var column = 0; column < amounts.Length; column++) { sheet.Cell(row, column + 5).Value = amounts[column]; sheet.Cell(row, column + 5).Style.NumberFormat.Format = MoneyFormat; }
+                    sheet.Cell(row, 10).Value = DayRange(item.PaymentDueMinimumDays, item.PaymentDueMaximumDays); sheet.Cell(row, 11).Value = DayRange(item.ComparablePayablesDueMinimumDays, item.ComparablePayablesDueMaximumDays);
+                    sheet.Cell(row, 12).Value = item.SecurityOrGuarantees; sheet.Cell(row, 13).Value = item.LiquidityRiskNotes; sheet.Cell(row, 14).Value = item.SourceReference; row++;
+                }
+                row++;
+            }
+            if (disclosure.Content.NarrativeDisclosures.Count > 0)
+            {
+                sheet.Cell(row++, 1).Value = "Other disclosures";
+                WriteTableHeader(sheet, row++, ["Category", "Code", "Title", "Order", "Disclosure", "Source"]);
+                foreach (var item in disclosure.Content.NarrativeDisclosures.OrderBy(item => item.SortOrder).ThenBy(item => item.Code))
+                {
+                    sheet.Cell(row, 1).Value = item.Category; sheet.Cell(row, 2).Value = item.Code; sheet.Cell(row, 3).Value = item.Title; sheet.Cell(row, 4).Value = item.SortOrder; sheet.Cell(row, 5).Value = item.Narrative; sheet.Cell(row, 6).Value = item.SourceReference; row++;
+                }
+            }
+            FinishSheet(sheet, 14, row, [15d, 25d, 42d, 24d, 16d, 16d, 16d, 16d, 18d, 22d, 22d, 32d, 38d, 30d], 8);
+            sheet.RangeUsed()?.Style.Alignment.SetWrapText();
+        }
+    }
+
+    private static string DayRange(int? minimum, int? maximum) => minimum.HasValue && maximum.HasValue ? $"{minimum}-{maximum}" : "Not provided";
 
     private static void WriteTitle(IXLWorksheet sheet, string title, string subtitle, string currency, bool isComplete)
     {
@@ -383,6 +443,38 @@ internal static class ConsolidatedStatementDocumentExporter
             }))));
             DrawRows(["Statement", "Section", "Report acct", "Line caption", "Company", "Source account", "Kind", "Reference", "Translation", "Amount"],
                 [0.08, 0.10, 0.08, 0.14, 0.12, 0.16, 0.08, 0.10, 0.07, 0.07], rows);
+        }
+
+        public void AddDisclosures(ConsolidatedStatementPackage package, string periodLabel)
+        {
+            foreach (var disclosure in package.DisclosurePackages ?? [])
+            {
+                NewPage($"{periodLabel} {disclosure.FrameworkCode} disclosures");
+                DrawParagraph($"Framework edition: {disclosure.FrameworkEdition}. JSON schema: {disclosure.SchemaVersion}. SHA-256: {disclosure.ContentSha256}. Approved by {disclosure.ApprovedBy ?? "Unavailable user"} at {disclosure.ApprovedAtUtc:O}.");
+                if (!string.IsNullOrWhiteSpace(disclosure.ReviewNotes)) DrawParagraph($"Preparation notes: {disclosure.ReviewNotes}");
+                if (disclosure.Content.FinancingLiabilities.Count > 0)
+                {
+                    DrawHeading("Financing-liability reconciliation");
+                    DrawRows(["Code / liability", "Balance-sheet line", "Opening", "Cash flows", "Noncash movements", "Closing", "Source"], [0.19, 0.15, 0.10, 0.10, 0.20, 0.10, 0.16],
+                        disclosure.Content.FinancingLiabilities.Select(item => new[] { $"{item.LiabilityCode} — {item.LiabilityName}", item.BalanceSheetLine, Money(item.OpeningBalance), Money(item.FinancingCashFlows), $"Acq {Money(item.Acquisitions)}; disp {Money(item.Disposals)}; FX {Money(item.ForeignExchangeChanges)}; FV {Money(item.FairValueChanges)}; other {Money(item.OtherNonCashChanges)}{(string.IsNullOrWhiteSpace(item.OtherNonCashExplanation) ? string.Empty : $" — {item.OtherNonCashExplanation}")}", Money(item.ClosingBalance), item.SourceReference }));
+                }
+                if (disclosure.Content.SupplierFinanceArrangements.Count > 0)
+                {
+                    DrawHeading("Supplier-finance arrangements");
+                    DrawRows(["Code / arrangement", "Terms / presentation", "Opening", "Confirmed", "Paid", "Closing / supplier paid", "Due ranges / liquidity / source"], [0.17, 0.24, 0.09, 0.09, 0.09, 0.13, 0.19],
+                        disclosure.Content.SupplierFinanceArrangements.Select(item => new[] { $"{item.ArrangementCode} — {item.ArrangementName}", $"{item.KeyTerms} | {item.BalanceSheetLine}", Money(item.OpeningOutstanding), Money(item.ObligationsConfirmed), Money(item.ObligationsPaid), $"{Money(item.ClosingOutstanding)} / {Money(item.SuppliersAlreadyPaid)}", $"Arrangement {DayRange(item.PaymentDueMinimumDays, item.PaymentDueMaximumDays)} days; comparable {DayRange(item.ComparablePayablesDueMinimumDays, item.ComparablePayablesDueMaximumDays)} days. {item.SecurityOrGuarantees} {item.LiquidityRiskNotes} Source: {item.SourceReference}" }));
+                }
+                if (disclosure.Content.NarrativeDisclosures.Count > 0)
+                {
+                    DrawHeading("Other disclosures");
+                    foreach (var item in disclosure.Content.NarrativeDisclosures.OrderBy(item => item.SortOrder).ThenBy(item => item.Code))
+                    {
+                        DrawSection($"{item.Category} · {item.Code} — {item.Title}");
+                        DrawParagraph(item.Narrative);
+                        DrawParagraph($"Source: {item.SourceReference}");
+                    }
+                }
+            }
         }
 
         public byte[] Save()

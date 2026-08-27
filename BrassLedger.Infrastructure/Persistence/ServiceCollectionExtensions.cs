@@ -589,6 +589,18 @@ public static class ServiceCollectionExtensions
                 : "IX_ConsolidationStatementPresentations_ConsolidationGroupId_StatementCode_SectionCode_EffectiveFrom";
             return await HasIndexAsync(dbContext, accountIndex, cancellationToken) && await HasIndexAsync(dbContext, sectionIndex, cancellationToken);
         }
+        if (migrationId.EndsWith("_AddConsolidationDisclosurePackages", StringComparison.Ordinal))
+        {
+            if (!await HasTableAsync(dbContext, "ConsolidationDisclosurePackages", cancellationToken)) return false;
+            string[] columns = ["Id", "CompanyId", "ConsolidationGroupId", "PeriodStart", "AsOf", "FrameworkCode", "FrameworkEdition", "SchemaVersion", "ContentJson", "Status", "PreparedByUserId", "PreparedAtUtc", "ApprovedByUserId", "ApprovedAtUtc", "RejectedByUserId", "RejectedAtUtc", "DecisionReason", "ReviewNotes", "ConcurrencyToken"];
+            foreach (var column in columns)
+                if (!await HasColumnAsync(dbContext, "ConsolidationDisclosurePackages", column, cancellationToken)) return false;
+            var periodIndex = dbContext.Database.IsNpgsql()
+                ? "IX_ConsolidationDisclosurePackages_ConsolidationGroupId_Period~"
+                : "IX_ConsolidationDisclosurePackages_ConsolidationGroupId_PeriodStart_AsOf_FrameworkCode";
+            return await HasIndexAsync(dbContext, "IX_ConsolidationDisclosurePackages_CompanyId_Status_AsOf", cancellationToken)
+                && await HasIndexAsync(dbContext, periodIndex, cancellationToken);
+        }
         return false;
     }
 
