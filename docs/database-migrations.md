@@ -62,6 +62,10 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 `AddProjectBillingLineDimensions` retains the source phase and cost code on controlled project-billing derivation lines so preview, approval revalidation, invoice creation, corrections, and historical display use the same attribution. Downgrade is prohibited because it could delete retained billing attribution.
 
+`AddTrackingDimensions` adds the company-scoped, hierarchical, effective-dated tracking-value master and optional Department and Class references on journal lines. Codes are unique by company and dimension type; parent relationships remain within the company and type. Lost-history adoption requires the master table, lifecycle and concurrency columns, journal references, and protective indexes before recording the migration. Downgrade is prohibited because it could delete the controlled classifications and retained journal attribution.
+
+`AddTrackingDimensionsToSourceLines` extends invoice, bill, quote, sales-order, requisition, purchase-order, payroll-time, payroll-earning, and project-billing lines with optional Department and Class references. Both providers add restrictive foreign keys and lookup indexes without rewriting existing records. Lost-history adoption verifies both columns and both indexes on every affected source table. Downgrade is prohibited because removing these columns could delete accounting classifications needed to reproduce source-to-ledger posting and historical reversals.
+
 ## Verification
 
 At minimum, run:

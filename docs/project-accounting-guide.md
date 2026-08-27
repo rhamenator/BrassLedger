@@ -66,6 +66,8 @@ The project selector is available on:
 
 Project, phase/task, and cost code follow the source line through approval, posting, quote or requisition conversion, fulfillment, invoice matching, customer and supplier returns, payroll posting, project billing, and reversal. A phase or cost code cannot be supplied without its project. Inventory shipments allocate COGS by the retained source dimensions. Shipment invoices retain those dimensions on revenue. Purchase invoice matching retains them from the purchase-order line on bill and variance lines. Payroll allocates gross pay and employer tax/benefit burden across each employee's dimensioned earnings; the final allocation absorbs rounding so the project lines reconcile exactly to the payroll posting.
 
+Department and Class are separate controlled accounting dimensions. Maintain their company-scoped codes, names, optional parent hierarchy, active state, and optional effective dates on the Ledger page. New journal, receivables, payables, sales, purchasing, payroll, and project-billing activity must use the correct active dimension type effective on the transaction date. The selected values propagate through conversions, posting, fulfillment, matching, returns, project billing, payroll allocation, and reversals. Deactivation or expiry prevents new activity but does not erase historical classification or prevent an exact correction or reversal.
+
 Liability, cash, tax, and other balance-sheet lines may carry a project when they are source-line-specific, but the current project cost and revenue totals intentionally include only expense and revenue accounts.
 
 ## Portfolio and ledger reporting
@@ -82,9 +84,9 @@ Totals scan the complete posted project ledger using exact decimal values. The o
 
 ## QuickBooks CSV interchange
 
-BrassLedger journal and zero-tax invoice CSV files include optional `Project / Job`, `Project Phase`, and `Cost Code` columns. Imports accept project aliases (`Project/Job`, `Project Job`, `Project`, or `Class`), phase aliases (`Phase`, `Project Task`, `Task`, or `Work Package`), and common cost-code spellings. A populated project must resolve by job number or unique exact name to one active same-company project. A phase must resolve inside that project, and a cost code must be active in the same company. A phase or cost code without a project, or an ambiguous, closed, foreign-company, or unknown value, rejects the batch instead of discarding attribution. Blank values remain unassigned.
+BrassLedger journal and zero-tax invoice CSV files include optional `Project / Job`, `Project Phase`, `Cost Code`, `Department`, and `Class` columns. Imports accept project aliases (`Project/Job`, `Project Job`, or `Project`), phase aliases (`Phase`, `Project Task`, `Task`, or `Work Package`), common cost-code spellings, department aliases (`Location` or `Business Unit`), and class aliases (`Tracking Class` or `QuickBooks Class`). `Class` identifies the controlled Class dimension; it is not a project alias. A populated project must resolve by job number or unique exact name to one active same-company project. A phase must resolve inside that project, and a cost code must be active in the same company. Department and Class resolve by code or unique exact name and must be active and effective on the journal or invoice date. A phase or cost code without a project, or an ambiguous, inactive, expired, future-effective, wrong-type, closed, foreign-company, or unknown value, rejects the batch instead of discarding attribution. Blank values remain unassigned.
 
-QuickBooks products and subscriptions expose project and class tracking differently. Treat this extra column as a controlled BrassLedger round-trip field and explicitly map or preserve it during the QuickBooks review step. A successful CSV parse does not prove that a particular QuickBooks subscription imported the dimension.
+QuickBooks products and subscriptions expose project, class, and location tracking differently. Treat these as distinct controlled BrassLedger round-trip fields and explicitly map or preserve them during the QuickBooks review step. A successful CSV parse does not prove that a particular QuickBooks subscription imported a dimension.
 
 ## Current boundaries
 
@@ -92,7 +94,7 @@ The following project-accounting capabilities remain future work and must not be
 
 - committed-cost forecasting beyond unreceived purchase-order value;
 - variable consideration, multiple performance obligations, and expected-loss provisions;
-- department/class dimensions and cross-project resource planning beyond the implemented phase/task, cost-code, account, period, budget, and forecast allocations;
+- additional user-defined transaction dimension types and cross-project resource planning beyond the implemented project, phase/task, cost-code, department, class, account, period, budget, and forecast classifications;
 - full historical project-ledger pagination/export beyond the recent workspace drill-down.
 
 Until those workflows are implemented and tested, record their accounting through controlled general journals or ordinary subledger documents with project assignments, retain the external approval evidence, and reconcile the result manually.

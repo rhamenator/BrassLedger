@@ -72,6 +72,25 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task TrackingDimensionApi_RequiresAntiforgeryAndProvidesControlledCompanyMaintenance()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var missingToken = await CreateAuthenticatedClientAsync(isolatedFactory, includeAntiforgery: false);
+        var request = new SaveTrackingDimensionValueRequest(null, "Department", null, "API-OPS", "API operations", "Created through the controlled API", new DateOnly(2026, 1, 1), null);
+        Assert.Equal(HttpStatusCode.BadRequest, (await missingToken.PostAsJsonAsync("/api/tracking-dimensions", request)).StatusCode);
+        var response = await client.PostAsJsonAsync("/api/tracking-dimensions", request);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<TransactionResult>();
+        var created = Assert.Single((await client.GetFromJsonAsync<GeneralLedgerWorkspace>("/api/general-ledger"))!.TrackingDimensions!, value => value.Id == result!.Id);
+        Assert.Equal("API-OPS", created.Code);
+        var update = new SaveTrackingDimensionValueRequest(created.Id, created.DimensionType, null, created.Code, "API operations revised", created.Description, created.EffectiveFrom, created.EffectiveThrough, created.IsActive, created.ConcurrencyToken);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/tracking-dimensions/{Guid.NewGuid()}", update)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/tracking-dimensions/{created.Id}", update)).StatusCode);
+        Assert.Contains((await client.GetFromJsonAsync<GeneralLedgerWorkspace>("/api/general-ledger"))!.TrackingDimensions!, value => value.Id == created.Id && value.Name == "API operations revised");
+    }
+
+    [Fact]
     public async Task UnsafeApiRoutes_RequireAntiforgeryAndRejectMissingTokensBeforeMutation()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();

@@ -87,6 +87,8 @@ public sealed partial class AccountingTransactionService
         var items = await db.InventoryItems.Where(x => x.CompanyId == companyId && lines.Select(y => y.InventoryItemId).Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken);
         var orderLines = await db.SalesOrderLines.Where(x => x.SalesOrderId == authorization.SalesOrderId).ToDictionaryAsync(x => x.Id, cancellationToken);
         if (shipmentLines.Count != lines.Count || items.Count != lines.Select(x => x.InventoryItemId).Distinct().Count()) return TransactionResult.Failure("One or more return source records are unavailable in this company.");
+        var returnedOrderLines = requested.Select(item => orderLines[lines.Single(line => line.Id == item.CustomerReturnAuthorizationLineId).SalesOrderLineId]).ToArray();
+        if (!await AreActiveTrackingDimensionsAsync(db, companyId, request.ReceivedOn, returnedOrderLines.Select(line => (line.DepartmentId, line.ClassId)), cancellationToken, allowHistorical: true)) return TransactionResult.Failure("One or more original sale departments or classes are unavailable or incorrectly typed.");
         var totalCost = requested.Sum(x => RoundCurrency(RoundQuantity(x.Quantity) * shipmentLines[lines.Single(y => y.Id == x.CustomerReturnAuthorizationLineId).InventoryShipmentLineId].UnitCost));
         if (totalCost <= 0m) return TransactionResult.Failure("The returned inventory cost must be greater than zero.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -100,10 +102,12 @@ public sealed partial class AccountingTransactionService
                 orderLines[authorizationLine.SalesOrderLineId].ProjectJobId,
                 orderLines[authorizationLine.SalesOrderLineId].ProjectPhaseId,
                 orderLines[authorizationLine.SalesOrderLineId].ProjectCostCodeId,
+                orderLines[authorizationLine.SalesOrderLineId].DepartmentId,
+                orderLines[authorizationLine.SalesOrderLineId].ClassId,
                 Cost = RoundCurrency(RoundQuantity(item.Quantity) * shipmentLines[authorizationLine.InventoryShipmentLineId].UnitCost)
             };
-        }).GroupBy(line => new { line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId }).Select(group => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), 0m, group.Sum(line => line.Cost), "Reverse cost of goods sold", group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId)));
-        var posting = await PostAsync(db, companyId, request.ReceivedOn, "Sales Fulfillment", receiptNumber, $"Customer return {authorization.ReturnNumber}", postingLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: receiptId, sourceDocumentType: "CustomerReturnReceipt", resolveOperationalRoles: true);
+        }).GroupBy(line => new { line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, line.DepartmentId, line.ClassId }).Select(group => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.CostOfGoodsSold), 0m, group.Sum(line => line.Cost), "Reverse cost of goods sold", group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId, group.Key.DepartmentId, group.Key.ClassId)));
+        var posting = await PostAsync(db, companyId, request.ReceivedOn, "Sales Fulfillment", receiptNumber, $"Customer return {authorization.ReturnNumber}", postingLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: receiptId, sourceDocumentType: "CustomerReturnReceipt", resolveOperationalRoles: true, allowClosedProjects: true);
         if (!posting.Succeeded) return posting;
         var receipt = new CustomerReturnReceipt { Id = receiptId, CompanyId = companyId, CustomerReturnAuthorizationId = authorization.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, ReceiptNumber = receiptNumber, ReceivedOn = request.ReceivedOn, TotalCost = totalCost, JournalEntryId = posting.Id!.Value, ReceivedByUserId = ResolveUserId(), ReceivedAtUtc = DateTimeOffset.UtcNow };
         db.CustomerReturnReceipts.Add(receipt);

@@ -7,6 +7,7 @@ public static class BrassLedgerAuthorizationPolicies
     public const string ManageTaxes = "ManageTaxes";
     public const string ViewWorkspace = "ViewWorkspace";
     public const string ManageLedger = "ManageLedger";
+    public const string ManageAccountingDimensions = "ManageAccountingDimensions";
     public const string PrepareJournals = "PrepareJournals";
     public const string ApproveJournals = "ApproveJournals";
     public const string PostJournals = "PostJournals";

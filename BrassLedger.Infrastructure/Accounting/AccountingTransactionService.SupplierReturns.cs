@@ -98,6 +98,8 @@ public sealed partial class AccountingTransactionService
         var receipt = await db.InventoryReceipts.SingleAsync(item => item.Id == authorization.InventoryReceiptId && item.CompanyId == companyId, cancellationToken); if (receipt.Status != "Posted") return TransactionResult.Failure("The source inventory receipt is no longer posted.");
         var order = await db.PurchaseOrders.SingleAsync(item => item.Id == authorization.PurchaseOrderId && item.CompanyId == companyId, cancellationToken);
         var orderLines = await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).ToDictionaryAsync(line => line.Id, cancellationToken);
+        var returnedOrderLines = requested.Select(item => orderLines[lines.Single(line => line.Id == item.SupplierReturnAuthorizationLineId).PurchaseOrderLineId]).ToArray();
+        if (!await AreActiveTrackingDimensionsAsync(db, companyId, request.ShippedOn, returnedOrderLines.Select(line => (line.DepartmentId, line.ClassId)), cancellationToken, allowHistorical: true)) return TransactionResult.Failure("One or more original purchase departments or classes are unavailable or incorrectly typed.");
         var activeBills = await db.VendorBills.Where(item => item.CompanyId == companyId && item.InventoryReceiptId == receipt.Id && item.Status != "Voided").OrderBy(item => item.BillDate).ThenBy(item => item.BillNumber).ToListAsync(cancellationToken);
         var activeBillIds = activeBills.Select(item => item.Id).ToArray();
         var activeBillLines = activeBillIds.Length == 0 ? [] : await db.VendorBillLines.Where(item => activeBillIds.Contains(item.VendorBillId) && item.InventoryReceiptLineId.HasValue && item.MatchedQuantity > 0m).OrderBy(item => item.Sequence).ToListAsync(cancellationToken);
@@ -122,16 +124,20 @@ public sealed partial class AccountingTransactionService
                 orderLines[authorizationLine.PurchaseOrderLineId].ProjectJobId,
                 orderLines[authorizationLine.PurchaseOrderLineId].ProjectPhaseId,
                 orderLines[authorizationLine.PurchaseOrderLineId].ProjectCostCodeId,
+                orderLines[authorizationLine.PurchaseOrderLineId].DepartmentId,
+                orderLines[authorizationLine.PurchaseOrderLineId].ClassId,
                 TotalAmount = totalAmount,
                 calculation.VendorCreditAmount,
                 calculation.GrniReductionAmount,
                 PurchaseVarianceAmount = totalAmount - calculation.VendorCreditAmount - calculation.GrniReductionAmount
             };
-        }).GroupBy(item => new { item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId }).Select(group => new
+        }).GroupBy(item => new { item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId, item.DepartmentId, item.ClassId }).Select(group => new
         {
             group.Key.ProjectJobId,
             group.Key.ProjectPhaseId,
             group.Key.ProjectCostCodeId,
+            group.Key.DepartmentId,
+            group.Key.ClassId,
             TotalAmount = group.Sum(item => item.TotalAmount),
             VendorCreditAmount = group.Sum(item => item.VendorCreditAmount),
             GrniReductionAmount = group.Sum(item => item.GrniReductionAmount),
@@ -144,11 +150,11 @@ public sealed partial class AccountingTransactionService
         var purchaseVarianceAmount = total - vendorCreditAmount - grniReductionAmount;
         if (total <= 0m || vendorCreditAmount < 0m) return TransactionResult.Failure("The supplier-return value must be positive and its vendor-credit value cannot be negative.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); var shipmentId = Guid.NewGuid();
-        var journalLines = projectAmounts.Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), 0m, item.TotalAmount, "Inventory returned to supplier", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId)).ToList();
-        journalLines.AddRange(projectAmounts.Where(item => item.VendorCreditAmount > 0m).Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), item.VendorCreditAmount, 0m, "Vendor return credit for invoiced quantity", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId)));
-        journalLines.AddRange(projectAmounts.Where(item => item.GrniReductionAmount > 0m).Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.GoodsReceivedNotInvoiced), item.GrniReductionAmount, 0m, "Reduce accrual for uninvoiced returned quantity", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId)));
-        journalLines.AddRange(projectAmounts.Where(item => item.PurchaseVarianceAmount > 0m).Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.PurchasePriceVariance), item.PurchaseVarianceAmount, 0m, "Capitalized cost not recoverable from goods vendor", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId)));
-        journalLines.AddRange(projectAmounts.Where(item => item.PurchaseVarianceAmount < 0m).Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.PurchasePriceVariance), 0m, -item.PurchaseVarianceAmount, "Favorable supplier-return variance", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId)));
+        var journalLines = projectAmounts.Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.InventoryAsset), 0m, item.TotalAmount, "Inventory returned to supplier", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId, item.DepartmentId, item.ClassId)).ToList();
+        journalLines.AddRange(projectAmounts.Where(item => item.VendorCreditAmount > 0m).Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), item.VendorCreditAmount, 0m, "Vendor return credit for invoiced quantity", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId, item.DepartmentId, item.ClassId)));
+        journalLines.AddRange(projectAmounts.Where(item => item.GrniReductionAmount > 0m).Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.GoodsReceivedNotInvoiced), item.GrniReductionAmount, 0m, "Reduce accrual for uninvoiced returned quantity", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId, item.DepartmentId, item.ClassId)));
+        journalLines.AddRange(projectAmounts.Where(item => item.PurchaseVarianceAmount > 0m).Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.PurchasePriceVariance), item.PurchaseVarianceAmount, 0m, "Capitalized cost not recoverable from goods vendor", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId, item.DepartmentId, item.ClassId)));
+        journalLines.AddRange(projectAmounts.Where(item => item.PurchaseVarianceAmount < 0m).Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.PurchasePriceVariance), 0m, -item.PurchaseVarianceAmount, "Favorable supplier-return variance", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId, item.DepartmentId, item.ClassId)));
         var posting = await PostAsync(db, companyId, request.ShippedOn, "Purchasing", shipmentNumber, $"Supplier return {authorization.ReturnNumber}", journalLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: shipmentId, sourceDocumentType: "SupplierReturnShipment", resolveOperationalRoles: true, allowClosedProjects: true); if (!posting.Succeeded) return posting;
         var sourceApplied = createsCredit ? Math.Min(vendorCreditAmount, bill!.BalanceDue) : 0m; var shipment = new SupplierReturnShipment { Id = shipmentId, CompanyId = companyId, SupplierReturnAuthorizationId = authorization.Id, SourceVendorBillId = bill?.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, ShipmentNumber = shipmentNumber, ShippedOn = request.ShippedOn, TotalAmount = total, VendorCreditAmount = vendorCreditAmount, CreatesVendorCredit = createsCredit, SourceAppliedAmount = sourceApplied, AppliedAmount = sourceApplied, JournalEntryId = posting.Id!.Value, ShippedByUserId = ResolveUserId(), ShippedAtUtc = DateTimeOffset.UtcNow }; db.SupplierReturnShipments.Add(shipment);
         var receiptLines = await db.InventoryReceiptLines.Where(line => lines.Select(item => item.InventoryReceiptLineId).Contains(line.Id)).ToDictionaryAsync(line => line.Id, cancellationToken); var sequence = 0;

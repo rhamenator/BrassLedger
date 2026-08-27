@@ -64,6 +64,8 @@ Ledger is the home for journal entries, accruals, reclasses, and period adjustme
 
 Save an ordinary journal as a draft. Its preparer cannot approve or reject it, and its approver cannot post it. A reviewer can reject an ordinary draft or approved-but-unposted journal with a specific correction note. The preparer then chooses **Correct**, revises the same journal, and resubmits it for independent approval. Account balances change only at posting; prior versions and decisions remain in the audit history. Correct journals created by another module through that module's own workflow rather than editing their generated entries.
 
+Use **Departments and classes** on the Ledger page to maintain controlled tracking values. Each value has a type, code, name, optional parent, optional effective dates, active state, and concurrency token. Use Department for an organizational or location-oriented reporting axis and Class for the separate QuickBooks-style classification axis; do not use Class as a substitute for Project. Select these values on journal, invoice, bill, sales, purchasing, payroll-time, and related source lines. Deactivate a value to stop new use while preserving posted history and exact reversals.
+
 Best practices:
 
 - include reference text and effective dates on every batch

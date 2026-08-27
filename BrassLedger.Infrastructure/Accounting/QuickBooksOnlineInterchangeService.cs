@@ -36,9 +36,9 @@ public sealed class QuickBooksOnlineInterchangeService(
         if (rows is null) return null;
 
         var header = normalizedEntity == "journal-entries"
-            ? new[] { "Journal No.", "Journal Date", "Reference", "Journal/Description", "Account Name", "Debits", "Credits", "Line Description", "Project / Job", "Project Phase", "Cost Code" }
+            ? new[] { "Journal No.", "Journal Date", "Reference", "Journal/Description", "Account Name", "Debits", "Credits", "Line Description", "Project / Job", "Project Phase", "Cost Code", "Department", "Class" }
             : normalizedEntity == "invoices"
-            ? new[] { "Invoice No.", "Customer", "Invoice Date", "Due Date", "Item Amount", "Item Description", "Quantity", "Rate", "Project / Job", "Project Phase", "Cost Code" }
+            ? new[] { "Invoice No.", "Customer", "Invoice Date", "Due Date", "Item Amount", "Item Description", "Quantity", "Rate", "Project / Job", "Project Phase", "Cost Code", "Department", "Class" }
             : normalizedEntity == "chart-of-accounts"
             ? new[] { "Account Name", "Type", "Detail Type", "Account Number" }
             : new[] { "Display Name", "Company Name", "Email", normalizedEntity == "customers" ? "Customer Number" : "Vendor Number" };
@@ -133,13 +133,17 @@ public sealed class QuickBooksOnlineInterchangeService(
         var phaseCodes = await db.ProjectPhases.Where(phase => phase.CompanyId == companyId && phaseIds.Contains(phase.Id)).ToDictionaryAsync(phase => phase.Id, phase => phase.Code, ct);
         var costCodeIds = lines.Where(line => line.ProjectCostCodeId.HasValue).Select(line => line.ProjectCostCodeId!.Value).Distinct().ToArray();
         var costCodeValues = await db.ProjectCostCodes.Where(costCode => costCode.CompanyId == companyId && costCodeIds.Contains(costCode.Id)).ToDictionaryAsync(costCode => costCode.Id, costCode => costCode.Code, ct);
+        var trackingDimensionIds = lines.SelectMany(line => new[] { line.DepartmentId, line.ClassId }).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+        var trackingDimensionCodes = await db.TrackingDimensionValues.Where(value => value.CompanyId == companyId && trackingDimensionIds.Contains(value.Id)).ToDictionaryAsync(value => value.Id, value => value.Code, ct);
         return entries.SelectMany(entry => lines.Where(line => line.JournalEntryId == entry.Id).Select(line => new[]
         {
             entry.EntryNumber, entry.PostedOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), entry.Reference, entry.Description,
             accountNames.GetValueOrDefault(line.AccountId, string.Empty), line.Debit.ToString("0.00", CultureInfo.InvariantCulture), line.Credit.ToString("0.00", CultureInfo.InvariantCulture), line.Description,
             line.ProjectJobId.HasValue ? projectNumbers.GetValueOrDefault(line.ProjectJobId.Value, string.Empty) : string.Empty,
             line.ProjectPhaseId.HasValue ? phaseCodes.GetValueOrDefault(line.ProjectPhaseId.Value, string.Empty) : string.Empty,
-            line.ProjectCostCodeId.HasValue ? costCodeValues.GetValueOrDefault(line.ProjectCostCodeId.Value, string.Empty) : string.Empty
+            line.ProjectCostCodeId.HasValue ? costCodeValues.GetValueOrDefault(line.ProjectCostCodeId.Value, string.Empty) : string.Empty,
+            line.DepartmentId.HasValue ? trackingDimensionCodes.GetValueOrDefault(line.DepartmentId.Value, string.Empty) : string.Empty,
+            line.ClassId.HasValue ? trackingDimensionCodes.GetValueOrDefault(line.ClassId.Value, string.Empty) : string.Empty
         }));
     }
 
@@ -156,12 +160,14 @@ public sealed class QuickBooksOnlineInterchangeService(
         var phaseCodes = await db.ProjectPhases.AsNoTracking().Where(phase => phase.CompanyId == companyId && phaseIds.Contains(phase.Id)).ToDictionaryAsync(phase => phase.Id, phase => phase.Code, ct);
         var costCodeIds = lines.Where(line => line.ProjectCostCodeId.HasValue).Select(line => line.ProjectCostCodeId!.Value).Distinct().ToArray();
         var costCodeValues = await db.ProjectCostCodes.AsNoTracking().Where(costCode => costCode.CompanyId == companyId && costCodeIds.Contains(costCode.Id)).ToDictionaryAsync(costCode => costCode.Id, costCode => costCode.Code, ct);
+        var trackingDimensionIds = lines.SelectMany(line => new[] { line.DepartmentId, line.ClassId }).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+        var trackingDimensionCodes = await db.TrackingDimensionValues.AsNoTracking().Where(value => value.CompanyId == companyId && trackingDimensionIds.Contains(value.Id)).ToDictionaryAsync(value => value.Id, value => value.Code, ct);
         return invoices.SelectMany(invoice =>
         {
             var invoiceLines = lines.Where(line => line.SalesInvoiceId == invoice.Id).ToArray();
             if (invoiceLines.Length == 0)
-                return new[] { new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture), "Imported invoice", "1", invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture), string.Empty, string.Empty, string.Empty } };
-            return invoiceLines.Select(line => new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), RoundCurrency(line.Quantity * line.UnitPrice - line.DiscountAmount).ToString("0.00", CultureInfo.InvariantCulture), line.Description, line.DiscountAmount == 0 ? line.Quantity.ToString("0.####", CultureInfo.InvariantCulture) : string.Empty, line.DiscountAmount == 0 ? line.UnitPrice.ToString("0.00", CultureInfo.InvariantCulture) : string.Empty, line.ProjectJobId.HasValue ? projectNumbers.GetValueOrDefault(line.ProjectJobId.Value, string.Empty) : string.Empty, line.ProjectPhaseId.HasValue ? phaseCodes.GetValueOrDefault(line.ProjectPhaseId.Value, string.Empty) : string.Empty, line.ProjectCostCodeId.HasValue ? costCodeValues.GetValueOrDefault(line.ProjectCostCodeId.Value, string.Empty) : string.Empty });
+                return new[] { new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture), "Imported invoice", "1", invoice.Subtotal.ToString("0.00", CultureInfo.InvariantCulture), string.Empty, string.Empty, string.Empty, string.Empty, string.Empty } };
+            return invoiceLines.Select(line => new[] { invoice.InvoiceNumber, customers.GetValueOrDefault(invoice.CustomerId, string.Empty), invoice.InvoiceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), invoice.DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), RoundCurrency(line.Quantity * line.UnitPrice - line.DiscountAmount).ToString("0.00", CultureInfo.InvariantCulture), line.Description, line.DiscountAmount == 0 ? line.Quantity.ToString("0.####", CultureInfo.InvariantCulture) : string.Empty, line.DiscountAmount == 0 ? line.UnitPrice.ToString("0.00", CultureInfo.InvariantCulture) : string.Empty, line.ProjectJobId.HasValue ? projectNumbers.GetValueOrDefault(line.ProjectJobId.Value, string.Empty) : string.Empty, line.ProjectPhaseId.HasValue ? phaseCodes.GetValueOrDefault(line.ProjectPhaseId.Value, string.Empty) : string.Empty, line.ProjectCostCodeId.HasValue ? costCodeValues.GetValueOrDefault(line.ProjectCostCodeId.Value, string.Empty) : string.Empty, line.DepartmentId.HasValue ? trackingDimensionCodes.GetValueOrDefault(line.DepartmentId.Value, string.Empty) : string.Empty, line.ClassId.HasValue ? trackingDimensionCodes.GetValueOrDefault(line.ClassId.Value, string.Empty) : string.Empty });
         });
     }
 
@@ -172,6 +178,7 @@ public sealed class QuickBooksOnlineInterchangeService(
         var activeProjects = await db.ProjectJobs.Where(project => project.CompanyId == companyId && project.Status == "Active").Select(project => new { project.Id, project.JobNumber, project.Name }).ToListAsync(ct);
         var activePhases = await db.ProjectPhases.Where(phase => phase.CompanyId == companyId && phase.IsActive).Select(phase => new { phase.Id, phase.ProjectJobId, phase.Code, phase.Name }).ToListAsync(ct);
         var activeCostCodes = await db.ProjectCostCodes.Where(costCode => costCode.CompanyId == companyId && costCode.IsActive).Select(costCode => new { costCode.Id, costCode.Code, costCode.Name }).ToListAsync(ct);
+        var activeTrackingDimensions = await db.TrackingDimensionValues.Where(value => value.CompanyId == companyId && value.IsActive).Select(value => new { value.Id, value.DimensionType, value.Code, value.Name, value.EffectiveFrom, value.EffectiveThrough }).ToListAsync(ct);
         var imports = new Dictionary<string, (DateOnly Date, string Reference, string Description, List<JournalLineRequest> Lines)>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
         {
@@ -192,7 +199,7 @@ public sealed class QuickBooksOnlineInterchangeService(
                 errors.Add($"Row {index + 2}: provide a positive debit or a positive credit, but not both.");
                 continue;
             }
-            var projectReference = Value(row, "project / job", "project/job", "project job", "project", "class");
+            var projectReference = Value(row, "project / job", "project/job", "project job", "project");
             var projectMatches = activeProjects.Where(project => project.JobNumber.Equals(projectReference, StringComparison.OrdinalIgnoreCase) || project.Name.Equals(projectReference, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (!string.IsNullOrWhiteSpace(projectReference) && projectMatches.Length != 1)
             {
@@ -216,6 +223,20 @@ public sealed class QuickBooksOnlineInterchangeService(
                 errors.Add($"Row {index + 2}: Cost Code must identify one active company cost code and requires a Project / Job.");
                 continue;
             }
+            var departmentReference = Value(row, "department", "location", "business unit");
+            var departmentMatches = activeTrackingDimensions.Where(value => value.DimensionType == "Department" && (!value.EffectiveFrom.HasValue || value.EffectiveFrom <= date) && (!value.EffectiveThrough.HasValue || value.EffectiveThrough >= date) && (value.Code.Equals(departmentReference, StringComparison.OrdinalIgnoreCase) || value.Name.Equals(departmentReference, StringComparison.OrdinalIgnoreCase))).ToArray();
+            if (!string.IsNullOrWhiteSpace(departmentReference) && departmentMatches.Length != 1)
+            {
+                errors.Add($"Row {index + 2}: Department must identify one active company department effective on the journal date.");
+                continue;
+            }
+            var classReference = Value(row, "class", "tracking class", "quickbooks class");
+            var classMatches = activeTrackingDimensions.Where(value => value.DimensionType == "Class" && (!value.EffectiveFrom.HasValue || value.EffectiveFrom <= date) && (!value.EffectiveThrough.HasValue || value.EffectiveThrough >= date) && (value.Code.Equals(classReference, StringComparison.OrdinalIgnoreCase) || value.Name.Equals(classReference, StringComparison.OrdinalIgnoreCase))).ToArray();
+            if (!string.IsNullOrWhiteSpace(classReference) && classMatches.Length != 1)
+            {
+                errors.Add($"Row {index + 2}: Class must identify one active company class effective on the journal date.");
+                continue;
+            }
             if (!imports.TryGetValue(journalNumber, out var journal))
             {
                 journal = (date, Value(row, "reference"), Value(row, "journal/description", "journal", "description"), []);
@@ -226,7 +247,7 @@ public sealed class QuickBooksOnlineInterchangeService(
                 errors.Add($"Row {index + 2}: every line in journal '{journalNumber}' must have the same date.");
                 continue;
             }
-            journal.Lines.Add(new JournalLineRequest(accountMatches[0].Number, debit, credit, Value(row, "line description", "description"), projectId, phaseMatches.SingleOrDefault()?.Id, costCodeMatches.SingleOrDefault()?.Id));
+            journal.Lines.Add(new JournalLineRequest(accountMatches[0].Number, debit, credit, Value(row, "line description", "description"), projectId, phaseMatches.SingleOrDefault()?.Id, costCodeMatches.SingleOrDefault()?.Id, departmentMatches.SingleOrDefault()?.Id, classMatches.SingleOrDefault()?.Id));
         }
         foreach (var (number, journal) in imports)
         {
@@ -255,7 +276,7 @@ public sealed class QuickBooksOnlineInterchangeService(
             {
                 Id = Guid.NewGuid(), JournalEntryId = entry.Id,
                 AccountId = eligibleAccounts.Single(account => account.Number.Equals(line.AccountNumber, StringComparison.OrdinalIgnoreCase)).Id,
-                ProjectJobId = line.ProjectJobId, ProjectPhaseId = line.ProjectPhaseId, ProjectCostCodeId = line.ProjectCostCodeId, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit
+                ProjectJobId = line.ProjectJobId, ProjectPhaseId = line.ProjectPhaseId, ProjectCostCodeId = line.ProjectCostCodeId, DepartmentId = line.DepartmentId, ClassId = line.ClassId, Description = line.Description.Trim(), Debit = line.Debit, Credit = line.Credit
             }));
             db.BusinessAuditEntries.Add(new BusinessAuditEntry
             {
@@ -275,6 +296,7 @@ public sealed class QuickBooksOnlineInterchangeService(
         var activeProjects = await db.ProjectJobs.Where(project => project.CompanyId == companyId && project.Status == "Active").Select(project => new { project.Id, project.JobNumber, project.Name }).ToListAsync(ct);
         var activePhases = await db.ProjectPhases.Where(phase => phase.CompanyId == companyId && phase.IsActive).Select(phase => new { phase.Id, phase.ProjectJobId, phase.Code, phase.Name }).ToListAsync(ct);
         var activeCostCodes = await db.ProjectCostCodes.Where(costCode => costCode.CompanyId == companyId && costCode.IsActive).Select(costCode => new { costCode.Id, costCode.Code, costCode.Name }).ToListAsync(ct);
+        var activeTrackingDimensions = await db.TrackingDimensionValues.Where(value => value.CompanyId == companyId && value.IsActive).Select(value => new { value.Id, value.DimensionType, value.Code, value.Name, value.EffectiveFrom, value.EffectiveThrough }).ToListAsync(ct);
         var defaultRevenueAccount = revenueAccounts.SingleOrDefault(account => account.OperationalRole == AccountingAccountRoles.DefaultRevenue)?.Number ?? string.Empty;
         var imports = new Dictionary<string, (Guid CustomerId, DateOnly InvoiceDate, DateOnly DueDate, List<SalesInvoiceLineRequest> Lines)>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < rows.Count; index++)
@@ -309,7 +331,7 @@ public sealed class QuickBooksOnlineInterchangeService(
                     continue;
                 }
             }
-            var projectReference = Value(row, "project / job", "project/job", "project job", "project", "class");
+            var projectReference = Value(row, "project / job", "project/job", "project job", "project");
             var projectMatches = activeProjects.Where(project => project.JobNumber.Equals(projectReference, StringComparison.OrdinalIgnoreCase) || project.Name.Equals(projectReference, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (!string.IsNullOrWhiteSpace(projectReference) && projectMatches.Length != 1)
             {
@@ -333,6 +355,20 @@ public sealed class QuickBooksOnlineInterchangeService(
                 errors.Add($"Row {index + 2}: Cost Code must identify one active company cost code and requires a Project / Job.");
                 continue;
             }
+            var departmentReference = Value(row, "department", "location", "business unit");
+            var departmentMatches = activeTrackingDimensions.Where(value => value.DimensionType == "Department" && (!value.EffectiveFrom.HasValue || value.EffectiveFrom <= invoiceDate) && (!value.EffectiveThrough.HasValue || value.EffectiveThrough >= invoiceDate) && (value.Code.Equals(departmentReference, StringComparison.OrdinalIgnoreCase) || value.Name.Equals(departmentReference, StringComparison.OrdinalIgnoreCase))).ToArray();
+            if (!string.IsNullOrWhiteSpace(departmentReference) && departmentMatches.Length != 1)
+            {
+                errors.Add($"Row {index + 2}: Department must identify one active company department effective on the invoice date.");
+                continue;
+            }
+            var classReference = Value(row, "class", "tracking class", "quickbooks class");
+            var classMatches = activeTrackingDimensions.Where(value => value.DimensionType == "Class" && (!value.EffectiveFrom.HasValue || value.EffectiveFrom <= invoiceDate) && (!value.EffectiveThrough.HasValue || value.EffectiveThrough >= invoiceDate) && (value.Code.Equals(classReference, StringComparison.OrdinalIgnoreCase) || value.Name.Equals(classReference, StringComparison.OrdinalIgnoreCase))).ToArray();
+            if (!string.IsNullOrWhiteSpace(classReference) && classMatches.Length != 1)
+            {
+                errors.Add($"Row {index + 2}: Class must identify one active company class effective on the invoice date.");
+                continue;
+            }
             if (!imports.TryGetValue(invoiceNumber, out var invoice))
             {
                 invoice = (customerMatches[0].Id, invoiceDate, dueDate, []);
@@ -344,7 +380,7 @@ public sealed class QuickBooksOnlineInterchangeService(
                 continue;
             }
             var description = Value(row, "item description", "description");
-            invoice.Lines.Add(new SalesInvoiceLineRequest(string.IsNullOrWhiteSpace(description) ? $"QuickBooks invoice {invoiceNumber}" : description, quantity, rate, 0, 0, accountMatches[0].Number, projectId, phaseMatches.SingleOrDefault()?.Id, costCodeMatches.SingleOrDefault()?.Id));
+            invoice.Lines.Add(new SalesInvoiceLineRequest(string.IsNullOrWhiteSpace(description) ? $"QuickBooks invoice {invoiceNumber}" : description, quantity, rate, 0, 0, accountMatches[0].Number, projectId, phaseMatches.SingleOrDefault()?.Id, costCodeMatches.SingleOrDefault()?.Id, departmentMatches.SingleOrDefault()?.Id, classMatches.SingleOrDefault()?.Id));
         }
         if (imports.Count > 100) errors.Add("A QuickBooks invoice batch can contain at most 100 invoices.");
         var numbers = imports.Keys.ToArray();

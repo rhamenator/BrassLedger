@@ -4,6 +4,7 @@ public static class BrassLedgerPermissions
 {
     public const string WorkspaceView = "workspace.view";
     public const string LedgerManage = "ledger.manage";
+    public const string AccountingDimensionsManage = "ledger.dimensions.manage";
     public const string JournalPrepare = "ledger.journal.prepare";
     public const string JournalApprove = "ledger.journal.approve";
     public const string JournalPost = "ledger.journal.post";
@@ -43,6 +44,7 @@ public static class BrassLedgerPermissions
     [
         new(WorkspaceView, "Workspace access", "Sign in and review the shared accounting workspace."),
         new(LedgerManage, "Ledger", "Review general ledger activity and accounting balances."),
+        new(AccountingDimensionsManage, "Accounting dimensions", "Maintain company departments, classes, hierarchies, and effective dates."),
         new(JournalPrepare, "Journal preparation", "Create and edit unposted general journal drafts."),
         new(JournalApprove, "Journal approval", "Approve balanced general journal drafts after review."),
         new(JournalPost, "Journal posting", "Post approved general journals and change account balances."),

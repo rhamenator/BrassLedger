@@ -10,6 +10,8 @@ internal static class TestWorkspaceData
         var projectId = Guid.Parse("33333333-3333-3333-3333-333333333333");
         var phaseId = Guid.Parse("44444444-4444-4444-4444-444444444444");
         var costCodeId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var departmentId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var classId = Guid.Parse("77777777-7777-7777-7777-777777777777");
         return new BusinessWorkspaceSnapshot(
             GeneratedAtUtc: new DateTime(2026, 4, 3, 12, 0, 0, DateTimeKind.Utc),
             Company: new CompanySnapshot("Brass Ledger Manufacturing", "Brass Ledger Manufacturing, LLC", "84-9923145", "USD", 1, 4),
@@ -45,7 +47,12 @@ internal static class TestWorkspaceData
                             new JournalEntryLineSnapshot("1000", "Cash", 25m, 0m),
                             new JournalEntryLineSnapshot("4000", "Revenue", 0m, 25m)
                         ])
-                }),
+                },
+                TrackingDimensions:
+                [
+                    new TrackingDimensionValueSnapshot(departmentId, "Department", null, "FIELD", "Field service", "", new DateOnly(2026, 1, 1), null, true, "department-token"),
+                    new TrackingDimensionValueSnapshot(classId, "Class", null, "COMMERCIAL", "Commercial", "", new DateOnly(2026, 1, 1), null, true, "class-token")
+                ]),
             Receivables: new ReceivablesWorkspace(
                 34715.75m,
                 0,

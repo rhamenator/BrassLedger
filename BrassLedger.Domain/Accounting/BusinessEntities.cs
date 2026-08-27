@@ -305,6 +305,25 @@ public sealed class GeneralLedgerAccount
     public string? OperationalRole { get; set; }
 }
 
+public sealed class TrackingDimensionValue
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid? ParentTrackingDimensionValueId { get; set; }
+    public string DimensionType { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public DateOnly? EffectiveFrom { get; set; }
+    public DateOnly? EffectiveThrough { get; set; }
+    public bool IsActive { get; set; } = true;
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public Guid? UpdatedByUserId { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
 public sealed class JournalEntry
 {
     public Guid Id { get; set; }
@@ -342,6 +361,8 @@ public sealed class JournalEntryLine
     public Guid? ProjectJobId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
@@ -500,6 +521,8 @@ public sealed class SalesInvoiceLine
     public Guid? ProjectJobId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public Guid? SalesOrderLineId { get; set; }
     public Guid? InventoryShipmentLineId { get; set; }
     public Guid? InventoryItemId { get; set; }
@@ -549,6 +572,8 @@ public sealed class VendorBillLine
     public Guid? ProjectJobId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public decimal UnitCost { get; set; }
@@ -763,6 +788,8 @@ public sealed class SalesQuoteLine
     public Guid? ProjectJobId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
@@ -803,6 +830,8 @@ public sealed class SalesOrderLine
     public Guid? ProjectJobId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal OrderedQuantity { get; set; }
     public decimal AllocatedQuantity { get; set; }
@@ -1150,6 +1179,8 @@ public sealed class PurchaseRequisitionLine
     public Guid? ProjectJobId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal RequestedQuantity { get; set; }
     public decimal EstimatedUnitCost { get; set; }
@@ -1165,6 +1196,8 @@ public sealed class PurchaseOrderLine
     public Guid? ProjectJobId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal OrderedQuantity { get; set; }
     public decimal UnitCost { get; set; }
@@ -1602,6 +1635,8 @@ public sealed class PayrollTimeEntry
     public Guid? ProjectJobId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public string Notes { get; set; } = string.Empty;
     public string W2ReportingJson { get; set; } = "{}";
 }
@@ -1826,6 +1861,8 @@ public sealed class ProjectBillingLine
     public Guid? SourceId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public string SourceKey { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
@@ -2058,6 +2095,8 @@ public sealed class PayrollEarningLine
     public Guid? ProjectJobId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectCostCodeId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? ClassId { get; set; }
     public int Sequence { get; set; }
     public string EarningCode { get; set; } = "REGULAR";
     public string EarningType { get; set; } = "Regular";

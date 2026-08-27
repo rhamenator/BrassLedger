@@ -429,6 +429,27 @@ public static class ServiceCollectionExtensions
                 && await HasColumnAsync(dbContext, "ProjectBillingLines", "ProjectCostCodeId", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ProjectBillingLines_ProjectPhaseId", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ProjectBillingLines_ProjectCostCodeId", cancellationToken);
+        if (migrationId.EndsWith("_AddTrackingDimensions", StringComparison.Ordinal))
+            return await HasTableAsync(dbContext, "TrackingDimensionValues", cancellationToken)
+                && await HasColumnAsync(dbContext, "TrackingDimensionValues", "DimensionType", cancellationToken)
+                && await HasColumnAsync(dbContext, "TrackingDimensionValues", "ParentTrackingDimensionValueId", cancellationToken)
+                && await HasColumnAsync(dbContext, "TrackingDimensionValues", "EffectiveThrough", cancellationToken)
+                && await HasColumnAsync(dbContext, "JournalEntryLines", "DepartmentId", cancellationToken)
+                && await HasColumnAsync(dbContext, "JournalEntryLines", "ClassId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_TrackingDimensionValues_CompanyId_DimensionType_Code", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_JournalEntryLines_DepartmentId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_JournalEntryLines_ClassId", cancellationToken);
+        if (migrationId.EndsWith("_AddTrackingDimensionsToSourceLines", StringComparison.Ordinal))
+        {
+            string[] sourceLineTables = ["VendorBillLines", "SalesQuoteLines", "SalesOrderLines", "SalesInvoiceLines", "PurchaseRequisitionLines", "PurchaseOrderLines", "ProjectBillingLines", "PayrollTimeEntries", "PayrollEarningLines"];
+            foreach (var table in sourceLineTables)
+                if (!await HasColumnAsync(dbContext, table, "DepartmentId", cancellationToken)
+                    || !await HasColumnAsync(dbContext, table, "ClassId", cancellationToken)
+                    || !await HasIndexAsync(dbContext, $"IX_{table}_DepartmentId", cancellationToken)
+                    || !await HasIndexAsync(dbContext, $"IX_{table}_ClassId", cancellationToken))
+                    return false;
+            return true;
+        }
         return false;
     }
 

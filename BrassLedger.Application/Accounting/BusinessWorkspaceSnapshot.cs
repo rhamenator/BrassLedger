@@ -49,7 +49,10 @@ public sealed record GeneralLedgerWorkspace(
     decimal Revenue,
     decimal Expenses,
     IReadOnlyList<AccountSnapshot> Accounts,
-    IReadOnlyList<JournalEntrySnapshot> RecentEntries);
+    IReadOnlyList<JournalEntrySnapshot> RecentEntries,
+    IReadOnlyList<TrackingDimensionValueSnapshot>? TrackingDimensions = null);
+
+public sealed record TrackingDimensionValueSnapshot(Guid Id, string DimensionType, Guid? ParentTrackingDimensionValueId, string Code, string Name, string Description, DateOnly? EffectiveFrom, DateOnly? EffectiveThrough, bool IsActive, string ConcurrencyToken);
 
 public sealed record AccountSnapshot(
     string Number,
@@ -75,7 +78,7 @@ public sealed record JournalEntrySnapshot(
     string ConcurrencyToken = "",
     IReadOnlyList<JournalEntryLineSnapshot>? Lines = null);
 
-public sealed record JournalEntryLineSnapshot(string AccountNumber, string Description, decimal Debit, decimal Credit, Guid? ProjectJobId = null, string ProjectJobNumber = "", Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "");
+public sealed record JournalEntryLineSnapshot(string AccountNumber, string Description, decimal Debit, decimal Credit, Guid? ProjectJobId = null, string ProjectJobNumber = "", Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "", Guid? DepartmentId = null, string DepartmentCode = "", Guid? ClassId = null, string ClassCode = "");
 
 public sealed record ReceivablesWorkspace(
     decimal OpenBalance,
@@ -106,7 +109,7 @@ public sealed record InvoiceSnapshot(
     IReadOnlyList<InvoiceLineSnapshot>? Lines = null,
     Guid CustomerId = default);
 
-public sealed record InvoiceLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber, Guid? ProjectJobId = null, string ProjectJobNumber = "", Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "");
+public sealed record InvoiceLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber, Guid? ProjectJobId = null, string ProjectJobNumber = "", Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "", Guid? DepartmentId = null, string DepartmentCode = "", Guid? ClassId = null, string ClassCode = "");
 
 public sealed record PayablesWorkspace(
     decimal OpenBalance,
@@ -137,7 +140,7 @@ public sealed record BillSnapshot(
     IReadOnlyList<BillLineSnapshot>? Lines = null,
     Guid VendorId = default);
 
-public sealed record BillLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitCost, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string ExpenseAccountNumber, Guid? ProjectJobId = null, string ProjectJobNumber = "", Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "");
+public sealed record BillLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitCost, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string ExpenseAccountNumber, Guid? ProjectJobId = null, string ProjectJobNumber = "", Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "", Guid? DepartmentId = null, string DepartmentCode = "", Guid? ClassId = null, string ClassCode = "");
 
 public sealed record SubledgerPaymentSnapshot(Guid Id, string Direction, string CounterpartyName, DateOnly PaymentDate, decimal Amount, decimal AppliedAmount, decimal UnappliedAmount, string Reference, string Method, string Status, IReadOnlyList<PaymentApplicationSnapshot> Applications);
 public sealed record PaymentApplicationSnapshot(Guid DocumentId, string DocumentNumber, decimal Amount);
@@ -203,7 +206,7 @@ public sealed record SalesQuoteSnapshot(
     string ConcurrencyToken,
     IReadOnlyList<SalesQuoteLineSnapshot> Lines);
 
-public sealed record SalesQuoteLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber, Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null);
+public sealed record SalesQuoteLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber, Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
 
 public sealed record SalesOrderSnapshot(
     string OrderNumber,
@@ -219,7 +222,7 @@ public sealed record SalesOrderSnapshot(
     IReadOnlyList<SalesOrderLineSnapshot>? Lines = null,
     Guid? SalesQuoteId = null);
 
-public sealed record SalesOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal AllocatedQuantity, decimal ShippedQuantity, decimal CancelledQuantity, decimal ReturnedQuantity, decimal InvoicedQuantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber, Guid? AllocationWarehouseId = null, Guid? AllocationBinId = null, string AllocationLocation = "", Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null);
+public sealed record SalesOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal AllocatedQuantity, decimal ShippedQuantity, decimal CancelledQuantity, decimal ReturnedQuantity, decimal InvoicedQuantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber, Guid? AllocationWarehouseId = null, Guid? AllocationBinId = null, string AllocationLocation = "", Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
 public sealed record InventoryShipmentSnapshot(Guid Id, Guid SalesOrderId, string SalesOrderNumber, string ShipmentNumber, DateOnly ShippedOn, string Status, decimal TotalCost, Guid? SalesInvoiceId, string ConcurrencyToken, IReadOnlyList<InventoryShipmentLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId, Guid? WarehouseId = null, Guid? BinId = null, string Location = "", Guid? InventoryPackingSlipId = null);
 public sealed record InventoryShipmentLineSnapshot(Guid Id, Guid SalesOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal TotalCost);
 public sealed record CustomerReturnAuthorizationSnapshot(Guid Id, Guid InventoryShipmentId, string ShipmentNumber, Guid SalesOrderId, string SalesOrderNumber, Guid CustomerId, string CustomerName, string ReturnNumber, DateOnly AuthorizedOn, string Reason, string Status, string ConcurrencyToken, IReadOnlyList<CustomerReturnAuthorizationLineSnapshot> Lines);
@@ -231,7 +234,7 @@ public sealed record CustomerReturnCreditApplicationSnapshot(Guid Id, Guid Sales
 public sealed record CustomerReturnCreditRefundSnapshot(Guid Id, Guid BankAccountId, string BankAccountName, string Reference, DateOnly RefundDate, decimal Amount, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken);
 
 public sealed record PurchaseRequisitionSnapshot(Guid Id, Guid? RequestedVendorId, string RequestedVendorName, string RequisitionNumber, DateOnly RequestedOn, DateOnly? NeededBy, string Purpose, string Status, decimal TotalEstimatedAmount, string DecisionReason, string CancellationReason, Guid? PurchaseOrderId, string PurchaseOrderNumber, string ConcurrencyToken, IReadOnlyList<PurchaseRequisitionLineSnapshot> Lines);
-public sealed record PurchaseRequisitionLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal RequestedQuantity, decimal EstimatedUnitCost, decimal EstimatedLineTotal, Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null);
+public sealed record PurchaseRequisitionLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal RequestedQuantity, decimal EstimatedUnitCost, decimal EstimatedLineTotal, Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
 public sealed record SupplierReturnAuthorizationSnapshot(Guid Id, Guid InventoryReceiptId, string ReceiptNumber, Guid PurchaseOrderId, string PurchaseOrderNumber, Guid VendorId, string VendorName, string ReturnNumber, DateOnly AuthorizedOn, string Reason, string Status, string CancellationReason, string ConcurrencyToken, IReadOnlyList<SupplierReturnAuthorizationLineSnapshot> Lines);
 public sealed record SupplierReturnAuthorizationLineSnapshot(Guid Id, Guid InventoryReceiptLineId, Guid PurchaseOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal AuthorizedQuantity, decimal ShippedQuantity, decimal UnitCost, decimal ReceiptUnitCost);
 public sealed record SupplierReturnShipmentSnapshot(Guid Id, Guid SupplierReturnAuthorizationId, string ReturnNumber, Guid? SourceVendorBillId, string SourceVendorBillNumber, Guid VendorId, string VendorName, string ShipmentNumber, DateOnly ShippedOn, string Status, decimal TotalAmount, decimal VendorCreditAmount, bool CreatesVendorCredit, decimal SourceAppliedAmount, decimal AppliedAmount, decimal RefundedAmount, decimal AvailableAmount, Guid WarehouseId, Guid BinId, string Location, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<SupplierReturnShipmentLineSnapshot> Lines, IReadOnlyList<SupplierReturnCreditApplicationSnapshot> Applications, IReadOnlyList<SupplierReturnCreditRefundSnapshot> Refunds);
@@ -257,7 +260,7 @@ public sealed record PurchaseOrderSnapshot(
     string ConcurrencyToken = "",
     IReadOnlyList<PurchaseOrderLineSnapshot>? Lines = null);
 
-public sealed record PurchaseOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal UnitCost, decimal ReceivedQuantity, decimal InvoicedQuantity, decimal LineTotal, decimal ReturnedQuantity = 0m, decimal CreditedQuantity = 0m, Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null);
+public sealed record PurchaseOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal UnitCost, decimal ReceivedQuantity, decimal InvoicedQuantity, decimal LineTotal, decimal ReturnedQuantity = 0m, decimal CreditedQuantity = 0m, Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
 public sealed record InventoryReceiptSnapshot(Guid Id, Guid PurchaseOrderId, string PurchaseOrderNumber, string ReceiptNumber, DateOnly ReceivedOn, string Status, decimal TotalAmount, Guid? VendorBillId, string ConcurrencyToken, IReadOnlyList<InventoryReceiptLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId, Guid? WarehouseId = null, Guid? BinId = null, string Location = "", IReadOnlyList<MatchedVendorBillSnapshot>? VendorBills = null);
 public sealed record InventoryReceiptLineSnapshot(Guid Id, Guid PurchaseOrderLineId, Guid InventoryItemId, string Sku, int Sequence, decimal Quantity, decimal UnitCost, decimal LineTotal, decimal ReturnedQuantity = 0m);
 public sealed record MatchedVendorBillSnapshot(Guid Id, string BillNumber, decimal TotalAmount, decimal BalanceDue, string Status);
@@ -313,7 +316,7 @@ public sealed record PayrollLiabilitySnapshot(Guid Id, Guid PayrollRunId, Guid E
 public sealed record PayrollLiabilityPaymentSnapshot(Guid Id, Guid BankAccountId, DateOnly PaymentDate, string Reference, string Payee, string Method, decimal Amount, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId, string ConcurrencyToken, IReadOnlyList<PayrollLiabilityPaymentApplicationSnapshot> Applications);
 public sealed record PayrollLiabilityPaymentApplicationSnapshot(Guid PayrollLiabilityId, string ObligationCode, decimal Amount);
 public sealed record PayrollTimecardSnapshot(Guid Id, Guid EmployeeId, string EmployeeNumber, string EmployeeName, DateOnly PeriodStart, DateOnly PeriodEnd, string Status, decimal TotalHours, decimal TotalAmount, string Notes, string ConcurrencyToken, Guid? PayrollRunId, DateTimeOffset PreparedAtUtc, DateTimeOffset? SubmittedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? VoidedAtUtc, string VoidReason, IReadOnlyList<PayrollTimeEntrySnapshot> Entries);
-public sealed record PayrollTimeEntrySnapshot(Guid Id, int Sequence, DateOnly WorkDate, string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable, string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict, Guid? ProjectJobId, string Notes, PayrollW2ReportingInput W2Reporting, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null);
+public sealed record PayrollTimeEntrySnapshot(Guid Id, int Sequence, DateOnly WorkDate, string EarningCode, string EarningType, decimal Hours, decimal Rate, decimal Amount, bool IsTaxable, string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict, Guid? ProjectJobId, string Notes, PayrollW2ReportingInput W2Reporting, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
 
 public sealed record EmployeeSnapshot(
     string EmployeeNumber,
@@ -453,7 +456,7 @@ public sealed record ProjectChangeOrderSnapshot(
     string ConcurrencyToken);
 
 public sealed record ProjectBillingRateSnapshot(Guid Id, Guid ProjectJobId, string ProjectJobNumber, string EarningCode, decimal HourlyRate, DateOnly EffectiveOn, DateOnly? EffectiveThrough, bool IsActive, string ConcurrencyToken);
-public sealed record ProjectBillingLineSnapshot(int Sequence, string SourceType, Guid? SourceId, string SourceKey, string Description, decimal Quantity, decimal UnitPrice, decimal SourceCost, decimal MarkupAmount, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber, Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "");
+public sealed record ProjectBillingLineSnapshot(int Sequence, string SourceType, Guid? SourceId, string SourceKey, string Description, decimal Quantity, decimal UnitPrice, decimal SourceCost, decimal MarkupAmount, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber, Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "", Guid? DepartmentId = null, string DepartmentCode = "", Guid? ClassId = null, string ClassCode = "");
 public sealed record ProjectBillingProposalSnapshot(Guid Id, Guid ProjectJobId, string ProjectJobNumber, Guid SubledgerDocumentWorkflowId, Guid? RetainageReleaseOfProposalId, string InvoiceNumber, DateOnly BillingThrough, DateOnly InvoiceDate, DateOnly DueDate, string BillingBasis, decimal ProgressPercentToDate, decimal CostMarkupPercent, decimal ContractAmountSnapshot, decimal RetainagePercentSnapshot, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber, string Description, string Status, DateTimeOffset PreparedAtUtc, DateTimeOffset? CancelledAtUtc, string CancellationReason, string ConcurrencyToken, IReadOnlyList<ProjectBillingLineSnapshot> Lines);
 public sealed record ProjectRetainageAgingSnapshot(Guid ProposalId, Guid ProjectJobId, string ProjectJobNumber, string CustomerName, string InvoiceNumber, DateOnly HeldOn, int AgeDays, decimal OriginalRetainage, decimal ReleasedAmount, decimal OutstandingAmount, decimal Days0To30, decimal Days31To60, decimal Days61To90, decimal DaysOver90);
 public sealed record ProjectWipScheduleSnapshot(Guid Id, Guid ProjectJobId, string ProjectJobNumber, DateOnly ThroughDate, DateOnly PostingDate, string RecognitionMethod, decimal ContractAmountSnapshot, decimal EstimatedCostSnapshot, decimal ActualCostToDate, decimal CompletionPercent, decimal EarnedRevenueToDate, decimal BilledRevenueToDate, decimal PriorContractAsset, decimal PriorContractLiability, decimal DesiredContractAsset, decimal DesiredContractLiability, decimal RevenueAdjustment, string RevenueAccountNumber, string Description, string Status, Guid? JournalEntryId, Guid? ReversalJournalEntryId, DateTimeOffset PreparedAtUtc, DateTimeOffset? SubmittedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? PostedAtUtc, DateTimeOffset? ReversedAtUtc, string DecisionReason, string ReversalReason, string ConcurrencyToken);

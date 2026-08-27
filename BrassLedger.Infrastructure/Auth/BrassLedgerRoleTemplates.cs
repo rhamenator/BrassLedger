@@ -10,6 +10,7 @@ public static class BrassLedgerRoleTemplates
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.LedgerManage,
+            BrassLedgerPermissions.AccountingDimensionsManage,
             BrassLedgerPermissions.JournalPrepare,
             BrassLedgerPermissions.JournalApprove,
             BrassLedgerPermissions.JournalPost,

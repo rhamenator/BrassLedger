@@ -91,6 +91,8 @@ public static class AuthenticationServiceCollectionExtensions
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.WorkspaceView));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageLedger, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.LedgerManage));
+            options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageAccountingDimensions, policy =>
+                policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.AccountingDimensionsManage));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.PrepareJournals, policy =>
                 policy.RequireClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.JournalPrepare));
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ApproveJournals, policy =>

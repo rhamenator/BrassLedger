@@ -95,6 +95,20 @@ api.MapGet("/general-ledger", async (IBusinessWorkspaceService service, Cancella
 .WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 
+api.MapPost("/tracking-dimensions", async (SaveTrackingDimensionValueRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id.HasValue) return Results.BadRequest(TransactionResult.Failure("A new tracking dimension request cannot contain an identifier."));
+    var result = await service.SaveTrackingDimensionValueAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/tracking-dimensions/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["trackingDimension"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountingDimensions);
+
+api.MapPut("/tracking-dimensions/{trackingDimensionId:guid}", async (Guid trackingDimensionId, SaveTrackingDimensionValueRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (request.Id != trackingDimensionId) return Results.BadRequest(TransactionResult.Failure("The tracking-dimension identifier in the route and request must match."));
+    var result = await service.SaveTrackingDimensionValueAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["trackingDimension"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageAccountingDimensions);
+
 api.MapGet("/receivables", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
 {
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Receivables);

@@ -30,6 +30,8 @@ public sealed partial class AccountingTransactionService
             return TransactionResult.Failure("Every quote item must be active in the current company.");
         if (!await AreActiveProjectDimensionsAsync(db, companyId, requestedLines.Select(line => (line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId)), cancellationToken))
             return TransactionResult.Failure("Every quoted project must be active and belong to this company.");
+        if (!await AreActiveTrackingDimensionsAsync(db, companyId, request.QuotedOn, requestedLines.Select(line => (line.DepartmentId, line.ClassId)), cancellationToken))
+            return TransactionResult.Failure("Every quote department and class must be active, effective on the quote date, correctly typed, and belong to this company.");
         var revenueNumbers = requestedLines.Select(line => line.RevenueAccountNumber.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var revenueAccounts = await db.Accounts
             .Where(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Revenue && !account.IsControlAccount && revenueNumbers.Contains(account.Number))
@@ -74,6 +76,8 @@ public sealed partial class AccountingTransactionService
             ProjectJobId = line.ProjectJobId,
             ProjectPhaseId = line.ProjectPhaseId,
             ProjectCostCodeId = line.ProjectCostCodeId,
+            DepartmentId = line.DepartmentId,
+            ClassId = line.ClassId,
             Description = line.Description.Trim(),
             Quantity = RoundQuantity(line.Quantity),
             UnitPrice = RoundCurrency(line.UnitPrice),
@@ -154,6 +158,7 @@ public sealed partial class AccountingTransactionService
         var revenueAccountIds = quoteLines.Select(line => line.RevenueAccountId).Distinct().ToArray();
         if (await db.Accounts.CountAsync(account => account.CompanyId == companyId && account.IsActive && account.Type == AccountType.Revenue && !account.IsControlAccount && revenueAccountIds.Contains(account.Id), cancellationToken) != revenueAccountIds.Length) return TransactionResult.Failure("One or more quoted revenue accounts are no longer available in this company.");
         if (!await AreActiveProjectDimensionsAsync(db, companyId, quoteLines.Select(line => (line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId)), cancellationToken)) return TransactionResult.Failure("One or more quoted project dimensions are closed or no longer available in this company.");
+        if (!await AreActiveTrackingDimensionsAsync(db, companyId, request.OrderedOn, quoteLines.Select(line => (line.DepartmentId, line.ClassId)), cancellationToken)) return TransactionResult.Failure("One or more quoted departments or classes are inactive, out of period, unavailable, or incorrectly typed for the sales-order date.");
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
@@ -171,6 +176,8 @@ public sealed partial class AccountingTransactionService
             ProjectJobId = line.ProjectJobId,
             ProjectPhaseId = line.ProjectPhaseId,
             ProjectCostCodeId = line.ProjectCostCodeId,
+            DepartmentId = line.DepartmentId,
+            ClassId = line.ClassId,
             Description = line.Description, OrderedQuantity = line.Quantity, UnitPrice = line.UnitPrice, DiscountAmount = line.DiscountAmount,
             TaxAmount = line.TaxAmount, LineTotal = line.LineTotal
         }));

@@ -19,6 +19,7 @@ public sealed class LedgerPageTests : TestContext
             BrassLedgerAuthorizationPolicies.ApproveJournals,
             BrassLedgerAuthorizationPolicies.PostJournals,
             BrassLedgerAuthorizationPolicies.ReverseJournals,
+            BrassLedgerAuthorizationPolicies.ManageAccountingDimensions,
             BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments,
             BrassLedgerAuthorizationPolicies.ApproveSubledgerDocuments,
             BrassLedgerAuthorizationPolicies.PostSubledgerDocuments,
@@ -49,6 +50,10 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("malformed-customers.csv", cut.Markup);
         Assert.Contains("Fix row 2", cut.Markup);
         Assert.Contains("Fixed assets, prepaids, and loans", cut.Markup);
+        Assert.Contains("Departments and classes", cut.Markup);
+        Assert.NotNull(cut.Find("select[aria-label='Tracking dimension type']"));
+        Assert.Contains("FIELD", cut.Find("select[aria-label='Journal entry department']").TextContent);
+        Assert.Contains("COMMERCIAL", cut.Find("select[aria-label='Journal entry class']").TextContent);
         Assert.NotNull(cut.Find("input[aria-label='Journal rejection reason']"));
         Assert.Contains("Attach the supporting bank statement.", cut.Markup);
         var projectSelect = cut.Find("select[aria-label='Journal entry project']");
@@ -194,6 +199,7 @@ public sealed class LedgerPageTests : TestContext
 
 internal sealed class StubAccountingTransactionService : IAccountingTransactionService
 {
+    public Task<TransactionResult> SaveTrackingDimensionValueAsync(SaveTrackingDimensionValueRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> SaveJournalEntryDraftAsync(SaveJournalEntryDraftRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.Id ?? Guid.NewGuid()));
     public Task<TransactionResult> ApproveJournalEntryAsync(Guid journalEntryId, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(journalEntryId));
     public Task<TransactionResult> RejectJournalEntryAsync(RejectJournalEntryRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.JournalEntryId));

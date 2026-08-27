@@ -63,7 +63,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("27", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("29", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -91,12 +91,20 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827035027_AddProjectPhaseCostCodeBudgets';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042019_AddProjectPhaseCostCodeLineDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042959_AddProjectBillingLineDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827055010_AddTrackingDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827062326_AddTrackingDimensionsToSourceLines';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectPhases';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectCostCodes';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectBudgetAllocations';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('JournalEntryLines') WHERE name = 'ProjectPhaseId';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('PayrollEarningLines') WHERE name = 'ProjectCostCodeId';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('ProjectBillingLines') WHERE name = 'ProjectPhaseId';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'TrackingDimensionValues';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('JournalEntryLines') WHERE name = 'DepartmentId';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('JournalEntryLines') WHERE name = 'ClassId';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('SalesInvoiceLines') WHERE name = 'DepartmentId';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('VendorBillLines') WHERE name = 'ClassId';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('PayrollTimeEntries') WHERE name = 'DepartmentId';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectWipSchedules';"));
         Assert.Equal("AsBilled", await ReadScalarAsync(connection, "SELECT RevenueRecognitionMethod FROM ProjectJobs ORDER BY JobNumber LIMIT 1;"));
         Assert.Equal("ContractAsset", await ReadScalarAsync(connection, "SELECT OperationalRole FROM Accounts WHERE Number = '1120';"));
@@ -133,7 +141,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("27", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("29", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -160,6 +168,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827035027_AddProjectPhaseCostCodeBudgets';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042019_AddProjectPhaseCostCodeLineDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042959_AddProjectBillingLineDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827055010_AddTrackingDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827062326_AddTrackingDimensionsToSourceLines';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('SalesOrderLines') WHERE name = 'ClassId';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('ProjectBillingLines') WHERE name = 'DepartmentId';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ProjectWipSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AccountingInterchangeBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MfaSignInChallenges';"));
@@ -1718,6 +1730,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
         var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
         var before = await workspaceService.GetWorkspaceAsync();
 
@@ -4584,6 +4597,209 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Contains("project-budget-allocation.created", actions);
             Assert.Contains("project-budget-allocation.updated", actions);
         }
+    }
+
+    [Fact]
+    public async Task TrackingDimensions_EnforceCompanyTypeHierarchyEffectiveDatesPostingAndReversal()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid companyId; Guid foreignDepartmentId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            var foreignCompanyId = Guid.NewGuid(); foreignDepartmentId = Guid.NewGuid();
+            db.Companies.Add(new Company { Id = foreignCompanyId, Name = "Foreign dimension company", LegalName = "Foreign dimension company", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            db.TrackingDimensionValues.Add(new TrackingDimensionValue { Id = foreignDepartmentId, CompanyId = foreignCompanyId, DimensionType = "Department", Code = "FOREIGN", Name = "Foreign department", CreatedAtUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        void SetUser(Guid userId, params string[] permissions)
+        {
+            var claims = permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)).ToList();
+            claims.Add(new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()));
+            claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.WorkspaceView);
+        var denied = await transactions.SaveTrackingDimensionValueAsync(new(null, "Department", null, "OPS", "Operations", "", null, null));
+        Assert.False(denied.Succeeded);
+        Assert.Contains("authorized", denied.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var dimensionManagerId = Guid.NewGuid();
+        SetUser(dimensionManagerId, BrassLedgerPermissions.AccountingDimensionsManage);
+        var parentResult = await transactions.SaveTrackingDimensionValueAsync(new(null, " department ", null, " ops ", "Operations", "Operating departments", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31)));
+        Assert.True(parentResult.Succeeded, parentResult.ErrorMessage);
+        var childResult = await transactions.SaveTrackingDimensionValueAsync(new(null, "Department", parentResult.Id, "field", "Field service", "Mobile technicians", new DateOnly(2026, 2, 1), new DateOnly(2026, 11, 30)));
+        Assert.True(childResult.Succeeded, childResult.ErrorMessage);
+        var accountingClassResult = await transactions.SaveTrackingDimensionValueAsync(new(null, "Class", null, "commercial", "Commercial", "Commercial customer activity", new DateOnly(2026, 1, 1), null));
+        Assert.True(accountingClassResult.Succeeded, accountingClassResult.ErrorMessage);
+        var futureDepartmentResult = await transactions.SaveTrackingDimensionValueAsync(new(null, "Department", null, "future", "Future organization", "", new DateOnly(2027, 1, 1), null));
+        Assert.True(futureDepartmentResult.Succeeded, futureDepartmentResult.ErrorMessage);
+        var wrongParentType = await transactions.SaveTrackingDimensionValueAsync(new(null, "Class", parentResult.Id, "WRONG", "Wrong parent type", "", null, null));
+        Assert.False(wrongParentType.Succeeded);
+        Assert.Contains("parent", wrongParentType.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var outsideParent = await transactions.SaveTrackingDimensionValueAsync(new(null, "Department", parentResult.Id, "LATE", "Outside parent dates", "", new DateOnly(2025, 12, 31), new DateOnly(2027, 1, 1)));
+        Assert.False(outsideParent.Succeeded);
+        Assert.Contains("parent", outsideParent.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        TrackingDimensionValue parent; TrackingDimensionValue child; TrackingDimensionValue accountingClass;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            parent = await db.TrackingDimensionValues.SingleAsync(value => value.Id == parentResult.Id);
+            child = await db.TrackingDimensionValues.SingleAsync(value => value.Id == childResult.Id);
+            accountingClass = await db.TrackingDimensionValues.SingleAsync(value => value.Id == accountingClassResult.Id);
+        }
+        var cycle = await transactions.SaveTrackingDimensionValueAsync(new(parent.Id, parent.DimensionType, child.Id, parent.Code, parent.Name, parent.Description, parent.EffectiveFrom, parent.EffectiveThrough, parent.IsActive, parent.ConcurrencyToken));
+        Assert.False(cycle.Succeeded);
+        Assert.Contains("cycle", cycle.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var renamed = await transactions.SaveTrackingDimensionValueAsync(new(parent.Id, parent.DimensionType, null, parent.Code, "Operations and service", parent.Description, parent.EffectiveFrom, parent.EffectiveThrough, parent.IsActive, parent.ConcurrencyToken));
+        Assert.True(renamed.Succeeded, renamed.ErrorMessage);
+        var stale = await transactions.SaveTrackingDimensionValueAsync(new(parent.Id, parent.DimensionType, null, parent.Code, parent.Name, parent.Description, parent.EffectiveFrom, parent.EffectiveThrough, parent.IsActive, parent.ConcurrencyToken));
+        Assert.False(stale.Succeeded);
+        Assert.Contains("changed", stale.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var preparerId = Guid.NewGuid();
+        SetUser(preparerId, BrassLedgerPermissions.JournalPrepare);
+        var entryDate = new DateOnly(2026, 6, 15);
+        var wrongType = await transactions.SaveJournalEntryDraftAsync(new(null, entryDate, "DIM-WRONG-TYPE", "Reject class used as department", [new("5100", 1m, 0m, "Wrong", DepartmentId: accountingClass.Id), new("4000", 0m, 1m, "Offset", DepartmentId: accountingClass.Id)]));
+        Assert.False(wrongType.Succeeded);
+        Assert.Contains("correct type", wrongType.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var foreign = await transactions.SaveJournalEntryDraftAsync(new(null, entryDate, "DIM-FOREIGN", "Reject another company dimension", [new("5100", 1m, 0m, "Foreign", DepartmentId: foreignDepartmentId), new("4000", 0m, 1m, "Offset", DepartmentId: foreignDepartmentId)]));
+        Assert.False(foreign.Succeeded);
+        Assert.Contains("current company", foreign.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var future = await transactions.SaveJournalEntryDraftAsync(new(null, entryDate, "DIM-FUTURE", "Reject future dimension", [new("5100", 1m, 0m, "Future", DepartmentId: futureDepartmentResult.Id), new("4000", 0m, 1m, "Offset", DepartmentId: futureDepartmentResult.Id)]));
+        Assert.False(future.Succeeded);
+        Assert.Contains("entry date", future.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var draft = await transactions.SaveJournalEntryDraftAsync(new(null, entryDate, "DIM-CONTROLLED", "Controlled department and class", [new("5100", 25m, 0m, "Tracked cost", DepartmentId: child.Id, ClassId: accountingClass.Id), new("4000", 0m, 25m, "Tracked offset", DepartmentId: child.Id, ClassId: accountingClass.Id)]));
+        Assert.True(draft.Succeeded, draft.ErrorMessage);
+
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.JournalApprove);
+        Assert.True((await transactions.ApproveJournalEntryAsync(draft.Id!.Value)).Succeeded);
+        SetUser(dimensionManagerId, BrassLedgerPermissions.AccountingDimensionsManage);
+        var deactivateClass = await transactions.SaveTrackingDimensionValueAsync(new(accountingClass.Id, accountingClass.DimensionType, null, accountingClass.Code, accountingClass.Name, accountingClass.Description, accountingClass.EffectiveFrom, accountingClass.EffectiveThrough, false, accountingClass.ConcurrencyToken));
+        Assert.True(deactivateClass.Succeeded, deactivateClass.ErrorMessage);
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.JournalPost);
+        var inactivePost = await transactions.PostApprovedJournalEntryAsync(draft.Id.Value);
+        Assert.False(inactivePost.Succeeded);
+        Assert.Contains("inactive", inactivePost.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        SetUser(dimensionManagerId, BrassLedgerPermissions.AccountingDimensionsManage);
+        await using (var db = await factory.CreateDbContextAsync()) accountingClass = await db.TrackingDimensionValues.SingleAsync(value => value.Id == accountingClass.Id);
+        Assert.True((await transactions.SaveTrackingDimensionValueAsync(new(accountingClass.Id, accountingClass.DimensionType, null, accountingClass.Code, accountingClass.Name, accountingClass.Description, accountingClass.EffectiveFrom, accountingClass.EffectiveThrough, true, accountingClass.ConcurrencyToken))).Succeeded);
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.JournalPost);
+        Assert.True((await transactions.PostApprovedJournalEntryAsync(draft.Id.Value)).Succeeded);
+
+        Guid customerId; Guid vendorId; Guid itemId; Guid employeeId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            customerId = await db.Customers.Select(customer => customer.Id).FirstAsync();
+            vendorId = await db.Vendors.Select(vendor => vendor.Id).FirstAsync();
+            itemId = await db.InventoryItems.Where(item => item.IsActive).Select(item => item.Id).FirstAsync();
+            employeeId = await db.Employees.Where(employee => employee.IsActive).Select(employee => employee.Id).FirstAsync();
+        }
+
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PayablesManage);
+        var invoiceDraft = await transactions.SaveInvoiceDraftAsync(new(customerId, "DIM-AR-1", entryDate, entryDate.AddDays(30), 0m, 0m, "4000", "Tracked invoice", [new("Tracked revenue", 1m, 10m, 0m, 0m, "4000", DepartmentId: child.Id, ClassId: accountingClass.Id)]));
+        Assert.True(invoiceDraft.Succeeded, invoiceDraft.ErrorMessage);
+        var billDraft = await transactions.SaveVendorBillDraftAsync(new(vendorId, "DIM-AP-1", entryDate, entryDate.AddDays(30), 0m, "5100", "Tracked bill", [new("Tracked expense", 1m, 8m, 0m, 0m, "5100", DepartmentId: child.Id, ClassId: accountingClass.Id)]));
+        Assert.True(billDraft.Succeeded, billDraft.ErrorMessage);
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.SubledgerApprove, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PayablesManage);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(invoiceDraft.Id!.Value)).Succeeded);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(billDraft.Id!.Value)).Succeeded);
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.SubledgerPost, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PayablesManage);
+        var postedInvoice = await transactions.PostApprovedSubledgerDocumentAsync(invoiceDraft.Id.Value);
+        var postedBill = await transactions.PostApprovedSubledgerDocumentAsync(billDraft.Id.Value);
+        Assert.True(postedInvoice.Succeeded, postedInvoice.ErrorMessage);
+        Assert.True(postedBill.Succeeded, postedBill.ErrorMessage);
+
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.SalesManage);
+        var quote = await transactions.SaveSalesQuoteAsync(new(null, customerId, "DIM-QUOTE-1", entryDate, entryDate.AddDays(15), "Tracked quote", [new(itemId, "Tracked quote line", 1m, 12m, 0m, 0m, "4000", DepartmentId: child.Id, ClassId: accountingClass.Id)]));
+        Assert.True(quote.Succeeded, quote.ErrorMessage);
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.RequisitionManage);
+        var requisition = await transactions.SavePurchaseRequisitionAsync(new(null, vendorId, "DIM-REQ-1", entryDate, entryDate.AddDays(10), "Tracked requisition", [new(itemId, "Tracked requisition line", 1m, 7m, DepartmentId: child.Id, ClassId: accountingClass.Id)]));
+        Assert.True(requisition.Succeeded, requisition.ErrorMessage);
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.PayrollPrepare);
+        var timecard = await transactions.SavePayrollTimecardDraftAsync(new(null, employeeId, entryDate, entryDate, [new(entryDate, "REG", "Regular", 1m, 20m, 20m, DepartmentId: child.Id, ClassId: accountingClass.Id)], "Tracked timecard"));
+        Assert.True(timecard.Succeeded, timecard.ErrorMessage);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.All(await db.SalesInvoiceLines.Where(line => line.SalesInvoiceId == postedInvoice.Id).ToListAsync(), line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
+            Assert.All(await db.VendorBillLines.Where(line => line.VendorBillId == postedBill.Id).ToListAsync(), line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
+            Assert.All(await db.SalesQuoteLines.Where(line => line.SalesQuoteId == quote.Id).ToListAsync(), line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
+            Assert.All(await db.PurchaseRequisitionLines.Where(line => line.PurchaseRequisitionId == requisition.Id).ToListAsync(), line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
+            Assert.All(await db.PayrollTimeEntries.Where(line => line.PayrollTimecardId == timecard.Id).ToListAsync(), line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
+        }
+
+        var invoiceExport = await interchange.ExportQuickBooksOnlineCsvAsync("invoices");
+        Assert.NotNull(invoiceExport);
+        var invoiceCsv = System.Text.Encoding.UTF8.GetString(invoiceExport.Content);
+        Assert.Contains("\"Department\",\"Class\"", invoiceCsv, StringComparison.Ordinal);
+        Assert.Contains("\"FIELD\",\"COMMERCIAL\"", invoiceCsv, StringComparison.Ordinal);
+        string customerReference;
+        await using (var db = await factory.CreateDbContextAsync()) customerReference = await db.Customers.Where(customer => customer.Id == customerId).Select(customer => customer.CustomerNumber).SingleAsync();
+        var invoiceImportCsv = "Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Item Description,Quantity,Rate,Project / Job,Project Phase,Cost Code,Department,Class\r\n"
+            + $"DIM-QB-AR-1,{customerReference},2026-06-20,2026-07-20,9.00,Imported tracked invoice,1,9.00,,,,FIELD,COMMERCIAL\r\n";
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage);
+        await using (var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(invoiceImportCsv)))
+        {
+            var imported = await interchange.ImportQuickBooksOnlineCsvAsync("invoices", content, new(false, "tracked-invoices.csv"));
+            Assert.True(imported.Succeeded, string.Join("; ", imported.Errors));
+        }
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var workflow = await db.SubledgerDocumentWorkflows.SingleAsync(item => item.DocumentNumber == "DIM-QB-AR-1");
+            var payload = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(workflow.PayloadJson)!;
+            Assert.All(payload.Lines ?? [], line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
+        }
+
+        var exported = await interchange.ExportQuickBooksOnlineCsvAsync("journal-entries");
+        Assert.NotNull(exported);
+        var exportedCsv = System.Text.Encoding.UTF8.GetString(exported.Content);
+        Assert.Contains("\"Department\",\"Class\"", exportedCsv, StringComparison.Ordinal);
+        Assert.Contains("\"FIELD\",\"COMMERCIAL\"", exportedCsv, StringComparison.Ordinal);
+        const string dimensionImport = "Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description,Project / Job,Project Phase,Cost Code,Department,Class\r\n"
+            + "DIM-IMPORT-TRACK,2026-06-20,DIM-IMPORT,Tracking import,5100,12,0,Imported cost,,,,FIELD,COMMERCIAL\r\n"
+            + "DIM-IMPORT-TRACK,2026-06-20,DIM-IMPORT,Tracking import,4000,0,12,Imported offset,,,,FIELD,COMMERCIAL\r\n";
+        SetUser(preparerId, BrassLedgerPermissions.JournalPrepare);
+        await using (var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(dimensionImport)))
+        {
+            var imported = await interchange.ImportQuickBooksOnlineCsvAsync("journal-entries", content, new(false, "tracking-dimensions.csv"));
+            Assert.True(imported.Succeeded, string.Join("; ", imported.Errors));
+        }
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var importedEntry = await db.JournalEntries.SingleAsync(entry => entry.Description.Contains("DIM-IMPORT-TRACK"));
+            Assert.All(await db.JournalEntryLines.Where(line => line.JournalEntryId == importedEntry.Id).ToListAsync(), line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
+        }
+
+        SetUser(dimensionManagerId, BrassLedgerPermissions.AccountingDimensionsManage);
+        await using (var db = await factory.CreateDbContextAsync()) accountingClass = await db.TrackingDimensionValues.SingleAsync(value => value.Id == accountingClass.Id);
+        Assert.True((await transactions.SaveTrackingDimensionValueAsync(new(accountingClass.Id, accountingClass.DimensionType, null, accountingClass.Code, accountingClass.Name, accountingClass.Description, accountingClass.EffectiveFrom, accountingClass.EffectiveThrough, false, accountingClass.ConcurrencyToken))).Succeeded);
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.JournalReverse);
+        var reversal = await transactions.ReverseJournalEntryAsync(new(draft.Id.Value, new DateOnly(2026, 6, 30), "Correct tracked posting"));
+        Assert.True(reversal.Succeeded, reversal.ErrorMessage);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var originalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == draft.Id).ToListAsync();
+            var reversalLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == reversal.Id).ToListAsync();
+            Assert.All(originalLines.Concat(reversalLines), line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
+            var auditActions = await db.BusinessAuditEntries.Where(entry => entry.EntityId == parent.Id || entry.EntityId == child.Id || entry.EntityId == accountingClass.Id).Select(entry => entry.Action).ToListAsync();
+            Assert.Contains("tracking-dimension.created", auditActions);
+            Assert.Contains("tracking-dimension.updated", auditActions);
+        }
+        var workspace = await workspaceService.GetWorkspaceAsync();
+        Assert.Contains(workspace.GeneralLedger.TrackingDimensions ?? [], value => value.Id == child.Id && value.Code == "FIELD" && value.ParentTrackingDimensionValueId == parent.Id);
+        var reversalSnapshot = Assert.Single(workspace.GeneralLedger.RecentEntries, entry => entry.Id == reversal.Id);
+        Assert.All(reversalSnapshot.Lines ?? [], line => { Assert.Equal("FIELD", line.DepartmentCode); Assert.Equal("COMMERCIAL", line.ClassCode); });
     }
 
     [Fact]

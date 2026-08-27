@@ -3060,12 +3060,18 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("Credit")
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Debit")
                         .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
@@ -3085,6 +3091,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("ProjectCostCodeId");
 
@@ -3980,6 +3990,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("EarningCode")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -4041,6 +4057,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("PayrollTimeEntryId");
 
@@ -5387,6 +5407,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("EarningCode")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -5449,6 +5475,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("ProjectCostCodeId");
 
@@ -5541,6 +5571,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -5605,6 +5641,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("ProjectCostCodeId");
 
@@ -6750,7 +6790,13 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("CreditedQuantity")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
@@ -6799,6 +6845,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("InventoryItemId");
 
@@ -6913,6 +6963,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -6948,6 +7004,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("InventoryItemId");
 
@@ -7071,6 +7131,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -7123,6 +7189,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("InventoryItemId");
 
@@ -7348,6 +7418,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -7410,6 +7486,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasIndex("AllocationBinId");
 
                     b.HasIndex("AllocationWarehouseId");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("InventoryItemId");
 
@@ -7510,6 +7590,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -7556,6 +7642,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("InventoryItemId");
 
@@ -8846,6 +8936,76 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("TaxSourceCaptures");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.TrackingDimensionValue", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DimensionType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("EffectiveFrom")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("EffectiveThrough")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ParentTrackingDimensionValueId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParentTrackingDimensionValueId");
+
+                    b.HasIndex("CompanyId", "DimensionType", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "DimensionType", "ParentTrackingDimensionValueId");
+
+                    b.ToTable("TrackingDimensionValues");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.UserSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8998,6 +9158,12 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -9064,6 +9230,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("DepartmentId");
 
                     b.HasIndex("ExpenseAccountId");
 
@@ -9710,6 +9880,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.JournalEntryLine", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectCostCode", null)
                         .WithMany()
                         .HasForeignKey("ProjectCostCodeId")
@@ -9822,6 +10002,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PayrollEarningLine", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.PayrollRunEmployeeLine", null)
                         .WithMany()
                         .HasForeignKey("PayrollRunEmployeeLineId")
@@ -10032,6 +10222,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PayrollTimeEntry", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.PayrollTimecard", null)
                         .WithMany()
                         .HasForeignKey("PayrollTimecardId")
@@ -10070,6 +10270,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.ProjectBillingLine", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.ProjectBillingProposal", null)
                         .WithMany()
                         .HasForeignKey("ProjectBillingProposalId")
@@ -10296,6 +10506,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseOrderLine", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
                         .WithMany()
                         .HasForeignKey("InventoryItemId")
@@ -10334,6 +10554,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.PurchaseRequisitionLine", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
                         .WithMany()
                         .HasForeignKey("InventoryItemId")
@@ -10377,6 +10607,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesInvoiceLine", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
                         .WithMany()
                         .HasForeignKey("InventoryItemId")
@@ -10470,6 +10710,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasForeignKey("AllocationWarehouseId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
                         .WithMany()
                         .HasForeignKey("InventoryItemId")
@@ -10515,6 +10765,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesQuoteLine", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryItem", null)
                         .WithMany()
                         .HasForeignKey("InventoryItemId")
@@ -10761,6 +11021,14 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.TrackingDimensionValue", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ParentTrackingDimensionValueId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.UserSession", b =>
                 {
                     b.HasOne("BrassLedger.Domain.Accounting.AppUser", null)
@@ -10785,6 +11053,16 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.VendorBillLine", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.TrackingDimensionValue", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.GeneralLedgerAccount", null)
                         .WithMany()
                         .HasForeignKey("ExpenseAccountId")
