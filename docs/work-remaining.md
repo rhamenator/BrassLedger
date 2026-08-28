@@ -17,14 +17,14 @@ This is the canonical agent-readable queue for work still required before BrassL
 | --- | --- |
 | Updated | 2026-08-27 EDT |
 | Branch | `codex/tax-content-intake-wip-20260824` |
-| Latest implementation checkpoint | `b9e23c5 feat(accounting): retain transaction currency settlements`; period-end remeasurement candidate is uncommitted and under final verification |
-| In progress | Controlled period-end foreign-currency remeasurement, followed by native foreign credits/refunds/returns |
-| Current evidence | The candidate retains every open-document calculation and direct/inverse closing-rate source, independently reviews and separately posts unrealized gain/loss, revalidates balances, gates period close, and reverses exactly only after reopening the source period. It also persists previously omitted payment reversal dates and blocks unsafe historical calculation after settlements, reversals, voids, adjustments, or later remeasurement batches. Final gates: clean Release build 0 warnings/errors; SQLite/default 198 passed plus 10 expected PostgreSQL-only skips; PostgreSQL 208/208; API 37/37; components 16/16; isolated Chromium 37/37; both EF models drift-free; changed-file whitespace clean; all 12 projects free of known vulnerable direct/transitive packages. Commit and push remain in progress. |
+| Latest implementation checkpoint | `6dfa814 feat(accounting): control foreign currency remeasurement` |
+| In progress | Native foreign credit/refund/return handling |
+| Current evidence | `6dfa814` retains every open-document calculation and direct/inverse closing-rate source, independently reviews and separately posts unrealized gain/loss, revalidates balances, gates period close, and reverses exactly only after reopening the source period. It also persists previously omitted payment reversal dates and blocks unsafe historical calculation after settlements, reversals, voids, adjustments, or later remeasurement batches. Final gates: clean Release build 0 warnings/errors; SQLite/default 198 passed plus 10 expected PostgreSQL-only skips; PostgreSQL 208/208; API 37/37; components 16/16; isolated Chromium 37/37; both EF models drift-free; changed-file whitespace clean; all 12 projects free of known vulnerable direct/transitive packages. Native foreign credits/refunds/returns remain next. |
 
 ## Immediate queue
 
 1. **Verified — CONSOL-ACQUISITION:** `712f49f` completes the controlled acquisition/disposal, continuing-control change, profit/NCI attribution, schema-v2 purchase-price-allocation, browser and export slice; independent professional review remains separately blocked.
-2. **In progress — FX-TRANSACTIONS:** ordinary transaction-currency documents and realized settlement results are checkpointed; controlled period-end unrealized remeasurement is implemented and undergoing final gates; native foreign credit/refund/return handling remains next.
+2. **In progress — FX-TRANSACTIONS:** ordinary transaction-currency documents, realized settlement results, and controlled period-end unrealized remeasurement are checkpointed; implement native foreign credit/refund/return handling next.
 3. **Pending — ACCEPTANCE-01:** automate the uninterrupted representative-business scenario from clean installation through encrypted restore and audit trace.
 
 ## Remaining capability slices
@@ -62,6 +62,7 @@ This is the canonical agent-readable queue for work still required before BrassL
 
 ## Recently verified checkpoints
 
+- `6dfa814` — controlled exact-date open-document remeasurement; frozen closing-rate calculations; independent review and separate posting; unrealized gain/loss; period-close gating; newest-to-oldest exact reversal including zero-adjustment accounting dates; safe historical-activity rejection; persisted payment reversal dates; provider migrations/adoption; guided UI/API; and complete Release/provider/API/component/Chromium/drift/vulnerability gates. This advances but does not finish `FX-TRANSACTIONS`; native foreign credits/refunds/returns remain open.
 - `b9e23c5` — ordinary transaction-currency invoices, bills, receipts and disbursements; frozen direct/inverse closing-rate provenance; transaction/base balances; realized settlement gain/loss and exact reversal; safe legacy backfill/adoption/downgrade protection; guided UI/API paths; and complete Release/provider/API/component/Chromium/drift/vulnerability gates. This advances but does not finish `FX-TRANSACTIONS`; unrealized remeasurement and native foreign credits/refunds/returns remain open.
 - `712f49f` — schema-v2 purchase-price allocation with consideration components, identifiable assets/liabilities, deferred tax, measurement-period limits and reconciled adjustment history; extension preservation; legacy compatibility; controlled JSON/CSV/Excel/PDF output; browser workflow; and complete Release/provider/API/component/Chromium/drift/vulnerability gates. This verifies `CONSOL-ACQUISITION`; independent professional review remains external.
 - `76fdd16` — exact ownership-history coupling for acquisitions, step acquisitions, continuing-control changes and loss of control; prior-interest/NCI consistency; departure/reentry warnings; and focused valid/invalid transition, posting, statement, CSV, API and Chromium evidence. This advances the still-open schema-v2 PPA portion of `CONSOL-ACQUISITION`.
