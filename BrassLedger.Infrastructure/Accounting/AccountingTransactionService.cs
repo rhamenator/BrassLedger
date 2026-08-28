@@ -1092,6 +1092,7 @@ public sealed partial class AccountingTransactionService(
         var posting = await PostAsync(db, companyId, request.RefundDate, customerRefund ? "Accounts Receivable" : "Accounts Payable", request.Reference, request.Reason, lines, cancellationToken, bank.Id, true, adjustmentId, "SubledgerAdjustment");
         if (!posting.Succeeded) return posting;
         payment.UnappliedAmount -= amount;
+        payment.TransactionUnappliedAmount -= amount;
         payment.ConcurrencyToken = Guid.NewGuid().ToString("N");
         bank.CurrentBalance += customerRefund ? -amount : amount;
         bank.UnreconciledAmount += amount;
@@ -1139,7 +1140,7 @@ public sealed partial class AccountingTransactionService(
         else if (adjustment.Kind is "CustomerDepositRefund" or "VendorAdvanceRefund")
         {
             var payment = await db.SubledgerPayments.SingleAsync(item => item.Id == adjustment.PaymentId && item.CompanyId == companyId, cancellationToken);
-            payment.UnappliedAmount += adjustment.Amount; payment.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            payment.UnappliedAmount += adjustment.Amount; payment.TransactionUnappliedAmount += adjustment.Amount; payment.ConcurrencyToken = Guid.NewGuid().ToString("N");
             var bank = await db.BankAccounts.SingleAsync(item => item.Id == adjustment.BankAccountId && item.CompanyId == companyId, cancellationToken);
             bank.CurrentBalance += adjustment.Kind == "CustomerDepositRefund" ? adjustment.Amount : -adjustment.Amount;
             bank.UnreconciledAmount += adjustment.Amount; bank.ConcurrencyToken = Guid.NewGuid().ToString("N");

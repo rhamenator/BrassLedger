@@ -1946,6 +1946,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(refund.Succeeded, refund.ErrorMessage);
         var refunded = await workspaceService.GetWorkspaceAsync();
         Assert.Equal(15m, refunded.Receivables.Payments!.Single(item => item.Id == deposit.Id).UnappliedAmount);
+        Assert.Equal(15m, refunded.Receivables.Payments!.Single(item => item.Id == deposit.Id).TransactionUnappliedAmount);
         Assert.Contains(refunded.Receivables.Adjustments!, item => item.Id == refund.Id && item.Kind == "CustomerDepositRefund");
         Assert.False((await transactions.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(deposit.Id.Value, new DateOnly(2026, 6, 6), "Cannot bypass refund", "Reversed"))).Succeeded);
 
@@ -1955,6 +1956,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var restored = await workspaceService.GetWorkspaceAsync();
         Assert.Equal(100m, restored.Receivables.Invoices.Single(item => item.Id == invoice.Id).BalanceDue);
         Assert.Equal(25m, restored.Receivables.Payments!.Single(item => item.Id == deposit.Id).UnappliedAmount);
+        Assert.Equal(25m, restored.Receivables.Payments!.Single(item => item.Id == deposit.Id).TransactionUnappliedAmount);
     }
 
     [Fact]
