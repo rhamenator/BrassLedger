@@ -127,6 +127,36 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
+    public async Task CreateForeignRefundRatesAsync()
+    {
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        var refundDate = DateOnly.FromDateTime(DateTime.Today);
+        var documentDate = refundDate.AddDays(-1);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO "CurrencyExchangeRates" (
+                "Id", "CompanyId", "BaseCurrency", "QuoteCurrency", "Rate", "RateType", "PeriodStartOn", "EffectiveOn",
+                "Source", "SourceReference", "RetrievedOn", "IsActive", "ConcurrencyToken")
+            SELECT $documentRateId, "CompanyId", 'CAD', 'USD', 0.75, 0, NULL, $documentDate,
+                   'E2E document rate', 'https://example.test/e2e/cad-document', $documentDate, 1, $documentToken
+            FROM "Users" WHERE "UserName" = 'controller';
+            INSERT OR IGNORE INTO "CurrencyExchangeRates" (
+                "Id", "CompanyId", "BaseCurrency", "QuoteCurrency", "Rate", "RateType", "PeriodStartOn", "EffectiveOn",
+                "Source", "SourceReference", "RetrievedOn", "IsActive", "ConcurrencyToken")
+            SELECT $refundRateId, "CompanyId", 'CAD', 'USD', 0.80, 0, NULL, $refundDate,
+                   'E2E refund rate', 'https://example.test/e2e/cad-refund', $refundDate, 1, $refundToken
+            FROM "Users" WHERE "UserName" = 'controller';
+            """;
+        command.Parameters.AddWithValue("$documentRateId", Guid.NewGuid().ToString().ToUpperInvariant());
+        command.Parameters.AddWithValue("$refundRateId", Guid.NewGuid().ToString().ToUpperInvariant());
+        command.Parameters.AddWithValue("$documentDate", documentDate.ToString("yyyy-MM-dd"));
+        command.Parameters.AddWithValue("$refundDate", refundDate.ToString("yyyy-MM-dd"));
+        command.Parameters.AddWithValue("$documentToken", Guid.NewGuid().ToString("N"));
+        command.Parameters.AddWithValue("$refundToken", Guid.NewGuid().ToString("N"));
+        await command.ExecuteNonQueryAsync();
+    }
+
     public async Task CreateConsolidationAdministratorAsync()
     {
         await CreateQuickBooksAdministratorAsync();

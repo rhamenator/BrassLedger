@@ -119,4 +119,45 @@ public sealed class ReceivablesPage
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer adjustment reversed.");
         await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference })).ToContainTextAsync("Reversed");
     }
+
+    public async Task RecordAndRefundForeignDepositAsync(string paymentReference, string refundReference)
+    {
+        var paymentDate = DateOnly.FromDateTime(DateTime.Today).AddDays(-1).ToString("yyyy-MM-dd");
+        var refundDate = DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd");
+        await _session.Page.GetByLabel("Payment customer").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Payment deposit account").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Payment date", new() { Exact = true }).FillAsync(paymentDate);
+        await _session.Page.GetByLabel("Payment total").FillAsync("100");
+        await _session.Page.GetByLabel("Payment method").SelectOptionAsync("Wire");
+        await _session.Page.GetByLabel("Payment reference").FillAsync(paymentReference);
+        await _session.Page.GetByLabel("Customer payment transaction currency").FillAsync("CAD");
+        await _session.Page.GetByLabel("Customer payment transaction currency").PressAsync("Tab");
+        await SelectOptionContainingAsync("Customer payment exchange rate", "E2E document rate");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Record customer payment" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer payment recorded.");
+        var paymentRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference });
+        await Assertions.Expect(paymentRow).ToContainTextAsync("100.00 CAD");
+        await Assertions.Expect(paymentRow).ToContainTextAsync("$75.00 USD");
+
+        await SelectOptionContainingAsync("Refund customer deposit", paymentReference);
+        await _session.Page.GetByLabel("Customer refund bank").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Customer refund date").FillAsync(refundDate);
+        await SelectOptionContainingAsync("Customer refund exchange rate", "E2E refund rate");
+        await _session.Page.GetByLabel("Customer refund amount").FillAsync("40");
+        await _session.Page.GetByLabel("Customer refund reference").FillAsync(refundReference);
+        await _session.Page.GetByLabel("Customer refund reason").FillAsync("E2E CAD deposit refund");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Refund customer deposit" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer deposit refunded.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = refundReference })).ToContainTextAsync("$32.00");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference })).ToContainTextAsync("60.00 CAD");
+    }
+
+    private async Task SelectOptionContainingAsync(string label, string text)
+    {
+        var select = _session.Page.GetByLabel(label);
+        await Assertions.Expect(select).ToBeEnabledAsync();
+        var option = select.Locator("option").Filter(new() { HasText = text });
+        await Assertions.Expect(option).ToHaveCountAsync(1);
+        await select.SelectOptionAsync(await option.GetAttributeAsync("value") ?? throw new InvalidOperationException($"The {label} option has no value."));
+    }
 }

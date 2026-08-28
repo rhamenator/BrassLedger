@@ -218,6 +218,7 @@ public sealed class UiSession : IAsyncDisposable
 
     public async Task AssertSnapshotAsync(string snapshotName)
     {
+        await NormalizeSnapshotDateDefaultsAsync();
         var snapshotRoot = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "..",
@@ -261,6 +262,36 @@ public sealed class UiSession : IAsyncDisposable
         {
             File.Delete(actualPath);
         }
+    }
+
+    private async Task NormalizeSnapshotDateDefaultsAsync()
+    {
+        await Page.EvaluateAsync("""
+            () => {
+                const anchor = new Date(Date.UTC(2026, 7, 27));
+                const now = new Date();
+                const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+                const dayMs = 24 * 60 * 60 * 1000;
+                const shiftDays = Math.round((today.getTime() - anchor.getTime()) / dayMs);
+                const iso = value => value.toISOString().slice(0, 10);
+                for (const input of document.querySelectorAll('input[type="date"]')) {
+                    if (!input.value) continue;
+                    const value = new Date(`${input.value}T00:00:00Z`);
+                    if (value.getUTCFullYear() === today.getUTCFullYear() && value.getUTCMonth() === 0 && value.getUTCDate() === 1) {
+                        input.value = `${anchor.getUTCFullYear()}-01-01`;
+                    } else if (value.getUTCFullYear() === today.getUTCFullYear() && value.getUTCMonth() === 11 && value.getUTCDate() === 31) {
+                        input.value = `${anchor.getUTCFullYear()}-12-31`;
+                    } else if (Math.abs(value.getTime() - today.getTime()) <= 120 * dayMs) {
+                        input.value = iso(new Date(value.getTime() - shiftDays * dayMs));
+                    }
+                }
+                const todayToken = iso(today).replaceAll('-', '');
+                const anchorToken = iso(anchor).replaceAll('-', '');
+                for (const input of document.querySelectorAll('input:not([type="date"])')) {
+                    if (input.value?.includes(todayToken)) input.value = input.value.replaceAll(todayToken, anchorToken);
+                }
+            }
+            """);
     }
 
     private string SnapshotDirectoryName()

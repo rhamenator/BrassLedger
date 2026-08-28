@@ -57,6 +57,25 @@ public sealed class ItemizedDocumentWorkflowTests
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task ForeignCustomerDepositAndVendorAdvance_CanBePartiallyRefundedAtDatedRate(BrowserKind browserKind)
+    {
+        await _fixture.CreateForeignRefundRatesAsync();
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync();
+        var receivables = new ReceivablesPage(session);
+        await receivables.OpenAsync();
+        await receivables.RecordAndRefundForeignDepositAsync($"FXDEP-{suffix}", $"FXRF-{suffix}");
+        await session.AssertNoUiFailuresAsync("foreign customer-deposit refund");
+
+        var payables = new PayablesPage(session);
+        await payables.OpenAsync();
+        await payables.RecordAndRefundForeignAdvanceAsync($"FXADV-{suffix}", $"FXVR-{suffix}");
+        await session.AssertNoUiFailuresAsync("foreign vendor-advance refund");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task InvoiceReviewer_CanRejectAndPreparerCanCorrectAndResubmit(BrowserKind browserKind)
     {
         await _fixture.CreateSubledgerWorkflowUsersAsync();
