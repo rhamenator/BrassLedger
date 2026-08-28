@@ -8694,6 +8694,10 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid?>("BankAccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("CarryingAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid");
 
@@ -8714,6 +8718,26 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid?>("DocumentId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateOnly?>("ExchangeRateEffectiveOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasPrecision(18, 10)
+                        .HasColumnType("numeric(18,10)");
+
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("uuid");
 
@@ -8728,6 +8752,15 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid?>("PaymentId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("RateBasis")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<decimal>("RealizedGainLoss")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("text");
@@ -8735,6 +8768,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<string>("Reference")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateOnly?>("ReversalDate")
+                        .HasColumnType("date");
 
                     b.Property<Guid?>("ReversalJournalEntryId")
                         .HasColumnType("uuid");
@@ -8757,9 +8793,20 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<decimal>("TransactionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("BankAccountId");
+
+                    b.HasIndex("ExchangeRateId");
 
                     b.HasIndex("JournalEntryId");
 
@@ -12095,6 +12142,11 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.BankAccount", null)
                         .WithMany()
                         .HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.CurrencyExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("ExchangeRateId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)

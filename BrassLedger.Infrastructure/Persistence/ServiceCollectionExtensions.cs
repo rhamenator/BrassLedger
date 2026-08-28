@@ -649,6 +649,13 @@ public static class ServiceCollectionExtensions
                 && await HasIndexAsync(dbContext, documentIndex, cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ForeignCurrencyRemeasurementLines_ExchangeRateId", cancellationToken);
         }
+        if (migrationId.EndsWith("_AddForeignCurrencyAdjustments", StringComparison.Ordinal))
+        {
+            string[] columns = ["TransactionCurrency", "TransactionAmount", "CarryingAmount", "RateBasis", "ExchangeRateId", "ExchangeRateToBase", "ExchangeRateEffectiveOn", "ExchangeRateSource", "ExchangeRateSourceReference", "RealizedGainLoss", "ReversalDate"];
+            foreach (var column in columns)
+                if (!await HasColumnAsync(dbContext, "SubledgerAdjustments", column, cancellationToken)) return false;
+            return await HasIndexAsync(dbContext, "IX_SubledgerAdjustments_ExchangeRateId", cancellationToken);
+        }
         return false;
     }
 

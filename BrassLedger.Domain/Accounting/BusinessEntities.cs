@@ -950,6 +950,16 @@ public sealed class SubledgerAdjustment
     public Guid? BankAccountId { get; set; }
     public DateOnly AdjustmentDate { get; set; }
     public decimal Amount { get; set; }
+    public string TransactionCurrency { get; set; } = "USD";
+    public decimal TransactionAmount { get; set; }
+    public decimal CarryingAmount { get; set; }
+    public string RateBasis { get; set; } = "BaseCurrency";
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; } = 1m;
+    public DateOnly? ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
+    public decimal RealizedGainLoss { get; set; }
     public string Reference { get; set; } = string.Empty;
     public string Reason { get; set; } = string.Empty;
     public string OffsetAccountNumber { get; set; } = string.Empty;
@@ -960,6 +970,7 @@ public sealed class SubledgerAdjustment
     public DateTimeOffset CreatedAtUtc { get; set; }
     public Guid? ReversedByUserId { get; set; }
     public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
     public string ReversalReason { get; set; } = string.Empty;
     public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
 }

@@ -66,7 +66,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("42", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("43", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -94,6 +94,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827035027_AddProjectPhaseCostCodeBudgets';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042019_AddProjectPhaseCostCodeLineDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042959_AddProjectBillingLineDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260828030114_AddForeignCurrencyAdjustments';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827055010_AddTrackingDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827062326_AddTrackingDimensionsToSourceLines';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827071655_AddEffectiveDatedConsolidationOwnership';"));
@@ -182,7 +183,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("42", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("43", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -209,6 +210,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827035027_AddProjectPhaseCostCodeBudgets';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042019_AddProjectPhaseCostCodeLineDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827042959_AddProjectBillingLineDimensions';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260828030114_AddForeignCurrencyAdjustments';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827055010_AddTrackingDimensions';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827062326_AddTrackingDimensionsToSourceLines';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827071655_AddEffectiveDatedConsolidationOwnership';"));
@@ -1634,6 +1636,33 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var invoiceSnapshot = posted.Receivables.Invoices.Single(item => item.Id == invoice.Id); var billSnapshot = posted.Payables.Bills.Single(item => item.Id == bill.Id);
         Assert.Equal("CAD", invoiceSnapshot.TransactionCurrency); Assert.Equal(100m, invoiceSnapshot.TransactionBalanceDue); Assert.Equal(75m, invoiceSnapshot.BalanceDue); Assert.Equal(.75m, invoiceSnapshot.ExchangeRateToBase); Assert.Contains("2026-05-01", invoiceSnapshot.ExchangeRateSourceReference);
         Assert.Equal("CAD", billSnapshot.TransactionCurrency); Assert.Equal(100m, billSnapshot.TransactionBalanceDue); Assert.Equal(75m, billSnapshot.BalanceDue);
+
+        var foreignDeposit = await transactions.RecordCustomerPaymentAsync(new(customer.Id, bank.Id, new DateOnly(2026, 5, 1), 100m, "DEP-FX-REFUND-1", "Wire", [], "CAD", documentRateId));
+        Assert.True(foreignDeposit.Succeeded, foreignDeposit.ErrorMessage);
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(foreignDeposit.Id!.Value, bank.Id, new DateOnly(2026, 5, 2), 40m, "RF-FX-CAD-NO-RATE", "Missing retained rate"))).Succeeded);
+        var foreignRefund = await transactions.RefundUnappliedPaymentAsync(new(foreignDeposit.Id!.Value, bank.Id, new DateOnly(2026, 5, 2), 40m, "RF-FX-CAD-1", "Return excess CAD deposit", settlementRateId));
+        Assert.True(foreignRefund.Succeeded, foreignRefund.ErrorMessage);
+        var afterForeignRefund = await workspaceService.GetWorkspaceAsync();
+        var retainedRefund = Assert.Single(afterForeignRefund.Receivables.Adjustments!, item => item.Id == foreignRefund.Id);
+        Assert.Equal("CAD", retainedRefund.TransactionCurrency); Assert.Equal(40m, retainedRefund.TransactionAmount); Assert.Equal(30m, retainedRefund.CarryingAmount); Assert.Equal(32m, retainedRefund.Amount); Assert.Equal(-2m, retainedRefund.RealizedGainLoss); Assert.Equal("AdjustmentDateRate", retainedRefund.RateBasis); Assert.Contains("2026-05-02", retainedRefund.ExchangeRateSourceReference);
+        var remainingDeposit = Assert.Single(afterForeignRefund.Receivables.Payments!, item => item.Id == foreignDeposit.Id);
+        Assert.Equal(60m, remainingDeposit.TransactionUnappliedAmount); Assert.Equal(45m, remainingDeposit.UnappliedAmount);
+        var finalForeignRefund = await transactions.RefundUnappliedPaymentAsync(new(foreignDeposit.Id!.Value, bank.Id, new DateOnly(2026, 5, 3), 60m, "RF-FX-CAD-2", "Return final CAD deposit", settlementRateId));
+        Assert.True(finalForeignRefund.Succeeded, finalForeignRefund.ErrorMessage);
+        Assert.False((await transactions.ReverseSubledgerAdjustmentAsync(new(foreignRefund.Id!.Value, new DateOnly(2026, 5, 4), "Out-of-order reversal"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new(finalForeignRefund.Id!.Value, new DateOnly(2026, 5, 4), "Final CAD refund recalled"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new(foreignRefund.Id!.Value, new DateOnly(2026, 5, 4), "CAD refund recalled"))).Succeeded);
+        var restoredDeposit = Assert.Single((await workspaceService.GetWorkspaceAsync()).Receivables.Payments!, item => item.Id == foreignDeposit.Id);
+        Assert.Equal(100m, restoredDeposit.TransactionUnappliedAmount); Assert.Equal(75m, restoredDeposit.UnappliedAmount);
+
+        var foreignAdvance = await transactions.RecordVendorPaymentAsync(new(vendor.Id, bank.Id, new DateOnly(2026, 5, 1), 100m, "ADV-FX-REFUND-1", "Wire", [], "CAD", documentRateId));
+        Assert.True(foreignAdvance.Succeeded, foreignAdvance.ErrorMessage);
+        var vendorRefund = await transactions.RefundUnappliedPaymentAsync(new(foreignAdvance.Id!.Value, bank.Id, new DateOnly(2026, 5, 2), 40m, "VR-FX-CAD-1", "Vendor returned CAD advance", settlementRateId));
+        Assert.True(vendorRefund.Succeeded, vendorRefund.ErrorMessage);
+        var afterVendorRefund = await workspaceService.GetWorkspaceAsync();
+        var retainedVendorRefund = Assert.Single(afterVendorRefund.Payables.Adjustments!, item => item.Id == vendorRefund.Id);
+        Assert.Equal(40m, retainedVendorRefund.TransactionAmount); Assert.Equal(30m, retainedVendorRefund.CarryingAmount); Assert.Equal(32m, retainedVendorRefund.Amount); Assert.Equal(2m, retainedVendorRefund.RealizedGainLoss);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new(vendorRefund.Id!.Value, new DateOnly(2026, 5, 3), "Vendor refund recalled"))).Succeeded);
 
         var receipt = await transactions.RecordCustomerPaymentAsync(new(customer.Id, bank.Id, new DateOnly(2026, 5, 2), 40m, "DEP-FX-CAD-1A", "Wire", [new(invoice.Id!.Value, 40m)], "CAD", settlementRateId));
         var finalReceipt = await transactions.RecordCustomerPaymentAsync(new(customer.Id, bank.Id, new DateOnly(2026, 5, 2), 60m, "DEP-FX-CAD-1B", "Wire", [new(invoice.Id!.Value, 60m)], "CAD", settlementRateId));

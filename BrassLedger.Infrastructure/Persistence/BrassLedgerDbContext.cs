@@ -469,6 +469,7 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<SubledgerAdjustment>().HasOne<JournalEntry>().WithMany().HasForeignKey(adjustment => adjustment.ReversalJournalEntryId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SubledgerAdjustment>().HasOne<BankAccount>().WithMany().HasForeignKey(adjustment => adjustment.BankAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SubledgerAdjustment>().HasOne<SubledgerPayment>().WithMany().HasForeignKey(adjustment => adjustment.PaymentId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SubledgerAdjustment>().HasOne<CurrencyExchangeRate>().WithMany().HasForeignKey(adjustment => adjustment.ExchangeRateId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BankStatementImportBatch>().HasOne<BankAccount>().WithMany().HasForeignKey(batch => batch.BankAccountId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<AccountingScheduleInstallment>().HasOne<AccountingSchedule>().WithMany().HasForeignKey(installment => installment.AccountingScheduleId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<AccountingScheduleInstallment>().HasOne<JournalEntry>().WithMany().HasForeignKey(installment => installment.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
@@ -829,6 +830,14 @@ public sealed class BrassLedgerDbContext(
         modelBuilder.Entity<ForeignCurrencyRemeasurementLine>().Property(x => x.ExchangeRateSource).HasMaxLength(240);
         modelBuilder.Entity<ForeignCurrencyRemeasurementLine>().Property(x => x.ExchangeRateSourceReference).HasMaxLength(1000);
         ConfigureMoney(modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.Amount));
+        ConfigureMoney(modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.TransactionAmount));
+        ConfigureMoney(modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.CarryingAmount));
+        ConfigureMoney(modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.RealizedGainLoss));
+        modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.ExchangeRateToBase).HasPrecision(18, 10);
+        modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.TransactionCurrency).HasMaxLength(3);
+        modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.RateBasis).HasMaxLength(40);
+        modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.ExchangeRateSource).HasMaxLength(240);
+        modelBuilder.Entity<SubledgerAdjustment>().Property(x => x.ExchangeRateSourceReference).HasMaxLength(1000);
         ConfigureMoney(modelBuilder.Entity<BankStatementImportBatch>().Property(x => x.DebitTotal));
         ConfigureMoney(modelBuilder.Entity<BankStatementImportBatch>().Property(x => x.CreditTotal));
         ConfigureMoney(modelBuilder.Entity<AccountingSchedule>().Property(x => x.OriginalAmount));

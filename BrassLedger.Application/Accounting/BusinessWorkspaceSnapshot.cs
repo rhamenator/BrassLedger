@@ -160,7 +160,9 @@ public sealed record SubledgerPaymentSnapshot(Guid Id, string Direction, string 
     string TransactionCurrency = "USD", decimal TransactionAmount = 0m, decimal TransactionAppliedAmount = 0m, decimal TransactionUnappliedAmount = 0m, decimal ExchangeRateToBase = 1m, decimal RealizedGainLoss = 0m,
     DateOnly? ExchangeRateEffectiveOn = null, string ExchangeRateSource = "", string ExchangeRateSourceReference = "");
 public sealed record PaymentApplicationSnapshot(Guid DocumentId, string DocumentNumber, decimal Amount, decimal TransactionAmount = 0m, decimal RealizedGainLoss = 0m);
-public sealed record SubledgerAdjustmentSnapshot(Guid Id, string Subledger, string Kind, Guid CounterpartyId, string CounterpartyName, Guid? DocumentId, string DocumentNumber, Guid? PaymentId, DateOnly AdjustmentDate, decimal Amount, string Reference, string Reason, string OffsetAccountNumber, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId);
+public sealed record SubledgerAdjustmentSnapshot(Guid Id, string Subledger, string Kind, Guid CounterpartyId, string CounterpartyName, Guid? DocumentId, string DocumentNumber, Guid? PaymentId, DateOnly AdjustmentDate, decimal Amount, string Reference, string Reason, string OffsetAccountNumber, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId,
+    string TransactionCurrency = "USD", decimal TransactionAmount = 0m, decimal CarryingAmount = 0m, string RateBasis = "BaseCurrency", decimal ExchangeRateToBase = 1m, decimal RealizedGainLoss = 0m,
+    DateOnly? ExchangeRateEffectiveOn = null, string ExchangeRateSource = "", string ExchangeRateSourceReference = "", DateOnly? ReversalDate = null);
 public sealed record SubledgerDocumentWorkflowSnapshot(Guid Id, string DocumentType, string DocumentNumber, string Status, bool IsRecurringTemplate, string Frequency, int FrequencyInterval, DateOnly? NextOccurrenceDate, DateOnly? EndDate, Guid? SourceTemplateId, Guid? PostedDocumentId, DateTimeOffset CreatedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? RejectedAtUtc, string DecisionReason, DateTimeOffset? PostedAtUtc, string ConcurrencyToken);
 
 public sealed record OperationsWorkspace(

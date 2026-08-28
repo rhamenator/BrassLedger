@@ -17,7 +17,7 @@ public sealed record RecordVendorPaymentRequest(Guid VendorId, Guid BankAccountI
 public sealed record ReverseSubledgerPaymentRequest(Guid PaymentId, DateOnly ReversalDate, string Reason, string ReversalKind = "Reversed");
 public sealed record RecordCustomerAdjustmentRequest(Guid InvoiceId, DateOnly AdjustmentDate, decimal Amount, string Reference, string OffsetAccountNumber, string Reason, string Kind = "CreditMemo");
 public sealed record RecordVendorCreditRequest(Guid VendorBillId, DateOnly AdjustmentDate, decimal Amount, string Reference, string OffsetAccountNumber, string Reason);
-public sealed record RefundUnappliedPaymentRequest(Guid PaymentId, Guid BankAccountId, DateOnly RefundDate, decimal Amount, string Reference, string Reason);
+public sealed record RefundUnappliedPaymentRequest(Guid PaymentId, Guid BankAccountId, DateOnly RefundDate, decimal Amount, string Reference, string Reason, Guid? ExchangeRateId = null);
 public sealed record VoidSubledgerDocumentRequest(Guid DocumentId, DateOnly VoidDate, string Reason);
 public sealed record ReverseSubledgerAdjustmentRequest(Guid AdjustmentId, DateOnly ReversalDate, string Reason);
 public sealed record ForeignCurrencyRateSelection(string Currency, Guid ExchangeRateId);
