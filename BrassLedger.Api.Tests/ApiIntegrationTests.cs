@@ -1131,6 +1131,45 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task ForeignCurrencyRemeasurementApi_EnforcesIdentifiersAndSeparateReviewPosting()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        await EnsureControllerCloneAsync(isolatedFactory, "fx-reviewer-api");
+        await EnsureControllerCloneAsync(isolatedFactory, "fx-poster-api");
+        using var preparer = await CreateAuthenticatedClientAsync(isolatedFactory);
+        using var reviewer = await CreateAuthenticatedClientAsync(isolatedFactory, "fx-reviewer-api");
+        using var poster = await CreateAuthenticatedClientAsync(isolatedFactory, "fx-poster-api");
+        var before = await preparer.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var customer = before!.Receivables.Customers.First(); var documentRateId = Guid.NewGuid(); var closingRateId = Guid.NewGuid();
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.CurrencyExchangeRates.AddRange(
+                new() { Id = documentRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 1), Source = "Official test source", SourceReference = "https://example.test/fx/2026-05-01", IsActive = true },
+                new() { Id = closingRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 31), Source = "Official test source", SourceReference = "https://example.test/fx/2026-05-31", IsActive = true });
+            await db.SaveChangesAsync();
+        }
+        var invoice = await PostInvoiceThroughWorkflowAsync(isolatedFactory.Services, new(customer.Id, "INV-API-FX-REMEASURE-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 6, 30), 100m, 0m, "4000", "Open CAD invoice", Currency: "CAD", ExchangeRateId: documentRateId));
+        Assert.True(invoice.Succeeded, invoice.ErrorMessage);
+
+        var prepareResponse = await preparer.PostAsJsonAsync("/api/foreign-currency-remeasurements", new PrepareForeignCurrencyRemeasurementRequest(new DateOnly(2026, 5, 31), "FX-API-2026-05", [new("CAD", closingRateId)]));
+        Assert.Equal(HttpStatusCode.Created, prepareResponse.StatusCode);
+        var prepared = await prepareResponse.Content.ReadFromJsonAsync<TransactionResult>(); Assert.NotNull(prepared?.Id);
+        var batches = await preparer.GetFromJsonAsync<IReadOnlyList<ForeignCurrencyRemeasurementBatchSnapshot>>("/api/foreign-currency-remeasurements");
+        var batch = Assert.Single(batches!, item => item.Id == prepared!.Id); Assert.Equal("Draft", batch.Status); Assert.Equal(5m, Assert.Single(batch.Lines).AdjustmentAmount);
+        Assert.Equal(HttpStatusCode.BadRequest, (await reviewer.PostAsJsonAsync($"/api/foreign-currency-remeasurements/{Guid.NewGuid()}/decide", new DecideForeignCurrencyRemeasurementRequest(batch.Id, true, "Reviewed.", batch.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await preparer.PostAsJsonAsync($"/api/foreign-currency-remeasurements/{batch.Id}/decide", new DecideForeignCurrencyRemeasurementRequest(batch.Id, true, "Self review.", batch.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reviewer.PostAsJsonAsync($"/api/foreign-currency-remeasurements/{batch.Id}/decide", new DecideForeignCurrencyRemeasurementRequest(batch.Id, true, "Rate evidence reviewed.", batch.ConcurrencyToken))).StatusCode);
+        batch = Assert.Single((await reviewer.GetFromJsonAsync<IReadOnlyList<ForeignCurrencyRemeasurementBatchSnapshot>>("/api/foreign-currency-remeasurements"))!, item => item.Id == batch.Id);
+        Assert.Equal(HttpStatusCode.BadRequest, (await reviewer.PostAsJsonAsync($"/api/foreign-currency-remeasurements/{batch.Id}/post", new PostForeignCurrencyRemeasurementRequest(batch.Id, batch.ConcurrencyToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await poster.PostAsJsonAsync($"/api/foreign-currency-remeasurements/{batch.Id}/post", new PostForeignCurrencyRemeasurementRequest(batch.Id, batch.ConcurrencyToken))).StatusCode);
+        batch = Assert.Single((await poster.GetFromJsonAsync<IReadOnlyList<ForeignCurrencyRemeasurementBatchSnapshot>>("/api/foreign-currency-remeasurements"))!, item => item.Id == batch.Id); Assert.Equal("Posted", batch.Status); Assert.NotNull(batch.JournalEntryId);
+        Assert.Equal(HttpStatusCode.OK, (await preparer.PostAsJsonAsync($"/api/foreign-currency-remeasurements/{batch.Id}/reverse", new ReverseForeignCurrencyRemeasurementRequest(batch.Id, new DateOnly(2026, 6, 1), "Correct the closing rate.", batch.ConcurrencyToken))).StatusCode);
+        batch = Assert.Single((await preparer.GetFromJsonAsync<IReadOnlyList<ForeignCurrencyRemeasurementBatchSnapshot>>("/api/foreign-currency-remeasurements"))!, item => item.Id == batch.Id); Assert.Equal("Reversed", batch.Status); Assert.NotNull(batch.ReversalJournalEntryId);
+    }
+
+    [Fact]
     public async Task BankingApi_ImportsStatementsAndReversesTransfersAndAdjustments()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();

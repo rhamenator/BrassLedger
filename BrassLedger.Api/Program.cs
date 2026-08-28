@@ -343,6 +343,32 @@ api.MapPost("/journal-entries/reverse", async (ReverseJournalEntryRequest reques
     return result.Succeeded ? Results.Created($"/api/journal-entries/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["journal"] = [result.ErrorMessage] });
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger, BrassLedgerAuthorizationPolicies.ReverseJournals);
 
+api.MapGet("/foreign-currency-remeasurements", async (IAccountingTransactionService service, CancellationToken cancellationToken) => Results.Ok(await service.GetForeignCurrencyRemeasurementsAsync(cancellationToken)))
+    .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+api.MapPost("/foreign-currency-remeasurements", async (PrepareForeignCurrencyRemeasurementRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.PrepareForeignCurrencyRemeasurementAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Created($"/api/foreign-currency-remeasurements/{result.Id}", result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["remeasurement"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareJournals);
+api.MapPost("/foreign-currency-remeasurements/{batchId:guid}/decide", async (Guid batchId, DecideForeignCurrencyRemeasurementRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (batchId != request.BatchId) return Results.BadRequest(TransactionResult.Failure("The remeasurement identifier in the route and request must match."));
+    var result = await service.DecideForeignCurrencyRemeasurementAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["remeasurement"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ApproveJournals);
+api.MapPost("/foreign-currency-remeasurements/{batchId:guid}/post", async (Guid batchId, PostForeignCurrencyRemeasurementRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (batchId != request.BatchId) return Results.BadRequest(TransactionResult.Failure("The remeasurement identifier in the route and request must match."));
+    var result = await service.PostForeignCurrencyRemeasurementAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["remeasurement"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PostJournals);
+api.MapPost("/foreign-currency-remeasurements/{batchId:guid}/reverse", async (Guid batchId, ReverseForeignCurrencyRemeasurementRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    if (batchId != request.BatchId) return Results.BadRequest(TransactionResult.Failure("The remeasurement identifier in the route and request must match."));
+    var result = await service.ReverseForeignCurrencyRemeasurementAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["remeasurement"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger, BrassLedgerAuthorizationPolicies.ReverseJournals);
+
 api.MapGet("/accounting-schedules", async (IAccountingTransactionService service, CancellationToken cancellationToken) => Results.Ok(await service.GetAccountingScheduleWorkspaceAsync(cancellationToken)))
     .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 api.MapPut("/accounting-schedules", async (SaveAccountingScheduleRequest request, IAccountingTransactionService service, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, HttpContext context, CancellationToken cancellationToken) =>

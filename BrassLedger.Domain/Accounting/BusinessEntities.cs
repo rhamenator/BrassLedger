@@ -404,6 +404,52 @@ public sealed class AccountingPeriod
     public string Notes { get; set; } = string.Empty;
 }
 
+public sealed class ForeignCurrencyRemeasurementBatch
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public DateOnly AsOf { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
+    public decimal NetAdjustment { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? PreparedByUserId { get; set; }
+    public DateTimeOffset PreparedAtUtc { get; set; }
+    public Guid? ApprovedByUserId { get; set; }
+    public DateTimeOffset? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public Guid? PostedByUserId { get; set; }
+    public DateTimeOffset? PostedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public DateTimeOffset? ReversedAtUtc { get; set; }
+    public DateOnly? ReversalDate { get; set; }
+    public string DecisionReason { get; set; } = string.Empty;
+    public string ReversalReason { get; set; } = string.Empty;
+    public string ConcurrencyToken { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+public sealed class ForeignCurrencyRemeasurementLine
+{
+    public Guid Id { get; set; }
+    public Guid ForeignCurrencyRemeasurementBatchId { get; set; }
+    public string DocumentType { get; set; } = string.Empty;
+    public Guid DocumentId { get; set; }
+    public string DocumentNumber { get; set; } = string.Empty;
+    public Guid CounterpartyId { get; set; }
+    public string TransactionCurrency { get; set; } = string.Empty;
+    public decimal TransactionBalance { get; set; }
+    public decimal PreviousBaseBalance { get; set; }
+    public decimal RemeasuredBaseBalance { get; set; }
+    public decimal AdjustmentAmount { get; set; }
+    public Guid ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; }
+    public DateOnly ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
+}
+
 public sealed class BusinessAuditEntry
 {
     public Guid Id { get; set; }

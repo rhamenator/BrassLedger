@@ -52,6 +52,22 @@ public sealed class AccountingPeriodService(IDbContextFactory<BrassLedgerDbConte
     {
         var companyId = CompanyId(); var userId = Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : (Guid?)null; if (companyId is null || userId is null) return TransactionResult.Failure("An authenticated company operator is required.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var period = await db.AccountingPeriods.SingleOrDefaultAsync(item => item.CompanyId == companyId && item.Id == periodId, cancellationToken); if (period is null) return TransactionResult.Failure("Accounting period not found.");
+        if (close)
+        {
+            var baseCurrency = await db.Companies.AsNoTracking().Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+            var openInvoices = await db.SalesInvoices.AsNoTracking().Where(invoice => invoice.CompanyId == companyId && invoice.InvoiceDate <= period.EndsOn && invoice.TransactionCurrency != baseCurrency && invoice.TransactionBalanceDue > 0m && invoice.Status != "Voided").Select(invoice => new { invoice.Id, invoice.TransactionBalanceDue, DocumentType = "Receivable" }).ToListAsync(cancellationToken);
+            var openBills = await db.VendorBills.AsNoTracking().Where(bill => bill.CompanyId == companyId && bill.BillDate <= period.EndsOn && bill.TransactionCurrency != baseCurrency && bill.TransactionBalanceDue > 0m && bill.Status != "Voided").Select(bill => new { bill.Id, bill.TransactionBalanceDue, DocumentType = "Payable" }).ToListAsync(cancellationToken);
+            if (openInvoices.Count + openBills.Count > 0)
+            {
+                var batchId = await db.ForeignCurrencyRemeasurementBatches.AsNoTracking().Where(batch => batch.CompanyId == companyId && batch.AsOf == period.EndsOn && batch.Status == "Posted").Select(batch => (Guid?)batch.Id).SingleOrDefaultAsync(cancellationToken);
+                if (!batchId.HasValue) return TransactionResult.Failure("Post a reviewed foreign-currency remeasurement as of the period end before closing this period.");
+                var lines = await db.ForeignCurrencyRemeasurementLines.AsNoTracking().Where(line => line.ForeignCurrencyRemeasurementBatchId == batchId.Value).ToListAsync(cancellationToken);
+                if (lines.Count != openInvoices.Count + openBills.Count
+                    || openInvoices.Any(document => !lines.Any(line => line.DocumentType == document.DocumentType && line.DocumentId == document.Id && line.TransactionBalance == document.TransactionBalanceDue))
+                    || openBills.Any(document => !lines.Any(line => line.DocumentType == document.DocumentType && line.DocumentId == document.Id && line.TransactionBalance == document.TransactionBalanceDue)))
+                    return TransactionResult.Failure("Open foreign-currency balances changed after the period-end remeasurement. Prepare, review, and post a replacement before closing.");
+            }
+        }
         period.Status = close ? "Closed" : "Open"; period.ClosedByUserId = close ? userId : null; period.ClosedAtUtc = close ? DateTimeOffset.UtcNow : null; period.Notes = notes.Trim();
         db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = userId, Action = close ? "accounting-period.closed" : "accounting-period.reopened", EntityType = "AccountingPeriod", EntityId = period.Id, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { period.StartsOn, period.EndsOn, period.Notes }), OccurredAtUtc = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync(cancellationToken); return TransactionResult.Success(period.Id);

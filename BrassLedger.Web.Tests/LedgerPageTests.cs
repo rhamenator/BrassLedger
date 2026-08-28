@@ -51,6 +51,9 @@ public sealed class LedgerPageTests : TestContext
         Assert.Contains("malformed-customers.csv", cut.Markup);
         Assert.Contains("Fix row 2", cut.Markup);
         Assert.Contains("Fixed assets, prepaids, and loans", cut.Markup);
+        Assert.Contains("Foreign-currency period-end remeasurement", cut.Markup);
+        Assert.NotNull(cut.Find("input[aria-label='FX remeasurement reporting date']"));
+        Assert.NotNull(cut.Find("table[aria-label='Foreign currency remeasurements']"));
         Assert.Contains("Departments and classes", cut.Markup);
         Assert.NotNull(cut.Find("select[aria-label='Tracking dimension type']"));
         Assert.Contains("FIELD", cut.Find("select[aria-label='Journal entry department']").TextContent);
@@ -224,6 +227,11 @@ internal sealed class StubAccountingTransactionService : IAccountingTransactionS
     public Task<TransactionResult> RecordCustomerPaymentAsync(RecordCustomerPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> RecordVendorPaymentAsync(RecordVendorPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> ReverseSubledgerPaymentAsync(ReverseSubledgerPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.PaymentId));
+    public Task<IReadOnlyList<ForeignCurrencyRemeasurementBatchSnapshot>> GetForeignCurrencyRemeasurementsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ForeignCurrencyRemeasurementBatchSnapshot>>([]);
+    public Task<TransactionResult> PrepareForeignCurrencyRemeasurementAsync(PrepareForeignCurrencyRemeasurementRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
+    public Task<TransactionResult> DecideForeignCurrencyRemeasurementAsync(DecideForeignCurrencyRemeasurementRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.BatchId));
+    public Task<TransactionResult> PostForeignCurrencyRemeasurementAsync(PostForeignCurrencyRemeasurementRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.BatchId));
+    public Task<TransactionResult> ReverseForeignCurrencyRemeasurementAsync(ReverseForeignCurrencyRemeasurementRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(request.BatchId));
     public Task<TransactionResult> RecordCustomerAdjustmentAsync(RecordCustomerAdjustmentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> RecordVendorCreditAsync(RecordVendorCreditRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));
     public Task<TransactionResult> RefundUnappliedPaymentAsync(RefundUnappliedPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(TransactionResult.Success(Guid.NewGuid()));

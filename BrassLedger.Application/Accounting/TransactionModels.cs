@@ -20,6 +20,13 @@ public sealed record RecordVendorCreditRequest(Guid VendorBillId, DateOnly Adjus
 public sealed record RefundUnappliedPaymentRequest(Guid PaymentId, Guid BankAccountId, DateOnly RefundDate, decimal Amount, string Reference, string Reason);
 public sealed record VoidSubledgerDocumentRequest(Guid DocumentId, DateOnly VoidDate, string Reason);
 public sealed record ReverseSubledgerAdjustmentRequest(Guid AdjustmentId, DateOnly ReversalDate, string Reason);
+public sealed record ForeignCurrencyRateSelection(string Currency, Guid ExchangeRateId);
+public sealed record PrepareForeignCurrencyRemeasurementRequest(DateOnly AsOf, string Reference, IReadOnlyList<ForeignCurrencyRateSelection> Rates);
+public sealed record DecideForeignCurrencyRemeasurementRequest(Guid BatchId, bool Approve, string Reason, string ConcurrencyToken);
+public sealed record PostForeignCurrencyRemeasurementRequest(Guid BatchId, string ConcurrencyToken);
+public sealed record ReverseForeignCurrencyRemeasurementRequest(Guid BatchId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
+public sealed record ForeignCurrencyRemeasurementLineSnapshot(Guid Id, string DocumentType, Guid DocumentId, string DocumentNumber, string CounterpartyName, string TransactionCurrency, decimal TransactionBalance, decimal PreviousBaseBalance, decimal RemeasuredBaseBalance, decimal AdjustmentAmount, Guid ExchangeRateId, decimal ExchangeRateToBase, DateOnly ExchangeRateEffectiveOn, string ExchangeRateSource, string ExchangeRateSourceReference);
+public sealed record ForeignCurrencyRemeasurementBatchSnapshot(Guid Id, DateOnly AsOf, string Reference, string Status, decimal NetAdjustment, Guid? JournalEntryId, Guid? ReversalJournalEntryId, string? PreparedBy, DateTimeOffset PreparedAtUtc, string? ApprovedBy, DateTimeOffset? ApprovedAtUtc, string? RejectedBy, DateTimeOffset? RejectedAtUtc, string? PostedBy, DateTimeOffset? PostedAtUtc, string? ReversedBy, DateTimeOffset? ReversedAtUtc, DateOnly? ReversalDate, string DecisionReason, string ReversalReason, string ConcurrencyToken, IReadOnlyList<ForeignCurrencyRemeasurementLineSnapshot> Lines);
 public sealed record RejectSubledgerDocumentRequest(Guid WorkflowId, string Reason, string ConcurrencyToken);
 public sealed record SaveRecurringInvoiceTemplateRequest(CreateInvoiceRequest Invoice, string Frequency, int FrequencyInterval, DateOnly NextOccurrenceDate, DateOnly? EndDate = null);
 public sealed record SaveRecurringVendorBillTemplateRequest(CreateVendorBillRequest Bill, string Frequency, int FrequencyInterval, DateOnly NextOccurrenceDate, DateOnly? EndDate = null);
@@ -238,6 +245,11 @@ public interface IAccountingTransactionService
     Task<TransactionResult> RecordCustomerPaymentAsync(RecordCustomerPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordVendorPaymentAsync(RecordVendorPaymentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReverseSubledgerPaymentAsync(ReverseSubledgerPaymentRequest request, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ForeignCurrencyRemeasurementBatchSnapshot>> GetForeignCurrencyRemeasurementsAsync(CancellationToken cancellationToken = default);
+    Task<TransactionResult> PrepareForeignCurrencyRemeasurementAsync(PrepareForeignCurrencyRemeasurementRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> DecideForeignCurrencyRemeasurementAsync(DecideForeignCurrencyRemeasurementRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> PostForeignCurrencyRemeasurementAsync(PostForeignCurrencyRemeasurementRequest request, CancellationToken cancellationToken = default);
+    Task<TransactionResult> ReverseForeignCurrencyRemeasurementAsync(ReverseForeignCurrencyRemeasurementRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordCustomerAdjustmentAsync(RecordCustomerAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RecordVendorCreditAsync(RecordVendorCreditRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> RefundUnappliedPaymentAsync(RefundUnappliedPaymentRequest request, CancellationToken cancellationToken = default);

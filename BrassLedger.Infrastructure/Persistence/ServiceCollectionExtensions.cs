@@ -635,6 +635,20 @@ public static class ServiceCollectionExtensions
                 && await HasIndexAsync(dbContext, "IX_VendorBills_ExchangeRateId", cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_SubledgerPayments_ExchangeRateId", cancellationToken);
         }
+        if (migrationId.EndsWith("_AddForeignCurrencyRemeasurements", StringComparison.Ordinal))
+        {
+            string[] batchColumns = ["CompanyId", "AsOf", "Reference", "Status", "NetAdjustment", "JournalEntryId", "ReversalJournalEntryId", "PreparedByUserId", "PreparedAtUtc", "ApprovedByUserId", "ApprovedAtUtc", "RejectedByUserId", "RejectedAtUtc", "PostedByUserId", "PostedAtUtc", "ReversedByUserId", "ReversedAtUtc", "ReversalDate", "DecisionReason", "ReversalReason", "ConcurrencyToken"];
+            foreach (var column in batchColumns)
+                if (!await HasColumnAsync(dbContext, "ForeignCurrencyRemeasurementBatches", column, cancellationToken)) return false;
+            string[] lineColumns = ["ForeignCurrencyRemeasurementBatchId", "DocumentType", "DocumentId", "DocumentNumber", "CounterpartyId", "TransactionCurrency", "TransactionBalance", "PreviousBaseBalance", "RemeasuredBaseBalance", "AdjustmentAmount", "ExchangeRateId", "ExchangeRateToBase", "ExchangeRateEffectiveOn", "ExchangeRateSource", "ExchangeRateSourceReference"];
+            foreach (var column in lineColumns)
+                if (!await HasColumnAsync(dbContext, "ForeignCurrencyRemeasurementLines", column, cancellationToken)) return false;
+            var documentIndex = dbContext.Database.IsNpgsql() ? "IX_ForeignCurrencyRemeasurementLines_ForeignCurrencyRemeasurem~" : "IX_ForeignCurrencyRemeasurementLines_ForeignCurrencyRemeasurementBatchId_DocumentType_DocumentId";
+            return await HasIndexAsync(dbContext, "IX_ForeignCurrencyRemeasurementBatches_CompanyId_Reference", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ForeignCurrencyRemeasurementBatches_CompanyId_AsOf", cancellationToken)
+                && await HasIndexAsync(dbContext, documentIndex, cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_ForeignCurrencyRemeasurementLines_ExchangeRateId", cancellationToken);
+        }
         return false;
     }
 

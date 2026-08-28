@@ -2661,6 +2661,178 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.ToTable("ExternalEntityLinks");
                 });
 
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ForeignCurrencyRemeasurementBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("AsOf")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("NetAdjustment")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("PostedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PostedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PreparedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("RejectedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RejectedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("ReversalDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReversalReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ReversedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReversedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JournalEntryId");
+
+                    b.HasIndex("ReversalJournalEntryId");
+
+                    b.HasIndex("CompanyId", "AsOf")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN ('Draft', 'Approved', 'Posted')");
+
+                    b.HasIndex("CompanyId", "Reference")
+                        .IsUnique();
+
+                    b.ToTable("ForeignCurrencyRemeasurementBatches");
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ForeignCurrencyRemeasurementLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("AdjustmentAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CounterpartyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("ExchangeRateEffectiveOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ExchangeRateId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasPrecision(18, 10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ForeignCurrencyRemeasurementBatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("PreviousBaseBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("RemeasuredBaseBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TransactionBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExchangeRateId");
+
+                    b.HasIndex("ForeignCurrencyRemeasurementBatchId", "DocumentType", "DocumentId")
+                        .IsUnique();
+
+                    b.ToTable("ForeignCurrencyRemeasurementLines");
+                });
+
             modelBuilder.Entity("BrassLedger.Domain.Accounting.GeneralLedgerAccount", b =>
                 {
                     b.Property<Guid>("Id")
@@ -10653,6 +10825,34 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasOne("BrassLedger.Domain.Accounting.PayrollDeductionPlan", null)
                         .WithMany()
                         .HasForeignKey("PayrollDeductionPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ForeignCurrencyRemeasurementBatch", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("BrassLedger.Domain.Accounting.ForeignCurrencyRemeasurementLine", b =>
+                {
+                    b.HasOne("BrassLedger.Domain.Accounting.CurrencyExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("ExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("BrassLedger.Domain.Accounting.ForeignCurrencyRemeasurementBatch", null)
+                        .WithMany()
+                        .HasForeignKey("ForeignCurrencyRemeasurementBatchId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

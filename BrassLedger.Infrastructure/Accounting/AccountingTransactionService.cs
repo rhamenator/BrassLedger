@@ -978,6 +978,7 @@ public sealed partial class AccountingTransactionService(
         payment.ReversalJournalEntryId = posting.Id;
         payment.ReversedByUserId = ResolveUserId();
         payment.ReversedAtUtc = DateTimeOffset.UtcNow;
+        payment.ReversalDate = request.ReversalDate;
         payment.ReversalReason = request.Reason.Trim();
         payment.ConcurrencyToken = Guid.NewGuid().ToString("N");
         bank.UnreconciledAmount += payment.Amount;

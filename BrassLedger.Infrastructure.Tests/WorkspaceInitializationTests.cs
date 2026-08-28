@@ -66,7 +66,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("41", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("42", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -107,6 +107,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827160327_AddConsolidatedStatementPresentation';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827185331_AddConsolidationDisclosurePackages';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827201050_AddConsolidationOwnershipEvents';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827230231_AddTransactionCurrencyDocuments';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260828014056_AddForeignCurrencyRemeasurements';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ForeignCurrencyRemeasurementBatches';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ForeignCurrencyRemeasurementLines';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
@@ -178,7 +182,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("41", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("42", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -219,6 +223,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827185331_AddConsolidationDisclosurePackages';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827201050_AddConsolidationOwnershipEvents';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827230231_AddTransactionCurrencyDocuments';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260828014056_AddForeignCurrencyRemeasurements';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ForeignCurrencyRemeasurementBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
@@ -475,7 +481,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
-    public async Task MigrationAdoption_RecognizesTransactionCurrencySchemaWithoutReplayingIt()
+    public async Task MigrationAdoption_RecognizesTransactionCurrencyAndRemeasurementSchemasWithoutReplayingThem()
     {
         using var services = CreateServiceProvider();
         await services.InitializeBrassLedgerAsync();
@@ -493,7 +499,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827230231_AddTransactionCurrencyDocuments';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260828014056_AddForeignCurrencyRemeasurements';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('SalesInvoices') WHERE name = 'TransactionCurrency';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ForeignCurrencyRemeasurementLines';"));
         Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
     }
 
@@ -1653,6 +1661,85 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var restored = await workspaceService.GetWorkspaceAsync();
         Assert.Equal(100m, restored.Receivables.Invoices.Single(item => item.Id == invoice.Id).TransactionBalanceDue); Assert.Equal(75m, restored.Receivables.Invoices.Single(item => item.Id == invoice.Id).BalanceDue);
         Assert.Equal(100m, restored.Payables.Bills.Single(item => item.Id == bill.Id).TransactionBalanceDue); Assert.Equal(75m, restored.Payables.Bills.Single(item => item.Id == bill.Id).BalanceDue);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var reversedReceipt = await db.SubledgerPayments.SingleAsync(item => item.Id == receipt.Id);
+            Assert.Equal(new DateOnly(2026, 5, 3), reversedReceipt.ReversalDate);
+            Assert.True(await db.SubledgerPaymentApplications.AnyAsync(item => item.SubledgerPaymentId == receipt.Id && item.DocumentId == invoice.Id));
+        }
+        var retrospectiveRemeasurement = await transactions.PrepareForeignCurrencyRemeasurementAsync(new(new DateOnly(2026, 5, 1), "FX-HISTORICAL-AFTER-REVERSALS", [new("CAD", documentRateId), new("EUR", inverseRateId)]));
+        Assert.False(retrospectiveRemeasurement.Succeeded); Assert.Contains("activity after", retrospectiveRemeasurement.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ForeignCurrencyRemeasurement_RetainsReviewPostsUnrealizedResultsAndReversesExactly()
+    {
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>(); var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>(); var accountingPeriods = scope.ServiceProvider.GetRequiredService<IAccountingPeriodService>(); var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var initial = await workspaceService.GetWorkspaceAsync(); var customer = initial.Receivables.Customers.First(); var vendor = initial.Payables.Vendors.First(); var documentRateId = Guid.NewGuid(); var closingRateId = Guid.NewGuid(); Guid companyId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.CurrencyExchangeRates.AddRange(
+                new() { Id = documentRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 1), Source = "Official daily rate", SourceReference = "https://example.test/2026-05-01" },
+                new() { Id = closingRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 31), Source = "Official month-end rate", SourceReference = "https://example.test/2026-05-31" });
+            await db.SaveChangesAsync();
+        }
+        var invoice = await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-FX-REMEASURE-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 6, 1), 100m, 0m, "4000", "Open CAD receivable", Currency: "CAD", ExchangeRateId: documentRateId));
+        var bill = await PostVendorBillThroughWorkflowAsync(transactions, new(vendor.Id, "B-FX-REMEASURE-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 6, 1), 100m, "5100", "Open CAD payable", Currency: "CAD", ExchangeRateId: documentRateId));
+        Assert.True(invoice.Succeeded, invoice.ErrorMessage); Assert.True(bill.Succeeded, bill.ErrorMessage);
+        void ActAs(Guid userId, params string[] permissions)
+        {
+            var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()), new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()) };
+            claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+        var preparer = Guid.NewGuid(); var reviewer = Guid.NewGuid(); var poster = Guid.NewGuid(); var reverser = Guid.NewGuid();
+        ActAs(preparer, BrassLedgerPermissions.JournalPrepare, BrassLedgerPermissions.JournalApprove);
+        var period = await accountingPeriods.SavePeriodAsync(new(null, new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), "Month-end FX control")); Assert.True(period.Succeeded, period.ErrorMessage);
+        var prematureClose = await accountingPeriods.SetPeriodStatusAsync(period.Id!.Value, true, "Attempt close before FX review"); Assert.False(prematureClose.Succeeded); Assert.Contains("remeasurement", prematureClose.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var prepared = await transactions.PrepareForeignCurrencyRemeasurementAsync(new(new DateOnly(2026, 5, 31), "FX-2026-05", [new("CAD", closingRateId)])); Assert.True(prepared.Succeeded, prepared.ErrorMessage);
+        var batch = (await transactions.GetForeignCurrencyRemeasurementsAsync()).Single(item => item.Id == prepared.Id); Assert.Equal("Draft", batch.Status); Assert.Equal(2, batch.Lines.Count); Assert.Equal(0m, batch.NetAdjustment); Assert.All(batch.Lines, line => { Assert.Equal(100m, line.TransactionBalance); Assert.Equal(75m, line.PreviousBaseBalance); Assert.Equal(80m, line.RemeasuredBaseBalance); Assert.Equal(5m, line.AdjustmentAmount); Assert.Equal(.80m, line.ExchangeRateToBase); Assert.Contains("2026-05-31", line.ExchangeRateSourceReference); });
+        var selfReview = await transactions.DecideForeignCurrencyRemeasurementAsync(new(batch.Id, true, "", batch.ConcurrencyToken)); Assert.False(selfReview.Succeeded); Assert.Contains("prepared", selfReview.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(reviewer, BrassLedgerPermissions.JournalApprove, BrassLedgerPermissions.JournalPost); batch = (await transactions.GetForeignCurrencyRemeasurementsAsync()).Single(item => item.Id == prepared.Id); Assert.True((await transactions.DecideForeignCurrencyRemeasurementAsync(new(batch.Id, true, "Reviewed month-end rates.", batch.ConcurrencyToken))).Succeeded);
+        batch = (await transactions.GetForeignCurrencyRemeasurementsAsync()).Single(item => item.Id == prepared.Id); var selfPost = await transactions.PostForeignCurrencyRemeasurementAsync(new(batch.Id, batch.ConcurrencyToken)); Assert.False(selfPost.Succeeded); Assert.Contains("approved", selfPost.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(poster, BrassLedgerPermissions.JournalPost); Assert.False((await transactions.PostForeignCurrencyRemeasurementAsync(new(batch.Id, "stale"))).Succeeded); Assert.True((await transactions.PostForeignCurrencyRemeasurementAsync(new(batch.Id, batch.ConcurrencyToken))).Succeeded);
+        var remeasured = await workspaceService.GetWorkspaceAsync(); Assert.Equal(80m, remeasured.Receivables.Invoices.Single(item => item.Id == invoice.Id).BalanceDue); Assert.Equal(100m, remeasured.Receivables.Invoices.Single(item => item.Id == invoice.Id).TransactionBalanceDue); Assert.Equal(80m, remeasured.Payables.Bills.Single(item => item.Id == bill.Id).BalanceDue); Assert.Equal(100m, remeasured.Payables.Bills.Single(item => item.Id == bill.Id).TransactionBalanceDue);
+        batch = (await transactions.GetForeignCurrencyRemeasurementsAsync()).Single(item => item.Id == prepared.Id); Assert.Equal("Posted", batch.Status); Assert.NotNull(batch.JournalEntryId);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var fxLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == batch.JournalEntryId).Join(db.Accounts, line => line.AccountId, account => account.Id, (line, account) => new { line, account.OperationalRole }).ToListAsync();
+            Assert.Equal(5m, fxLines.Where(item => item.OperationalRole == AccountingAccountRoles.ForeignExchangeGain).Sum(item => item.line.Credit)); Assert.Equal(5m, fxLines.Where(item => item.OperationalRole == AccountingAccountRoles.ForeignExchangeLoss).Sum(item => item.line.Debit));
+        }
+        ActAs(preparer, BrassLedgerPermissions.JournalPrepare); var retrospectiveBatch = await transactions.PrepareForeignCurrencyRemeasurementAsync(new(new DateOnly(2026, 5, 30), "FX-2026-05-30-LATE", [new("CAD", documentRateId)])); Assert.False(retrospectiveBatch.Succeeded); Assert.Contains("later", retrospectiveBatch.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var changedInvoice = await db.SalesInvoices.SingleAsync(item => item.Id == invoice.Id);
+            changedInvoice.TransactionBalanceDue = 0m; changedInvoice.BalanceDue = 0m; changedInvoice.Status = "Paid";
+            await db.SaveChangesAsync();
+        }
+        ActAs(poster, BrassLedgerPermissions.JournalPost); var changedBalanceClose = await accountingPeriods.SetPeriodStatusAsync(period.Id.Value, true, "Attempt close after document activity"); Assert.False(changedBalanceClose.Succeeded); Assert.Contains("changed", changedBalanceClose.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var changedInvoice = await db.SalesInvoices.SingleAsync(item => item.Id == invoice.Id);
+            changedInvoice.TransactionBalanceDue = 100m; changedInvoice.BalanceDue = 80m; changedInvoice.Status = "Open";
+            await db.SaveChangesAsync();
+        }
+        ActAs(poster, BrassLedgerPermissions.JournalPost); Assert.True((await accountingPeriods.SetPeriodStatusAsync(period.Id.Value, true, "Closed after reviewed FX remeasurement")).Succeeded);
+        ActAs(reverser, BrassLedgerPermissions.JournalReverse); var closedReversal = await transactions.ReverseForeignCurrencyRemeasurementAsync(new(batch.Id, new DateOnly(2026, 6, 1), "Correct the retained closing rate.", batch.ConcurrencyToken)); Assert.False(closedReversal.Succeeded); Assert.Contains("Reopen", closedReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await accountingPeriods.SetPeriodStatusAsync(period.Id.Value, false, "Reopened to correct FX rate")).Succeeded);
+        ActAs(preparer, BrassLedgerPermissions.JournalPrepare); var laterPrepared = await transactions.PrepareForeignCurrencyRemeasurementAsync(new(new DateOnly(2026, 6, 30), "FX-2026-06", [new("CAD", closingRateId)])); Assert.True(laterPrepared.Succeeded, laterPrepared.ErrorMessage);
+        var laterBatch = (await transactions.GetForeignCurrencyRemeasurementsAsync()).Single(item => item.Id == laterPrepared.Id);
+        ActAs(reviewer, BrassLedgerPermissions.JournalApprove); Assert.True((await transactions.DecideForeignCurrencyRemeasurementAsync(new(laterBatch.Id, true, "Reviewed unchanged June rate.", laterBatch.ConcurrencyToken))).Succeeded);
+        laterBatch = (await transactions.GetForeignCurrencyRemeasurementsAsync()).Single(item => item.Id == laterPrepared.Id);
+        ActAs(poster, BrassLedgerPermissions.JournalPost); Assert.True((await transactions.PostForeignCurrencyRemeasurementAsync(new(laterBatch.Id, laterBatch.ConcurrencyToken))).Succeeded);
+        laterBatch = (await transactions.GetForeignCurrencyRemeasurementsAsync()).Single(item => item.Id == laterPrepared.Id); Assert.Null(laterBatch.JournalEntryId);
+        ActAs(reverser, BrassLedgerPermissions.JournalReverse); var outOfOrderReversal = await transactions.ReverseForeignCurrencyRemeasurementAsync(new(batch.Id, new DateOnly(2026, 7, 1), "Out-of-order reversal must fail.", batch.ConcurrencyToken)); Assert.False(outOfOrderReversal.Succeeded); Assert.Contains("later", outOfOrderReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await transactions.ReverseForeignCurrencyRemeasurementAsync(new(laterBatch.Id, new DateOnly(2026, 7, 1), "Reverse later unchanged batch first.", laterBatch.ConcurrencyToken))).Succeeded);
+        var chronologicallyInvalidReversal = await transactions.ReverseForeignCurrencyRemeasurementAsync(new(batch.Id, new DateOnly(2026, 6, 1), "Cannot predate the later batch reversal.", batch.ConcurrencyToken)); Assert.False(chronologicallyInvalidReversal.Succeeded); Assert.Contains("cannot precede", chronologicallyInvalidReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await transactions.ReverseForeignCurrencyRemeasurementAsync(new(batch.Id, new DateOnly(2026, 7, 1), "Correct the retained closing rate.", batch.ConcurrencyToken))).Succeeded);
+        var restored = await workspaceService.GetWorkspaceAsync(); Assert.Equal(75m, restored.Receivables.Invoices.Single(item => item.Id == invoice.Id).BalanceDue); Assert.Equal(75m, restored.Payables.Bills.Single(item => item.Id == bill.Id).BalanceDue);
+        batch = (await transactions.GetForeignCurrencyRemeasurementsAsync()).Single(item => item.Id == prepared.Id); Assert.Equal("Reversed", batch.Status); Assert.Equal(new DateOnly(2026, 7, 1), batch.ReversalDate); Assert.NotNull(batch.ReversalJournalEntryId); Assert.Equal("Correct the retained closing rate.", batch.ReversalReason);
     }
 
     [Fact]

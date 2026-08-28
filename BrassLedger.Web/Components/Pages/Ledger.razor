@@ -3,6 +3,7 @@
 @inject IBusinessWorkspaceService WorkspaceService
 @inject IAccountingTransactionService TransactionService
 @inject IAccountingInterchangeService InterchangeService
+@inject IConsolidationService ConsolidationService
 
 <PageTitle>Ledger</PageTitle>
 
@@ -45,6 +46,32 @@ else
         </section>
 
         <section class="panel">
+            <h2>Foreign-currency period-end remeasurement</h2>
+            <p class="page-intro">Evaluate every open foreign receivable and payable at retained closing rates. Preparation stores the complete calculation without changing balances; a different reviewer approves it and a different poster applies the control-account and unrealized gain/loss journal. Close the accounting period only after its dated batch is posted.</p>
+            @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals" Context="fxPreparationAuthorization">
+                <div class="content-grid">
+                    <div class="field-group"><label class="field-label">Reporting date</label><InputDate aria-label="FX remeasurement reporting date" class="field-input" @bind-Value="RemeasurementForm.AsOf" /></div>
+                    <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="FX remeasurement reference" class="field-input" @bind-Value="RemeasurementForm.Reference" /></div>
+                    @foreach (var currency in OpenForeignCurrencies)
+                    {
+                        <div class="field-group"><label class="field-label">@currency closing rate</label><select aria-label="@($"{currency} remeasurement rate")" class="field-input" value="@GetRemeasurementRate(currency)" @onchange="args => SetRemeasurementRate(currency, args.Value?.ToString())"><option value="">Select retained rate</option>@foreach (var rate in ApplicableRemeasurementRates(currency)) { <option value="@rate.Id">@rate.EffectiveOn: @rate.BaseCurrency/@rate.QuoteCurrency @rate.Rate.ToString("N8") — @rate.Source</option> }</select></div>
+                    }
+                </div>
+                <button class="action-primary" type="button" disabled="@(OpenForeignCurrencies.Count == 0)" @onclick="PrepareRemeasurementAsync">Prepare remeasurement</button>
+            </AuthorizeView>
+            @if (OpenForeignCurrencies.Count == 0) { <p class="muted-copy">There are no currently open foreign-currency receivables or payables.</p> }
+            <div class="content-grid"><div class="field-group"><label class="field-label">Review / reversal reason</label><input aria-label="FX remeasurement decision reason" class="field-input" @bind="RemeasurementDecisionReason" @bind:event="oninput" /></div><div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="FX remeasurement reversal date" class="field-input" @bind-Value="RemeasurementReversalDate" /></div></div>
+            <div class="table-scroll"><table class="data-table" aria-label="Foreign currency remeasurements"><thead><tr><th>Date / reference</th><th>Status</th><th>Net gain (loss)</th><th>Control</th><th>Documents</th><th>Actions</th></tr></thead><tbody>
+                @if (Remeasurements.Count == 0) { <tr><td colspan="6">No retained remeasurement batches.</td></tr> }
+                @foreach (var batch in Remeasurements)
+                {
+                    <tr><td>@batch.AsOf<br /><strong>@batch.Reference</strong></td><td>@batch.Status @if (batch.ReversalDate.HasValue) { <br /><small>Reversal date: @batch.ReversalDate</small> } @if (!string.IsNullOrWhiteSpace(batch.DecisionReason)) { <br /><small>@batch.DecisionReason</small> } @if (!string.IsNullOrWhiteSpace(batch.ReversalReason)) { <br /><small>@batch.ReversalReason</small> }</td><td>@batch.NetAdjustment.ToString("N2") @Workspace.Company.BaseCurrency</td><td>Prepared: @ControlEvidence(batch.PreparedBy, batch.PreparedAtUtc)<br />Approved: @ControlEvidence(batch.ApprovedBy, batch.ApprovedAtUtc)<br />Rejected: @ControlEvidence(batch.RejectedBy, batch.RejectedAtUtc)<br />Posted: @ControlEvidence(batch.PostedBy, batch.PostedAtUtc)<br />Reversed: @ControlEvidence(batch.ReversedBy, batch.ReversedAtUtc)</td><td><details><summary>@batch.Lines.Count evaluated</summary><table class="data-table"><thead><tr><th>Document</th><th>Transaction balance</th><th>Before</th><th>Remeasured</th><th>Adjustment</th><th>Rate provenance</th></tr></thead><tbody>@foreach (var line in batch.Lines) { <tr><td>@line.DocumentType @line.DocumentNumber<br /><small>@line.CounterpartyName</small></td><td>@line.TransactionBalance.ToString("N2") @line.TransactionCurrency</td><td>@line.PreviousBaseBalance.ToString("N2")</td><td>@line.RemeasuredBaseBalance.ToString("N2")</td><td>@line.AdjustmentAmount.ToString("N2")</td><td>@line.ExchangeRateEffectiveOn: @line.ExchangeRateToBase.ToString("N10")<br /><small>@line.ExchangeRateSource — @line.ExchangeRateSourceReference</small></td></tr> }</tbody></table></details></td><td>@if (batch.Status == "Draft") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-primary" type="button" @onclick="() => DecideRemeasurementAsync(batch, true)">Approve</button><button class="action-secondary" type="button" @onclick="() => DecideRemeasurementAsync(batch, false)">Reject</button></AuthorizeView> } else if (batch.Status == "Approved") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostJournals"><button class="action-primary" type="button" @onclick="() => PostRemeasurementAsync(batch)">Post</button></AuthorizeView> } else if (batch.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseJournals"><button class="action-secondary" type="button" @onclick="() => ReverseRemeasurementAsync(batch)">Reverse</button></AuthorizeView> }</td></tr>
+                }
+            </tbody></table></div>
+        </section>
+
+        <section class="panel">
             <h2>Departments and classes</h2>
             <p class="page-intro">Maintain effective-dated, hierarchical tracking values once and use their stable identities on accounting lines. Deactivating or renaming a value does not rewrite historical postings.</p>
             <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageAccountingDimensions" Context="trackingDimensionAuthorization">
@@ -74,7 +101,6 @@ else
         <section class="panel">
             <h2>@(JournalForm.Id.HasValue ? "Correct journal entry" : "Prepare journal entry")</h2>
             <p class="page-intro">Save the entry as a draft, approve it after review, and then post it. Account balances do not change until the approved entry is posted. Receivables, payables, inventory, and payroll control accounts remain restricted to their dedicated workflows.</p>
-            @if (!string.IsNullOrWhiteSpace(StatusMessage)) { <p class="lead" role="status" aria-live="polite">@StatusMessage</p> }
             <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals">
             <Authorized Context="journalPreparationAuthorization">
             <EditForm Model="JournalForm" OnValidSubmit="SaveJournalDraftAsync">
@@ -226,7 +252,7 @@ else
 
             <article class="panel">
                 <h2>Recent journal entries</h2>
-                <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><div class="field-group"><label class="field-label">Journal rejection reason</label><InputText aria-label="Journal rejection reason" class="field-input" @bind-Value="JournalRejectionReason" /><span class="field-help">Reject an ordinary general journal with a specific correction request. Source-workflow journals must be corrected in their originating workflow.</span></div></AuthorizeView>
+                <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><div class="field-group"><label class="field-label">Journal rejection reason</label><input aria-label="Journal rejection reason" class="field-input" @bind="JournalRejectionReason" @bind:event="oninput" /><span class="field-help">Reject an ordinary general journal with a specific correction request. Source-workflow journals must be corrected in their originating workflow.</span></div></AuthorizeView>
                 <table class="data-table">
                     <thead>
                         <tr>
@@ -408,6 +434,12 @@ else
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
     private AccountingScheduleWorkspace ScheduleWorkspace { get; set; } = new([], [], []);
+    private IReadOnlyList<ForeignCurrencyRemeasurementBatchSnapshot> Remeasurements = [];
+    private IReadOnlyList<ExchangeRateSnapshot> ExchangeRates = [];
+    private ForeignCurrencyRemeasurementEditor RemeasurementForm { get; } = new();
+    private Dictionary<string, Guid> RemeasurementRateSelections { get; } = new(StringComparer.Ordinal);
+    private string RemeasurementDecisionReason = string.Empty;
+    private DateOnly RemeasurementReversalDate = DateOnly.FromDateTime(DateTime.Today);
     private IReadOnlyList<AccountingInterchangeBatchSnapshot> InterchangeBatches = [];
     private string? StatusMessage;
     private string JournalRejectionReason = string.Empty;
@@ -435,8 +467,20 @@ else
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
         ScheduleWorkspace = await TransactionService.GetAccountingScheduleWorkspaceAsync();
+        Remeasurements = await TransactionService.GetForeignCurrencyRemeasurementsAsync();
+        ExchangeRates = await ConsolidationService.GetExchangeRatesAsync();
         InterchangeBatches = await InterchangeService.GetRecentBatchesAsync();
     }
+
+    private IReadOnlyList<string> OpenForeignCurrencies => Workspace is null ? [] : Workspace.Receivables.Invoices.Where(invoice => invoice.TransactionBalanceDue > 0m && invoice.TransactionCurrency != Workspace.Company.BaseCurrency).Select(invoice => invoice.TransactionCurrency).Concat(Workspace.Payables.Bills.Where(bill => bill.TransactionBalanceDue > 0m && bill.TransactionCurrency != Workspace.Company.BaseCurrency).Select(bill => bill.TransactionCurrency)).Distinct(StringComparer.Ordinal).OrderBy(currency => currency).ToArray();
+    private IEnumerable<ExchangeRateSnapshot> ApplicableRemeasurementRates(string currency) => ExchangeRates.Where(rate => rate.IsActive && rate.RateType == "Closing" && rate.EffectiveOn <= RemeasurementForm.AsOf && ((rate.BaseCurrency == currency && rate.QuoteCurrency == Workspace?.Company.BaseCurrency) || (rate.QuoteCurrency == currency && rate.BaseCurrency == Workspace?.Company.BaseCurrency))).OrderByDescending(rate => rate.EffectiveOn);
+    private string GetRemeasurementRate(string currency) => RemeasurementRateSelections.TryGetValue(currency, out var id) ? id.ToString() : string.Empty;
+    private static string ControlEvidence(string? actor, DateTimeOffset? occurredAtUtc) => string.IsNullOrWhiteSpace(actor) || !occurredAtUtc.HasValue ? "—" : $"{actor} · {occurredAtUtc.Value.ToLocalTime():g}";
+    private void SetRemeasurementRate(string currency, string? value) { if (Guid.TryParse(value, out var id)) RemeasurementRateSelections[currency] = id; else RemeasurementRateSelections.Remove(currency); }
+    private async Task PrepareRemeasurementAsync() { var result = await TransactionService.PrepareForeignCurrencyRemeasurementAsync(new(RemeasurementForm.AsOf, RemeasurementForm.Reference, OpenForeignCurrencies.Where(RemeasurementRateSelections.ContainsKey).Select(currency => new ForeignCurrencyRateSelection(currency, RemeasurementRateSelections[currency])).ToArray())); StatusMessage = result.Succeeded ? "Foreign-currency remeasurement prepared for independent review; no balances changed." : result.ErrorMessage; if (result.Succeeded) { RemeasurementForm.Reference = string.Empty; Remeasurements = await TransactionService.GetForeignCurrencyRemeasurementsAsync(); } }
+    private async Task DecideRemeasurementAsync(ForeignCurrencyRemeasurementBatchSnapshot batch, bool approve) { var result = await TransactionService.DecideForeignCurrencyRemeasurementAsync(new(batch.Id, approve, RemeasurementDecisionReason, batch.ConcurrencyToken)); StatusMessage = result.Succeeded ? approve ? "Foreign-currency remeasurement approved for separate posting." : "Foreign-currency remeasurement rejected with its evidence retained." : result.ErrorMessage; if (result.Succeeded) { RemeasurementDecisionReason = string.Empty; Remeasurements = await TransactionService.GetForeignCurrencyRemeasurementsAsync(); } }
+    private async Task PostRemeasurementAsync(ForeignCurrencyRemeasurementBatchSnapshot batch) { var result = await TransactionService.PostForeignCurrencyRemeasurementAsync(new(batch.Id, batch.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Foreign-currency remeasurement posted to open balances and unrealized gain or loss." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); Remeasurements = await TransactionService.GetForeignCurrencyRemeasurementsAsync(); } }
+    private async Task ReverseRemeasurementAsync(ForeignCurrencyRemeasurementBatchSnapshot batch) { var result = await TransactionService.ReverseForeignCurrencyRemeasurementAsync(new(batch.Id, RemeasurementReversalDate, RemeasurementDecisionReason, batch.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Foreign-currency remeasurement reversed with both journals and calculations retained." : result.ErrorMessage; if (result.Succeeded) { RemeasurementDecisionReason = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); Remeasurements = await TransactionService.GetForeignCurrencyRemeasurementsAsync(); } }
 
     private IEnumerable<TrackingDimensionValueSnapshot> TrackingDimensionsOfType(string dimensionType) =>
         (Workspace?.GeneralLedger.TrackingDimensions ?? []).Where(value => value.DimensionType == dimensionType);
@@ -671,6 +715,7 @@ else
     private sealed class BankAdjustmentEditor { public Guid BankId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string OffsetAccount { get; set; } = string.Empty; public string Reference { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public void Reset() { BankId = Guid.Empty; Amount = 0; OffsetAccount = string.Empty; Reference = string.Empty; Description = string.Empty; } }
     private sealed class BankAdjustmentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; }
     private sealed class ReopenEditor { public string Reason { get; set; } = string.Empty; }
+    private sealed class ForeignCurrencyRemeasurementEditor { public DateOnly AsOf { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Reference { get; set; } = string.Empty; }
     private sealed class AccountingScheduleEditor
     {
         public Guid? Id { get; set; }
