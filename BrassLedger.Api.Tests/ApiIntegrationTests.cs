@@ -1088,7 +1088,20 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         var recorded = Assert.Single(paid!.Receivables.Payments!, payment => payment.Id == paymentResult!.Id);
         Assert.Equal(75m, recorded.AppliedAmount);
         Assert.Equal(15m, recorded.UnappliedAmount);
+        Assert.Equal(15m, recorded.TransactionUnappliedAmount);
         Assert.Equal(2, recorded.Applications.Count);
+
+        var refundResponse = await client.PostAsJsonAsync("/api/subledger-payments/refund-unapplied", new RefundUnappliedPaymentRequest(
+            paymentResult!.Id!.Value, bank.Id, new DateOnly(2026, 5, 3), 5m, "RF-API-PAY-1", "Return excess customer deposit"));
+        Assert.Equal(HttpStatusCode.Created, refundResponse.StatusCode);
+        var refundResult = await refundResponse.Content.ReadFromJsonAsync<TransactionResult>(); Assert.NotNull(refundResult?.Id);
+        var refunded = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var afterRefund = Assert.Single(refunded!.Receivables.Payments!, payment => payment.Id == paymentResult.Id);
+        Assert.Equal(10m, afterRefund.UnappliedAmount); Assert.Equal(10m, afterRefund.TransactionUnappliedAmount);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/subledger-adjustments/reverse", new ReverseSubledgerAdjustmentRequest(refundResult!.Id!.Value, new DateOnly(2026, 5, 3), "Refund was not released"))).StatusCode);
+        var refundReversed = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var afterRefundReversal = Assert.Single(refundReversed!.Receivables.Payments!, payment => payment.Id == paymentResult.Id);
+        Assert.Equal(15m, afterRefundReversal.UnappliedAmount); Assert.Equal(15m, afterRefundReversal.TransactionUnappliedAmount);
 
         var returnResponse = await client.PostAsJsonAsync("/api/subledger-payments/reverse", new ReverseSubledgerPaymentRequest(
             paymentResult!.Id!.Value, new DateOnly(2026, 5, 3), "Bank returned the ACH", "Returned"));
