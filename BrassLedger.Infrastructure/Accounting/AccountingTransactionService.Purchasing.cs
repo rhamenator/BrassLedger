@@ -252,6 +252,7 @@ public sealed partial class AccountingTransactionService
         vendor.OpenBalance -= bill.TotalAmount;
         bill.Status = "Voided";
         bill.BalanceDue = 0m;
+        bill.TransactionBalanceDue = 0m;
         bill.InventoryReceiptId = null;
         bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
         receipt.ConcurrencyToken = Guid.NewGuid().ToString("N");

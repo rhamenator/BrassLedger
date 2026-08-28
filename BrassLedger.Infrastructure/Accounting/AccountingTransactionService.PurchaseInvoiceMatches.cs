@@ -517,6 +517,7 @@ public sealed partial class AccountingTransactionService
         if (!posting.Succeeded)
             return posting;
 
+        var baseCurrency = await db.Companies.AsNoTracking().Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
         var bill = new VendorBill
         {
             Id = billId,
@@ -528,6 +529,12 @@ public sealed partial class AccountingTransactionService
             Status = "Open",
             TotalAmount = match.InvoiceAmount,
             BalanceDue = match.InvoiceAmount,
+            TransactionCurrency = baseCurrency,
+            TransactionTotalAmount = match.InvoiceAmount,
+            TransactionBalanceDue = match.InvoiceAmount,
+            ExchangeRateToBase = 1m,
+            ExchangeRateEffectiveOn = match.BillDate,
+            ExchangeRateSource = "Company base currency",
             PurchaseOrderId = match.PurchaseOrderId,
             InventoryReceiptId = receipt.Id,
             ConcurrencyToken = Guid.NewGuid().ToString("N")
@@ -549,6 +556,7 @@ public sealed partial class AccountingTransactionService
             Quantity = line.InvoiceQuantity,
             UnitCost = line.InvoiceUnitCost,
             LineTotal = line.InvoiceAmount,
+            BaseLineTotal = line.InvoiceAmount,
             MatchedQuantity = line.MatchedQuantity,
             QuantityVarianceQuantity = line.QuantityVarianceQuantity,
             ReceiptUnitCost = line.ReceiptUnitCost,
@@ -711,6 +719,7 @@ public sealed partial class AccountingTransactionService
         vendor.OpenBalance -= bill.TotalAmount;
         bill.Status = "Voided";
         bill.BalanceDue = 0m;
+        bill.TransactionBalanceDue = 0m;
         bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
         match.Status = "Reversed";
         match.ReversalJournalEntryId = reversal.Id;

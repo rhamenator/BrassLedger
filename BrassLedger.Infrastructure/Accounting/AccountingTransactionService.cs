@@ -549,6 +549,9 @@ public sealed partial class AccountingTransactionService(
         if (requestedLines.Length == 0 && (request.Subtotal < 0 || request.TaxAmount < 0)) return TransactionResult.Failure("Invoice amounts must be non-negative.");
         var customer = await db.Customers.SingleOrDefaultAsync(x => x.Id == request.CustomerId && x.CompanyId == companyId, cancellationToken);
         if (customer is null) return TransactionResult.Failure("Customer not found.");
+        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, request.Currency, request.ExchangeRateId, request.InvoiceDate, cancellationToken);
+        if (transactionRateError is not null) return TransactionResult.Failure(transactionRateError);
+        if (projectBilling is not null && transactionRate!.IsForeign) return TransactionResult.Failure("Project-billing invoices currently require the company base currency; prepare an ordinary foreign-currency invoice instead.");
         if (await db.SalesInvoices.AnyAsync(x => x.CompanyId == companyId && x.InvoiceNumber == request.InvoiceNumber.Trim(), cancellationToken)) return TransactionResult.Failure("Invoice number already exists.");
         var revenueNumbers = (requestedLines.Length == 0 ? [request.RevenueAccountNumber] : requestedLines.Select(line => line.RevenueAccountNumber)).Select(number => number?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (revenueNumbers.Any(string.IsNullOrWhiteSpace)) return TransactionResult.Failure("Every invoice line requires a revenue account.");
@@ -561,12 +564,17 @@ public sealed partial class AccountingTransactionService(
             Request = line,
             Sequence = index + 1,
             NetAmount = RoundCurrency(line.Quantity * line.UnitPrice - line.DiscountAmount),
-            TaxAmount = RoundCurrency(line.TaxAmount)
+            TaxAmount = RoundCurrency(line.TaxAmount),
+            BaseNetAmount = transactionRate!.ToBase(RoundCurrency(line.Quantity * line.UnitPrice - line.DiscountAmount)),
+            BaseTaxAmount = transactionRate!.ToBase(RoundCurrency(line.TaxAmount))
         }).ToArray();
-        var subtotal = requestedLines.Length == 0 ? RoundCurrency(request.Subtotal) : lineAmounts.Sum(line => line.NetAmount);
-        var taxAmount = requestedLines.Length == 0 ? RoundCurrency(request.TaxAmount) : lineAmounts.Sum(line => line.TaxAmount);
+        var transactionSubtotal = requestedLines.Length == 0 ? RoundCurrency(request.Subtotal) : lineAmounts.Sum(line => line.NetAmount);
+        var transactionTaxAmount = requestedLines.Length == 0 ? RoundCurrency(request.TaxAmount) : lineAmounts.Sum(line => line.TaxAmount);
+        var transactionTotal = transactionSubtotal + transactionTaxAmount;
+        var subtotal = requestedLines.Length == 0 ? transactionRate!.ToBase(transactionSubtotal) : lineAmounts.Sum(line => line.BaseNetAmount);
+        var taxAmount = requestedLines.Length == 0 ? transactionRate!.ToBase(transactionTaxAmount) : lineAmounts.Sum(line => line.BaseTaxAmount);
         var total = subtotal + taxAmount;
-        if (total <= 0) return TransactionResult.Failure("Invoice total must be greater than zero.");
+        if (transactionTotal <= 0 || total <= 0) return TransactionResult.Failure("Invoice total must be greater than zero in both transaction and base currency.");
         var projectPayloadRetainage = projectBilling is null ? 0m : lineAmounts.Sum(line => RoundCurrency(line.Request.DiscountAmount));
         var projectPayloadGross = subtotal + projectPayloadRetainage;
         if (projectBilling is not null
@@ -595,18 +603,20 @@ public sealed partial class AccountingTransactionService(
         {
             if (projectBilling?.RetainageAmount > 0m) lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.RetainageReceivable), projectBilling.RetainageAmount, 0m, "Project retainage receivable", projectBilling.ProjectJobId));
             if (requestedLines.Length == 0) lines.Add(new JournalLineRequest(request.RevenueAccountNumber, 0, subtotal, "Invoice revenue"));
-            else lines.AddRange(lineAmounts.GroupBy(line => new { AccountNumber = line.Request.RevenueAccountNumber.Trim().ToUpperInvariant(), line.Request.ProjectJobId, line.Request.ProjectPhaseId, line.Request.ProjectCostCodeId, line.Request.DepartmentId, line.Request.ClassId }).Select(group => new JournalLineRequest(group.Key.AccountNumber, 0, group.Sum(line => line.NetAmount + (projectBilling is null ? 0m : RoundCurrency(line.Request.DiscountAmount))), "Invoice revenue", group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId, group.Key.DepartmentId, group.Key.ClassId)));
+            else lines.AddRange(lineAmounts.GroupBy(line => new { AccountNumber = line.Request.RevenueAccountNumber.Trim().ToUpperInvariant(), line.Request.ProjectJobId, line.Request.ProjectPhaseId, line.Request.ProjectCostCodeId, line.Request.DepartmentId, line.Request.ClassId }).Select(group => new JournalLineRequest(group.Key.AccountNumber, 0, group.Sum(line => line.BaseNetAmount + (projectBilling is null ? 0m : transactionRate!.ToBase(RoundCurrency(line.Request.DiscountAmount)))), "Invoice revenue", group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId, group.Key.DepartmentId, group.Key.ClassId)));
         }
         if (taxAmount > 0) lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.SalesTaxPayable), 0, taxAmount, "Sales tax payable"));
         var invoiceId = Guid.NewGuid();
         var posting = await PostAsync(db, companyId, request.InvoiceDate, "Accounts Receivable", request.InvoiceNumber, request.Description, lines, cancellationToken, allowControlAccounts: true, sourceDocumentId: invoiceId, sourceDocumentType: "SalesInvoice", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
-        var invoice = new SalesInvoice { Id = invoiceId, CompanyId = companyId, CustomerId = request.CustomerId, InvoiceNumber = request.InvoiceNumber.Trim(), InvoiceDate = request.InvoiceDate, DueDate = request.DueDate, Status = "Open", Subtotal = subtotal, TaxAmount = taxAmount, TotalAmount = total, BalanceDue = total, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        var invoice = new SalesInvoice { Id = invoiceId, CompanyId = companyId, CustomerId = request.CustomerId, InvoiceNumber = request.InvoiceNumber.Trim(), InvoiceDate = request.InvoiceDate, DueDate = request.DueDate, Status = "Open", Subtotal = subtotal, TaxAmount = taxAmount, TotalAmount = total, BalanceDue = total,
+            TransactionCurrency = transactionRate!.TransactionCurrency, TransactionSubtotal = transactionSubtotal, TransactionTaxAmount = transactionTaxAmount, TransactionTotalAmount = transactionTotal, TransactionBalanceDue = transactionTotal,
+            ExchangeRateId = transactionRate.ExchangeRateId, ExchangeRateToBase = transactionRate.FactorToBase, ExchangeRateEffectiveOn = transactionRate.EffectiveOn, ExchangeRateSource = transactionRate.Source, ExchangeRateSourceReference = transactionRate.SourceReference, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.SalesInvoices.Add(invoice);
         if (lineAmounts.Length > 0)
         {
             var revenueAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && revenueNumbers.Contains(account.Number)).ToDictionaryAsync(account => account.Number, StringComparer.OrdinalIgnoreCase, cancellationToken);
-            db.SalesInvoiceLines.AddRange(lineAmounts.Select(line => new SalesInvoiceLine { Id = Guid.NewGuid(), SalesInvoiceId = invoice.Id, Sequence = line.Sequence, RevenueAccountId = revenueAccounts[line.Request.RevenueAccountNumber.Trim()].Id, ProjectJobId = line.Request.ProjectJobId, ProjectPhaseId = line.Request.ProjectPhaseId, ProjectCostCodeId = line.Request.ProjectCostCodeId, DepartmentId = line.Request.DepartmentId, ClassId = line.Request.ClassId, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitPrice = line.Request.UnitPrice, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount }));
+            db.SalesInvoiceLines.AddRange(lineAmounts.Select(line => new SalesInvoiceLine { Id = Guid.NewGuid(), SalesInvoiceId = invoice.Id, Sequence = line.Sequence, RevenueAccountId = revenueAccounts[line.Request.RevenueAccountNumber.Trim()].Id, ProjectJobId = line.Request.ProjectJobId, ProjectPhaseId = line.Request.ProjectPhaseId, ProjectCostCodeId = line.Request.ProjectCostCodeId, DepartmentId = line.Request.DepartmentId, ClassId = line.Request.ClassId, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitPrice = line.Request.UnitPrice, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount, BaseTaxAmount = line.BaseTaxAmount, BaseLineTotal = line.BaseNetAmount + line.BaseTaxAmount }));
         }
         customer.OpenBalance += total;
         try { await db.SaveChangesAsync(cancellationToken); }
@@ -638,6 +648,8 @@ public sealed partial class AccountingTransactionService(
             return TransactionResult.Failure("Each bill line requires a description, positive quantity, valid cost and discount, non-negative tax, and expense account.");
         if (requestedLines.Length == 0 && request.TotalAmount <= 0) return TransactionResult.Failure("Bill amount must be positive.");
         if (!await db.Vendors.AnyAsync(x => x.Id == request.VendorId && x.CompanyId == companyId, cancellationToken)) return TransactionResult.Failure("Vendor not found.");
+        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, request.Currency, request.ExchangeRateId, request.BillDate, cancellationToken);
+        if (transactionRateError is not null) return TransactionResult.Failure(transactionRateError);
         var billNumber = request.BillNumber.Trim();
         if (await db.VendorBills.AnyAsync(x => x.CompanyId == companyId && x.VendorId == request.VendorId && x.BillNumber == billNumber, cancellationToken)
             || await db.PurchaseInvoiceMatches.AnyAsync(x => x.CompanyId == companyId && x.VendorId == request.VendorId && x.BillNumber == billNumber, cancellationToken)
@@ -654,25 +666,30 @@ public sealed partial class AccountingTransactionService(
             Request = line,
             Sequence = index + 1,
             NetAmount = RoundCurrency(line.Quantity * line.UnitCost - line.DiscountAmount),
-            TaxAmount = RoundCurrency(line.TaxAmount)
+            TaxAmount = RoundCurrency(line.TaxAmount),
+            BaseNetAmount = transactionRate!.ToBase(RoundCurrency(line.Quantity * line.UnitCost - line.DiscountAmount)),
+            BaseTaxAmount = transactionRate!.ToBase(RoundCurrency(line.TaxAmount))
         }).ToArray();
-        var total = requestedLines.Length == 0 ? RoundCurrency(request.TotalAmount) : lineAmounts.Sum(line => line.NetAmount + line.TaxAmount);
-        if (total <= 0) return TransactionResult.Failure("Bill total must be positive.");
+        var transactionTotal = requestedLines.Length == 0 ? RoundCurrency(request.TotalAmount) : lineAmounts.Sum(line => line.NetAmount + line.TaxAmount);
+        var total = requestedLines.Length == 0 ? transactionRate!.ToBase(transactionTotal) : lineAmounts.Sum(line => line.BaseNetAmount + line.BaseTaxAmount);
+        if (transactionTotal <= 0 || total <= 0) return TransactionResult.Failure("Bill total must be positive in both transaction and base currency.");
         var billId = Guid.NewGuid();
         IReadOnlyList<JournalLineRequest> postingLines = requestedLines.Length == 0
             ? [new(request.ExpenseAccountNumber, total, 0, "Bill expense"), new(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), 0, total, "Accounts payable")]
             : lineAmounts.GroupBy(line => new { AccountNumber = line.Request.ExpenseAccountNumber.Trim().ToUpperInvariant(), line.Request.ProjectJobId, line.Request.ProjectPhaseId, line.Request.ProjectCostCodeId, line.Request.DepartmentId, line.Request.ClassId })
-                .Select(group => new JournalLineRequest(group.Key.AccountNumber, group.Sum(line => line.NetAmount + line.TaxAmount), 0, "Bill expense and tax", group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId, group.Key.DepartmentId, group.Key.ClassId))
+                .Select(group => new JournalLineRequest(group.Key.AccountNumber, group.Sum(line => line.BaseNetAmount + line.BaseTaxAmount), 0, "Bill expense and tax", group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId, group.Key.DepartmentId, group.Key.ClassId))
                 .Append(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), 0, total, "Accounts payable")).ToArray();
         var posting = await PostAsync(db, companyId, request.BillDate, "Accounts Payable", request.BillNumber, request.Description,
             postingLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: billId, sourceDocumentType: "VendorBill", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
-        var bill = new VendorBill { Id = billId, CompanyId = companyId, VendorId = request.VendorId, BillNumber = billNumber, BillDate = request.BillDate, DueDate = request.DueDate, Status = "Open", TotalAmount = total, BalanceDue = total, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+        var bill = new VendorBill { Id = billId, CompanyId = companyId, VendorId = request.VendorId, BillNumber = billNumber, BillDate = request.BillDate, DueDate = request.DueDate, Status = "Open", TotalAmount = total, BalanceDue = total,
+            TransactionCurrency = transactionRate!.TransactionCurrency, TransactionTotalAmount = transactionTotal, TransactionBalanceDue = transactionTotal, ExchangeRateId = transactionRate.ExchangeRateId, ExchangeRateToBase = transactionRate.FactorToBase,
+            ExchangeRateEffectiveOn = transactionRate.EffectiveOn, ExchangeRateSource = transactionRate.Source, ExchangeRateSourceReference = transactionRate.SourceReference, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.VendorBills.Add(bill);
         if (lineAmounts.Length > 0)
         {
             var expenseAccounts = await db.Accounts.Where(account => account.CompanyId == companyId && expenseNumbers.Contains(account.Number)).ToDictionaryAsync(account => account.Number, StringComparer.OrdinalIgnoreCase, cancellationToken);
-            db.VendorBillLines.AddRange(lineAmounts.Select(line => new VendorBillLine { Id = Guid.NewGuid(), VendorBillId = bill.Id, Sequence = line.Sequence, ExpenseAccountId = expenseAccounts[line.Request.ExpenseAccountNumber.Trim()].Id, ProjectJobId = line.Request.ProjectJobId, ProjectPhaseId = line.Request.ProjectPhaseId, ProjectCostCodeId = line.Request.ProjectCostCodeId, DepartmentId = line.Request.DepartmentId, ClassId = line.Request.ClassId, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitCost = line.Request.UnitCost, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount }));
+            db.VendorBillLines.AddRange(lineAmounts.Select(line => new VendorBillLine { Id = Guid.NewGuid(), VendorBillId = bill.Id, Sequence = line.Sequence, ExpenseAccountId = expenseAccounts[line.Request.ExpenseAccountNumber.Trim()].Id, ProjectJobId = line.Request.ProjectJobId, ProjectPhaseId = line.Request.ProjectPhaseId, ProjectCostCodeId = line.Request.ProjectCostCodeId, DepartmentId = line.Request.DepartmentId, ClassId = line.Request.ClassId, Description = line.Request.Description.Trim(), Quantity = line.Request.Quantity, UnitCost = line.Request.UnitCost, DiscountAmount = line.Request.DiscountAmount, TaxAmount = line.TaxAmount, LineTotal = line.NetAmount + line.TaxAmount, BaseTaxAmount = line.BaseTaxAmount, BaseLineTotal = line.BaseNetAmount + line.BaseTaxAmount }));
         }
         var vendor = await db.Vendors.SingleAsync(x => x.Id == request.VendorId, cancellationToken);
         vendor.OpenBalance += total;
@@ -797,11 +814,25 @@ public sealed partial class AccountingTransactionService(
         return TransactionResult.Success(posting.Id!.Value);
     }
 
-    public Task<TransactionResult> SaveRecurringInvoiceTemplateAsync(SaveRecurringInvoiceTemplateRequest request, CancellationToken cancellationToken = default) =>
-        SaveSubledgerWorkflowAsync("Invoice", "company", request.Invoice.InvoiceNumber, request.Invoice, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
+    public async Task<TransactionResult> SaveRecurringInvoiceTemplateAsync(SaveRecurringInvoiceTemplateRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!await IsBaseCurrencyRequestAsync(request.Invoice.Currency, cancellationToken)) return TransactionResult.Failure("Foreign-currency recurring templates are not supported because each occurrence requires a current retained rate. Generate a base-currency template or prepare each foreign draft with its applicable rate.");
+        return await SaveSubledgerWorkflowAsync("Invoice", "company", request.Invoice.InvoiceNumber, request.Invoice, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
+    }
 
-    public Task<TransactionResult> SaveRecurringVendorBillTemplateAsync(SaveRecurringVendorBillTemplateRequest request, CancellationToken cancellationToken = default) =>
-        SaveSubledgerWorkflowAsync("VendorBill", request.Bill.VendorId.ToString("N"), request.Bill.BillNumber, request.Bill, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
+    public async Task<TransactionResult> SaveRecurringVendorBillTemplateAsync(SaveRecurringVendorBillTemplateRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!await IsBaseCurrencyRequestAsync(request.Bill.Currency, cancellationToken)) return TransactionResult.Failure("Foreign-currency recurring templates are not supported because each occurrence requires a current retained rate. Generate a base-currency template or prepare each foreign draft with its applicable rate.");
+        return await SaveSubledgerWorkflowAsync("VendorBill", request.Bill.VendorId.ToString("N"), request.Bill.BillNumber, request.Bill, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
+    }
+
+    private async Task<bool> IsBaseCurrencyRequestAsync(string? currency, CancellationToken cancellationToken)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var baseCurrency = await db.Companies.AsNoTracking().Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        return NormalizeTransactionCurrency(currency, baseCurrency) == baseCurrency;
+    }
 
     public async Task<TransactionResult> GenerateDueRecurringDocumentsAsync(DateOnly throughDate, CancellationToken cancellationToken = default)
     {
@@ -845,31 +876,31 @@ public sealed partial class AccountingTransactionService(
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        var customerId = await db.SalesInvoices.Where(invoice => invoice.Id == request.InvoiceId && invoice.CompanyId == companyId).Select(invoice => (Guid?)invoice.CustomerId).SingleOrDefaultAsync(cancellationToken);
-        return customerId is null
+        var invoice = await db.SalesInvoices.Where(invoice => invoice.Id == request.InvoiceId && invoice.CompanyId == companyId).Select(invoice => new { invoice.CustomerId, invoice.TransactionCurrency }).SingleOrDefaultAsync(cancellationToken);
+        return invoice is null
             ? TransactionResult.Failure("Invoice not found.")
-            : await RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customerId.Value, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, "Other", [new PaymentDocumentApplicationRequest(request.InvoiceId, request.Amount)]), cancellationToken);
+            : await RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(invoice.CustomerId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, "Other", [new PaymentDocumentApplicationRequest(request.InvoiceId, request.Amount)], invoice.TransactionCurrency, request.ExchangeRateId), cancellationToken);
     }
 
     public async Task<TransactionResult> ApplyBillPaymentAsync(ApplyBillPaymentRequest request, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        var vendorId = await db.VendorBills.Where(bill => bill.Id == request.VendorBillId && bill.CompanyId == companyId).Select(bill => (Guid?)bill.VendorId).SingleOrDefaultAsync(cancellationToken);
-        return vendorId is null
+        var bill = await db.VendorBills.Where(bill => bill.Id == request.VendorBillId && bill.CompanyId == companyId).Select(bill => new { bill.VendorId, bill.TransactionCurrency }).SingleOrDefaultAsync(cancellationToken);
+        return bill is null
             ? TransactionResult.Failure("Vendor bill not found.")
-            : await RecordVendorPaymentAsync(new RecordVendorPaymentRequest(vendorId.Value, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, "Other", [new PaymentDocumentApplicationRequest(request.VendorBillId, request.Amount)]), cancellationToken);
+            : await RecordVendorPaymentAsync(new RecordVendorPaymentRequest(bill.VendorId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, "Other", [new PaymentDocumentApplicationRequest(request.VendorBillId, request.Amount)], bill.TransactionCurrency, request.ExchangeRateId), cancellationToken);
     }
 
     public Task<TransactionResult> RecordCustomerPaymentAsync(RecordCustomerPaymentRequest request, CancellationToken cancellationToken = default) =>
         !HasPermission(BrassLedgerPermissions.ReceivablesManage)
             ? Task.FromResult(TransactionResult.Failure("You are not authorized to record customer payments."))
-            : RecordSubledgerPaymentAsync("CustomerReceipt", request.CustomerId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, request.Method, request.Applications, cancellationToken);
+            : RecordSubledgerPaymentAsync("CustomerReceipt", request.CustomerId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, request.Method, request.Applications, request.Currency, request.ExchangeRateId, cancellationToken);
 
     public Task<TransactionResult> RecordVendorPaymentAsync(RecordVendorPaymentRequest request, CancellationToken cancellationToken = default) =>
         !HasPermission(BrassLedgerPermissions.PayablesManage)
             ? Task.FromResult(TransactionResult.Failure("You are not authorized to record vendor payments."))
-            : RecordSubledgerPaymentAsync("VendorDisbursement", request.VendorId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, request.Method, request.Applications, cancellationToken);
+            : RecordSubledgerPaymentAsync("VendorDisbursement", request.VendorId, request.BankAccountId, request.PaymentDate, request.Amount, request.Reference, request.Method, request.Applications, request.Currency, request.ExchangeRateId, cancellationToken);
 
     public async Task<TransactionResult> ReverseSubledgerPaymentAsync(ReverseSubledgerPaymentRequest request, CancellationToken cancellationToken = default)
     {
@@ -899,6 +930,7 @@ public sealed partial class AccountingTransactionService(
             {
                 var invoice = invoices[application.DocumentId];
                 invoice.BalanceDue += application.Amount;
+                invoice.TransactionBalanceDue += application.TransactionAmount;
                 invoice.Status = invoice.BalanceDue == invoice.TotalAmount ? "Open" : "Partial";
                 invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
             }
@@ -907,6 +939,8 @@ public sealed partial class AccountingTransactionService(
             var reversalLines = new List<JournalLineRequest> { new(cashAccountNumber, 0, payment.Amount, $"{reversalKind} customer receipt") };
             if (payment.AppliedAmount > 0) reversalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.AccountsReceivable), payment.AppliedAmount, 0, "Restore invoice balances"));
             if (payment.UnappliedAmount > 0) reversalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.CustomerDeposits), payment.UnappliedAmount, 0, "Remove customer deposit"));
+            if (payment.RealizedGainLoss > 0m) reversalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeGain), payment.RealizedGainLoss, 0, "Reverse realized foreign-exchange gain"));
+            if (payment.RealizedGainLoss < 0m) reversalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeLoss), 0, -payment.RealizedGainLoss, "Reverse realized foreign-exchange loss"));
             lines = reversalLines;
             bank.CurrentBalance -= payment.Amount;
         }
@@ -918,6 +952,7 @@ public sealed partial class AccountingTransactionService(
             {
                 var bill = bills[application.DocumentId];
                 bill.BalanceDue += application.Amount;
+                bill.TransactionBalanceDue += application.TransactionAmount;
                 bill.Status = bill.BalanceDue == bill.TotalAmount ? "Open" : "Partial";
                 bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
             }
@@ -926,6 +961,8 @@ public sealed partial class AccountingTransactionService(
             var reversalLines = new List<JournalLineRequest> { new(cashAccountNumber, payment.Amount, 0, $"{reversalKind} vendor disbursement") };
             if (payment.AppliedAmount > 0) reversalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), 0, payment.AppliedAmount, "Restore bill balances"));
             if (payment.UnappliedAmount > 0) reversalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.VendorAdvances), 0, payment.UnappliedAmount, "Remove vendor advance"));
+            if (payment.RealizedGainLoss > 0m) reversalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeGain), payment.RealizedGainLoss, 0, "Reverse realized foreign-exchange gain"));
+            if (payment.RealizedGainLoss < 0m) reversalLines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeLoss), 0, -payment.RealizedGainLoss, "Reverse realized foreign-exchange loss"));
             lines = reversalLines;
             bank.CurrentBalance += payment.Amount;
         }
@@ -963,6 +1000,7 @@ public sealed partial class AccountingTransactionService(
         var amount = RoundCurrency(request.Amount);
         var invoice = await db.SalesInvoices.SingleOrDefaultAsync(item => item.Id == request.InvoiceId && item.CompanyId == companyId, cancellationToken);
         if (invoice is null) return TransactionResult.Failure("Invoice not found.");
+        if (invoice.ExchangeRateId.HasValue) return TransactionResult.Failure("Foreign-currency credit memos and write-offs require a transaction-currency adjustment workflow that is not yet available.");
         if (invoice.Status == "Voided" || amount > invoice.BalanceDue) return TransactionResult.Failure("The adjustment cannot exceed the open invoice balance or target a voided invoice.");
         if (request.AdjustmentDate < invoice.InvoiceDate) return TransactionResult.Failure("The adjustment date cannot precede the invoice date.");
         var offset = await db.Accounts.SingleOrDefaultAsync(account => account.CompanyId == companyId && account.Number == request.OffsetAccountNumber.Trim() && account.IsActive && !account.IsControlAccount, cancellationToken);
@@ -975,6 +1013,7 @@ public sealed partial class AccountingTransactionService(
             allowControlAccounts: true, sourceDocumentId: adjustmentId, sourceDocumentType: "SubledgerAdjustment", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
         invoice.BalanceDue -= amount;
+        invoice.TransactionBalanceDue -= amount;
         invoice.Status = invoice.BalanceDue == 0 ? "Paid" : "Partial";
         invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
         var customer = await db.Customers.SingleAsync(item => item.Id == invoice.CustomerId && item.CompanyId == companyId, cancellationToken);
@@ -996,6 +1035,7 @@ public sealed partial class AccountingTransactionService(
         var amount = RoundCurrency(request.Amount);
         var bill = await db.VendorBills.SingleOrDefaultAsync(item => item.Id == request.VendorBillId && item.CompanyId == companyId, cancellationToken);
         if (bill is null) return TransactionResult.Failure("Vendor bill not found.");
+        if (bill.ExchangeRateId.HasValue) return TransactionResult.Failure("Foreign-currency vendor credits require a transaction-currency adjustment workflow that is not yet available.");
         if (bill.Status == "Voided" || amount > bill.BalanceDue) return TransactionResult.Failure("The credit cannot exceed the open bill balance or target a voided bill.");
         if (request.AdjustmentDate < bill.BillDate) return TransactionResult.Failure("The credit date cannot precede the bill date.");
         var offset = await db.Accounts.SingleOrDefaultAsync(account => account.CompanyId == companyId && account.Number == request.OffsetAccountNumber.Trim() && account.IsActive && !account.IsControlAccount && (account.Type == AccountType.Expense || account.Type == AccountType.Asset), cancellationToken);
@@ -1008,6 +1048,7 @@ public sealed partial class AccountingTransactionService(
             allowControlAccounts: true, sourceDocumentId: adjustmentId, sourceDocumentType: "SubledgerAdjustment", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
         bill.BalanceDue -= amount;
+        bill.TransactionBalanceDue -= amount;
         bill.Status = bill.BalanceDue == 0 ? "Paid" : "Partial";
         bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
         var vendor = await db.Vendors.SingleAsync(item => item.Id == bill.VendorId && item.CompanyId == companyId, cancellationToken);
@@ -1029,6 +1070,7 @@ public sealed partial class AccountingTransactionService(
         var payment = await db.SubledgerPayments.SingleOrDefaultAsync(item => item.Id == request.PaymentId && item.CompanyId == companyId, cancellationToken);
         var amount = RoundCurrency(request.Amount);
         if (payment is null || payment.Status != "Posted" || amount > payment.UnappliedAmount) return TransactionResult.Failure("The refund cannot exceed the unapplied balance of a posted payment.");
+        if (payment.ExchangeRateId.HasValue) return TransactionResult.Failure("Foreign-currency unapplied refunds require a transaction-currency refund workflow that is not yet available.");
         if (request.RefundDate < payment.PaymentDate) return TransactionResult.Failure("The refund date cannot precede the payment date.");
         var bank = await db.BankAccounts.SingleOrDefaultAsync(item => item.Id == request.BankAccountId && item.CompanyId == companyId, cancellationToken);
         if (bank is null) return TransactionResult.Failure("Bank account not found.");
@@ -1084,13 +1126,13 @@ public sealed partial class AccountingTransactionService(
         if (adjustment.Kind is "CreditMemo" or "WriteOff")
         {
             var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
-            invoice.BalanceDue += adjustment.Amount; invoice.Status = invoice.BalanceDue == invoice.TotalAmount ? "Open" : "Partial"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            invoice.BalanceDue += adjustment.Amount; invoice.TransactionBalanceDue += adjustment.Amount; invoice.Status = invoice.BalanceDue == invoice.TotalAmount ? "Open" : "Partial"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
             (await db.Customers.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
         }
         else if (adjustment.Kind == "VendorCredit")
         {
             var bill = await db.VendorBills.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
-            bill.BalanceDue += adjustment.Amount; bill.Status = bill.BalanceDue == bill.TotalAmount ? "Open" : "Partial"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            bill.BalanceDue += adjustment.Amount; bill.TransactionBalanceDue += adjustment.Amount; bill.Status = bill.BalanceDue == bill.TotalAmount ? "Open" : "Partial"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
             (await db.Vendors.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
         }
         else if (adjustment.Kind is "CustomerDepositRefund" or "VendorAdvanceRefund")
@@ -1104,7 +1146,7 @@ public sealed partial class AccountingTransactionService(
         else if (adjustment.Kind == "InvoiceVoid")
         {
             var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
-            invoice.BalanceDue = invoice.TotalAmount; invoice.Status = "Open"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            invoice.BalanceDue = invoice.TotalAmount; invoice.TransactionBalanceDue = invoice.TransactionTotalAmount; invoice.Status = "Open"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
             (await db.Customers.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
             if (invoice.InventoryShipmentId.HasValue)
             {
@@ -1122,7 +1164,7 @@ public sealed partial class AccountingTransactionService(
         else if (adjustment.Kind == "VendorBillVoid")
         {
             var bill = await db.VendorBills.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
-            bill.BalanceDue = bill.TotalAmount; bill.Status = "Open"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            bill.BalanceDue = bill.TotalAmount; bill.TransactionBalanceDue = bill.TransactionTotalAmount; bill.Status = "Open"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
             (await db.Vendors.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
         }
         else return TransactionResult.Failure("The adjustment kind is not reversible.");
@@ -1182,7 +1224,7 @@ public sealed partial class AccountingTransactionService(
         if (!reversal.Succeeded) return reversal;
         if (receivable)
         {
-            var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == request.DocumentId, cancellationToken); invoice.BalanceDue = 0; invoice.Status = "Voided"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == request.DocumentId, cancellationToken); invoice.BalanceDue = 0; invoice.TransactionBalanceDue = 0; invoice.Status = "Voided"; invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
             (await db.Customers.SingleAsync(item => item.Id == counterpartyId, cancellationToken)).OpenBalance -= amount;
             if (projectBillingInvoice is not null)
             {
@@ -1211,7 +1253,7 @@ public sealed partial class AccountingTransactionService(
         }
         else
         {
-            var bill = await db.VendorBills.SingleAsync(item => item.Id == request.DocumentId, cancellationToken); bill.BalanceDue = 0; bill.Status = "Voided"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            var bill = await db.VendorBills.SingleAsync(item => item.Id == request.DocumentId, cancellationToken); bill.BalanceDue = 0; bill.TransactionBalanceDue = 0; bill.Status = "Voided"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
             (await db.Vendors.SingleAsync(item => item.Id == counterpartyId, cancellationToken)).OpenBalance -= amount;
         }
         var adjustment = CreateAdjustment(adjustmentId, companyId, receivable ? "Receivables" : "Payables", receivable ? "InvoiceVoid" : "VendorBillVoid", counterpartyId, request.DocumentId, null, null, request.VoidDate, amount, $"VOID-{reference}", request.Reason, string.Empty, reversal.Id!.Value);
@@ -2713,7 +2755,7 @@ public sealed partial class AccountingTransactionService(
         return $"{normalizedJurisdiction}-{normalizedTaxType}";
     }
 
-    private async Task<TransactionResult> RecordSubledgerPaymentAsync(string direction, Guid counterpartyId, Guid bankAccountId, DateOnly date, decimal amount, string reference, string method, IReadOnlyList<PaymentDocumentApplicationRequest> requestedApplications, CancellationToken cancellationToken)
+    private async Task<TransactionResult> RecordSubledgerPaymentAsync(string direction, Guid counterpartyId, Guid bankAccountId, DateOnly date, decimal amount, string reference, string method, IReadOnlyList<PaymentDocumentApplicationRequest> requestedApplications, string currency, Guid? exchangeRateId, CancellationToken cancellationToken)
     {
         if (amount <= 0) return TransactionResult.Failure("Payment amount must be greater than zero.");
         if (string.IsNullOrWhiteSpace(reference)) return TransactionResult.Failure("A payment reference is required.");
@@ -2722,10 +2764,10 @@ public sealed partial class AccountingTransactionService(
         var applications = requestedApplications?.ToArray() ?? [];
         if (applications.Any(application => application.DocumentId == Guid.Empty || application.Amount <= 0) || applications.Select(application => application.DocumentId).Distinct().Count() != applications.Length)
             return TransactionResult.Failure("Payment applications require unique documents and positive amounts.");
-        var appliedAmount = RoundCurrency(applications.Sum(application => application.Amount));
-        amount = RoundCurrency(amount);
-        if (appliedAmount > amount) return TransactionResult.Failure("Applied amounts cannot exceed the total payment.");
-        var unappliedAmount = amount - appliedAmount;
+        var transactionAppliedAmount = RoundCurrency(applications.Sum(application => application.Amount));
+        var transactionAmount = RoundCurrency(amount);
+        if (transactionAppliedAmount > transactionAmount) return TransactionResult.Failure("Applied amounts cannot exceed the total payment.");
+        var transactionUnappliedAmount = transactionAmount - transactionAppliedAmount;
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
@@ -2733,6 +2775,11 @@ public sealed partial class AccountingTransactionService(
             return TransactionResult.Failure("That payment reference has already been recorded for this payment type.");
         var bank = await db.BankAccounts.SingleOrDefaultAsync(account => account.Id == bankAccountId && account.CompanyId == companyId, cancellationToken);
         if (bank is null) return TransactionResult.Failure("Bank account not found.");
+        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, currency, exchangeRateId, date, cancellationToken);
+        if (transactionRateError is not null) return TransactionResult.Failure(transactionRateError);
+        amount = transactionRate!.ToBase(transactionAmount);
+        var unappliedAmount = transactionRate.ToBase(transactionUnappliedAmount);
+        if (amount <= 0m) return TransactionResult.Failure("Payment amount must be greater than zero after conversion to the company base currency.");
         var cashAccountNumber = await ResolveBankLedgerAccountNumberAsync(db, companyId, bank, cancellationToken);
         if (string.IsNullOrWhiteSpace(cashAccountNumber)) return TransactionResult.Failure("The payment bank account is not mapped to an active ledger account.");
         if (direction == "VendorDisbursement" && bank.CurrentBalance < amount) return TransactionResult.Failure("The bank account does not have sufficient book balance for this payment.");
@@ -2740,26 +2787,42 @@ public sealed partial class AccountingTransactionService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var paymentId = Guid.NewGuid();
         IReadOnlyList<JournalLineRequest> postingLines;
+        var retainedApplications = new List<SubledgerPaymentApplication>();
+        decimal appliedAmount;
+        decimal realizedGainLoss;
         if (direction == "CustomerReceipt")
         {
             if (!await db.Customers.AnyAsync(customer => customer.Id == counterpartyId && customer.CompanyId == companyId, cancellationToken)) return TransactionResult.Failure("Customer not found.");
             var ids = applications.Select(application => application.DocumentId).ToArray();
             var invoices = await db.SalesInvoices.Where(invoice => invoice.CompanyId == companyId && invoice.CustomerId == counterpartyId && ids.Contains(invoice.Id)).ToDictionaryAsync(invoice => invoice.Id, cancellationToken);
             if (invoices.Count != applications.Length) return TransactionResult.Failure("Every invoice application must belong to the selected customer.");
-            foreach (var application in applications)
+            if (invoices.Values.Any(invoice => invoice.TransactionCurrency != transactionRate.TransactionCurrency)) return TransactionResult.Failure("Every invoice application must use the payment transaction currency.");
+            var allocatedCash = 0m;
+            for (var index = 0; index < applications.Length; index++)
             {
+                var application = applications[index];
                 var invoice = invoices[application.DocumentId];
                 if (date < invoice.InvoiceDate) return TransactionResult.Failure($"Payment date cannot precede invoice {invoice.InvoiceNumber}.");
-                if (application.Amount > invoice.BalanceDue) return TransactionResult.Failure($"Application to invoice {invoice.InvoiceNumber} exceeds its remaining balance.");
-                invoice.BalanceDue -= application.Amount;
-                invoice.Status = invoice.BalanceDue == 0 ? "Paid" : "Partial";
+                if (application.Amount > invoice.TransactionBalanceDue) return TransactionResult.Failure($"Application to invoice {invoice.InvoiceNumber} exceeds its remaining transaction-currency balance.");
+                var carryingAmount = application.Amount == invoice.TransactionBalanceDue ? invoice.BalanceDue : RoundCurrency(invoice.BalanceDue * application.Amount / invoice.TransactionBalanceDue);
+                var cashApplied = index == applications.Length - 1 ? amount - unappliedAmount - allocatedCash : transactionRate.ToBase(application.Amount);
+                allocatedCash += cashApplied;
+                var applicationGainLoss = cashApplied - carryingAmount;
+                retainedApplications.Add(new() { Id = Guid.NewGuid(), SubledgerPaymentId = paymentId, DocumentId = application.DocumentId, Amount = carryingAmount, TransactionAmount = RoundCurrency(application.Amount), RealizedGainLoss = applicationGainLoss });
+                invoice.BalanceDue -= carryingAmount;
+                invoice.TransactionBalanceDue -= RoundCurrency(application.Amount);
+                invoice.Status = invoice.TransactionBalanceDue == 0m ? "Paid" : "Partial";
                 invoice.ConcurrencyToken = Guid.NewGuid().ToString("N");
             }
+            appliedAmount = retainedApplications.Sum(application => application.Amount);
+            realizedGainLoss = retainedApplications.Sum(application => application.RealizedGainLoss);
             var customer = await db.Customers.SingleAsync(item => item.Id == counterpartyId && item.CompanyId == companyId, cancellationToken);
             customer.OpenBalance -= appliedAmount;
             var lines = new List<JournalLineRequest> { new(cashAccountNumber, amount, 0, "Customer cash receipt") };
             if (appliedAmount > 0) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.AccountsReceivable), 0, appliedAmount, "Invoice applications"));
             if (unappliedAmount > 0) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.CustomerDeposits), 0, unappliedAmount, "Unapplied customer deposit"));
+            if (realizedGainLoss > 0m) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeGain), 0, realizedGainLoss, "Realized foreign-exchange gain"));
+            if (realizedGainLoss < 0m) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeLoss), -realizedGainLoss, 0, "Realized foreign-exchange loss"));
             postingLines = lines;
             bank.CurrentBalance += amount;
         }
@@ -2769,21 +2832,34 @@ public sealed partial class AccountingTransactionService(
             var ids = applications.Select(application => application.DocumentId).ToArray();
             var bills = await db.VendorBills.Where(bill => bill.CompanyId == companyId && bill.VendorId == counterpartyId && ids.Contains(bill.Id)).ToDictionaryAsync(bill => bill.Id, cancellationToken);
             if (bills.Count != applications.Length) return TransactionResult.Failure("Every bill application must belong to the selected vendor.");
-            foreach (var application in applications)
+            if (bills.Values.Any(bill => bill.TransactionCurrency != transactionRate.TransactionCurrency)) return TransactionResult.Failure("Every bill application must use the payment transaction currency.");
+            var allocatedCash = 0m;
+            for (var index = 0; index < applications.Length; index++)
             {
+                var application = applications[index];
                 var bill = bills[application.DocumentId];
                 if (date < bill.BillDate) return TransactionResult.Failure($"Payment date cannot precede bill {bill.BillNumber}.");
-                if (application.Amount > bill.BalanceDue) return TransactionResult.Failure($"Application to bill {bill.BillNumber} exceeds its remaining balance.");
-                bill.BalanceDue -= application.Amount;
-                bill.Status = bill.BalanceDue == 0 ? "Paid" : "Partial";
+                if (application.Amount > bill.TransactionBalanceDue) return TransactionResult.Failure($"Application to bill {bill.BillNumber} exceeds its remaining transaction-currency balance.");
+                var carryingAmount = application.Amount == bill.TransactionBalanceDue ? bill.BalanceDue : RoundCurrency(bill.BalanceDue * application.Amount / bill.TransactionBalanceDue);
+                var cashApplied = index == applications.Length - 1 ? amount - unappliedAmount - allocatedCash : transactionRate.ToBase(application.Amount);
+                allocatedCash += cashApplied;
+                var applicationGainLoss = carryingAmount - cashApplied;
+                retainedApplications.Add(new() { Id = Guid.NewGuid(), SubledgerPaymentId = paymentId, DocumentId = application.DocumentId, Amount = carryingAmount, TransactionAmount = RoundCurrency(application.Amount), RealizedGainLoss = applicationGainLoss });
+                bill.BalanceDue -= carryingAmount;
+                bill.TransactionBalanceDue -= RoundCurrency(application.Amount);
+                bill.Status = bill.TransactionBalanceDue == 0m ? "Paid" : "Partial";
                 bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
             }
+            appliedAmount = retainedApplications.Sum(application => application.Amount);
+            realizedGainLoss = retainedApplications.Sum(application => application.RealizedGainLoss);
             var vendor = await db.Vendors.SingleAsync(item => item.Id == counterpartyId && item.CompanyId == companyId, cancellationToken);
             vendor.OpenBalance -= appliedAmount;
             var lines = new List<JournalLineRequest>();
             if (appliedAmount > 0) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), appliedAmount, 0, "Bill applications"));
             if (unappliedAmount > 0) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.VendorAdvances), unappliedAmount, 0, "Unapplied vendor advance"));
             lines.Add(new(cashAccountNumber, 0, amount, "Vendor cash disbursement"));
+            if (realizedGainLoss > 0m) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeGain), 0, realizedGainLoss, "Realized foreign-exchange gain"));
+            if (realizedGainLoss < 0m) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeLoss), -realizedGainLoss, 0, "Realized foreign-exchange loss"));
             postingLines = lines;
             bank.CurrentBalance -= amount;
         }
@@ -2802,6 +2878,16 @@ public sealed partial class AccountingTransactionService(
             Amount = amount,
             AppliedAmount = appliedAmount,
             UnappliedAmount = unappliedAmount,
+            TransactionCurrency = transactionRate.TransactionCurrency,
+            TransactionAmount = transactionAmount,
+            TransactionAppliedAmount = transactionAppliedAmount,
+            TransactionUnappliedAmount = transactionUnappliedAmount,
+            ExchangeRateId = transactionRate.ExchangeRateId,
+            ExchangeRateToBase = transactionRate.FactorToBase,
+            ExchangeRateEffectiveOn = transactionRate.EffectiveOn,
+            ExchangeRateSource = transactionRate.Source,
+            ExchangeRateSourceReference = transactionRate.SourceReference,
+            RealizedGainLoss = realizedGainLoss,
             Reference = reference.Trim(),
             Method = normalizedMethod,
             Status = "Posted",
@@ -2811,10 +2897,10 @@ public sealed partial class AccountingTransactionService(
             ConcurrencyToken = Guid.NewGuid().ToString("N")
         };
         db.SubledgerPayments.Add(payment);
-        db.SubledgerPaymentApplications.AddRange(applications.Select(application => new SubledgerPaymentApplication { Id = Guid.NewGuid(), SubledgerPaymentId = payment.Id, DocumentId = application.DocumentId, Amount = RoundCurrency(application.Amount) }));
+        db.SubledgerPaymentApplications.AddRange(retainedApplications);
         bank.UnreconciledAmount += amount;
         bank.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        AddPaymentAudit(db, companyId, payment, "payment.posted", new { applicationCount = applications.Length });
+        AddPaymentAudit(db, companyId, payment, "payment.posted", new { applicationCount = applications.Length, payment.TransactionCurrency, payment.TransactionAmount, payment.ExchangeRateToBase, payment.ExchangeRateEffectiveOn, payment.ExchangeRateSourceReference, payment.RealizedGainLoss });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("A document or bank balance changed while the payment was posting. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The payment reference already exists or its documents changed concurrently. Refresh and try again."); }

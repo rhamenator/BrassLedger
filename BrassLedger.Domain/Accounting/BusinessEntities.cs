@@ -744,6 +744,16 @@ public sealed class SalesInvoice
     public decimal TaxAmount { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal BalanceDue { get; set; }
+    public string TransactionCurrency { get; set; } = "USD";
+    public decimal TransactionSubtotal { get; set; }
+    public decimal TransactionTaxAmount { get; set; }
+    public decimal TransactionTotalAmount { get; set; }
+    public decimal TransactionBalanceDue { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; } = 1m;
+    public DateOnly? ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
     public Guid? SalesOrderId { get; set; }
     public Guid? InventoryShipmentId { get; set; }
     public string ConcurrencyToken { get; set; } = string.Empty;
@@ -769,6 +779,8 @@ public sealed class SalesInvoiceLine
     public decimal DiscountAmount { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal LineTotal { get; set; }
+    public decimal BaseTaxAmount { get; set; }
+    public decimal BaseLineTotal { get; set; }
 }
 
 public sealed class Vendor
@@ -794,6 +806,14 @@ public sealed class VendorBill
     public string Status { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
     public decimal BalanceDue { get; set; }
+    public string TransactionCurrency { get; set; } = "USD";
+    public decimal TransactionTotalAmount { get; set; }
+    public decimal TransactionBalanceDue { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; } = 1m;
+    public DateOnly? ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
     public Guid? PurchaseOrderId { get; set; }
     public Guid? InventoryReceiptId { get; set; }
     public string ConcurrencyToken { get; set; } = string.Empty;
@@ -817,6 +837,8 @@ public sealed class VendorBillLine
     public decimal DiscountAmount { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal LineTotal { get; set; }
+    public decimal BaseTaxAmount { get; set; }
+    public decimal BaseLineTotal { get; set; }
     public decimal MatchedQuantity { get; set; }
     public decimal QuantityVarianceQuantity { get; set; }
     public decimal ReceiptUnitCost { get; set; }
@@ -836,6 +858,16 @@ public sealed class SubledgerPayment
     public decimal Amount { get; set; }
     public decimal AppliedAmount { get; set; }
     public decimal UnappliedAmount { get; set; }
+    public string TransactionCurrency { get; set; } = "USD";
+    public decimal TransactionAmount { get; set; }
+    public decimal TransactionAppliedAmount { get; set; }
+    public decimal TransactionUnappliedAmount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; } = 1m;
+    public DateOnly? ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
+    public decimal RealizedGainLoss { get; set; }
     public string Reference { get; set; } = string.Empty;
     public string Method { get; set; } = string.Empty;
     public string Status { get; set; } = "Posted";
@@ -856,6 +888,8 @@ public sealed class SubledgerPaymentApplication
     public Guid SubledgerPaymentId { get; set; }
     public Guid DocumentId { get; set; }
     public decimal Amount { get; set; }
+    public decimal TransactionAmount { get; set; }
+    public decimal RealizedGainLoss { get; set; }
 }
 
 public sealed class SubledgerAdjustment

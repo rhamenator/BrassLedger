@@ -107,7 +107,14 @@ public sealed record InvoiceSnapshot(
     decimal BalanceDue,
     Guid Id = default,
     IReadOnlyList<InvoiceLineSnapshot>? Lines = null,
-    Guid CustomerId = default);
+    Guid CustomerId = default,
+    string TransactionCurrency = "USD",
+    decimal TransactionTotalAmount = 0m,
+    decimal TransactionBalanceDue = 0m,
+    decimal ExchangeRateToBase = 1m,
+    DateOnly? ExchangeRateEffectiveOn = null,
+    string ExchangeRateSource = "",
+    string ExchangeRateSourceReference = "");
 
 public sealed record InvoiceLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber, Guid? ProjectJobId = null, string ProjectJobNumber = "", Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "", Guid? DepartmentId = null, string DepartmentCode = "", Guid? ClassId = null, string ClassCode = "");
 
@@ -138,12 +145,21 @@ public sealed record BillSnapshot(
     decimal BalanceDue,
     Guid Id = default,
     IReadOnlyList<BillLineSnapshot>? Lines = null,
-    Guid VendorId = default);
+    Guid VendorId = default,
+    string TransactionCurrency = "USD",
+    decimal TransactionTotalAmount = 0m,
+    decimal TransactionBalanceDue = 0m,
+    decimal ExchangeRateToBase = 1m,
+    DateOnly? ExchangeRateEffectiveOn = null,
+    string ExchangeRateSource = "",
+    string ExchangeRateSourceReference = "");
 
 public sealed record BillLineSnapshot(int Sequence, string Description, decimal Quantity, decimal UnitCost, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string ExpenseAccountNumber, Guid? ProjectJobId = null, string ProjectJobNumber = "", Guid? ProjectPhaseId = null, string ProjectPhaseCode = "", Guid? ProjectCostCodeId = null, string ProjectCostCode = "", Guid? DepartmentId = null, string DepartmentCode = "", Guid? ClassId = null, string ClassCode = "");
 
-public sealed record SubledgerPaymentSnapshot(Guid Id, string Direction, string CounterpartyName, DateOnly PaymentDate, decimal Amount, decimal AppliedAmount, decimal UnappliedAmount, string Reference, string Method, string Status, IReadOnlyList<PaymentApplicationSnapshot> Applications);
-public sealed record PaymentApplicationSnapshot(Guid DocumentId, string DocumentNumber, decimal Amount);
+public sealed record SubledgerPaymentSnapshot(Guid Id, string Direction, string CounterpartyName, DateOnly PaymentDate, decimal Amount, decimal AppliedAmount, decimal UnappliedAmount, string Reference, string Method, string Status, IReadOnlyList<PaymentApplicationSnapshot> Applications,
+    string TransactionCurrency = "USD", decimal TransactionAmount = 0m, decimal TransactionAppliedAmount = 0m, decimal TransactionUnappliedAmount = 0m, decimal ExchangeRateToBase = 1m, decimal RealizedGainLoss = 0m,
+    DateOnly? ExchangeRateEffectiveOn = null, string ExchangeRateSource = "", string ExchangeRateSourceReference = "");
+public sealed record PaymentApplicationSnapshot(Guid DocumentId, string DocumentNumber, decimal Amount, decimal TransactionAmount = 0m, decimal RealizedGainLoss = 0m);
 public sealed record SubledgerAdjustmentSnapshot(Guid Id, string Subledger, string Kind, Guid CounterpartyId, string CounterpartyName, Guid? DocumentId, string DocumentNumber, Guid? PaymentId, DateOnly AdjustmentDate, decimal Amount, string Reference, string Reason, string OffsetAccountNumber, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId);
 public sealed record SubledgerDocumentWorkflowSnapshot(Guid Id, string DocumentType, string DocumentNumber, string Status, bool IsRecurringTemplate, string Frequency, int FrequencyInterval, DateOnly? NextOccurrenceDate, DateOnly? EndDate, Guid? SourceTemplateId, Guid? PostedDocumentId, DateTimeOffset CreatedAtUtc, DateTimeOffset? ApprovedAtUtc, DateTimeOffset? RejectedAtUtc, string DecisionReason, DateTimeOffset? PostedAtUtc, string ConcurrencyToken);
 

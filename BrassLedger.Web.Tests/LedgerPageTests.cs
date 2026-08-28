@@ -36,6 +36,7 @@ public sealed class LedgerPageTests : TestContext
         Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(TestWorkspaceData.CreateWorkspace()));
         Services.AddSingleton<IAccountingTransactionService>(new StubAccountingTransactionService());
         Services.AddSingleton<IAccountingInterchangeService>(new StubAccountingInterchangeService());
+        Services.AddSingleton<IConsolidationService>(new StubConsolidationService());
     }
 
     [Fact]
@@ -184,6 +185,9 @@ public sealed class LedgerPageTests : TestContext
         var receivables = RenderComponent<Receivables>();
         Assert.NotNull(receivables.Find("select[aria-label='Invoice line project phase']"));
         Assert.NotNull(receivables.Find("select[aria-label='Invoice line project cost code']"));
+        Assert.NotNull(receivables.Find("input[aria-label='Invoice transaction currency']"));
+        Assert.NotNull(receivables.Find("select[aria-label='Invoice exchange rate']"));
+        Assert.NotNull(receivables.Find("input[aria-label='Customer payment transaction currency']"));
         Assert.NotNull(receivables.Find("input[aria-label='Invoice rejection reason']"));
         Assert.Contains("correct and resubmit it using the same invoice number", receivables.Markup);
         Assert.Contains("Review note", receivables.Markup);
@@ -191,6 +195,9 @@ public sealed class LedgerPageTests : TestContext
         var payables = RenderComponent<Payables>();
         Assert.NotNull(payables.Find("select[aria-label='Bill line project phase']"));
         Assert.NotNull(payables.Find("select[aria-label='Bill line project cost code']"));
+        Assert.NotNull(payables.Find("input[aria-label='Bill transaction currency']"));
+        Assert.NotNull(payables.Find("select[aria-label='Bill exchange rate']"));
+        Assert.NotNull(payables.Find("input[aria-label='Vendor payment transaction currency']"));
         Assert.NotNull(payables.Find("input[aria-label='Vendor bill rejection reason']"));
         Assert.Contains("correct and resubmit it using the same vendor and bill number", payables.Markup);
         Assert.Contains("Review note", payables.Markup);

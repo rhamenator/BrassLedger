@@ -7811,6 +7811,26 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<DateOnly>("DueDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateOnly?>("ExchangeRateEffectiveOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasPrecision(18, 10)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("InventoryShipmentId")
                         .HasColumnType("TEXT");
 
@@ -7840,7 +7860,30 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("TransactionBalanceDue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TransactionSubtotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TransactionTaxAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TransactionTotalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("ExchangeRateId");
 
                     b.HasIndex("InventoryShipmentId");
 
@@ -7856,6 +7899,14 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("BaseLineTotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("BaseTaxAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("ClassId")
@@ -8679,6 +8730,26 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<DateOnly?>("ExchangeRateEffectiveOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasPrecision(18, 10)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("TEXT");
 
@@ -8687,6 +8758,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateOnly>("PaymentDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("RealizedGainLoss")
+                        .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Reference")
@@ -8713,6 +8788,23 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("TransactionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TransactionAppliedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TransactionUnappliedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("UnappliedAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
@@ -8720,6 +8812,8 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BankAccountId");
+
+                    b.HasIndex("ExchangeRateId");
 
                     b.HasIndex("JournalEntryId");
 
@@ -8746,7 +8840,15 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<Guid>("DocumentId")
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("RealizedGainLoss")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("SubledgerPaymentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TransactionAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -9846,6 +9948,26 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                     b.Property<DateOnly>("DueDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateOnly?>("ExchangeRateEffectiveOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasPrecision(18, 10)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("InventoryReceiptId")
                         .HasColumnType("TEXT");
 
@@ -9860,10 +9982,25 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("TransactionBalanceDue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TransactionTotalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("VendorId")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ExchangeRateId");
 
                     b.HasIndex("InventoryReceiptId");
 
@@ -9882,6 +10019,14 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("AccrualAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("BaseLineTotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("BaseTaxAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
@@ -11517,6 +11662,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.SalesInvoice", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.CurrencyExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("ExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryShipment", null)
                         .WithMany()
                         .HasForeignKey("InventoryShipmentId")
@@ -11764,6 +11914,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("BrassLedger.Domain.Accounting.CurrencyExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("ExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.JournalEntry", null)
                         .WithMany()
                         .HasForeignKey("JournalEntryId")
@@ -11963,6 +12118,11 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("BrassLedger.Domain.Accounting.VendorBill", b =>
                 {
+                    b.HasOne("BrassLedger.Domain.Accounting.CurrencyExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("ExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("BrassLedger.Domain.Accounting.InventoryReceipt", null)
                         .WithMany()
                         .HasForeignKey("InventoryReceiptId")

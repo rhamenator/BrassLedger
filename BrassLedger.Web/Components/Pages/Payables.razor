@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ManagePayables)]
 @inject IBusinessWorkspaceService WorkspaceService
 @inject IAccountingTransactionService TransactionService
+@inject IConsolidationService ConsolidationService
 
 <PageTitle>Payables</PageTitle>
 
@@ -50,6 +51,8 @@ else
                     <div class="field-group"><label class="field-label">Bill number</label><InputText aria-label="Bill number" class="field-input" @bind-Value="BillForm.Number" /></div>
                     <div class="field-group"><label class="field-label">Bill date</label><InputDate aria-label="Bill date" class="field-input" @bind-Value="BillForm.Date" /></div>
                     <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Bill due date" class="field-input" @bind-Value="BillForm.DueDate" /></div>
+                    <div class="field-group"><label class="field-label">Transaction currency</label><InputText aria-label="Bill transaction currency" class="field-input" maxlength="3" @bind-Value="BillForm.Currency" /><span class="field-help">Use a three-letter code. The company base currency is @Workspace.Company.BaseCurrency.</span></div>
+                    <div class="field-group"><label class="field-label">Closing exchange rate</label><InputSelect aria-label="Bill exchange rate" class="field-input" @bind-Value="BillForm.ExchangeRateId" disabled="@(IsBaseCurrency(BillForm.Currency))"><option value="">Select retained rate</option>@foreach (var rate in ApplicableRates(BillForm.Currency, BillForm.Date)) { <option value="@rate.Id">@RateLabel(rate)</option> }</InputSelect></div>
                 </div>
                 <div class="table-scroll">
                     <table class="data-table">
@@ -113,13 +116,15 @@ else
                     <div class="field-group"><label class="field-label">Payment total</label><InputNumber aria-label="Vendor payment total" class="field-input" @bind-Value="PaymentForm.Amount" /></div>
                     <div class="field-group"><label class="field-label">Method</label><InputSelect aria-label="Vendor payment method" class="field-input" @bind-Value="PaymentForm.Method">@foreach (var method in PaymentMethods) { <option value="@method">@method</option> }</InputSelect></div>
                     <div class="field-group"><label class="field-label">Reference</label><InputText aria-label="Payment reference" class="field-input" @bind-Value="PaymentForm.Reference" /></div>
+                    <div class="field-group"><label class="field-label">Transaction currency</label><InputText aria-label="Vendor payment transaction currency" class="field-input" maxlength="3" @bind-Value="PaymentForm.Currency" /><span class="field-help">Applications are limited to bills in this currency.</span></div>
+                    <div class="field-group"><label class="field-label">Closing exchange rate</label><InputSelect aria-label="Vendor payment exchange rate" class="field-input" @bind-Value="PaymentForm.ExchangeRateId" disabled="@(IsBaseCurrency(PaymentForm.Currency))"><option value="">Select retained rate</option>@foreach (var rate in ApplicableRates(PaymentForm.Currency, PaymentForm.Date)) { <option value="@rate.Id">@RateLabel(rate)</option> }</InputSelect></div>
                 </div>
                 @if (PaymentForm.VendorId != Guid.Empty)
                 {
                     <div class="table-scroll"><table class="data-table"><thead><tr><th>Apply</th><th>Bill</th><th>Due</th><th>Open balance</th><th>Apply amount</th></tr></thead><tbody>
                         @foreach (var application in AvailableBillApplications)
                         {
-                            <tr @key="application.DocumentId"><td><InputCheckbox aria-label="@($"Apply to {application.DocumentNumber}")" @bind-Value="application.Selected" /></td><td>@application.DocumentNumber</td><td>@application.DueDate</td><td>@application.OpenBalance.ToString("C")</td><td><InputNumber aria-label="@($"Amount for {application.DocumentNumber}")" class="field-input" disabled="@(!application.Selected)" @bind-Value="application.Amount" /></td></tr>
+                            <tr @key="application.DocumentId"><td><InputCheckbox aria-label="@($"Apply to {application.DocumentNumber}")" @bind-Value="application.Selected" /></td><td>@application.DocumentNumber</td><td>@application.DueDate</td><td>@application.OpenBalance.ToString("N2") @application.Currency</td><td><InputNumber aria-label="@($"Amount for {application.DocumentNumber}")" class="field-input" disabled="@(!application.Selected)" @bind-Value="application.Amount" /></td></tr>
                         }
                     </tbody><tfoot><tr><th colspan="3">Payment allocation</th><th>Applied: @PaymentForm.AppliedAmount.ToString("C")</th><th>Unapplied advance: @PaymentForm.UnappliedAmount.ToString("C")</th></tr></tfoot></table></div>
                 }
@@ -130,10 +135,10 @@ else
         <section class="panel">
             <h2>Vendor payment history</h2>
             <div class="content-grid"><div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="Vendor payment reversal date" class="field-input" @bind-Value="ReversalForm.Date" /></div><div class="field-group"><label class="field-label">Outcome</label><InputSelect aria-label="Vendor payment reversal kind" class="field-input" @bind-Value="ReversalForm.Kind"><option>Voided</option><option>Returned</option><option>Reversed</option></InputSelect></div><div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Vendor payment reversal reason" class="field-input" @bind-Value="ReversalForm.Reason" /></div></div>
-            <div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Vendor</th><th>Reference</th><th>Method</th><th>Total</th><th>Applied</th><th>Advance</th><th>Status</th><th></th></tr></thead><tbody>
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Vendor</th><th>Reference</th><th>Method</th><th>Transaction total</th><th>Applied</th><th>Advance</th><th>Base total</th><th>Realized FX</th><th>Rate provenance</th><th>Status</th><th></th></tr></thead><tbody>
                 @foreach (var payment in Workspace.Payables.Payments ?? [])
                 {
-                    <tr><td>@payment.PaymentDate</td><td>@payment.CounterpartyName</td><td>@payment.Reference</td><td>@payment.Method</td><td>@payment.Amount.ToString("C")</td><td>@payment.AppliedAmount.ToString("C")</td><td>@payment.UnappliedAmount.ToString("C")</td><td>@payment.Status</td><td>@if (payment.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayments"><button class="action-secondary" type="button" @onclick="() => ReversePaymentAsync(payment.Id)">Record @ReversalForm.Kind.ToLowerInvariant()</button></AuthorizeView> }</td></tr>
+                    <tr><td>@payment.PaymentDate</td><td>@payment.CounterpartyName</td><td>@payment.Reference</td><td>@payment.Method</td><td>@FormatTransactionAmount(payment.TransactionAmount, payment.TransactionCurrency)</td><td>@FormatTransactionAmount(payment.TransactionAppliedAmount, payment.TransactionCurrency)</td><td>@FormatTransactionAmount(payment.TransactionUnappliedAmount, payment.TransactionCurrency)</td><td>@payment.Amount.ToString("C") @Workspace.Company.BaseCurrency</td><td>@payment.RealizedGainLoss.ToString("N2") @Workspace.Company.BaseCurrency</td><td>@(!IsBaseCurrency(payment.TransactionCurrency) ? $"{payment.ExchangeRateEffectiveOn}: {payment.ExchangeRateToBase:N10} — {payment.ExchangeRateSource}" : "Base currency")</td><td>@payment.Status</td><td>@if (payment.Status == "Posted") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReversePayments"><button class="action-secondary" type="button" @onclick="() => ReversePaymentAsync(payment.Id)">Record @ReversalForm.Kind.ToLowerInvariant()</button></AuthorizeView> }</td></tr>
                 }
             </tbody></table></div>
         </section>
@@ -188,7 +193,9 @@ else
                             <th>Status</th>
                             <th>Lines</th>
                             <th>Due</th>
-                            <th>Balance</th>
+                            <th>Transaction balance</th>
+                            <th>Base balance</th>
+                            <th>Rate provenance</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -200,7 +207,9 @@ else
                                 <td>@bill.Status</td>
                                 <td>@(bill.Lines?.Count ?? 0)</td>
                                 <td>@bill.DueDate.ToString("MMM d, yyyy")</td>
-                                <td>@bill.BalanceDue.ToString("C")</td>
+                                <td>@FormatTransactionAmount(bill.TransactionBalanceDue, bill.TransactionCurrency)</td>
+                                <td>@bill.BalanceDue.ToString("N2") @Workspace.Company.BaseCurrency</td>
+                                <td>@(!IsBaseCurrency(bill.TransactionCurrency) ? $"{bill.ExchangeRateEffectiveOn}: {bill.ExchangeRateToBase:N10} — {bill.ExchangeRateSource}" : "Base currency")</td>
                             </tr>
                         }
                     </tbody>
@@ -212,6 +221,7 @@ else
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private IReadOnlyList<ExchangeRateSnapshot> ExchangeRates = [];
     private string? StatusMessage;
     private string RejectionReason = string.Empty;
     private BillEditor BillForm { get; } = new();
@@ -223,11 +233,13 @@ else
     private AdjustmentReversalEditor AdjustmentReversalForm { get; } = new();
     private RecurringEditor RecurringForm { get; } = new();
     private static readonly string[] PaymentMethods = ["Check", "ACH", "Card", "Wire", "Cash", "Other"];
-    private IEnumerable<PaymentApplicationEditor> AvailableBillApplications => PaymentForm.Applications.Where(application => application.CounterpartyId == PaymentForm.VendorId);
+    private IEnumerable<PaymentApplicationEditor> AvailableBillApplications => PaymentForm.Applications.Where(application => application.CounterpartyId == PaymentForm.VendorId && application.Currency == NormalizeCurrency(PaymentForm.Currency));
 
     protected override async Task OnInitializedAsync()
     {
         Workspace = await WorkspaceService.GetWorkspaceAsync();
+        ExchangeRates = await ConsolidationService.GetExchangeRatesAsync();
+        BillForm.Currency = PaymentForm.Currency = Workspace.Company.BaseCurrency;
         SetBillDefaults();
         SyncPaymentApplications();
     }
@@ -235,7 +247,7 @@ else
     private async Task SaveBillDraftAsync()
     {
         var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount, line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, line.DepartmentId, line.ClassId)).ToArray();
-        var result = await TransactionService.SaveVendorBillDraftAsync(new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? DefaultCostAccountNumber, $"Bill {BillForm.Number}", lines));
+        var result = await TransactionService.SaveVendorBillDraftAsync(new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? DefaultCostAccountNumber, $"Bill {BillForm.Number}", lines, Currency: BillForm.Currency, ExchangeRateId: BillForm.ExchangeRateId));
         StatusMessage = result.Succeeded ? "Vendor bill draft saved." : result.ErrorMessage;
         if (result.Succeeded)
         {
@@ -245,7 +257,7 @@ else
         }
     }
 
-    private async Task SaveRecurringBillTemplateAsync() { var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount, line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, line.DepartmentId, line.ClassId)).ToArray(); var request = new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? DefaultCostAccountNumber, $"Recurring bill {BillForm.Number}", lines); var result = await TransactionService.SaveRecurringVendorBillTemplateAsync(new SaveRecurringVendorBillTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring vendor bill template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); BillForm.Reset(DefaultCostAccountNumber); } }
+    private async Task SaveRecurringBillTemplateAsync() { var lines = BillForm.Lines.Select(line => new VendorBillLineRequest(line.Description, line.Quantity, line.UnitCost, line.Discount, line.Tax, line.ExpenseAccount, line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, line.DepartmentId, line.ClassId)).ToArray(); var request = new CreateVendorBillRequest(BillForm.VendorId, BillForm.Number, BillForm.Date, BillForm.DueDate, 0m, lines.FirstOrDefault()?.ExpenseAccountNumber ?? DefaultCostAccountNumber, $"Recurring bill {BillForm.Number}", lines, BillForm.Currency, BillForm.ExchangeRateId); var result = await TransactionService.SaveRecurringVendorBillTemplateAsync(new SaveRecurringVendorBillTemplateRequest(request, RecurringForm.Frequency, RecurringForm.Interval, RecurringForm.NextDate)); StatusMessage = result.Succeeded ? "Recurring vendor bill template saved." : result.ErrorMessage; if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); BillForm.Reset(DefaultCostAccountNumber); } }
     private async Task GenerateRecurringDraftsAsync() { var result = await TransactionService.GenerateDueRecurringDocumentsAsync(RecurringForm.GenerateThrough); StatusMessage = result.Succeeded ? "Due recurring drafts generated." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task ApproveWorkflowAsync(Guid id) { var result = await TransactionService.ApproveSubledgerDocumentAsync(id); StatusMessage = result.Succeeded ? "Vendor bill draft approved." : result.ErrorMessage; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
     private async Task RejectWorkflowAsync(SubledgerDocumentWorkflowSnapshot workflow) { var result = await TransactionService.RejectSubledgerDocumentAsync(new RejectSubledgerDocumentRequest(workflow.Id, RejectionReason, workflow.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Vendor bill draft rejected. Its preparer can correct and resubmit it using the same vendor and bill number." : result.ErrorMessage; if (result.Succeeded) RejectionReason = string.Empty; Workspace = await WorkspaceService.GetWorkspaceAsync(); }
@@ -257,7 +269,7 @@ else
     private async Task ApplyPaymentAsync()
     {
         var applications = AvailableBillApplications.Where(application => application.Selected).Select(application => new PaymentDocumentApplicationRequest(application.DocumentId, application.Amount)).ToArray();
-        var result = await TransactionService.RecordVendorPaymentAsync(new RecordVendorPaymentRequest(PaymentForm.VendorId, PaymentForm.BankId, PaymentForm.Date, PaymentForm.Amount, PaymentForm.Reference, PaymentForm.Method, applications));
+        var result = await TransactionService.RecordVendorPaymentAsync(new RecordVendorPaymentRequest(PaymentForm.VendorId, PaymentForm.BankId, PaymentForm.Date, PaymentForm.Amount, PaymentForm.Reference, PaymentForm.Method, applications, PaymentForm.Currency, PaymentForm.ExchangeRateId));
         StatusMessage = result.Succeeded ? "Vendor payment recorded." : result.ErrorMessage;
         if (result.Succeeded) { Workspace = await WorkspaceService.GetWorkspaceAsync(); PaymentForm.Reset(); SyncPaymentApplications(); }
     }
@@ -278,8 +290,18 @@ else
     {
         PaymentForm.Applications.Clear();
         if (Workspace is null) return;
-        PaymentForm.Applications.AddRange(Workspace.Payables.Bills.Where(bill => bill.BalanceDue > 0).Select(bill => new PaymentApplicationEditor(bill.Id, bill.VendorId, bill.BillNumber, bill.DueDate, bill.BalanceDue)));
+        PaymentForm.Applications.AddRange(Workspace.Payables.Bills.Where(bill => bill.TransactionBalanceDue > 0).Select(bill => new PaymentApplicationEditor(bill.Id, bill.VendorId, bill.BillNumber, bill.DueDate, bill.TransactionBalanceDue, bill.TransactionCurrency)));
     }
+
+    private string NormalizeCurrency(string? currency) => (string.IsNullOrWhiteSpace(currency) ? Workspace?.Company.BaseCurrency : currency)?.Trim().ToUpperInvariant() ?? string.Empty;
+    private bool IsBaseCurrency(string? currency) => NormalizeCurrency(currency) == Workspace?.Company.BaseCurrency;
+    private string FormatTransactionAmount(decimal amount, string currency) => IsBaseCurrency(currency) ? $"{amount:C} {currency}" : $"{amount:N2} {currency}";
+    private IEnumerable<ExchangeRateSnapshot> ApplicableRates(string? currency, DateOnly date)
+    {
+        var transactionCurrency = NormalizeCurrency(currency); var baseCurrency = Workspace?.Company.BaseCurrency ?? string.Empty;
+        return ExchangeRates.Where(rate => rate.IsActive && rate.RateType == "Closing" && rate.EffectiveOn <= date && ((rate.BaseCurrency == transactionCurrency && rate.QuoteCurrency == baseCurrency) || (rate.BaseCurrency == baseCurrency && rate.QuoteCurrency == transactionCurrency))).OrderByDescending(rate => rate.EffectiveOn);
+    }
+    private static string RateLabel(ExchangeRateSnapshot rate) => $"{rate.EffectiveOn}: {rate.BaseCurrency}/{rate.QuoteCurrency} {rate.Rate:N8} — {rate.Source}";
 
     private string DefaultCostAccountNumber => Workspace?.GeneralLedger.Accounts.SingleOrDefault(account => account.OperationalRole == BrassLedger.Domain.Accounting.AccountingAccountRoles.CostOfGoodsSold)?.Number ?? string.Empty;
     private IEnumerable<TrackingDimensionValueSnapshot> ActiveTrackingDimensions(string type, DateOnly effectiveOn) =>
@@ -297,9 +319,11 @@ else
         public string Number { get; set; } = string.Empty;
         public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today);
         public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30));
+        public string Currency { get; set; } = string.Empty;
+        public Guid? ExchangeRateId { get; set; }
         public List<BillLineEditor> Lines { get; } = [new()];
         public decimal Total => Lines.Sum(line => line.Total);
-        public void Reset(string defaultCostAccount) { Number = string.Empty; Lines.Clear(); Lines.Add(new BillLineEditor { ExpenseAccount = defaultCostAccount }); }
+        public void Reset(string defaultCostAccount) { Number = string.Empty; ExchangeRateId = null; Lines.Clear(); Lines.Add(new BillLineEditor { ExpenseAccount = defaultCostAccount }); }
     }
     private sealed class BillLineEditor
     {
@@ -325,14 +349,16 @@ else
         public decimal Amount { get; set; }
         public string Method { get; set; } = "Check";
         public string Reference { get; set; } = string.Empty;
+        public string Currency { get; set; } = string.Empty;
+        public Guid? ExchangeRateId { get; set; }
         public List<PaymentApplicationEditor> Applications { get; } = [];
         public decimal AppliedAmount => Applications.Where(application => application.Selected).Sum(application => application.Amount);
         public decimal UnappliedAmount => Math.Max(0m, Amount - AppliedAmount);
-        public void Reset() { VendorId = Guid.Empty; Amount = 0m; Reference = string.Empty; Applications.Clear(); }
+        public void Reset() { VendorId = Guid.Empty; Amount = 0m; Reference = string.Empty; ExchangeRateId = null; Applications.Clear(); }
     }
-    private sealed class PaymentApplicationEditor(Guid documentId, Guid counterpartyId, string documentNumber, DateOnly dueDate, decimal openBalance)
+    private sealed class PaymentApplicationEditor(Guid documentId, Guid counterpartyId, string documentNumber, DateOnly dueDate, decimal openBalance, string currency)
     {
-        public Guid DocumentId { get; } = documentId; public Guid CounterpartyId { get; } = counterpartyId; public string DocumentNumber { get; } = documentNumber; public DateOnly DueDate { get; } = dueDate; public decimal OpenBalance { get; } = openBalance; public bool Selected { get; set; } public decimal Amount { get; set; } = openBalance;
+        public Guid DocumentId { get; } = documentId; public Guid CounterpartyId { get; } = counterpartyId; public string DocumentNumber { get; } = documentNumber; public DateOnly DueDate { get; } = dueDate; public decimal OpenBalance { get; } = openBalance; public string Currency { get; } = currency; public bool Selected { get; set; } public decimal Amount { get; set; } = openBalance;
     }
     private sealed class PaymentReversalEditor { public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Kind { get; set; } = "Voided"; public string Reason { get; set; } = string.Empty; }
     private sealed class VendorCreditEditor { public Guid BillId { get; set; } public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Amount { get; set; } public string Reference { get; set; } = string.Empty; public string OffsetAccount { get; set; } = string.Empty; public string Reason { get; set; } = string.Empty; public void Reset() { BillId = Guid.Empty; Amount = 0; Reference = string.Empty; Reason = string.Empty; } }

@@ -104,6 +104,13 @@ public sealed class FakeDataPopulationService(
             new SalesInvoice { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[Math.Min(1, customers.Count - 1)].Id, InvoiceNumber = "INV-30104", InvoiceDate = new DateOnly(2026, 4, 3), DueDate = new DateOnly(2026, 5, 3), Status = "Partial", Subtotal = 11620m, TaxAmount = 0m, TotalAmount = 11620m, BalanceDue = 5820m },
             new SalesInvoice { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[Math.Min(2, customers.Count - 1)].Id, InvoiceNumber = "INV-30106", InvoiceDate = new DateOnly(2026, 4, 5), DueDate = new DateOnly(2026, 5, 5), Status = "Open", Subtotal = 8420.15m, TaxAmount = 505.21m, TotalAmount = 8925.36m, BalanceDue = 8925.36m }
         };
+        var baseCurrency = await dbContext.Companies.Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        foreach (var invoice in invoices)
+        {
+            invoice.TransactionCurrency = baseCurrency; invoice.TransactionSubtotal = invoice.Subtotal; invoice.TransactionTaxAmount = invoice.TaxAmount;
+            invoice.TransactionTotalAmount = invoice.TotalAmount; invoice.TransactionBalanceDue = invoice.BalanceDue; invoice.ExchangeRateToBase = 1m;
+            invoice.ExchangeRateEffectiveOn = invoice.InvoiceDate; invoice.ExchangeRateSource = "Company base currency";
+        }
 
         await dbContext.SalesInvoices.AddRangeAsync(invoices, cancellationToken);
         return invoices.Length;
@@ -146,6 +153,12 @@ public sealed class FakeDataPopulationService(
             new VendorBill { Id = Guid.NewGuid(), CompanyId = companyId, VendorId = vendors[Math.Min(1, vendors.Count - 1)].Id, BillNumber = "B-9304", BillDate = new DateOnly(2026, 4, 4), DueDate = new DateOnly(2026, 4, 19), Status = "Open", TotalAmount = 4630.75m, BalanceDue = 4630.75m },
             new VendorBill { Id = Guid.NewGuid(), CompanyId = companyId, VendorId = vendors[Math.Min(2, vendors.Count - 1)].Id, BillNumber = "B-9307", BillDate = new DateOnly(2026, 4, 6), DueDate = new DateOnly(2026, 4, 16), Status = "Open", TotalAmount = 2190m, BalanceDue = 2190m }
         };
+        var baseCurrency = await dbContext.Companies.Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        foreach (var bill in bills)
+        {
+            bill.TransactionCurrency = baseCurrency; bill.TransactionTotalAmount = bill.TotalAmount; bill.TransactionBalanceDue = bill.BalanceDue;
+            bill.ExchangeRateToBase = 1m; bill.ExchangeRateEffectiveOn = bill.BillDate; bill.ExchangeRateSource = "Company base currency";
+        }
 
         await dbContext.VendorBills.AddRangeAsync(bills, cancellationToken);
         return bills.Length;

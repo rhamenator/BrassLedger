@@ -90,6 +90,12 @@ internal static class BrassLedgerSeedData
             new SalesInvoice { Id = Guid.Parse("8e3716d5-b2a9-4d6c-a742-c7196b950df3"), CompanyId = CompanyId, CustomerId = customers[2].Id, InvoiceNumber = "INV-24021", InvoiceDate = new DateOnly(2026, 3, 24), DueDate = new DateOnly(2026, 4, 23), Status = "Open", Subtotal = 9010.75m, TaxAmount = 0m, TotalAmount = 9010.75m, BalanceDue = 9010.75m },
             new SalesInvoice { Id = Guid.Parse("2e0c71ba-b85f-4df3-8639-dd95e57ff365"), CompanyId = CompanyId, CustomerId = customers[3].Id, InvoiceNumber = "INV-24024", InvoiceDate = new DateOnly(2026, 3, 30), DueDate = new DateOnly(2026, 4, 29), Status = "Open", Subtotal = 4990m, TaxAmount = 0m, TotalAmount = 4990m, BalanceDue = 4990m }
         };
+        foreach (var invoice in invoices)
+        {
+            invoice.TransactionCurrency = "USD"; invoice.TransactionSubtotal = invoice.Subtotal; invoice.TransactionTaxAmount = invoice.TaxAmount;
+            invoice.TransactionTotalAmount = invoice.TotalAmount; invoice.TransactionBalanceDue = invoice.BalanceDue; invoice.ExchangeRateToBase = 1m;
+            invoice.ExchangeRateEffectiveOn = invoice.InvoiceDate; invoice.ExchangeRateSource = "Company base currency";
+        }
 
         var vendors = new[]
         {
@@ -106,6 +112,11 @@ internal static class BrassLedgerSeedData
             new VendorBill { Id = Guid.Parse("e8cb96d5-bd1a-485f-bf6e-f7459d816d49"), CompanyId = CompanyId, VendorId = vendors[2].Id, BillNumber = "B-8822", BillDate = new DateOnly(2026, 3, 28), DueDate = new DateOnly(2026, 4, 7), Status = "Approved", TotalAmount = 4330.87m, BalanceDue = 4330.87m },
             new VendorBill { Id = Guid.Parse("46c42d81-bf15-49c7-a8a2-e4b1daebc9cc"), CompanyId = CompanyId, VendorId = vendors[3].Id, BillNumber = "B-8824", BillDate = new DateOnly(2026, 4, 1), DueDate = new DateOnly(2026, 4, 8), Status = "Open", TotalAmount = 7815m, BalanceDue = 7815m }
         };
+        foreach (var bill in vendorBills)
+        {
+            bill.TransactionCurrency = "USD"; bill.TransactionTotalAmount = bill.TotalAmount; bill.TransactionBalanceDue = bill.BalanceDue;
+            bill.ExchangeRateToBase = 1m; bill.ExchangeRateEffectiveOn = bill.BillDate; bill.ExchangeRateSource = "Company base currency";
+        }
 
         var inventoryItems = new[]
         {

@@ -300,6 +300,7 @@ public sealed class ConsolidationAdministrationTests(PlaywrightWebAppFixture fix
         await session.Page.Locator("#adjustmentPeriodStart").FillAsync("2026-01-01");
         await session.Page.Locator("#adjustmentAsOf").FillAsync("2026-08-31");
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "Discover exact matches" }).ClickAsync();
+        await Assertions.Expect(session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Discovery retained 1 new");
         var matches = session.Page.GetByRole(AriaRole.Table, new() { Name = "Reviewed intercompany matches" });
         await Assertions.Expect(matches).ToContainTextAsync("E2E-IC-INV-1001");
         await Assertions.Expect(matches).ToContainTextAsync("125.00 USD");

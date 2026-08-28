@@ -1101,6 +1101,36 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task ForeignCurrencyPaymentApi_UsesRetainedRateAndReturnsRealizedGain()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        var before = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var customer = before!.Receivables.Customers.First(); var bank = before.Treasury.BankAccounts.First();
+        var documentRateId = Guid.NewGuid(); var settlementRateId = Guid.NewGuid();
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.CurrencyExchangeRates.AddRange(
+                new() { Id = documentRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 1), Source = "Official test source", SourceReference = "https://example.test/fx/2026-05-01", IsActive = true },
+                new() { Id = settlementRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 2), Source = "Official test source", SourceReference = "https://example.test/fx/2026-05-02", IsActive = true });
+            await db.SaveChangesAsync();
+        }
+        var invoice = await PostInvoiceThroughWorkflowAsync(isolatedFactory.Services, new(customer.Id, "INV-API-FX-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "CAD invoice through API", Currency: "CAD", ExchangeRateId: documentRateId));
+        Assert.True(invoice.Succeeded, invoice.ErrorMessage);
+
+        var response = await client.PostAsJsonAsync("/api/customer-payments", new RecordCustomerPaymentRequest(customer.Id, bank.Id, new DateOnly(2026, 5, 2), 100m, "DEP-API-FX-1", "Wire", [new(invoice.Id!.Value, 100m)], "CAD", settlementRateId));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<TransactionResult>();
+        var after = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
+        var payment = Assert.Single(after!.Receivables.Payments!, item => item.Id == result!.Id);
+        Assert.Equal(100m, payment.TransactionAmount); Assert.Equal(80m, payment.Amount); Assert.Equal(5m, payment.RealizedGainLoss); Assert.Contains("2026-05-02", payment.ExchangeRateSourceReference);
+        var postedInvoice = after.Receivables.Invoices.Single(item => item.Id == invoice.Id);
+        Assert.Equal("CAD", postedInvoice.TransactionCurrency); Assert.Equal(0m, postedInvoice.TransactionBalanceDue); Assert.Equal(0m, postedInvoice.BalanceDue);
+    }
+
+    [Fact]
     public async Task BankingApi_ImportsStatementsAndReversesTransfersAndAdjustments()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();

@@ -614,6 +614,27 @@ public static class ServiceCollectionExtensions
                 && await HasIndexAsync(dbContext, subjectDateIndex, cancellationToken)
                 && await HasIndexAsync(dbContext, "IX_ConsolidationOwnershipEvents_ReversalOfEventId", cancellationToken);
         }
+        if (migrationId.EndsWith("_AddTransactionCurrencyDocuments", StringComparison.Ordinal))
+        {
+            string[] invoiceColumns = ["TransactionCurrency", "TransactionSubtotal", "TransactionTaxAmount", "TransactionTotalAmount", "TransactionBalanceDue", "ExchangeRateId", "ExchangeRateToBase", "ExchangeRateEffectiveOn", "ExchangeRateSource", "ExchangeRateSourceReference"];
+            foreach (var column in invoiceColumns)
+                if (!await HasColumnAsync(dbContext, "SalesInvoices", column, cancellationToken)) return false;
+            string[] billColumns = ["TransactionCurrency", "TransactionTotalAmount", "TransactionBalanceDue", "ExchangeRateId", "ExchangeRateToBase", "ExchangeRateEffectiveOn", "ExchangeRateSource", "ExchangeRateSourceReference"];
+            foreach (var column in billColumns)
+                if (!await HasColumnAsync(dbContext, "VendorBills", column, cancellationToken)) return false;
+            string[] paymentColumns = ["TransactionCurrency", "TransactionAmount", "TransactionAppliedAmount", "TransactionUnappliedAmount", "ExchangeRateId", "ExchangeRateToBase", "ExchangeRateEffectiveOn", "ExchangeRateSource", "ExchangeRateSourceReference", "RealizedGainLoss"];
+            foreach (var column in paymentColumns)
+                if (!await HasColumnAsync(dbContext, "SubledgerPayments", column, cancellationToken)) return false;
+            return await HasColumnAsync(dbContext, "SalesInvoiceLines", "BaseLineTotal", cancellationToken)
+                && await HasColumnAsync(dbContext, "SalesInvoiceLines", "BaseTaxAmount", cancellationToken)
+                && await HasColumnAsync(dbContext, "VendorBillLines", "BaseLineTotal", cancellationToken)
+                && await HasColumnAsync(dbContext, "VendorBillLines", "BaseTaxAmount", cancellationToken)
+                && await HasColumnAsync(dbContext, "SubledgerPaymentApplications", "TransactionAmount", cancellationToken)
+                && await HasColumnAsync(dbContext, "SubledgerPaymentApplications", "RealizedGainLoss", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_SalesInvoices_ExchangeRateId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_VendorBills_ExchangeRateId", cancellationToken)
+                && await HasIndexAsync(dbContext, "IX_SubledgerPayments_ExchangeRateId", cancellationToken);
+        }
         return false;
     }
 

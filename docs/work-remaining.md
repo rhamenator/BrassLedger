@@ -17,14 +17,14 @@ This is the canonical agent-readable queue for work still required before BrassL
 | --- | --- |
 | Updated | 2026-08-27 EDT |
 | Branch | `codex/tax-content-intake-wip-20260824` |
-| Last pushed commit | `712f49f feat(reporting): retain acquisition allocation detail` |
+| Last pushed commit | `d09f4b1 docs: verify acquisition accounting slice` |
 | In progress | Transaction-currency documents, remeasurement, and realized/unrealized foreign-exchange accounting |
-| Current evidence | `712f49f` closes `CONSOL-ACQUISITION` with schema-v2 line-item consideration, identifiable asset/liability, deferred-tax and measurement-period detail; future-field extensions; hostile-input and accounting reconciliation controls; guided browser entry; and current/comparative CSV, Excel, PDF and JSON retention. Its canonical out-of-tree Release gates passed: build 0 warnings/errors; SQLite/default 194 plus 10 expected PostgreSQL-only skips; PostgreSQL 204/204; API 35/35; components 16/16; isolated Chromium 37/37; both EF models clean; changed-file whitespace clean; all 12 projects free of known vulnerable direct/transitive NuGet packages. Independent accounting review remains `REVIEW-ACCOUNTING`, not repository work. |
+| Current evidence | First `FX-TRANSACTIONS` checkpoint is ready to commit: transaction/base amounts and frozen direct-or-inverse closing-rate provenance for ordinary invoices, bills, receipts and disbursements; realized settlement gain/loss and exact reversal; base-workflow compatibility; provider migrations with backfill, adoption and downgrade protection; API and guided AR/AP forms. Gates: Release build 0 warnings/errors; SQLite/default 197 pass plus 10 expected PostgreSQL skips; PostgreSQL 207/207; API 36/36; components 16/16; Chromium 37/37; both EF models clean; whitespace clean; all 12 projects free of known vulnerable packages. Period-end unrealized remeasurement and native foreign credits/refunds/returns remain next. |
 
 ## Immediate queue
 
 1. **Verified — CONSOL-ACQUISITION:** `712f49f` completes the controlled acquisition/disposal, continuing-control change, profit/NCI attribution, schema-v2 purchase-price-allocation, browser and export slice; independent professional review remains separately blocked.
-2. **In progress — FX-TRANSACTIONS:** implement transaction-currency documents, rate provenance, settlement remeasurement, and realized/unrealized gains and losses.
+2. **In progress — FX-TRANSACTIONS:** first checkpoint implements ordinary transaction-currency documents, frozen rate provenance and realized settlement gains/losses; next implement controlled period-end unrealized remeasurement and native foreign credit/refund/return handling.
 3. **Pending — ACCEPTANCE-01:** automate the uninterrupted representative-business scenario from clean installation through encrypted restore and audit trace.
 
 ## Remaining capability slices

@@ -88,6 +88,8 @@ Never edit `__EFMigrationsHistory` or record a migration that has not actually b
 
 Ownership-event schema 2 adds purchase-price-allocation line items inside the existing retained JSON document. It intentionally requires no relational migration: consideration types, identifiable asset/liability and deferred-tax detail, measurement-period changes, and extension fields can evolve without adding state-specific or framework-specific table columns. The service accepts posted legacy schema-1 acquisitions for reporting and reversal, while new or corrected acquisitions must use schema 2.
 
+`AddTransactionCurrencyDocuments` adds transaction-currency totals and balances, frozen closing-rate identity/factor/effective date/source provenance, and realized settlement gain/loss to ordinary invoices, vendor bills, payments, applications, and source lines. Existing rows are explicitly backfilled from each company's base currency and existing base amounts; they are not reinterpreted as foreign transactions. Restrictive rate relationships preserve source identity, while each posted document also retains the exact factor and source text used so later rate-master corrections cannot rewrite historical accounting. Lost-history adoption requires all material header, line, payment, application, and rate indexes. Downgrade is prohibited because it could delete transaction amounts, conversion evidence, and realized-gain/loss history.
+
 ## Verification
 
 At minimum, run:

@@ -473,6 +473,7 @@ public sealed partial class AccountingTransactionService
         if (!posting.Succeeded)
             return posting;
 
+        var baseCurrency = await db.Companies.AsNoTracking().Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
         var bill = new VendorBill
         {
             Id = billId,
@@ -484,6 +485,12 @@ public sealed partial class AccountingTransactionService
             Status = "Open",
             TotalAmount = allocation.TotalAmount,
             BalanceDue = allocation.TotalAmount,
+            TransactionCurrency = baseCurrency,
+            TransactionTotalAmount = allocation.TotalAmount,
+            TransactionBalanceDue = allocation.TotalAmount,
+            ExchangeRateToBase = 1m,
+            ExchangeRateEffectiveOn = allocation.BillDate,
+            ExchangeRateSource = "Company base currency",
             ConcurrencyToken = Guid.NewGuid().ToString("N")
         };
         db.VendorBills.Add(bill);
@@ -499,7 +506,8 @@ public sealed partial class AccountingTransactionService
             Description = $"{allocation.Description} — allocation line {line.Sequence}",
             Quantity = 1m,
             UnitCost = line.AllocatedAmount,
-            LineTotal = line.AllocatedAmount
+            LineTotal = line.AllocatedAmount,
+            BaseLineTotal = line.AllocatedAmount
         }));
         foreach (var line in postedLines)
         {
@@ -673,6 +681,7 @@ public sealed partial class AccountingTransactionService
         vendor.OpenBalance -= allocation.TotalAmount;
         bill.Status = "Voided";
         bill.BalanceDue = 0m;
+        bill.TransactionBalanceDue = 0m;
         bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
         allocation.Status = "Reversed";
         allocation.ReversalJournalEntryId = reversal.Id;

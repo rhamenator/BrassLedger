@@ -43,7 +43,7 @@ public sealed partial class ConsolidationService(IDbContextFactory<BrassLedgerDb
     {
         var companyId = CurrentCompanyId(); var userId = CurrentUserId(); if (companyId is null || userId is null) return [];
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        if (!await db.CompanyMemberships.AsNoTracking().AnyAsync(member => member.UserId == userId && member.CompanyId == companyId && member.IsOwner && member.IsActive, cancellationToken)) return [];
+        if (!await db.CompanyMemberships.AsNoTracking().AnyAsync(member => member.UserId == userId && member.CompanyId == companyId && member.IsActive, cancellationToken)) return [];
         return await db.CurrencyExchangeRates.AsNoTracking().Where(rate => rate.CompanyId == companyId).OrderBy(rate => rate.BaseCurrency).ThenBy(rate => rate.QuoteCurrency).ThenBy(rate => rate.RateType).ThenByDescending(rate => rate.EffectiveOn).Select(rate => new ExchangeRateSnapshot(rate.Id, rate.BaseCurrency, rate.QuoteCurrency, rate.Rate, rate.RateType.ToString(), rate.PeriodStartOn, rate.EffectiveOn, rate.Source, rate.SourceReference, rate.RetrievedOn, rate.IsActive, rate.ConcurrencyToken)).ToArrayAsync(cancellationToken);
     }
 

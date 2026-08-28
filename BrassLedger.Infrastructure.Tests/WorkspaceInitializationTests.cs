@@ -66,7 +66,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("40", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("41", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -178,7 +178,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("40", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("41", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -218,6 +218,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827160327_AddConsolidatedStatementPresentation';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827185331_AddConsolidationDisclosurePackages';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827201050_AddConsolidationOwnershipEvents';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827230231_AddTransactionCurrencyDocuments';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationAdjustmentBatches';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationIntercompanyMatches';"));
@@ -471,6 +472,50 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826082201_AddInventoryLocations';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826090933_AddPickPackBackorders';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('AccountingSchedules') WHERE name = 'DisposalJournalEntryId';"));
+    }
+
+    [Fact]
+    public async Task MigrationAdoption_RecognizesTransactionCurrencySchemaWithoutReplayingIt()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM __EFMigrationsHistory;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await services.InitializeBrassLedgerAsync();
+
+        await using var verified = new SqliteConnection($"Data Source={databasePath}");
+        await verified.OpenAsync();
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827230231_AddTransactionCurrencyDocuments';"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM pragma_table_info('SalesInvoices') WHERE name = 'TransactionCurrency';"));
+        Assert.Equal("Brass Ledger Manufacturing", await ReadScalarAsync(verified, "SELECT Name FROM Companies WHERE Name = 'Brass Ledger Manufacturing';"));
+    }
+
+    [Fact]
+    public async Task TransactionCurrencyMigration_BackfillsLegacyDocumentsFromCompanyBaseCurrency()
+    {
+        using var services = CreateServiceProvider(); using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
+        var migrator = db.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260827201050_AddConsolidationOwnershipEvents");
+        var companyId = Guid.NewGuid(); var customerId = Guid.NewGuid(); var vendorId = Guid.NewGuid(); var invoiceId = Guid.NewGuid(); var billId = Guid.NewGuid();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""INSERT INTO "Companies" ("Id", "Name", "LegalName", "TaxId", "BaseCurrency", "FiscalYearStartMonth") VALUES ({companyId}, {"CAD legacy company"}, {"CAD legacy company"}, {"00-0000000"}, {"CAD"}, {1});""");
+        await db.Database.ExecuteSqlInterpolatedAsync($"""INSERT INTO "Customers" ("Id", "CompanyId", "CustomerNumber", "Name", "Email", "State", "CreditLimit", "OpenBalance") VALUES ({customerId}, {companyId}, {"C-LEGACY-FX"}, {"Legacy customer"}, {"customer@example.test"}, {"ON"}, {1000m}, {80m});""");
+        await db.Database.ExecuteSqlInterpolatedAsync($"""INSERT INTO "Vendors" ("Id", "CompanyId", "VendorNumber", "Name", "Email", "State", "PaymentTerms", "OpenBalance") VALUES ({vendorId}, {companyId}, {"V-LEGACY-FX"}, {"Legacy vendor"}, {"vendor@example.test"}, {"ON"}, {"Net 30"}, {60m});""");
+        await db.Database.ExecuteSqlInterpolatedAsync($"""INSERT INTO "SalesInvoices" ("Id", "CompanyId", "CustomerId", "InvoiceNumber", "InvoiceDate", "DueDate", "Status", "Subtotal", "TaxAmount", "TotalAmount", "BalanceDue", "ConcurrencyToken") VALUES ({invoiceId}, {companyId}, {customerId}, {"INV-LEGACY-FX"}, {new DateOnly(2026, 1, 1)}, {new DateOnly(2026, 1, 31)}, {"Partial"}, {100m}, {5m}, {105m}, {80m}, {"legacy-invoice"});""");
+        await db.Database.ExecuteSqlInterpolatedAsync($"""INSERT INTO "VendorBills" ("Id", "CompanyId", "VendorId", "BillNumber", "BillDate", "DueDate", "Status", "TotalAmount", "BalanceDue", "ConcurrencyToken") VALUES ({billId}, {companyId}, {vendorId}, {"B-LEGACY-FX"}, {new DateOnly(2026, 1, 2)}, {new DateOnly(2026, 2, 1)}, {"Partial"}, {90m}, {60m}, {"legacy-bill"});""");
+
+        await migrator.MigrateAsync(); db.ChangeTracker.Clear();
+
+        var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == invoiceId); var bill = await db.VendorBills.SingleAsync(item => item.Id == billId);
+        Assert.Equal("CAD", invoice.TransactionCurrency); Assert.Equal(105m, invoice.TransactionTotalAmount); Assert.Equal(80m, invoice.TransactionBalanceDue); Assert.Equal(1m, invoice.ExchangeRateToBase); Assert.Null(invoice.ExchangeRateId);
+        Assert.Equal("CAD", bill.TransactionCurrency); Assert.Equal(90m, bill.TransactionTotalAmount); Assert.Equal(60m, bill.TransactionBalanceDue); Assert.Equal(1m, bill.ExchangeRateToBase); Assert.Null(bill.ExchangeRateId);
     }
 
     [Fact]
@@ -1541,6 +1586,73 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(before.Receivables.OpenBalance, afterPayment.Receivables.OpenBalance);
         Assert.Equal(before.Treasury.CashOnHand + 100m, afterPayment.Treasury.CashOnHand);
         Assert.Contains(afterPayment.GeneralLedger.RecentEntries, entry => entry.Description == "Customer payment");
+    }
+
+    [Fact]
+    public async Task ForeignCurrencyDocuments_FreezeRatesAndRecognizeSettlementGainLoss()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var initial = await workspaceService.GetWorkspaceAsync();
+        var customer = initial.Receivables.Customers.First(); var vendor = initial.Payables.Vendors.First(); var bank = initial.Treasury.BankAccounts.First();
+        var documentRateId = Guid.NewGuid(); var settlementRateId = Guid.NewGuid(); var inverseRateId = Guid.NewGuid(); var futureRateId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.CurrencyExchangeRates.AddRange(
+                new() { Id = documentRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 1), Source = "Bank of Canada daily rate", SourceReference = "https://example.test/cad-usd/2026-05-01", RetrievedOn = new DateOnly(2026, 5, 2) },
+                new() { Id = settlementRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 2), Source = "Bank of Canada daily rate", SourceReference = "https://example.test/cad-usd/2026-05-02", RetrievedOn = new DateOnly(2026, 5, 3) },
+                new() { Id = inverseRateId, CompanyId = companyId, BaseCurrency = "USD", QuoteCurrency = "EUR", Rate = .50m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 1), Source = "ECB inverse quotation", SourceReference = "https://example.test/usd-eur/2026-05-01" },
+                new() { Id = futureRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .85m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 10), Source = "Future observation", SourceReference = "https://example.test/cad-usd/2026-05-10" });
+            await db.SaveChangesAsync();
+        }
+
+        var invoice = await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-FX-CAD-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "CAD consulting invoice", Currency: "CAD", ExchangeRateId: documentRateId));
+        var bill = await PostVendorBillThroughWorkflowAsync(transactions, new(vendor.Id, "B-FX-CAD-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, "5100", "CAD professional-services bill", Currency: "CAD", ExchangeRateId: documentRateId));
+        Assert.True(invoice.Succeeded, invoice.ErrorMessage); Assert.True(bill.Succeeded, bill.ErrorMessage);
+        var inverseInvoice = await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-FX-EUR-1", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 10m, 0m, "4000", "EUR invoice using inverse quote", Currency: "EUR", ExchangeRateId: inverseRateId));
+        Assert.True(inverseInvoice.Succeeded, inverseInvoice.ErrorMessage);
+        Assert.Equal(20m, (await workspaceService.GetWorkspaceAsync()).Receivables.Invoices.Single(item => item.Id == inverseInvoice.Id).TotalAmount);
+        Assert.False((await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-FX-FUTURE", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 10m, 0m, "4000", "Future rate rejected", Currency: "CAD", ExchangeRateId: futureRateId))).Succeeded);
+        Assert.False((await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-FX-WRONG-PAIR", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 10m, 0m, "4000", "Wrong pair rejected", Currency: "CAD", ExchangeRateId: inverseRateId))).Succeeded);
+        Assert.False((await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-FX-BASE-WITH-RATE", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 10m, 0m, "4000", "Base currency rate rejected", Currency: "USD", ExchangeRateId: documentRateId))).Succeeded);
+        var recurringForeign = await transactions.SaveRecurringInvoiceTemplateAsync(new(new(customer.Id, "INV-FX-RECUR", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "Foreign recurring invoice", Currency: "CAD", ExchangeRateId: documentRateId), "Monthly", 1, new DateOnly(2026, 6, 1)));
+        Assert.False(recurringForeign.Succeeded); Assert.Contains("current retained rate", recurringForeign.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var posted = await workspaceService.GetWorkspaceAsync();
+        var invoiceSnapshot = posted.Receivables.Invoices.Single(item => item.Id == invoice.Id); var billSnapshot = posted.Payables.Bills.Single(item => item.Id == bill.Id);
+        Assert.Equal("CAD", invoiceSnapshot.TransactionCurrency); Assert.Equal(100m, invoiceSnapshot.TransactionBalanceDue); Assert.Equal(75m, invoiceSnapshot.BalanceDue); Assert.Equal(.75m, invoiceSnapshot.ExchangeRateToBase); Assert.Contains("2026-05-01", invoiceSnapshot.ExchangeRateSourceReference);
+        Assert.Equal("CAD", billSnapshot.TransactionCurrency); Assert.Equal(100m, billSnapshot.TransactionBalanceDue); Assert.Equal(75m, billSnapshot.BalanceDue);
+
+        var receipt = await transactions.RecordCustomerPaymentAsync(new(customer.Id, bank.Id, new DateOnly(2026, 5, 2), 40m, "DEP-FX-CAD-1A", "Wire", [new(invoice.Id!.Value, 40m)], "CAD", settlementRateId));
+        var finalReceipt = await transactions.RecordCustomerPaymentAsync(new(customer.Id, bank.Id, new DateOnly(2026, 5, 2), 60m, "DEP-FX-CAD-1B", "Wire", [new(invoice.Id!.Value, 60m)], "CAD", settlementRateId));
+        var disbursement = await transactions.RecordVendorPaymentAsync(new(vendor.Id, bank.Id, new DateOnly(2026, 5, 2), 100m, "PAY-FX-CAD-1", "Wire", [new(bill.Id!.Value, 100m)], "CAD", settlementRateId));
+        Assert.True(receipt.Succeeded, receipt.ErrorMessage); Assert.True(finalReceipt.Succeeded, finalReceipt.ErrorMessage); Assert.True(disbursement.Succeeded, disbursement.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var customerPayment = await db.SubledgerPayments.SingleAsync(item => item.Id == receipt.Id); var finalCustomerPayment = await db.SubledgerPayments.SingleAsync(item => item.Id == finalReceipt.Id); var vendorPayment = await db.SubledgerPayments.SingleAsync(item => item.Id == disbursement.Id);
+            Assert.Equal(32m, customerPayment.Amount); Assert.Equal(30m, customerPayment.AppliedAmount); Assert.Equal(2m, customerPayment.RealizedGainLoss); Assert.Equal(40m, customerPayment.TransactionAmount); Assert.Equal(.80m, customerPayment.ExchangeRateToBase);
+            Assert.Equal(48m, finalCustomerPayment.Amount); Assert.Equal(45m, finalCustomerPayment.AppliedAmount); Assert.Equal(3m, finalCustomerPayment.RealizedGainLoss); Assert.Equal(60m, finalCustomerPayment.TransactionAmount);
+            Assert.Equal(80m, vendorPayment.Amount); Assert.Equal(75m, vendorPayment.AppliedAmount); Assert.Equal(-5m, vendorPayment.RealizedGainLoss);
+            var customerGainLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == customerPayment.JournalEntryId).Join(db.Accounts, line => line.AccountId, account => account.Id, (line, account) => new { line, account }).Where(item => item.account.OperationalRole == AccountingAccountRoles.ForeignExchangeGain).Select(item => item.line.Credit).ToListAsync();
+            var vendorLossLines = await db.JournalEntryLines.Where(line => line.JournalEntryId == vendorPayment.JournalEntryId).Join(db.Accounts, line => line.AccountId, account => account.Id, (line, account) => new { line, account }).Where(item => item.account.OperationalRole == AccountingAccountRoles.ForeignExchangeLoss).Select(item => item.line.Debit).ToListAsync();
+            Assert.Equal(2m, customerGainLines.Sum());
+            Assert.Equal(5m, vendorLossLines.Sum());
+        }
+        var settled = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(0m, settled.Receivables.Invoices.Single(item => item.Id == invoice.Id).TransactionBalanceDue); Assert.Equal(0m, settled.Payables.Bills.Single(item => item.Id == bill.Id).TransactionBalanceDue);
+        Assert.Contains(settled.Receivables.Payments!, payment => payment.Id == receipt.Id && payment.TransactionCurrency == "CAD" && payment.RealizedGainLoss == 2m && payment.ExchangeRateSourceReference.Contains("2026-05-02"));
+        Assert.Contains(settled.Receivables.Payments!, payment => payment.Id == finalReceipt.Id && payment.RealizedGainLoss == 3m);
+        Assert.False((await transactions.RecordCustomerAdjustmentAsync(new(invoice.Id.Value, new DateOnly(2026, 5, 3), 1m, "CM-FX-BLOCKED", "5100", "Foreign credit requires native amount"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerPaymentAsync(new(receipt.Id!.Value, new DateOnly(2026, 5, 3), "Wire returned"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerPaymentAsync(new(finalReceipt.Id!.Value, new DateOnly(2026, 5, 3), "Wire returned"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerPaymentAsync(new(disbursement.Id!.Value, new DateOnly(2026, 5, 3), "Wire cancelled", "Voided"))).Succeeded);
+        var restored = await workspaceService.GetWorkspaceAsync();
+        Assert.Equal(100m, restored.Receivables.Invoices.Single(item => item.Id == invoice.Id).TransactionBalanceDue); Assert.Equal(75m, restored.Receivables.Invoices.Single(item => item.Id == invoice.Id).BalanceDue);
+        Assert.Equal(100m, restored.Payables.Bills.Single(item => item.Id == bill.Id).TransactionBalanceDue); Assert.Equal(75m, restored.Payables.Bills.Single(item => item.Id == bill.Id).BalanceDue);
     }
 
     [Fact]
