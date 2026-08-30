@@ -15,7 +15,7 @@ This is the canonical agent-readable queue for work still required before BrassL
 
 | Field | Current value |
 | --- | --- |
-| Updated | 2026-08-27 EDT |
+| Updated | 2026-08-30 EDT |
 | Branch | `codex/tax-content-intake-wip-20260824` |
 | Latest implementation checkpoint | `9e03097 feat(accounting): support foreign unapplied refunds` |
 | In progress | Native foreign credit/refund/return handling |
@@ -31,6 +31,28 @@ This is the canonical agent-readable queue for work still required before BrassL
 - Browser status: 38/38 passed at `413b182`. The approved Ledger baseline now includes the previously implemented remeasurement panel. Snapshot date defaults are normalized to the August 27, 2026 reference day during capture so midnight/day rollover does not create false failures; seeded historical data is not rewritten. Pre-normalization diagnostic captures remain under `/home/rich/temp` only.
 - Do not mark foreign-refund sub-slice 1 `Verified` until service/API tests prove hostile concurrent refunds cannot over-release either retained balance and complete the focused negative matrix: wrong/inactive/future/other-company rate, wrong pair, wrong bank/counterparty/currency, amount above transaction balance, insufficient customer cash, duplicate reference, closed period, completed reconciliation, stale/concurrent request, out-of-order refund reversal, and original-payment reversal while a refund is active. Several controls already exist generically, but each requires explicit refund-path evidence.
 - Next product work after verifying this checkpoint: foreign invoice credit memos/write-offs, followed by foreign vendor credits, exactly as ordered below.
+
+## User-requested pause — 2026-08-28
+
+- Continuation reference: `BL-HANDOFF-20260828-01` (conversation reference `01a03532-9e64-7933-aff5-07eb9af6a4ff`).
+- The user requested that no further work occur after the turn recording this handoff.
+- Branch: `codex/tax-content-intake-wip-20260824`; last committed checkpoint remains `bd4182c docs: record foreign refund browser evidence` on both local `HEAD` and the tracked remote at the time of inspection.
+- The worktree is intentionally dirty. Six source files contain an **unbuilt and untested WIP** that carries the existing `SubledgerPayment.ConcurrencyToken` into `SubledgerPaymentSnapshot`, submits it from the receivables/payables refund forms, and rejects a refund when a supplied token no longer matches the payment. Modified files: `BrassLedger.Application/Accounting/BusinessWorkspaceSnapshot.cs`, `BrassLedger.Application/Accounting/TransactionModels.cs`, `BrassLedger.Infrastructure/Accounting/AccountingTransactionService.cs`, `BrassLedger.Infrastructure/Accounting/BusinessWorkspaceService.cs`, `BrassLedger.Web/Components/Pages/Receivables.razor`, and `BrassLedger.Web/Components/Pages/Payables.razor`.
+- Do not assume those WIP edits compile. First inspect `git status` and `git diff`; then build and add focused stale-token coverage. Preserve or deliberately revise the edits only after review.
+- Complete the foreign-refund acceptance matrix next: hostile PostgreSQL concurrent refunds; wrong/inactive/future/other-company rate; wrong currency pair; wrong bank/company; over-refund; insufficient customer cash; duplicate reference; closed period; completed reconciliation; stale request; out-of-order refund reversal; and original-payment reversal while a refund remains active. Counterparty and payment currency are derived from the retained payment rather than accepted from the request, so document and test that structural protection instead of inventing client-controlled fields.
+- After focused tests, run the proportional gates: Release build, default/SQLite tests, PostgreSQL tests using disposable data, API tests, component tests, Chromium tests if rendered behavior changed, both provider drift checks, vulnerability scan for all projects, and whitespace check. Use `/home/rich/temp` for all temporary artifacts.
+- If all evidence passes, update this ledger and `docs/production-readiness.md`, checkpoint and push the verified refund slice, then continue with typed foreign invoice credit memos/write-offs and foreign vendor credits.
+- Completion estimate remains **68%**; the WIP does not advance the estimate until verified.
+- Continuation prompt: `Resume BrassLedger from handoff BL-HANDOFF-20260828-01 in /home/rich/dev/BrassLedger. Read the active goal attachment and docs/work-remaining.md completely, inspect the dirty worktree before changing anything, and continue the foreign unapplied-payment refund concurrency/negative acceptance slice. Review the six uncommitted concurrency-token edits, build them, add focused stale-token and hostile PostgreSQL concurrent-refund tests plus the documented negative matrix, fix only evidenced defects, run all proportional gates using /home/rich/temp, update the canonical readiness documents, and commit/push only a verified checkpoint on codex/tax-content-intake-wip-20260824. Then proceed in the documented FX implementation order.`
+
+## Two defects fixed in the WIP — 2026-08-30
+
+- The six-file WIP from `BL-HANDOFF-20260828-01` did compile, but review found two real defects, now fixed and built:
+  1. `AccountingTransactionService.cs`'s new stale-token check was gated behind `!string.IsNullOrWhiteSpace(request.PaymentConcurrencyToken)`, so any caller omitting the token (an older client, a script, a render race) silently bypassed the check instead of being rejected. Made unconditional, matching the sibling check in `CustomerReturnCredits.cs`.
+  2. `Payables.razor`/`Receivables.razor` only refreshed `Workspace` inside `if (result.Succeeded)`, so a stale-token rejection left `SelectedRefundPayment` (a computed property re-reading `Workspace`) stuck on the same stale token forever — resubmitting always failed the same way, with no way out short of a full page reload. `Workspace` now refreshes unconditionally after the call.
+- `WorkspaceInitializationTests.cs` had five existing `RefundUnappliedPaymentAsync` calls that omitted the token and were relying on the now-removed bypass; updated all five to supply the real current `ConcurrencyToken` (fetched from a live workspace/payment snapshot, not hardcoded, so they stay correct if token rotation ever changes).
+- Verified: full solution builds with 0 warnings/errors; `BrassLedger.Infrastructure.Tests` passes 198/198 (10 skipped, Postgres-only, no live instance available); `BrassLedger.Web.Tests` passes 16/16.
+- **This does not advance the slice to Verified.** The hostile-concurrent-refund negative acceptance matrix from the pause note above (wrong/inactive/future/other-company rate, wrong pair, wrong bank/counterparty/currency, over-refund, insufficient cash, duplicate reference, closed period, completed reconciliation, out-of-order refund reversal, original-payment reversal while active) is still not written. Completion estimate remains **68%**.
 
 ## Immediate queue
 

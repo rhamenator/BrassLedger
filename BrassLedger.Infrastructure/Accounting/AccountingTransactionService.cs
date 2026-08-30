@@ -1071,6 +1071,7 @@ public sealed partial class AccountingTransactionService(
         var payment = await db.SubledgerPayments.SingleOrDefaultAsync(item => item.Id == request.PaymentId && item.CompanyId == companyId, cancellationToken);
         var transactionAmount = RoundCurrency(request.Amount);
         if (payment is null || payment.Status != "Posted" || transactionAmount > payment.TransactionUnappliedAmount) return TransactionResult.Failure("The refund cannot exceed the transaction-currency unapplied balance of a posted payment.");
+        if (!string.Equals(request.PaymentConcurrencyToken, payment.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The payment changed after the refund form was opened. Refresh and review its current unapplied balance.");
         if (request.RefundDate < payment.PaymentDate) return TransactionResult.Failure("The refund date cannot precede the payment date.");
         var (refundRate, refundRateError) = await ResolveTransactionRateAsync(db, companyId, payment.TransactionCurrency, request.ExchangeRateId, request.RefundDate, cancellationToken);
         if (refundRateError is not null) return TransactionResult.Failure(refundRateError);

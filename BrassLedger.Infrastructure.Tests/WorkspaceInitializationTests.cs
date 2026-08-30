@@ -1639,15 +1639,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         var foreignDeposit = await transactions.RecordCustomerPaymentAsync(new(customer.Id, bank.Id, new DateOnly(2026, 5, 1), 100m, "DEP-FX-REFUND-1", "Wire", [], "CAD", documentRateId));
         Assert.True(foreignDeposit.Succeeded, foreignDeposit.ErrorMessage);
-        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(foreignDeposit.Id!.Value, bank.Id, new DateOnly(2026, 5, 2), 40m, "RF-FX-CAD-NO-RATE", "Missing retained rate"))).Succeeded);
-        var foreignRefund = await transactions.RefundUnappliedPaymentAsync(new(foreignDeposit.Id!.Value, bank.Id, new DateOnly(2026, 5, 2), 40m, "RF-FX-CAD-1", "Return excess CAD deposit", settlementRateId));
+        var foreignDepositToken = (await workspaceService.GetWorkspaceAsync()).Receivables.Payments!.Single(item => item.Id == foreignDeposit.Id!.Value).ConcurrencyToken;
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(foreignDeposit.Id!.Value, bank.Id, new DateOnly(2026, 5, 2), 40m, "RF-FX-CAD-NO-RATE", "Missing retained rate", null, foreignDepositToken))).Succeeded);
+        var foreignRefund = await transactions.RefundUnappliedPaymentAsync(new(foreignDeposit.Id!.Value, bank.Id, new DateOnly(2026, 5, 2), 40m, "RF-FX-CAD-1", "Return excess CAD deposit", settlementRateId, foreignDepositToken));
         Assert.True(foreignRefund.Succeeded, foreignRefund.ErrorMessage);
         var afterForeignRefund = await workspaceService.GetWorkspaceAsync();
         var retainedRefund = Assert.Single(afterForeignRefund.Receivables.Adjustments!, item => item.Id == foreignRefund.Id);
         Assert.Equal("CAD", retainedRefund.TransactionCurrency); Assert.Equal(40m, retainedRefund.TransactionAmount); Assert.Equal(30m, retainedRefund.CarryingAmount); Assert.Equal(32m, retainedRefund.Amount); Assert.Equal(-2m, retainedRefund.RealizedGainLoss); Assert.Equal("AdjustmentDateRate", retainedRefund.RateBasis); Assert.Contains("2026-05-02", retainedRefund.ExchangeRateSourceReference);
         var remainingDeposit = Assert.Single(afterForeignRefund.Receivables.Payments!, item => item.Id == foreignDeposit.Id);
         Assert.Equal(60m, remainingDeposit.TransactionUnappliedAmount); Assert.Equal(45m, remainingDeposit.UnappliedAmount);
-        var finalForeignRefund = await transactions.RefundUnappliedPaymentAsync(new(foreignDeposit.Id!.Value, bank.Id, new DateOnly(2026, 5, 3), 60m, "RF-FX-CAD-2", "Return final CAD deposit", settlementRateId));
+        var finalForeignRefund = await transactions.RefundUnappliedPaymentAsync(new(foreignDeposit.Id!.Value, bank.Id, new DateOnly(2026, 5, 3), 60m, "RF-FX-CAD-2", "Return final CAD deposit", settlementRateId, remainingDeposit.ConcurrencyToken));
         Assert.True(finalForeignRefund.Succeeded, finalForeignRefund.ErrorMessage);
         Assert.False((await transactions.ReverseSubledgerAdjustmentAsync(new(foreignRefund.Id!.Value, new DateOnly(2026, 5, 4), "Out-of-order reversal"))).Succeeded);
         Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new(finalForeignRefund.Id!.Value, new DateOnly(2026, 5, 4), "Final CAD refund recalled"))).Succeeded);
@@ -1657,7 +1658,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         var foreignAdvance = await transactions.RecordVendorPaymentAsync(new(vendor.Id, bank.Id, new DateOnly(2026, 5, 1), 100m, "ADV-FX-REFUND-1", "Wire", [], "CAD", documentRateId));
         Assert.True(foreignAdvance.Succeeded, foreignAdvance.ErrorMessage);
-        var vendorRefund = await transactions.RefundUnappliedPaymentAsync(new(foreignAdvance.Id!.Value, bank.Id, new DateOnly(2026, 5, 2), 40m, "VR-FX-CAD-1", "Vendor returned CAD advance", settlementRateId));
+        var foreignAdvanceToken = (await workspaceService.GetWorkspaceAsync()).Payables.Payments!.Single(item => item.Id == foreignAdvance.Id!.Value).ConcurrencyToken;
+        var vendorRefund = await transactions.RefundUnappliedPaymentAsync(new(foreignAdvance.Id!.Value, bank.Id, new DateOnly(2026, 5, 2), 40m, "VR-FX-CAD-1", "Vendor returned CAD advance", settlementRateId, foreignAdvanceToken));
         Assert.True(vendorRefund.Succeeded, vendorRefund.ErrorMessage);
         var afterVendorRefund = await workspaceService.GetWorkspaceAsync();
         var retainedVendorRefund = Assert.Single(afterVendorRefund.Payables.Adjustments!, item => item.Id == vendorRefund.Id);
@@ -1971,7 +1973,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         var deposit = await transactions.RecordCustomerPaymentAsync(new RecordCustomerPaymentRequest(customer.Id, bank.Id, new DateOnly(2026, 6, 4), 25m, "DEP-ADJ-1", "ACH", []));
         Assert.True(deposit.Succeeded, deposit.ErrorMessage);
-        var refund = await transactions.RefundUnappliedPaymentAsync(new RefundUnappliedPaymentRequest(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 5), 10m, "RF-ADJ-1", "Return excess deposit"));
+        var depositToken = (await workspaceService.GetWorkspaceAsync()).Receivables.Payments!.Single(item => item.Id == deposit.Id!.Value).ConcurrencyToken;
+        var refund = await transactions.RefundUnappliedPaymentAsync(new RefundUnappliedPaymentRequest(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 5), 10m, "RF-ADJ-1", "Return excess deposit", PaymentConcurrencyToken: depositToken));
         Assert.True(refund.Succeeded, refund.ErrorMessage);
         var refunded = await workspaceService.GetWorkspaceAsync();
         Assert.Equal(15m, refunded.Receivables.Payments!.Single(item => item.Id == deposit.Id).UnappliedAmount);

@@ -158,7 +158,7 @@ public sealed record BillLineSnapshot(int Sequence, string Description, decimal 
 
 public sealed record SubledgerPaymentSnapshot(Guid Id, string Direction, string CounterpartyName, DateOnly PaymentDate, decimal Amount, decimal AppliedAmount, decimal UnappliedAmount, string Reference, string Method, string Status, IReadOnlyList<PaymentApplicationSnapshot> Applications,
     string TransactionCurrency = "USD", decimal TransactionAmount = 0m, decimal TransactionAppliedAmount = 0m, decimal TransactionUnappliedAmount = 0m, decimal ExchangeRateToBase = 1m, decimal RealizedGainLoss = 0m,
-    DateOnly? ExchangeRateEffectiveOn = null, string ExchangeRateSource = "", string ExchangeRateSourceReference = "");
+    DateOnly? ExchangeRateEffectiveOn = null, string ExchangeRateSource = "", string ExchangeRateSourceReference = "", string ConcurrencyToken = "");
 public sealed record PaymentApplicationSnapshot(Guid DocumentId, string DocumentNumber, decimal Amount, decimal TransactionAmount = 0m, decimal RealizedGainLoss = 0m);
 public sealed record SubledgerAdjustmentSnapshot(Guid Id, string Subledger, string Kind, Guid CounterpartyId, string CounterpartyName, Guid? DocumentId, string DocumentNumber, Guid? PaymentId, DateOnly AdjustmentDate, decimal Amount, string Reference, string Reason, string OffsetAccountNumber, string Status, Guid JournalEntryId, Guid? ReversalJournalEntryId,
     string TransactionCurrency = "USD", decimal TransactionAmount = 0m, decimal CarryingAmount = 0m, string RateBasis = "BaseCurrency", decimal ExchangeRateToBase = 1m, decimal RealizedGainLoss = 0m,
