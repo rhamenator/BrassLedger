@@ -1995,6 +1995,82 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task ForeignInvoiceCreditsAndWriteOffs_TranslateAtChosenPolicyAndReverseExactly()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var customer = before.Receivables.Customers.First();
+
+        var documentRateId = Guid.NewGuid(); var adjustmentDateRateId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.CurrencyExchangeRates.AddRange(
+                new() { Id = documentRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 1), Source = "Test document rate", SourceReference = "https://example.test/cad-usd/2026-06-01" },
+                new() { Id = adjustmentDateRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 2), Source = "Test adjustment-date rate", SourceReference = "https://example.test/cad-usd/2026-06-02" });
+            await db.SaveChangesAsync();
+        }
+
+        var invoice = await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-FX-CREDIT-1", new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 30), 100m, 0m, "4000", "Foreign credit-memo test invoice", Currency: "CAD", ExchangeRateId: documentRateId));
+        Assert.True(invoice.Succeeded, invoice.ErrorMessage);
+        var invoiceSnapshot = (await workspaceService.GetWorkspaceAsync()).Receivables.Invoices.Single(item => item.Id == invoice.Id);
+        Assert.Equal(100m, invoiceSnapshot.TransactionBalanceDue); Assert.Equal(75m, invoiceSnapshot.BalanceDue);
+
+        // A foreign invoice requires an explicit, kind-consistent rate basis.
+        Assert.False((await transactions.RecordCustomerAdjustmentAsync(new(invoice.Id!.Value, new DateOnly(2026, 6, 2), 10m, "CM-FX-NOPOLICY", "4000", "Missing rate basis rejected"))).Succeeded);
+        Assert.False((await transactions.RecordCustomerAdjustmentAsync(new(invoice.Id!.Value, new DateOnly(2026, 6, 2), 10m, "WO-FX-WRONGPOLICY", "5100", "Write-off cannot use AdjustmentDateRate", "WriteOff", adjustmentDateRateId, "AdjustmentDateRate"))).Succeeded);
+
+        // OriginalDocumentRate: no rate has changed since the invoice was booked, so the translated
+        // amount and the proportional carrying release agree exactly -- zero realized gain/loss.
+        var originalRateCredit = await transactions.RecordCustomerAdjustmentAsync(new(invoice.Id!.Value, new DateOnly(2026, 6, 2), 40m, "CM-FX-ORIGRATE", "4000", "Original-rate concession", "CreditMemo", RateBasis: "OriginalDocumentRate"));
+        Assert.True(originalRateCredit.Succeeded, originalRateCredit.ErrorMessage);
+        var afterOriginalRateCredit = (await workspaceService.GetWorkspaceAsync());
+        var originalRateAdjustment = Assert.Single(afterOriginalRateCredit.Receivables.Adjustments!, item => item.Id == originalRateCredit.Id);
+        Assert.Equal(40m, originalRateAdjustment.TransactionAmount); Assert.Equal(30m, originalRateAdjustment.CarryingAmount); Assert.Equal(30m, originalRateAdjustment.Amount); Assert.Equal(0m, originalRateAdjustment.RealizedGainLoss); Assert.Equal("OriginalDocumentRate", originalRateAdjustment.RateBasis);
+        var afterOriginalRateInvoice = afterOriginalRateCredit.Receivables.Invoices.Single(item => item.Id == invoice.Id);
+        Assert.Equal(60m, afterOriginalRateInvoice.TransactionBalanceDue); Assert.Equal(45m, afterOriginalRateInvoice.BalanceDue);
+
+        // AdjustmentDateRate: a new, higher rate is selected for this dated concession. The proportional
+        // carrying release (based on the invoice's own retained rate) differs from the translated amount
+        // at the new rate, and the difference posts explicitly to realized FX loss.
+        var adjustmentDateCredit = await transactions.RecordCustomerAdjustmentAsync(new(invoice.Id!.Value, new DateOnly(2026, 6, 3), 30m, "CM-FX-ADJRATE", "4000", "Dated concession", "CreditMemo", adjustmentDateRateId, "AdjustmentDateRate"));
+        Assert.True(adjustmentDateCredit.Succeeded, adjustmentDateCredit.ErrorMessage);
+        var afterAdjustmentDateCredit = await workspaceService.GetWorkspaceAsync();
+        var adjustmentDateAdjustment = Assert.Single(afterAdjustmentDateCredit.Receivables.Adjustments!, item => item.Id == adjustmentDateCredit.Id);
+        Assert.Equal(30m, adjustmentDateAdjustment.TransactionAmount); Assert.Equal(22.5m, adjustmentDateAdjustment.CarryingAmount); Assert.Equal(24m, adjustmentDateAdjustment.Amount); Assert.Equal(1.5m, adjustmentDateAdjustment.RealizedGainLoss); Assert.Equal("AdjustmentDateRate", adjustmentDateAdjustment.RateBasis);
+        var afterAdjustmentDateInvoice = afterAdjustmentDateCredit.Receivables.Invoices.Single(item => item.Id == invoice.Id);
+        Assert.Equal(30m, afterAdjustmentDateInvoice.TransactionBalanceDue); Assert.Equal(22.5m, afterAdjustmentDateInvoice.BalanceDue);
+
+        // CarryingValue write-off of the exact remainder: no new conversion, no realized FX result.
+        var writeOff = await transactions.RecordCustomerAdjustmentAsync(new(invoice.Id!.Value, new DateOnly(2026, 6, 4), 30m, "WO-FX-CARRYING", "5100", "Uncollectible remainder", "WriteOff", RateBasis: "CarryingValue"));
+        Assert.True(writeOff.Succeeded, writeOff.ErrorMessage);
+        var afterWriteOff = await workspaceService.GetWorkspaceAsync();
+        var writeOffAdjustment = Assert.Single(afterWriteOff.Receivables.Adjustments!, item => item.Id == writeOff.Id);
+        Assert.Equal(30m, writeOffAdjustment.TransactionAmount); Assert.Equal(22.5m, writeOffAdjustment.CarryingAmount); Assert.Equal(22.5m, writeOffAdjustment.Amount); Assert.Equal(0m, writeOffAdjustment.RealizedGainLoss); Assert.Equal("CarryingValue", writeOffAdjustment.RateBasis);
+        var afterWriteOffInvoice = afterWriteOff.Receivables.Invoices.Single(item => item.Id == invoice.Id);
+        Assert.Equal(0m, afterWriteOffInvoice.TransactionBalanceDue); Assert.Equal(0m, afterWriteOffInvoice.BalanceDue); Assert.Equal("Paid", afterWriteOffInvoice.Status);
+
+        // Exact reversal, in reverse order, restores both the transaction- and base-currency balances.
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new(writeOff.Id!.Value, new DateOnly(2026, 6, 5), "Debtor paid after all"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new(adjustmentDateCredit.Id!.Value, new DateOnly(2026, 6, 5), "Concession withdrawn"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new(originalRateCredit.Id!.Value, new DateOnly(2026, 6, 5), "Correction withdrawn"))).Succeeded);
+        var restoredInvoice = (await workspaceService.GetWorkspaceAsync()).Receivables.Invoices.Single(item => item.Id == invoice.Id);
+        Assert.Equal(100m, restoredInvoice.TransactionBalanceDue); Assert.Equal(75m, restoredInvoice.BalanceDue); Assert.Equal("Open", restoredInvoice.Status);
+        var restoredCustomer = (await workspaceService.GetWorkspaceAsync()).Receivables.Customers.Single(item => item.Id == customer.Id);
+        Assert.Equal(customer.OpenBalance + restoredInvoice.BalanceDue, restoredCustomer.OpenBalance);
+
+        // A base-currency invoice must not accept a rate basis at all.
+        var baseInvoice = await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-BASE-CREDIT-1", new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 30), 50m, 0m, "4000", "Base-currency invoice"));
+        Assert.True(baseInvoice.Succeeded, baseInvoice.ErrorMessage);
+        Assert.False((await transactions.RecordCustomerAdjustmentAsync(new(baseInvoice.Id!.Value, new DateOnly(2026, 6, 2), 10m, "CM-BASE-NOPOLICY", "4000", "Rate basis rejected on base-currency invoice", "CreditMemo", RateBasis: "OriginalDocumentRate"))).Succeeded);
+    }
+
+    [Fact]
     public async Task RefundUnappliedPayment_RejectsHostileAndOutOfRangeRequestsWithoutMutatingState()
     {
         using var services = CreateServiceProvider();
