@@ -1942,6 +1942,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(receipt.Succeeded, receipt.ErrorMessage);
         Assert.False((await transactions.RecordVendorPaymentAsync(new RecordVendorPaymentRequest(vendorId, bankId, new DateOnly(2026, 5, 2), 1m, "CHK-PAY-SOD-1", "Check", []))).Succeeded);
         Assert.False((await transactions.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(receipt.Id!.Value, new DateOnly(2026, 5, 3), "Unauthorized return", "Returned"))).Succeeded);
+        var unauthorizedRefund = await transactions.RefundUnappliedPaymentAsync(new RefundUnappliedPaymentRequest(receipt.Id.Value, bankId, new DateOnly(2026, 5, 3), 1m, "RF-PAY-SOD-1", "Unauthorized refund"));
+        Assert.False(unauthorizedRefund.Succeeded);
+        Assert.Contains("not authorized", unauthorizedRefund.ErrorMessage, StringComparison.OrdinalIgnoreCase);
 
         ActAs(BrassLedgerPermissions.PaymentReverse);
         var returned = await transactions.ReverseSubledgerPaymentAsync(new ReverseSubledgerPaymentRequest(receipt.Id.Value, new DateOnly(2026, 5, 3), "Authorized return", "Returned"));
@@ -2061,6 +2064,33 @@ public sealed class WorkspaceInitializationTests : IDisposable
             (await db.BankAccounts.SingleAsync(item => item.Id == bank.Id)).CurrentBalance = originalBankBalance;
             await db.SaveChangesAsync();
         }
+
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedInOwner = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedInOwner.Outcome);
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()),
+                 new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString()),
+                 new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage)], "test"))
+        };
+        var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
+        var secondCompany = await companies.CreateCompanyAsync(new CreateCompanyRequest("Isolation test subsidiary", "Isolation Test Subsidiary Ltd.", "ISO-TEST", "USD", 1));
+        Assert.True(secondCompany.Succeeded, secondCompany.ErrorMessage);
+
+        void ActAsCompany(Guid activeCompanyId, params string[] permissions)
+        {
+            var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, activeCompanyId.ToString()) };
+            claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+
+        ActAsCompany(secondCompany.CompanyId!.Value, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PaymentReverse);
+        var crossCompanyRefund = await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-CROSS-CO", "Cross-company refund rejected", settlementRateId, token));
+        Assert.False(crossCompanyRefund.Succeeded);
+        accessor.HttpContext = null;
 
         var untouched = (await workspaceService.GetWorkspaceAsync()).Receivables.Payments!.Single(item => item.Id == deposit.Id);
         Assert.Equal(100m, untouched.TransactionUnappliedAmount);
