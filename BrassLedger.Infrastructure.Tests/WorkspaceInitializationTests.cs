@@ -1992,6 +1992,88 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task RefundUnappliedPayment_RejectsHostileAndOutOfRangeRequestsWithoutMutatingState()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var customer = before.Receivables.Customers.First();
+        var bank = before.Treasury.BankAccounts.First();
+        var originalBankBalance = bank.CurrentBalance;
+
+        var documentRateId = Guid.NewGuid(); var settlementRateId = Guid.NewGuid();
+        var inactiveRateId = Guid.NewGuid(); var futureRateId = Guid.NewGuid();
+        var wrongPairRateId = Guid.NewGuid(); var otherCompanyRateId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.CurrencyExchangeRates.AddRange(
+                new() { Id = documentRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 1), Source = "Test document rate", SourceReference = "https://example.test/cad-usd/2026-06-01" },
+                new() { Id = settlementRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 2), Source = "Test settlement rate", SourceReference = "https://example.test/cad-usd/2026-06-02" },
+                new() { Id = inactiveRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 5, 25), Source = "Retracted rate", SourceReference = "https://example.test/cad-usd/inactive", IsActive = false },
+                new() { Id = futureRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .90m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 20), Source = "Future rate", SourceReference = "https://example.test/cad-usd/future" },
+                new() { Id = wrongPairRateId, CompanyId = companyId, BaseCurrency = "USD", QuoteCurrency = "EUR", Rate = .50m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 1), Source = "Wrong pair rate", SourceReference = "https://example.test/usd-eur" },
+                new() { Id = otherCompanyRateId, CompanyId = Guid.NewGuid(), BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 2), Source = "Other company's rate", SourceReference = "https://example.test/other-company" });
+            await db.SaveChangesAsync();
+        }
+
+        var deposit = await transactions.RecordCustomerPaymentAsync(new(customer.Id, bank.Id, new DateOnly(2026, 6, 1), 100m, "DEP-HOSTILE-1", "Wire", [], "CAD", documentRateId));
+        Assert.True(deposit.Succeeded, deposit.ErrorMessage);
+        var token = (await workspaceService.GetWorkspaceAsync()).Receivables.Payments!.Single(item => item.Id == deposit.Id!.Value).ConcurrencyToken;
+
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-INACTIVE", "Inactive rate rejected", inactiveRateId, token))).Succeeded);
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-FUTURE", "Future rate rejected", futureRateId, token))).Succeeded);
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-PAIR", "Wrong pair rejected", wrongPairRateId, token))).Succeeded);
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-OTHER-CO", "Other company rate rejected", otherCompanyRateId, token))).Succeeded);
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, Guid.NewGuid(), new DateOnly(2026, 6, 2), 40m, "RF-H-BANK", "Unknown bank rejected", settlementRateId, token))).Succeeded);
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 150m, "RF-H-OVER", "Over-refund rejected", settlementRateId, token))).Succeeded);
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-STALE", "Stale token rejected", settlementRateId, "not-the-real-token"))).Succeeded);
+
+        var closedPeriodId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.AccountingPeriods.Add(new AccountingPeriod { Id = closedPeriodId, CompanyId = await db.Companies.Select(company => company.Id).SingleAsync(), StartsOn = new DateOnly(2026, 6, 2), EndsOn = new DateOnly(2026, 6, 2), Status = "Closed" });
+            await db.SaveChangesAsync();
+        }
+        var closedPeriodRefund = await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-CLOSED", "Closed period rejected", settlementRateId, token));
+        Assert.False(closedPeriodRefund.Succeeded);
+        Assert.Contains("closed", closedPeriodRefund.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.AccountingPeriods.Remove(await db.AccountingPeriods.SingleAsync(period => period.Id == closedPeriodId));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.BankAccounts.SingleAsync(item => item.Id == bank.Id)).CurrentBalance = 10m;
+            await db.SaveChangesAsync();
+        }
+        var insufficientCashRefund = await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-CASH", "Insufficient cash rejected", settlementRateId, token));
+        Assert.False(insufficientCashRefund.Succeeded);
+        Assert.Contains("sufficient book balance", insufficientCashRefund.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.BankAccounts.SingleAsync(item => item.Id == bank.Id)).CurrentBalance = originalBankBalance;
+            await db.SaveChangesAsync();
+        }
+
+        var untouched = (await workspaceService.GetWorkspaceAsync()).Receivables.Payments!.Single(item => item.Id == deposit.Id);
+        Assert.Equal(100m, untouched.TransactionUnappliedAmount);
+        Assert.Equal(75m, untouched.UnappliedAmount);
+        Assert.Equal(token, untouched.ConcurrencyToken);
+
+        var refund = await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-REAL", "Genuine refund", settlementRateId, token));
+        Assert.True(refund.Succeeded, refund.ErrorMessage);
+        var afterRealRefund = (await workspaceService.GetWorkspaceAsync()).Receivables.Payments!.Single(item => item.Id == deposit.Id);
+        Assert.False((await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 10m, "RF-H-REAL", "Duplicate reference rejected", settlementRateId, afterRealRefund.ConcurrencyToken))).Succeeded);
+    }
+
+    [Fact]
     public async Task DocumentVoidsAndVendorCredits_PreserveExactReversibleLedgerHistory()
     {
         using var services = CreateServiceProvider();
