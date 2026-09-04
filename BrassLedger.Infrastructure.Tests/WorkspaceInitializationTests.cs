@@ -2101,6 +2101,18 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(refund.Succeeded, refund.ErrorMessage);
         var afterRealRefund = (await workspaceService.GetWorkspaceAsync()).Receivables.Payments!.Single(item => item.Id == deposit.Id);
         Assert.False((await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 10m, "RF-H-REAL", "Duplicate reference rejected", settlementRateId, afterRealRefund.ConcurrencyToken))).Succeeded);
+
+        var reconciliationId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var refundAdjustment = await db.SubledgerAdjustments.Where(item => item.Id == refund.Id!.Value).Select(item => new { item.JournalEntryId, item.CompanyId }).SingleAsync();
+            db.BankReconciliations.Add(new BankReconciliation { Id = reconciliationId, CompanyId = refundAdjustment.CompanyId, BankAccountId = bank.Id, StatementDate = new DateOnly(2026, 6, 30), Status = "Completed" });
+            db.BankReconciliationItems.Add(new BankReconciliationItem { Id = Guid.NewGuid(), BankReconciliationId = reconciliationId, JournalEntryId = refundAdjustment.JournalEntryId });
+            await db.SaveChangesAsync();
+        }
+        var reconciledReversal = await transactions.ReverseSubledgerAdjustmentAsync(new ReverseSubledgerAdjustmentRequest(refund.Id!.Value, new DateOnly(2026, 7, 1), "Blocked by completed reconciliation"));
+        Assert.False(reconciledReversal.Succeeded);
+        Assert.Contains("reconcil", reconciledReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
