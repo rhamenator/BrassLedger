@@ -57,6 +57,22 @@ public sealed class AccountingScheduleTests : IDisposable
             Assert.Equal(-83.33m, (await posted.Accounts.SingleAsync(account => account.Id == accounts.AccumulatedDepreciation)).CurrentBalance);
         }
 
+        var installmentReconciliationId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.BankReconciliations.Add(new BankReconciliation { Id = installmentReconciliationId, CompanyId = actor.CompanyId, BankAccountId = accounts.PaymentBank, StatementDate = new DateOnly(2026, 2, 1), Status = "Completed" });
+            db.BankReconciliationItems.Add(new BankReconciliationItem { Id = Guid.NewGuid(), BankReconciliationId = installmentReconciliationId, JournalEntryId = installment.JournalEntryId!.Value });
+            await db.SaveChangesAsync();
+        }
+        var reconciledInstallmentReversal = await service.ReverseAccountingScheduleInstallmentAsync(new(installment.Id, new DateOnly(2026, 2, 1), "Blocked by completed reconciliation."));
+        Assert.False(reconciledInstallmentReversal.Succeeded);
+        Assert.Contains("reconcil", reconciledInstallmentReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.BankReconciliations.Remove(await db.BankReconciliations.SingleAsync(item => item.Id == installmentReconciliationId));
+            await db.SaveChangesAsync();
+        }
+
         var reversed = await service.ReverseAccountingScheduleInstallmentAsync(new(installment.Id, new DateOnly(2026, 2, 1), "Asset was not placed in service."));
         Assert.True(reversed.Succeeded, reversed.ErrorMessage);
         await using var verified = await factory.CreateDbContextAsync();
@@ -226,6 +242,22 @@ public sealed class AccountingScheduleTests : IDisposable
         Assert.Equal(bankBalanceBeforeDisposal + 1200m, bankBalanceAfterDisposal);
         var businessWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
         Assert.Contains(businessWorkspace.Treasury.ReconciliationCandidates ?? [], candidate => candidate.JournalEntryId == disposalId && candidate.BankAccountId == accounts.PaymentBank && candidate.SignedAmount == 1200m);
+
+        var disposalReconciliationId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.BankReconciliations.Add(new BankReconciliation { Id = disposalReconciliationId, CompanyId = actor.CompanyId, BankAccountId = accounts.PaymentBank, StatementDate = new DateOnly(2026, 5, 16), Status = "Completed" });
+            db.BankReconciliationItems.Add(new BankReconciliationItem { Id = Guid.NewGuid(), BankReconciliationId = disposalReconciliationId, JournalEntryId = disposalId });
+            await db.SaveChangesAsync();
+        }
+        var reconciledDisposalReversal = await service.ReverseFixedAssetDisposalAsync(new(schedule.Id, new DateOnly(2026, 5, 16), "Blocked by completed reconciliation.", schedule.ConcurrencyToken));
+        Assert.False(reconciledDisposalReversal.Succeeded);
+        Assert.Contains("reconcil", reconciledDisposalReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.BankReconciliations.Remove(await db.BankReconciliations.SingleAsync(item => item.Id == disposalReconciliationId));
+            await db.SaveChangesAsync();
+        }
 
         var reversed = await service.ReverseFixedAssetDisposalAsync(new(schedule.Id, new DateOnly(2026, 5, 16), "Sale was cancelled.", schedule.ConcurrencyToken));
         Assert.True(reversed.Succeeded, reversed.ErrorMessage);

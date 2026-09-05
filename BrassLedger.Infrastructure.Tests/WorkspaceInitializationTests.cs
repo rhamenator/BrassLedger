@@ -1686,6 +1686,25 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Contains(settled.Receivables.Payments!, payment => payment.Id == receipt.Id && payment.TransactionCurrency == "CAD" && payment.RealizedGainLoss == 2m && payment.ExchangeRateSourceReference.Contains("2026-05-02"));
         Assert.Contains(settled.Receivables.Payments!, payment => payment.Id == finalReceipt.Id && payment.RealizedGainLoss == 3m);
         Assert.False((await transactions.RecordCustomerAdjustmentAsync(new(invoice.Id.Value, new DateOnly(2026, 5, 3), 1m, "CM-FX-BLOCKED", "5100", "Foreign credit requires native amount"))).Succeeded);
+
+        var paymentReconciliationId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            var receiptJournalEntryId = await db.SubledgerPayments.Where(item => item.Id == receipt.Id!.Value).Select(item => item.JournalEntryId).SingleAsync();
+            db.BankReconciliations.Add(new BankReconciliation { Id = paymentReconciliationId, CompanyId = companyId, BankAccountId = bank.Id, StatementDate = new DateOnly(2026, 5, 3), Status = "Completed" });
+            db.BankReconciliationItems.Add(new BankReconciliationItem { Id = Guid.NewGuid(), BankReconciliationId = paymentReconciliationId, JournalEntryId = receiptJournalEntryId });
+            await db.SaveChangesAsync();
+        }
+        var reconciledPaymentReversal = await transactions.ReverseSubledgerPaymentAsync(new(receipt.Id!.Value, new DateOnly(2026, 5, 3), "Blocked by completed reconciliation."));
+        Assert.False(reconciledPaymentReversal.Succeeded);
+        Assert.Contains("reconcil", reconciledPaymentReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.BankReconciliations.Remove(await db.BankReconciliations.SingleAsync(item => item.Id == paymentReconciliationId));
+            await db.SaveChangesAsync();
+        }
+
         Assert.True((await transactions.ReverseSubledgerPaymentAsync(new(receipt.Id!.Value, new DateOnly(2026, 5, 3), "Wire returned"))).Succeeded);
         Assert.True((await transactions.ReverseSubledgerPaymentAsync(new(finalReceipt.Id!.Value, new DateOnly(2026, 5, 3), "Wire returned"))).Succeeded);
         Assert.True((await transactions.ReverseSubledgerPaymentAsync(new(disbursement.Id!.Value, new DateOnly(2026, 5, 3), "Wire cancelled", "Voided"))).Succeeded);
@@ -2068,6 +2087,72 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var baseInvoice = await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-BASE-CREDIT-1", new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 30), 50m, 0m, "4000", "Base-currency invoice"));
         Assert.True(baseInvoice.Succeeded, baseInvoice.ErrorMessage);
         Assert.False((await transactions.RecordCustomerAdjustmentAsync(new(baseInvoice.Id!.Value, new DateOnly(2026, 6, 2), 10m, "CM-BASE-NOPOLICY", "4000", "Rate basis rejected on base-currency invoice", "CreditMemo", RateBasis: "OriginalDocumentRate"))).Succeeded);
+    }
+
+    [Fact]
+    public async Task ForeignVendorCredits_TranslateAtChosenPolicyAndReverseExactly()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var vendor = before.Payables.Vendors.First();
+
+        var documentRateId = Guid.NewGuid(); var adjustmentDateRateId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.CurrencyExchangeRates.AddRange(
+                new() { Id = documentRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 1), Source = "Test document rate", SourceReference = "https://example.test/cad-usd/vc-2026-06-01" },
+                new() { Id = adjustmentDateRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 2), Source = "Test adjustment-date rate", SourceReference = "https://example.test/cad-usd/vc-2026-06-02" });
+            await db.SaveChangesAsync();
+        }
+
+        var bill = await PostVendorBillThroughWorkflowAsync(transactions, new(vendor.Id, "B-FX-CREDIT-1", new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 30), 100m, "5100", "Foreign vendor-credit test bill", Currency: "CAD", ExchangeRateId: documentRateId));
+        Assert.True(bill.Succeeded, bill.ErrorMessage);
+        var billSnapshot = (await workspaceService.GetWorkspaceAsync()).Payables.Bills.Single(item => item.Id == bill.Id);
+        Assert.Equal(100m, billSnapshot.TransactionBalanceDue); Assert.Equal(75m, billSnapshot.BalanceDue);
+
+        // A foreign bill requires an explicit rate basis.
+        Assert.False((await transactions.RecordVendorCreditAsync(new(bill.Id!.Value, new DateOnly(2026, 6, 2), 10m, "VC-FX-NOPOLICY", "5100", "Missing rate basis rejected"))).Succeeded);
+
+        // OriginalDocumentRate: no rate has changed since the bill was booked, so the translated
+        // amount and the proportional carrying release agree exactly -- zero realized gain/loss.
+        var originalRateCredit = await transactions.RecordVendorCreditAsync(new(bill.Id!.Value, new DateOnly(2026, 6, 2), 40m, "VC-FX-ORIGRATE", "5100", "Original-rate concession", RateBasis: "OriginalDocumentRate"));
+        Assert.True(originalRateCredit.Succeeded, originalRateCredit.ErrorMessage);
+        var afterOriginalRateCredit = await workspaceService.GetWorkspaceAsync();
+        var originalRateAdjustment = Assert.Single(afterOriginalRateCredit.Payables.Adjustments!, item => item.Id == originalRateCredit.Id);
+        Assert.Equal(40m, originalRateAdjustment.TransactionAmount); Assert.Equal(30m, originalRateAdjustment.CarryingAmount); Assert.Equal(30m, originalRateAdjustment.Amount); Assert.Equal(0m, originalRateAdjustment.RealizedGainLoss); Assert.Equal("OriginalDocumentRate", originalRateAdjustment.RateBasis);
+        var afterOriginalRateBill = afterOriginalRateCredit.Payables.Bills.Single(item => item.Id == bill.Id);
+        Assert.Equal(60m, afterOriginalRateBill.TransactionBalanceDue); Assert.Equal(45m, afterOriginalRateBill.BalanceDue);
+
+        // AdjustmentDateRate: a new, higher rate is selected for this dated concession. Unlike a
+        // customer credit memo (which releases an asset on the credit side), a vendor credit
+        // releases a liability (AP) on the debit side -- the same shape as a refund -- so a stronger
+        // settlement-date rate here produces a realized LOSS, not a gain, for the same numbers.
+        var adjustmentDateCredit = await transactions.RecordVendorCreditAsync(new(bill.Id!.Value, new DateOnly(2026, 6, 3), 30m, "VC-FX-ADJRATE", "5100", "Dated concession", adjustmentDateRateId, "AdjustmentDateRate"));
+        Assert.True(adjustmentDateCredit.Succeeded, adjustmentDateCredit.ErrorMessage);
+        var afterAdjustmentDateCredit = await workspaceService.GetWorkspaceAsync();
+        var adjustmentDateAdjustment = Assert.Single(afterAdjustmentDateCredit.Payables.Adjustments!, item => item.Id == adjustmentDateCredit.Id);
+        Assert.Equal(30m, adjustmentDateAdjustment.TransactionAmount); Assert.Equal(22.5m, adjustmentDateAdjustment.CarryingAmount); Assert.Equal(24m, adjustmentDateAdjustment.Amount); Assert.Equal(-1.5m, adjustmentDateAdjustment.RealizedGainLoss); Assert.Equal("AdjustmentDateRate", adjustmentDateAdjustment.RateBasis);
+        var afterAdjustmentDateBill = afterAdjustmentDateCredit.Payables.Bills.Single(item => item.Id == bill.Id);
+        Assert.Equal(30m, afterAdjustmentDateBill.TransactionBalanceDue); Assert.Equal(22.5m, afterAdjustmentDateBill.BalanceDue);
+
+        // Exact reversal, in reverse order, restores both the transaction- and base-currency balances.
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new(adjustmentDateCredit.Id!.Value, new DateOnly(2026, 6, 5), "Concession withdrawn"))).Succeeded);
+        Assert.True((await transactions.ReverseSubledgerAdjustmentAsync(new(originalRateCredit.Id!.Value, new DateOnly(2026, 6, 5), "Correction withdrawn"))).Succeeded);
+        var restoredBill = (await workspaceService.GetWorkspaceAsync()).Payables.Bills.Single(item => item.Id == bill.Id);
+        Assert.Equal(100m, restoredBill.TransactionBalanceDue); Assert.Equal(75m, restoredBill.BalanceDue); Assert.Equal("Open", restoredBill.Status);
+        var restoredVendor = (await workspaceService.GetWorkspaceAsync()).Payables.Vendors.Single(item => item.Id == vendor.Id);
+        Assert.Equal(vendor.OpenBalance + restoredBill.BalanceDue, restoredVendor.OpenBalance);
+
+        // A base-currency bill must not accept a rate basis at all.
+        var baseBill = await PostVendorBillThroughWorkflowAsync(transactions, new(vendor.Id, "B-BASE-CREDIT-1", new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 30), 50m, "5100", "Base-currency bill"));
+        Assert.True(baseBill.Succeeded, baseBill.ErrorMessage);
+        Assert.False((await transactions.RecordVendorCreditAsync(new(baseBill.Id!.Value, new DateOnly(2026, 6, 2), 10m, "VC-BASE-NOPOLICY", "5100", "Rate basis rejected on base-currency bill", RateBasis: "OriginalDocumentRate"))).Succeeded);
     }
 
     [Fact]
@@ -2779,6 +2864,25 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var afterPosting = await workspaceService.GetWorkspaceAsync();
         Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance + 75m, afterPosting.GeneralLedger.Accounts.Single(account => account.Number == "1000").Balance);
         Assert.Equal(before.GeneralLedger.Accounts.Single(account => account.Number == "4000").Balance + 75m, afterPosting.GeneralLedger.Accounts.Single(account => account.Number == "4000").Balance);
+
+        var journalReconciliationId = Guid.NewGuid();
+        var journalReconciliationFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var reconciliationDb = await journalReconciliationFactory.CreateDbContextAsync())
+        {
+            var companyId = await reconciliationDb.Companies.Select(company => company.Id).SingleAsync();
+            var bankId = await reconciliationDb.BankAccounts.Where(bank => bank.CompanyId == companyId).Select(bank => bank.Id).FirstAsync();
+            reconciliationDb.BankReconciliations.Add(new BankReconciliation { Id = journalReconciliationId, CompanyId = companyId, BankAccountId = bankId, StatementDate = new DateOnly(2026, 5, 3), Status = "Completed" });
+            reconciliationDb.BankReconciliationItems.Add(new BankReconciliationItem { Id = Guid.NewGuid(), BankReconciliationId = journalReconciliationId, JournalEntryId = draft.Id.Value });
+            await reconciliationDb.SaveChangesAsync();
+        }
+        var reconciledJournalReversal = await transactions.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(draft.Id.Value, new DateOnly(2026, 5, 3), "Blocked by completed reconciliation."));
+        Assert.False(reconciledJournalReversal.Succeeded);
+        Assert.Contains("reconcil", reconciledJournalReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var reconciliationCleanupDb = await journalReconciliationFactory.CreateDbContextAsync())
+        {
+            reconciliationCleanupDb.BankReconciliations.Remove(await reconciliationCleanupDb.BankReconciliations.SingleAsync(item => item.Id == journalReconciliationId));
+            await reconciliationCleanupDb.SaveChangesAsync();
+        }
 
         var reversal = await transactions.ReverseJournalEntryAsync(new ReverseJournalEntryRequest(draft.Id.Value, new DateOnly(2026, 5, 3), "Correcting lifecycle test"));
         Assert.True(reversal.Succeeded, reversal.ErrorMessage);
