@@ -1388,6 +1388,17 @@ public sealed class CustomerReturnCredit
     public decimal SourceAppliedAmount { get; set; }
     public decimal AppliedAmount { get; set; }
     public decimal RefundedAmount { get; set; }
+    public string TransactionCurrency { get; set; } = "USD";
+    public decimal TransactionSubtotal { get; set; }
+    public decimal TransactionTaxAmount { get; set; }
+    public decimal TransactionTotalAmount { get; set; }
+    public decimal TransactionSourceAppliedAmount { get; set; }
+    public decimal TransactionAppliedAmount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; } = 1m;
+    public DateOnly? ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
     public Guid JournalEntryId { get; set; }
     public Guid? ReversalJournalEntryId { get; set; }
     public Guid? CreatedByUserId { get; set; }
@@ -1411,6 +1422,9 @@ public sealed class CustomerReturnCreditLine
     public decimal NetAmount { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal TotalAmount { get; set; }
+    public decimal TransactionNetAmount { get; set; }
+    public decimal TransactionTaxAmount { get; set; }
+    public decimal TransactionTotalAmount { get; set; }
 }
 
 public sealed class CustomerReturnCreditApplication
@@ -1421,6 +1435,7 @@ public sealed class CustomerReturnCreditApplication
     public Guid SalesInvoiceId { get; set; }
     public DateOnly AppliedOn { get; set; }
     public decimal Amount { get; set; }
+    public decimal TransactionAmount { get; set; }
     public string Status { get; set; } = "Posted";
     public Guid? AppliedByUserId { get; set; }
     public DateTimeOffset AppliedAtUtc { get; set; }
