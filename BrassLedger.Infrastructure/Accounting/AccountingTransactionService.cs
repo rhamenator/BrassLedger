@@ -1077,28 +1077,71 @@ public sealed partial class AccountingTransactionService(
         if (request.Amount <= 0 || string.IsNullOrWhiteSpace(request.Reference) || string.IsNullOrWhiteSpace(request.Reason)) return TransactionResult.Failure("A positive amount, reference, and reason are required.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        var amount = RoundCurrency(request.Amount);
+        var transactionAmount = RoundCurrency(request.Amount);
         var bill = await db.VendorBills.SingleOrDefaultAsync(item => item.Id == request.VendorBillId && item.CompanyId == companyId, cancellationToken);
         if (bill is null) return TransactionResult.Failure("Vendor bill not found.");
-        if (bill.ExchangeRateId.HasValue) return TransactionResult.Failure("Foreign-currency vendor credits require a transaction-currency adjustment workflow that is not yet available.");
-        if (bill.Status == "Voided" || amount > bill.BalanceDue) return TransactionResult.Failure("The credit cannot exceed the open bill balance or target a voided bill.");
+        var rateBasis = (request.RateBasis ?? string.Empty).Trim();
+        var isForeign = bill.ExchangeRateId.HasValue;
+        if (isForeign)
+        {
+            if (rateBasis is not ("OriginalDocumentRate" or "AdjustmentDateRate")) return TransactionResult.Failure("A foreign-currency vendor credit must use the OriginalDocumentRate or AdjustmentDateRate rate basis.");
+        }
+        else if (!string.IsNullOrWhiteSpace(rateBasis)) return TransactionResult.Failure("Do not select a rate basis for a base-currency bill adjustment.");
+        if (bill.Status == "Voided" || transactionAmount > bill.TransactionBalanceDue) return TransactionResult.Failure("The credit cannot exceed the open bill balance or target a voided bill.");
         if (request.AdjustmentDate < bill.BillDate) return TransactionResult.Failure("The credit date cannot precede the bill date.");
         var offset = await db.Accounts.SingleOrDefaultAsync(account => account.CompanyId == companyId && account.Number == request.OffsetAccountNumber.Trim() && account.IsActive && !account.IsControlAccount && (account.Type == AccountType.Expense || account.Type == AccountType.Asset), cancellationToken);
         if (offset is null) return TransactionResult.Failure("A vendor credit requires an active non-control expense or asset account.");
         if (await db.SubledgerAdjustments.AnyAsync(item => item.CompanyId == companyId && item.Subledger == "Payables" && item.Reference == request.Reference.Trim(), cancellationToken)) return TransactionResult.Failure("That payables adjustment reference already exists.");
+
+        var carryingReleased = transactionAmount == bill.TransactionBalanceDue ? bill.BalanceDue : RoundCurrency(bill.BalanceDue * transactionAmount / bill.TransactionBalanceDue);
+        var translatedAmount = carryingReleased;
+        Guid? adjustmentRateId = null; var adjustmentRateToBase = 1m; DateOnly? adjustmentRateEffectiveOn = null; var adjustmentRateSource = string.Empty; var adjustmentRateSourceReference = string.Empty;
+        if (isForeign)
+        {
+            if (rateBasis == "OriginalDocumentRate")
+            {
+                translatedAmount = RoundCurrency(transactionAmount * bill.ExchangeRateToBase);
+                adjustmentRateId = bill.ExchangeRateId; adjustmentRateToBase = bill.ExchangeRateToBase; adjustmentRateEffectiveOn = bill.ExchangeRateEffectiveOn; adjustmentRateSource = bill.ExchangeRateSource; adjustmentRateSourceReference = bill.ExchangeRateSourceReference;
+            }
+            else
+            {
+                var (creditRate, creditRateError) = await ResolveTransactionRateAsync(db, companyId, bill.TransactionCurrency, request.ExchangeRateId, request.AdjustmentDate, cancellationToken);
+                if (creditRateError is not null) return TransactionResult.Failure(creditRateError);
+                translatedAmount = creditRate!.ToBase(transactionAmount);
+                adjustmentRateId = creditRate.ExchangeRateId; adjustmentRateToBase = creditRate.FactorToBase; adjustmentRateEffectiveOn = creditRate.EffectiveOn; adjustmentRateSource = creditRate.Source; adjustmentRateSourceReference = creditRate.SourceReference;
+            }
+        }
+        if (translatedAmount <= 0m || carryingReleased <= 0m) return TransactionResult.Failure("The credit must produce positive translated and carrying amounts after conversion.");
+        // A vendor credit releases a liability (AP) on the debit side against the offset on the
+        // credit side -- the same shape as a refund, not a customer credit memo -- so the gain/loss
+        // sign matches the refund convention: carrying released minus the translated other side.
+        var realizedGainLoss = isForeign ? carryingReleased - translatedAmount : 0m;
+
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var adjustmentId = Guid.NewGuid();
+        var lines = new List<JournalLineRequest> { new(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), carryingReleased, 0, "Reduce payable"), new(offset.Number, 0, translatedAmount, "Vendor credit") };
+        if (realizedGainLoss > 0m) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeGain), 0, realizedGainLoss, "Realized foreign-exchange gain"));
+        if (realizedGainLoss < 0m) lines.Add(new(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeLoss), -realizedGainLoss, 0, "Realized foreign-exchange loss"));
         var posting = await PostAsync(db, companyId, request.AdjustmentDate, "Accounts Payable", request.Reference, request.Reason,
-            [new(OperationalRoleReference(AccountingAccountRoles.AccountsPayable), amount, 0, "Reduce payable"), new(offset.Number, 0, amount, "Vendor credit")], cancellationToken,
+            lines, cancellationToken,
             allowControlAccounts: true, sourceDocumentId: adjustmentId, sourceDocumentType: "SubledgerAdjustment", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
-        bill.BalanceDue -= amount;
-        bill.TransactionBalanceDue -= amount;
+        bill.BalanceDue -= carryingReleased;
+        bill.TransactionBalanceDue -= transactionAmount;
         bill.Status = bill.BalanceDue == 0 ? "Paid" : "Partial";
         bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
         var vendor = await db.Vendors.SingleAsync(item => item.Id == bill.VendorId && item.CompanyId == companyId, cancellationToken);
-        vendor.OpenBalance -= amount;
-        var adjustment = CreateAdjustment(adjustmentId, companyId, "Payables", "VendorCredit", bill.VendorId, request.VendorBillId, null, null, request.AdjustmentDate, amount, request.Reference, request.Reason, offset.Number, posting.Id!.Value, bill.TransactionCurrency);
+        vendor.OpenBalance -= carryingReleased;
+        var adjustment = CreateAdjustment(adjustmentId, companyId, "Payables", "VendorCredit", bill.VendorId, request.VendorBillId, null, null, request.AdjustmentDate, translatedAmount, request.Reference, request.Reason, offset.Number, posting.Id!.Value, bill.TransactionCurrency);
+        adjustment.TransactionAmount = transactionAmount;
+        adjustment.CarryingAmount = carryingReleased;
+        adjustment.RateBasis = isForeign ? rateBasis : "BaseCurrency";
+        adjustment.ExchangeRateId = adjustmentRateId;
+        adjustment.ExchangeRateToBase = adjustmentRateToBase;
+        adjustment.ExchangeRateEffectiveOn = adjustmentRateEffectiveOn ?? request.AdjustmentDate;
+        adjustment.ExchangeRateSource = adjustmentRateSource;
+        adjustment.ExchangeRateSourceReference = adjustmentRateSourceReference;
+        adjustment.RealizedGainLoss = realizedGainLoss;
         db.SubledgerAdjustments.Add(adjustment);
         AddAdjustmentAudit(db, adjustment, "subledger-adjustment.posted");
         try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return TransactionResult.Failure("The credit changed concurrently or its reference already exists. Refresh and try again."); }
@@ -1204,8 +1247,8 @@ public sealed partial class AccountingTransactionService(
         else if (adjustment.Kind == "VendorCredit")
         {
             var bill = await db.VendorBills.SingleAsync(item => item.Id == adjustment.DocumentId && item.CompanyId == companyId, cancellationToken);
-            bill.BalanceDue += adjustment.Amount; bill.TransactionBalanceDue += adjustment.Amount; bill.Status = bill.BalanceDue == bill.TotalAmount ? "Open" : "Partial"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
-            (await db.Vendors.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.Amount;
+            bill.BalanceDue += adjustment.CarryingAmount; bill.TransactionBalanceDue += adjustment.TransactionAmount; bill.Status = bill.BalanceDue == bill.TotalAmount ? "Open" : "Partial"; bill.ConcurrencyToken = Guid.NewGuid().ToString("N");
+            (await db.Vendors.SingleAsync(item => item.Id == adjustment.CounterpartyId && item.CompanyId == companyId, cancellationToken)).OpenBalance += adjustment.CarryingAmount;
         }
         else if (adjustment.Kind is "CustomerDepositRefund" or "VendorAdvanceRefund")
         {
