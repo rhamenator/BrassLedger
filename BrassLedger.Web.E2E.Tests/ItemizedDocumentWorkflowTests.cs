@@ -76,6 +76,31 @@ public sealed class ItemizedDocumentWorkflowTests
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task ForeignInvoice_CanBeCreditedAtOriginalDocumentRateAndReversed(BrowserKind browserKind)
+    {
+        await _fixture.CreateSubledgerWorkflowUsersAsync();
+        await _fixture.CreateForeignRefundRatesAsync();
+        var invoiceNumber = $"INV-FXCM-{browserKind}";
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync();
+        var receivables = new ReceivablesPage(session);
+        await receivables.OpenAsync();
+        await receivables.CreateForeignItemizedInvoiceDraftAsync(invoiceNumber);
+        await using (var approverSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await approverSession.SignInAsync("e2e-ar-approver"); var approver = new ReceivablesPage(approverSession); await approver.OpenAsync(); await approver.ApproveInvoiceAsync(invoiceNumber);
+        }
+        await using (var posterSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await posterSession.SignInAsync("e2e-ar-poster"); var poster = new ReceivablesPage(posterSession); await poster.OpenAsync(); await poster.PostForeignInvoiceAsync(invoiceNumber);
+        }
+        await receivables.OpenAsync();
+        await receivables.RecordAndReverseForeignCreditMemoAsync(invoiceNumber, $"CMFX-E2E-{browserKind}");
+        await session.AssertNoUiFailuresAsync("foreign invoice credit memo");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task InvoiceReviewer_CanRejectAndPreparerCanCorrectAndResubmit(BrowserKind browserKind)
     {
         await _fixture.CreateSubledgerWorkflowUsersAsync();

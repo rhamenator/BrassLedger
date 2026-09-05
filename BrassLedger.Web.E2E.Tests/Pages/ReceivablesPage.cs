@@ -120,6 +120,47 @@ public sealed class ReceivablesPage
         await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference })).ToContainTextAsync("Reversed");
     }
 
+    public async Task CreateForeignItemizedInvoiceDraftAsync(string invoiceNumber)
+    {
+        await _session.Page.GetByLabel("Invoice customer").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Invoice number").FillAsync(invoiceNumber);
+        await _session.Page.GetByLabel("Invoice transaction currency").FillAsync("CAD");
+        await _session.Page.GetByLabel("Invoice transaction currency").PressAsync("Tab");
+        await SelectOptionContainingAsync("Invoice exchange rate", "E2E document rate");
+        await Assertions.Expect(_session.Page.GetByLabel("Invoice line description")).ToHaveCountAsync(1);
+        await _session.Page.GetByLabel("Invoice line description").First.FillAsync("Foreign equipment");
+        await _session.Page.GetByLabel("Invoice line quantity").First.FillAsync("2");
+        await _session.Page.GetByLabel("Invoice line unit price").First.FillAsync("50");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save invoice draft" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Invoice draft saved.");
+    }
+
+    public async Task PostForeignInvoiceAsync(string invoiceNumber)
+    {
+        var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = invoiceNumber }).Filter(new() { HasText = "Approved" });
+        await Assertions.Expect(workflowRow).ToContainTextAsync("Approved");
+        await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Approved invoice posted.");
+    }
+
+    public async Task RecordAndReverseForeignCreditMemoAsync(string invoiceNumber, string adjustmentReference)
+    {
+        await SelectOptionContainingAsync("Adjustment invoice", invoiceNumber);
+        await Assertions.Expect(_session.Page.GetByLabel("Rate basis")).ToBeVisibleAsync();
+        await _session.Page.GetByLabel("Customer adjustment amount").FillAsync("40");
+        await _session.Page.GetByLabel("Customer adjustment reference").FillAsync(adjustmentReference);
+        await _session.Page.GetByLabel("Customer adjustment reason").FillAsync("E2E foreign price allowance");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post customer adjustment" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer adjustment posted.");
+        var row = _session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference });
+        await Assertions.Expect(row).ToContainTextAsync("CreditMemo");
+        await Assertions.Expect(row).ToContainTextAsync("$30.00");
+        await _session.Page.GetByLabel("Customer adjustment reversal reason").FillAsync("E2E foreign allowance withdrawn");
+        await row.GetByRole(AriaRole.Button, new() { Name = "Reverse" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer adjustment reversed.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference })).ToContainTextAsync("Reversed");
+    }
+
     public async Task RecordAndRefundForeignDepositAsync(string paymentReference, string refundReference)
     {
         var paymentDate = DateOnly.FromDateTime(DateTime.Today).AddDays(-1).ToString("yyyy-MM-dd");
