@@ -656,6 +656,16 @@ public static class ServiceCollectionExtensions
                 if (!await HasColumnAsync(dbContext, "SubledgerAdjustments", column, cancellationToken)) return false;
             return await HasIndexAsync(dbContext, "IX_SubledgerAdjustments_ExchangeRateId", cancellationToken);
         }
+        if (migrationId.EndsWith("_AddCustomerReturnCreditTransactionCurrency", StringComparison.Ordinal))
+        {
+            string[] creditColumns = ["TransactionCurrency", "TransactionSubtotal", "TransactionTaxAmount", "TransactionTotalAmount", "TransactionSourceAppliedAmount", "TransactionAppliedAmount", "ExchangeRateId", "ExchangeRateToBase", "ExchangeRateEffectiveOn", "ExchangeRateSource", "ExchangeRateSourceReference"];
+            foreach (var column in creditColumns)
+                if (!await HasColumnAsync(dbContext, "CustomerReturnCredits", column, cancellationToken)) return false;
+            string[] lineColumns = ["TransactionNetAmount", "TransactionTaxAmount", "TransactionTotalAmount"];
+            foreach (var column in lineColumns)
+                if (!await HasColumnAsync(dbContext, "CustomerReturnCreditLines", column, cancellationToken)) return false;
+            return await HasColumnAsync(dbContext, "CustomerReturnCreditApplications", "TransactionAmount", cancellationToken);
+        }
         return false;
     }
 
