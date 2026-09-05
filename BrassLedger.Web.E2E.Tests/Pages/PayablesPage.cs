@@ -136,6 +136,69 @@ public sealed class PayablesPage
         await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference })).ToContainTextAsync("60.00 CAD");
     }
 
+    public async Task CreateForeignItemizedBillDraftAsync(string billNumber)
+    {
+        await _session.Page.GetByLabel("Bill vendor").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Bill number").FillAsync(billNumber);
+        await _session.Page.GetByLabel("Bill transaction currency").FillAsync("CAD");
+        await _session.Page.GetByLabel("Bill transaction currency").PressAsync("Tab");
+        await SelectOptionContainingAsync("Bill exchange rate", "E2E document rate");
+        await Assertions.Expect(_session.Page.GetByLabel("Bill line description")).ToHaveCountAsync(1);
+        await _session.Page.GetByLabel("Bill line description").First.FillAsync("Foreign materials");
+        await _session.Page.GetByLabel("Bill line quantity").First.FillAsync("2");
+        await _session.Page.GetByLabel("Bill line unit cost").First.FillAsync("50");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save bill draft" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor bill draft saved.");
+    }
+
+    public async Task PostForeignBillAsync(string billNumber)
+    {
+        var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = billNumber }).Filter(new() { HasText = "Approved" });
+        await Assertions.Expect(workflowRow).ToContainTextAsync("Approved");
+        await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Post", Exact = true }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Approved vendor bill posted.");
+    }
+
+    public async Task RecordAndReverseForeignVendorCreditAsync(string billNumber, string reference)
+    {
+        await RecordForeignVendorCreditAsync(billNumber, reference, "40", "OriginalDocumentRate");
+        var row = _session.Page.Locator("tbody tr").Filter(new() { HasText = reference });
+        await Assertions.Expect(row).ToContainTextAsync("VendorCredit");
+        await Assertions.Expect(row).ToContainTextAsync("$30.00");
+        await _session.Page.GetByLabel("Vendor adjustment reversal reason").FillAsync("E2E foreign allowance withdrawn");
+        await row.GetByRole(AriaRole.Button, new() { Name = "Reverse" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor adjustment reversed.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = reference })).ToContainTextAsync("Reversed");
+    }
+
+    public async Task RecordAndReverseForeignAdjustmentDateVendorCreditAsync(string billNumber, string reference)
+    {
+        await RecordForeignVendorCreditAsync(billNumber, reference, "30", "AdjustmentDateRate");
+        var row = _session.Page.Locator("tbody tr").Filter(new() { HasText = reference });
+        await Assertions.Expect(row).ToContainTextAsync("VendorCredit");
+        await Assertions.Expect(row).ToContainTextAsync("$24.00");
+        await _session.Page.GetByLabel("Vendor adjustment reversal reason").FillAsync("E2E foreign dated concession withdrawn");
+        await row.GetByRole(AriaRole.Button, new() { Name = "Reverse" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor adjustment reversed.");
+        await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = reference })).ToContainTextAsync("Reversed");
+    }
+
+    private async Task RecordForeignVendorCreditAsync(string billNumber, string reference, string amount, string rateBasis)
+    {
+        await SelectOptionContainingAsync("Vendor credit bill", billNumber);
+        await Assertions.Expect(_session.Page.GetByLabel("Vendor credit rate basis")).ToBeVisibleAsync();
+        await _session.Page.GetByLabel("Vendor credit rate basis").SelectOptionAsync(rateBasis);
+        if (rateBasis == "AdjustmentDateRate")
+        {
+            await SelectOptionContainingAsync("Vendor credit exchange rate", "E2E refund rate");
+        }
+        await _session.Page.GetByLabel("Vendor credit amount").FillAsync(amount);
+        await _session.Page.GetByLabel("Vendor credit reference").FillAsync(reference);
+        await _session.Page.GetByLabel("Vendor credit reason").FillAsync("E2E foreign vendor adjustment");
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post vendor credit" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor credit posted.");
+    }
+
     private async Task SelectOptionContainingAsync(string label, string text)
     {
         var select = _session.Page.GetByLabel(label);

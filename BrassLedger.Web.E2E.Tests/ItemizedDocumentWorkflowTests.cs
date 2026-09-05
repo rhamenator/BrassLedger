@@ -105,6 +105,33 @@ public sealed class ItemizedDocumentWorkflowTests
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task ForeignBill_CanBeCreditedUnderBothRateBasisPoliciesAndReversed(BrowserKind browserKind)
+    {
+        await _fixture.CreateSubledgerWorkflowUsersAsync();
+        await _fixture.CreateForeignRefundRatesAsync();
+        var billNumber = $"B-FXVC-{browserKind}";
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync();
+        var payables = new PayablesPage(session);
+        await payables.OpenAsync();
+        await payables.CreateForeignItemizedBillDraftAsync(billNumber);
+        await using (var approverSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await approverSession.SignInAsync("e2e-ap-approver"); var approver = new PayablesPage(approverSession); await approver.OpenAsync(); await approver.ApproveBillAsync(billNumber);
+        }
+        await using (var posterSession = await _fixture.CreateSessionAsync(browserKind))
+        {
+            await posterSession.SignInAsync("e2e-ap-poster"); var poster = new PayablesPage(posterSession); await poster.OpenAsync(); await poster.PostForeignBillAsync(billNumber);
+        }
+        await payables.OpenAsync();
+        await payables.RecordAndReverseForeignVendorCreditAsync(billNumber, $"VCFX-E2E-{browserKind}");
+        await session.AssertNoUiFailuresAsync("foreign vendor credit (OriginalDocumentRate)");
+        await payables.RecordAndReverseForeignAdjustmentDateVendorCreditAsync(billNumber, $"VCFXD-E2E-{browserKind}");
+        await session.AssertNoUiFailuresAsync("foreign vendor credit (AdjustmentDateRate)");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task InvoiceReviewer_CanRejectAndPreparerCanCorrectAndResubmit(BrowserKind browserKind)
     {
         await _fixture.CreateSubledgerWorkflowUsersAsync();
