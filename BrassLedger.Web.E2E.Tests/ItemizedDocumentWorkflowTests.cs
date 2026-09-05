@@ -76,7 +76,7 @@ public sealed class ItemizedDocumentWorkflowTests
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
-    public async Task ForeignInvoice_CanBeCreditedAtOriginalDocumentRateAndReversed(BrowserKind browserKind)
+    public async Task ForeignInvoice_CanBeCreditedOrWrittenOffUnderAllThreeRateBasisPoliciesAndReversed(BrowserKind browserKind)
     {
         await _fixture.CreateSubledgerWorkflowUsersAsync();
         await _fixture.CreateForeignRefundRatesAsync();
@@ -96,7 +96,11 @@ public sealed class ItemizedDocumentWorkflowTests
         }
         await receivables.OpenAsync();
         await receivables.RecordAndReverseForeignCreditMemoAsync(invoiceNumber, $"CMFX-E2E-{browserKind}");
-        await session.AssertNoUiFailuresAsync("foreign invoice credit memo");
+        await session.AssertNoUiFailuresAsync("foreign invoice credit memo (OriginalDocumentRate)");
+        await receivables.RecordAndReverseForeignAdjustmentDateCreditAsync(invoiceNumber, $"CMFXD-E2E-{browserKind}");
+        await session.AssertNoUiFailuresAsync("foreign invoice credit memo (AdjustmentDateRate)");
+        await receivables.RecordAndReverseForeignWriteOffAsync(invoiceNumber, $"WOFX-E2E-{browserKind}");
+        await session.AssertNoUiFailuresAsync("foreign invoice write-off (CarryingValue)");
     }
 
     [Theory]
