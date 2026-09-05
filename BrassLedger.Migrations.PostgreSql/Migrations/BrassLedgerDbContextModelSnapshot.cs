@@ -9303,6 +9303,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid>("SupplierReturnShipmentId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("TransactionAmount")
+                        .HasColumnType("numeric");
+
                     b.Property<Guid>("VendorBillId")
                         .HasColumnType("uuid");
 
@@ -9417,6 +9420,23 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<bool>("CreatesVendorCredit")
                         .HasColumnType("boolean");
 
+                    b.Property<DateOnly?>("ExchangeRateEffectiveOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasColumnType("numeric");
+
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("uuid");
 
@@ -9470,6 +9490,19 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<decimal>("TotalAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TransactionAppliedAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TransactionSourceAppliedAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("TransactionVendorCreditAmount")
+                        .HasColumnType("numeric");
 
                     b.Property<decimal>("VendorCreditAmount")
                         .HasPrecision(18, 2)
@@ -9549,6 +9582,12 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<decimal>("TotalAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TransactionVendorCreditAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("TransactionVendorCreditUnitCost")
+                        .HasColumnType("numeric");
 
                     b.Property<decimal>("UnitCost")
                         .HasPrecision(18, 2)

@@ -66,7 +66,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("44", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("45", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -111,6 +111,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260827230231_AddTransactionCurrencyDocuments';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260828014056_AddForeignCurrencyRemeasurements';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260905034042_AddCustomerReturnCreditTransactionCurrency';"));
+        Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260905221957_AddSupplierReturnShipmentTransactionCurrency';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ForeignCurrencyRemeasurementBatches';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ForeignCurrencyRemeasurementLines';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ConsolidationTradingPartners';"));
@@ -184,7 +185,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("44", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("45", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826052206_AddPurchaseReceiving';"));
@@ -3836,6 +3837,124 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(0m, await afterFx.SalesInvoices.Where(x => x.Id == invoiceId).Select(x => x.BalanceDue).SingleAsync()); Assert.Equal(0m, await afterFx.SalesInvoices.Where(x => x.Id == invoiceId).Select(x => x.TransactionBalanceDue).SingleAsync());
         Assert.Equal(startingCustomerBalance, await afterFx.Customers.Where(x => x.Id == customerId).Select(x => x.OpenBalance).SingleAsync());
         Assert.Equal(startingReceivables, await afterFx.Accounts.Where(x => x.OperationalRole == AccountingAccountRoles.AccountsReceivable).Select(x => x.CurrentBalance).SingleAsync());
+    }
+
+    [Fact]
+    public async Task ForeignSupplierReturnCredit_TranslatesAtOriginalBillRateAndAppliesAndReversesExactly()
+    {
+        // The PurchaseOrder -> InventoryReceipt -> SavePurchaseInvoiceMatchAsync pipeline that
+        // SupplierReturnShipment's authorization/receipt chain is built on has no transaction-currency
+        // support at all (PurchaseOrderLine/ReceivePurchaseOrderRequest/PurchaseInvoiceMatchLineRequest
+        // carry no currency or rate fields). So this test drives the real order/receipt/return-
+        // authorization chain through the real service (base-currency, since that part only tracks
+        // inventory cost, not the vendor's own invoiced price), then seeds the foreign VendorBill/
+        // VendorBillLine directly -- exactly mirroring the Base/Transaction field population
+        // AccountingTransactionService.PurchaseInvoiceMatches.cs's real posting path uses -- since no
+        // service method exists yet to create a receipt-matched foreign bill. That gap is a real,
+        // separate prerequisite for a fully end-to-end foreign supplier-return workflow; this test
+        // instead proves ShipSupplierReturnAsync/ApplySupplierReturnCreditAsync's own FX translation,
+        // application, and exact reversal (including the source-bill TransactionBalanceDue restoration
+        // on shipment reversal) against a realistic foreign vendor-bill line shape.
+        using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>(); var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        Guid companyId; Guid vendorId; Guid itemId; Guid grniAccountId; decimal startingVendorBalance; decimal startingPayables;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(x => x.Id).SingleAsync();
+            vendorId = await db.Vendors.Select(x => x.Id).FirstAsync(); startingVendorBalance = await db.Vendors.Where(x => x.Id == vendorId).Select(x => x.OpenBalance).SingleAsync();
+            itemId = await db.InventoryItems.Where(x => x.Sku == "RM-220").Select(x => x.Id).SingleAsync();
+            grniAccountId = await db.Accounts.Where(x => x.CompanyId == companyId && x.OperationalRole == AccountingAccountRoles.GoodsReceivedNotInvoiced).Select(x => x.Id).SingleAsync();
+            startingPayables = await db.Accounts.Where(x => x.OperationalRole == AccountingAccountRoles.AccountsPayable).Select(x => x.CurrentBalance).SingleAsync();
+        }
+
+        var documentRateId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.CurrencyExchangeRates.Add(new() { Id = documentRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .5m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 1), Source = "Test document rate", SourceReference = "https://example.test/cad-usd/2026-06-01" });
+            await db.SaveChangesAsync();
+        }
+
+        // Real base-currency order/receive pipeline -- only inventory cost flows through this, no bill
+        // price. Unit cost (25) is chosen to exactly match the foreign bill's translated per-unit base
+        // cost below, so the return's purchase-price-variance amount is zero and the only journal lines
+        // in play are inventory and accounts payable.
+        var orderResult = await transactions.SavePurchaseOrderAsync(new(null, vendorId, "PO-FXSUPRET-1", new DateOnly(2026, 6, 1), null, "Foreign supplier-return provenance test", [new(itemId, "Foreign compression fittings", 2m, 25m)])); Assert.True(orderResult.Succeeded, orderResult.ErrorMessage);
+        Guid orderLineId; string orderToken; await using (var db = await factory.CreateDbContextAsync()) { var order = await db.PurchaseOrders.SingleAsync(x => x.Id == orderResult.Id); Assert.True((await transactions.ApprovePurchaseOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded); orderLineId = await db.PurchaseOrderLines.Where(x => x.PurchaseOrderId == order.Id).Select(x => x.Id).SingleAsync(); }
+        await using (var db = await factory.CreateDbContextAsync()) orderToken = await db.PurchaseOrders.Where(x => x.Id == orderResult.Id).Select(x => x.ConcurrencyToken).SingleAsync();
+        var receiptResult = await transactions.ReceivePurchaseOrderAsync(new(orderResult.Id!.Value, "RCV-FXSUPRET-1", new DateOnly(2026, 6, 1), [new(orderLineId, 2m)], orderToken)); Assert.True(receiptResult.Succeeded, receiptResult.ErrorMessage);
+        Guid receiptLineId; await using (var db = await factory.CreateDbContextAsync()) receiptLineId = await db.InventoryReceiptLines.Where(x => x.InventoryReceiptId == receiptResult.Id).Select(x => x.Id).SingleAsync();
+
+        // Seed the source (partially paid) foreign bill directly: 2 units at 50 CAD = 100 CAD, rate .5 to
+        // base => 50 base. LineTotal/UnitCost are transaction-currency; BaseLineTotal is its base
+        // equivalent -- matching how AccountingTransactionService.PurchaseInvoiceMatches.cs populates
+        // VendorBillLine elsewhere. BalanceDue/TransactionBalanceDue start partially paid (10/20 of
+        // 50/100) so shipping the return both auto-applies part of the credit to this source bill AND
+        // leaves the rest available for a separate application below.
+        var sourceBillId = Guid.NewGuid(); var sourceBillLineId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.VendorBills.Add(new VendorBill { Id = sourceBillId, CompanyId = companyId, VendorId = vendorId, BillNumber = "BILL-FXSUPRET-1", BillDate = new DateOnly(2026, 6, 1), DueDate = new DateOnly(2026, 7, 1), Status = "Partial", TotalAmount = 50m, BalanceDue = 10m, TransactionCurrency = "CAD", TransactionTotalAmount = 100m, TransactionBalanceDue = 20m, ExchangeRateId = documentRateId, ExchangeRateToBase = .5m, ExchangeRateEffectiveOn = new DateOnly(2026, 6, 1), ExchangeRateSource = "Test document rate", InventoryReceiptId = receiptResult.Id, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+            db.VendorBillLines.Add(new VendorBillLine { Id = sourceBillLineId, VendorBillId = sourceBillId, InventoryReceiptLineId = receiptLineId, Sequence = 1, ExpenseAccountId = grniAccountId, Description = "Foreign compression fittings", Quantity = 2m, UnitCost = 50m, LineTotal = 100m, BaseTaxAmount = 0m, BaseLineTotal = 50m, MatchedQuantity = 2m });
+            await db.SaveChangesAsync();
+        }
+
+        string receiptToken; await using (var db = await factory.CreateDbContextAsync()) receiptToken = await db.InventoryReceipts.Where(x => x.Id == receiptResult.Id).Select(x => x.ConcurrencyToken).SingleAsync();
+        var authorizationResult = await transactions.AuthorizeSupplierReturnAsync(new(receiptResult.Id!.Value, "SRA-FXSUPRET-1", new DateOnly(2026, 6, 2), "Vendor shipped wrong fittings", [new(receiptLineId, 1m)], receiptToken)); Assert.True(authorizationResult.Succeeded, authorizationResult.ErrorMessage);
+        string authorizationToken; Guid authorizationLineId; await using (var db = await factory.CreateDbContextAsync()) { var authorization = await db.SupplierReturnAuthorizations.SingleAsync(x => x.Id == authorizationResult.Id); authorizationToken = authorization.ConcurrencyToken; authorizationLineId = await db.SupplierReturnAuthorizationLines.Where(x => x.SupplierReturnAuthorizationId == authorization.Id).Select(x => x.Id).SingleAsync(); }
+
+        // Returning 1 of 2 units: proportional (not final) split of both the transaction- and
+        // base-currency vendor-credit amounts, with zero purchase-price variance (see the unit-cost note
+        // above) and zero GRNI reduction (the whole matched quantity is already invoiced).
+        var shipmentResult = await transactions.ShipSupplierReturnAsync(new(authorizationResult.Id!.Value, "SRS-FXSUPRET-1", new DateOnly(2026, 6, 3), null, null, [new(authorizationLineId, 1m)], authorizationToken)); Assert.True(shipmentResult.Succeeded, shipmentResult.ErrorMessage);
+        string shipmentToken; await using (var db = await factory.CreateDbContextAsync())
+        {
+            var shipment = await db.SupplierReturnShipments.SingleAsync(x => x.Id == shipmentResult.Id); shipmentToken = shipment.ConcurrencyToken;
+            Assert.True(shipment.CreatesVendorCredit); Assert.Equal(25m, shipment.VendorCreditAmount); Assert.Equal(50m, shipment.TransactionVendorCreditAmount); Assert.Equal("CAD", shipment.TransactionCurrency); Assert.Equal(.5m, shipment.ExchangeRateToBase); Assert.Equal(documentRateId, shipment.ExchangeRateId);
+            Assert.Equal(25m, shipment.TotalAmount); // purchase-price variance is zero by construction
+            Assert.Equal(10m, shipment.SourceAppliedAmount); Assert.Equal(20m, shipment.TransactionSourceAppliedAmount); Assert.Equal(10m, shipment.AppliedAmount); Assert.Equal(20m, shipment.TransactionAppliedAmount);
+            var sourceBill = await db.VendorBills.SingleAsync(x => x.Id == sourceBillId); Assert.Equal(0m, sourceBill.BalanceDue); Assert.Equal(0m, sourceBill.TransactionBalanceDue);
+            Assert.Equal(startingPayables - 25m, await db.Accounts.Where(x => x.OperationalRole == AccountingAccountRoles.AccountsPayable).Select(x => x.CurrentBalance).SingleAsync());
+            Assert.Equal(startingVendorBalance - 25m, await db.Vendors.Where(x => x.Id == vendorId).Select(x => x.OpenBalance).SingleAsync());
+        }
+
+        // A second, unrelated foreign bill for the same vendor, at the same rate, to apply the remaining credit to.
+        var otherBillId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.VendorBills.Add(new VendorBill { Id = otherBillId, CompanyId = companyId, VendorId = vendorId, BillNumber = "BILL-FXSUPRET-OTHER", BillDate = new DateOnly(2026, 6, 1), DueDate = new DateOnly(2026, 7, 1), Status = "Open", TotalAmount = 40m, BalanceDue = 40m, TransactionCurrency = "CAD", TransactionTotalAmount = 80m, TransactionBalanceDue = 80m, ExchangeRateId = documentRateId, ExchangeRateToBase = .5m, ExchangeRateEffectiveOn = new DateOnly(2026, 6, 1), ExchangeRateSource = "Test document rate", ConcurrencyToken = Guid.NewGuid().ToString("N") });
+            await db.SaveChangesAsync(); // hand-inserted like the source bill, so it never touched vendor.OpenBalance -- only its own BalanceDue/TransactionBalanceDue matter for the application below.
+        }
+
+        // Applying more than the remaining available transaction-currency credit (30 CAD) fails.
+        var overApplication = await transactions.ApplySupplierReturnCreditAsync(new(shipmentResult.Id!.Value, otherBillId, new DateOnly(2026, 6, 4), 30.01m, shipmentToken)); Assert.False(overApplication.Succeeded); Assert.Contains("exceeds", overApplication.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var applicationResult = await transactions.ApplySupplierReturnCreditAsync(new(shipmentResult.Id!.Value, otherBillId, new DateOnly(2026, 6, 4), 30m, shipmentToken)); Assert.True(applicationResult.Succeeded, applicationResult.ErrorMessage);
+        string applicationToken; await using (var db = await factory.CreateDbContextAsync())
+        {
+            var application = await db.SupplierReturnCreditApplications.SingleAsync(x => x.Id == applicationResult.Id); applicationToken = application.ConcurrencyToken;
+            Assert.Equal(30m, application.TransactionAmount); Assert.Equal(15m, application.Amount);
+            var shipment = await db.SupplierReturnShipments.SingleAsync(x => x.Id == shipmentResult.Id); Assert.Equal(50m, shipment.TransactionAppliedAmount); Assert.Equal(25m, shipment.AppliedAmount);
+            var otherBill = await db.VendorBills.SingleAsync(x => x.Id == otherBillId); Assert.Equal(50m, otherBill.TransactionBalanceDue); Assert.Equal(25m, otherBill.BalanceDue);
+        }
+
+        // Exact reversal, newest to oldest: the application, then the physical return shipment.
+        Assert.True((await transactions.ReverseSupplierReturnCreditApplicationAsync(new(applicationResult.Id!.Value, new DateOnly(2026, 6, 5), "Apply to a different bill instead", applicationToken))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var shipment = await db.SupplierReturnShipments.SingleAsync(x => x.Id == shipmentResult.Id); Assert.Equal(20m, shipment.TransactionAppliedAmount); Assert.Equal(10m, shipment.AppliedAmount); shipmentToken = shipment.ConcurrencyToken;
+            var otherBill = await db.VendorBills.SingleAsync(x => x.Id == otherBillId); Assert.Equal(80m, otherBill.TransactionBalanceDue); Assert.Equal(40m, otherBill.BalanceDue);
+        }
+        var reversedShipment = await transactions.ReverseSupplierReturnShipmentAsync(new(shipmentResult.Id!.Value, new DateOnly(2026, 6, 6), "Vendor accepted the fittings after inspection", shipmentToken)); Assert.True(reversedShipment.Succeeded, reversedShipment.ErrorMessage);
+        await using var afterFx = await factory.CreateDbContextAsync();
+        Assert.Equal("Reversed", await afterFx.SupplierReturnShipments.Where(x => x.Id == shipmentResult.Id).Select(x => x.Status).SingleAsync());
+        // The exact bug this proves: TransactionBalanceDue must be restored by the source bill's own
+        // TransactionSourceAppliedAmount (20), not by its base-currency SourceAppliedAmount (10) -- the
+        // same class of mistake CreditCustomerReturnAsync's reversal path caught and fixed on the
+        // customer side.
+        var restoredSourceBill = await afterFx.VendorBills.SingleAsync(x => x.Id == sourceBillId);
+        Assert.Equal(10m, restoredSourceBill.BalanceDue); Assert.Equal(20m, restoredSourceBill.TransactionBalanceDue);
+        Assert.Equal(startingVendorBalance, await afterFx.Vendors.Where(x => x.Id == vendorId).Select(x => x.OpenBalance).SingleAsync());
+        Assert.Equal(startingPayables, await afterFx.Accounts.Where(x => x.OperationalRole == AccountingAccountRoles.AccountsPayable).Select(x => x.CurrentBalance).SingleAsync());
     }
 
     [Fact]

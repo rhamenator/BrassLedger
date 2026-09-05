@@ -1699,6 +1699,15 @@ public sealed class SupplierReturnShipment
     public decimal SourceAppliedAmount { get; set; }
     public decimal AppliedAmount { get; set; }
     public decimal RefundedAmount { get; set; }
+    public string TransactionCurrency { get; set; } = "USD";
+    public decimal TransactionVendorCreditAmount { get; set; }
+    public decimal TransactionSourceAppliedAmount { get; set; }
+    public decimal TransactionAppliedAmount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; } = 1m;
+    public DateOnly? ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
     public Guid JournalEntryId { get; set; }
     public Guid? ReversalJournalEntryId { get; set; }
     public Guid? ShippedByUserId { get; set; }
@@ -1726,6 +1735,8 @@ public sealed class SupplierReturnShipmentLine
     public decimal GrniReductionAmount { get; set; }
     public decimal VendorCreditUnitCost { get; set; }
     public decimal VendorCreditAmount { get; set; }
+    public decimal TransactionVendorCreditUnitCost { get; set; }
+    public decimal TransactionVendorCreditAmount { get; set; }
     public decimal PriorQuantityOnHand { get; set; }
     public decimal PriorUnitCost { get; set; }
     public decimal ResultingUnitCost { get; set; }
@@ -1739,6 +1750,7 @@ public sealed class SupplierReturnCreditApplication
     public Guid VendorBillId { get; set; }
     public DateOnly AppliedOn { get; set; }
     public decimal Amount { get; set; }
+    public decimal TransactionAmount { get; set; }
     public string Status { get; set; } = "Posted";
     public Guid? AppliedByUserId { get; set; }
     public DateTimeOffset AppliedAtUtc { get; set; }
