@@ -254,6 +254,18 @@ public sealed class OperationsPage
         await _session.Page.GetByLabel("Customer return credit number").FillAsync(creditNumber); await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post return credit" }).ClickAsync(); await _session.Page.GetByText($"Customer return credit {creditNumber} posted.", new() { Exact = true }).WaitForAsync(); var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer return credits" }).Locator("tr").Filter(new() { HasTextString = creditNumber }); await Assertions.Expect(row).ToContainTextAsync("Posted"); await Assertions.Expect(row).ToContainTextAsync("$0.00");
     }
 
+    public async Task ApplyCustomerReturnCreditAsync(string creditNumber, string invoiceNumber)
+    {
+        var creditRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer return credits" }).Locator("tr").Filter(new() { HasTextString = creditNumber });
+        await creditRow.GetByRole(AriaRole.Button, new() { Name = "Apply or refund" }).ClickAsync();
+        var invoiceSelect = _session.Page.GetByLabel("Customer return credit target invoice");
+        var invoiceOptionValue = await invoiceSelect.Locator("option").Filter(new() { HasTextString = invoiceNumber }).GetAttributeAsync("value");
+        await invoiceSelect.SelectOptionAsync(invoiceOptionValue!);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post credit settlement" }).ClickAsync();
+        await _session.Page.GetByText("Customer return credit applied to invoice.", new() { Exact = true }).WaitForAsync();
+        var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer return credits" }).Locator("tr").Filter(new() { HasTextString = creditNumber }); await Assertions.Expect(row).ToContainTextAsync("Posted");
+    }
+
     public async Task ApproveAndReceiveAsync(string orderNumber, string receiptNumber)
     {
         var orderRow = _session.Page.Locator("tr").Filter(new() { HasTextString = orderNumber });
@@ -311,6 +323,17 @@ public sealed class OperationsPage
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post supplier-return shipment" }).ClickAsync();
         await _session.Page.GetByText($"Supplier-return shipment {shipmentNumber} posted.", new() { Exact = true }).WaitForAsync();
         var shipmentRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Supplier return shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber }); await Assertions.Expect(shipmentRow).ToContainTextAsync("Vendor credit"); await Assertions.Expect(shipmentRow).ToContainTextAsync("Posted");
+    }
+
+    public async Task RefundSupplierReturnCreditAsync(string shipmentNumber)
+    {
+        var shipmentRow = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Supplier return shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber });
+        await shipmentRow.GetByRole(AriaRole.Button, new() { Name = "Apply or refund" }).ClickAsync();
+        await _session.Page.GetByLabel("Supplier return credit settlement method").SelectOptionAsync("Refund");
+        await _session.Page.GetByLabel("Supplier return credit refund bank").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post vendor-credit settlement" }).ClickAsync();
+        await _session.Page.GetByText("Supplier-return credit settlement posted.", new() { Exact = true }).WaitForAsync();
+        var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Supplier return shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber }); await Assertions.Expect(row).ToContainTextAsync("Posted");
     }
 
     public async Task PrepareLandedCostAsync(string receiptNumber, string allocationNumber, string billNumber)

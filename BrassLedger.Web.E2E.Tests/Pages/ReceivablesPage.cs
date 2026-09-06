@@ -103,6 +103,18 @@ public sealed class ReceivablesPage
         await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference })).ToContainTextAsync("Returned");
     }
 
+    public async Task RecordCustomerPaymentAsync(string invoiceNumber, string paymentReference, string amount)
+    {
+        await _session.Page.GetByLabel("Payment customer").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Payment deposit account").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Payment total").FillAsync(amount);
+        await _session.Page.GetByLabel("Payment method").SelectOptionAsync("ACH");
+        await _session.Page.GetByLabel("Payment reference").FillAsync(paymentReference);
+        await _session.Page.GetByLabel($"Apply to {invoiceNumber}").CheckAsync();
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Record customer payment" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer payment recorded.");
+    }
+
     public async Task RecordAndReverseCreditMemoAsync(string adjustmentReference)
     {
         await _session.Page.GetByLabel("Adjustment invoice").SelectOptionAsync(new SelectOptionValue { Index = 1 });

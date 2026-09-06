@@ -87,6 +87,18 @@ public sealed class PayablesPage
         await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = paymentReference })).ToContainTextAsync("Voided");
     }
 
+    public async Task RecordVendorPaymentAsync(string billNumber, string paymentReference, string amount)
+    {
+        await _session.Page.GetByLabel("Payment vendor").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Payment account").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Vendor payment total").FillAsync(amount);
+        await _session.Page.GetByLabel("Vendor payment method").SelectOptionAsync("Check");
+        await _session.Page.GetByLabel("Payment reference").FillAsync(paymentReference);
+        await _session.Page.GetByLabel($"Apply to {billNumber}").CheckAsync();
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Record vendor payment" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor payment recorded.");
+    }
+
     public async Task RecordAndReverseVendorCreditAsync(string adjustmentReference)
     {
         await _session.Page.GetByLabel("Vendor credit bill").SelectOptionAsync(new SelectOptionValue { Index = 1 });
