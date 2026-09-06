@@ -169,7 +169,7 @@ public sealed record CreditCustomerReturnRequest(Guid CustomerReturnReceiptId, s
 public sealed record ReverseCustomerReturnCreditRequest(Guid CustomerReturnCreditId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record ApplyCustomerReturnCreditRequest(Guid CustomerReturnCreditId, Guid SalesInvoiceId, DateOnly AppliedOn, decimal Amount, string ConcurrencyToken);
 public sealed record ReverseCustomerReturnCreditApplicationRequest(Guid CustomerReturnCreditApplicationId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
-public sealed record RefundCustomerReturnCreditRequest(Guid CustomerReturnCreditId, Guid BankAccountId, string Reference, DateOnly RefundDate, decimal Amount, string ConcurrencyToken);
+public sealed record RefundCustomerReturnCreditRequest(Guid CustomerReturnCreditId, Guid BankAccountId, string Reference, DateOnly RefundDate, decimal Amount, string ConcurrencyToken, Guid? ExchangeRateId = null);
 public sealed record ReverseCustomerReturnCreditRefundRequest(Guid CustomerReturnCreditRefundId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record PurchaseRequisitionLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal EstimatedUnitCost, Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
 public sealed record SavePurchaseRequisitionRequest(Guid? Id, Guid? RequestedVendorId, string RequisitionNumber, DateOnly RequestedOn, DateOnly? NeededBy, string Purpose, IReadOnlyList<PurchaseRequisitionLineRequest> Lines, string ConcurrencyToken = "");
@@ -197,7 +197,7 @@ public sealed record CancelSupplierReturnRequest(Guid SupplierReturnAuthorizatio
 public sealed record ShipSupplierReturnLineRequest(Guid SupplierReturnAuthorizationLineId, decimal Quantity);
 public sealed record ShipSupplierReturnRequest(Guid SupplierReturnAuthorizationId, string ShipmentNumber, DateOnly ShippedOn, Guid? WarehouseId, Guid? BinId, IReadOnlyList<ShipSupplierReturnLineRequest> Lines, string ConcurrencyToken);
 public sealed record ApplySupplierReturnCreditRequest(Guid SupplierReturnShipmentId, Guid VendorBillId, DateOnly AppliedOn, decimal Amount, string ConcurrencyToken);
-public sealed record RefundSupplierReturnCreditRequest(Guid SupplierReturnShipmentId, Guid BankAccountId, string Reference, DateOnly RefundDate, decimal Amount, string ConcurrencyToken);
+public sealed record RefundSupplierReturnCreditRequest(Guid SupplierReturnShipmentId, Guid BankAccountId, string Reference, DateOnly RefundDate, decimal Amount, string ConcurrencyToken, Guid? ExchangeRateId = null);
 public sealed record ReverseSupplierReturnShipmentRequest(Guid SupplierReturnShipmentId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record ReverseSupplierReturnCreditApplicationRequest(Guid SupplierReturnCreditApplicationId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record ReverseSupplierReturnCreditRefundRequest(Guid SupplierReturnCreditRefundId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);

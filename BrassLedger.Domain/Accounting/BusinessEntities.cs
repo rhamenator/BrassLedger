@@ -1394,6 +1394,7 @@ public sealed class CustomerReturnCredit
     public decimal TransactionTotalAmount { get; set; }
     public decimal TransactionSourceAppliedAmount { get; set; }
     public decimal TransactionAppliedAmount { get; set; }
+    public decimal TransactionRefundedAmount { get; set; }
     public Guid? ExchangeRateId { get; set; }
     public decimal ExchangeRateToBase { get; set; } = 1m;
     public DateOnly? ExchangeRateEffectiveOn { get; set; }
@@ -1455,6 +1456,13 @@ public sealed class CustomerReturnCreditRefund
     public string Reference { get; set; } = string.Empty;
     public DateOnly RefundDate { get; set; }
     public decimal Amount { get; set; }
+    public decimal TransactionAmount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; } = 1m;
+    public DateOnly? ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
+    public decimal RealizedGainLoss { get; set; }
     public string Status { get; set; } = "Posted";
     public Guid JournalEntryId { get; set; }
     public Guid? ReversalJournalEntryId { get; set; }
@@ -1703,6 +1711,7 @@ public sealed class SupplierReturnShipment
     public decimal TransactionVendorCreditAmount { get; set; }
     public decimal TransactionSourceAppliedAmount { get; set; }
     public decimal TransactionAppliedAmount { get; set; }
+    public decimal TransactionRefundedAmount { get; set; }
     public Guid? ExchangeRateId { get; set; }
     public decimal ExchangeRateToBase { get; set; } = 1m;
     public DateOnly? ExchangeRateEffectiveOn { get; set; }
@@ -1770,6 +1779,13 @@ public sealed class SupplierReturnCreditRefund
     public string Reference { get; set; } = string.Empty;
     public DateOnly RefundDate { get; set; }
     public decimal Amount { get; set; }
+    public decimal TransactionAmount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; } = 1m;
+    public DateOnly? ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
+    public decimal RealizedGainLoss { get; set; }
     public string Status { get; set; } = "Posted";
     public Guid JournalEntryId { get; set; }
     public Guid? ReversalJournalEntryId { get; set; }

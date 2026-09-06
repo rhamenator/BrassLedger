@@ -676,6 +676,17 @@ public static class ServiceCollectionExtensions
                 if (!await HasColumnAsync(dbContext, "SupplierReturnShipmentLines", column, cancellationToken)) return false;
             return await HasColumnAsync(dbContext, "SupplierReturnCreditApplications", "TransactionAmount", cancellationToken);
         }
+        if (migrationId.EndsWith("_AddSupplierAndCustomerReturnRefundTransactionCurrency", StringComparison.Ordinal))
+        {
+            if (!await HasColumnAsync(dbContext, "SupplierReturnShipments", "TransactionRefundedAmount", cancellationToken)) return false;
+            if (!await HasColumnAsync(dbContext, "CustomerReturnCredits", "TransactionRefundedAmount", cancellationToken)) return false;
+            string[] refundColumns = ["TransactionAmount", "ExchangeRateId", "ExchangeRateToBase", "ExchangeRateEffectiveOn", "ExchangeRateSource", "ExchangeRateSourceReference", "RealizedGainLoss"];
+            foreach (var column in refundColumns)
+                if (!await HasColumnAsync(dbContext, "SupplierReturnCreditRefunds", column, cancellationToken)) return false;
+            foreach (var column in refundColumns)
+                if (!await HasColumnAsync(dbContext, "CustomerReturnCreditRefunds", column, cancellationToken)) return false;
+            return true;
+        }
         return false;
     }
 

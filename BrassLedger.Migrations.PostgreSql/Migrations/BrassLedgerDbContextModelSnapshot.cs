@@ -2056,6 +2056,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<decimal>("TransactionRefundedAmount")
+                        .HasColumnType("numeric");
+
                     b.Property<decimal>("TransactionSourceAppliedAmount")
                         .HasColumnType("numeric");
 
@@ -2236,8 +2239,28 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<Guid>("CustomerReturnCreditId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateOnly?>("ExchangeRateEffectiveOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasColumnType("numeric");
+
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("RealizedGainLoss")
+                        .HasColumnType("numeric");
 
                     b.Property<string>("Reference")
                         .IsRequired()
@@ -2268,6 +2291,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<decimal>("TransactionAmount")
+                        .HasColumnType("numeric");
 
                     b.HasKey("Id");
 
@@ -9341,8 +9367,28 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateOnly?>("ExchangeRateEffectiveOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasColumnType("numeric");
+
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("RealizedGainLoss")
+                        .HasColumnType("numeric");
 
                     b.Property<string>("Reference")
                         .IsRequired()
@@ -9379,6 +9425,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
 
                     b.Property<Guid>("SupplierReturnShipmentId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("TransactionAmount")
+                        .HasColumnType("numeric");
 
                     b.HasKey("Id");
 
@@ -9497,6 +9546,9 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<string>("TransactionCurrency")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<decimal>("TransactionRefundedAmount")
+                        .HasColumnType("numeric");
 
                     b.Property<decimal>("TransactionSourceAppliedAmount")
                         .HasColumnType("numeric");
