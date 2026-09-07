@@ -30,6 +30,7 @@ public sealed record ForeignCurrencyRemeasurementBatchSnapshot(Guid Id, DateOnly
 public sealed record RejectSubledgerDocumentRequest(Guid WorkflowId, string Reason, string ConcurrencyToken);
 public sealed record SaveRecurringInvoiceTemplateRequest(CreateInvoiceRequest Invoice, string Frequency, int FrequencyInterval, DateOnly NextOccurrenceDate, DateOnly? EndDate = null);
 public sealed record SaveRecurringVendorBillTemplateRequest(CreateVendorBillRequest Bill, string Frequency, int FrequencyInterval, DateOnly NextOccurrenceDate, DateOnly? EndDate = null);
+public sealed record AssignRecurringOccurrenceRateRequest(Guid WorkflowId, Guid ExchangeRateId, string ConcurrencyToken);
 public sealed record ReconcileBankAccountRequest(Guid BankAccountId, DateOnly StatementDate, decimal StatementClosingBalance, IReadOnlyList<Guid>? ClearedJournalEntryIds = null, string Notes = "");
 public sealed record UpdateBankLedgerMappingRequest(Guid BankAccountId, string LedgerAccountNumber);
 public sealed record ImportBankStatementRequest(Guid BankAccountId, string FileName, string Format, string Content, bool DryRun = false);
@@ -264,6 +265,7 @@ public interface IAccountingTransactionService
     Task<TransactionResult> SaveRecurringInvoiceTemplateAsync(SaveRecurringInvoiceTemplateRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> SaveRecurringVendorBillTemplateAsync(SaveRecurringVendorBillTemplateRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> GenerateDueRecurringDocumentsAsync(DateOnly throughDate, CancellationToken cancellationToken = default);
+    Task<TransactionResult> AssignRecurringOccurrenceRateAsync(AssignRecurringOccurrenceRateRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> ReconcileBankAccountAsync(ReconcileBankAccountRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> UpdateBankLedgerMappingAsync(UpdateBankLedgerMappingRequest request, CancellationToken cancellationToken = default);
     Task<BankStatementImportResult> ImportBankStatementAsync(ImportBankStatementRequest request, CancellationToken cancellationToken = default);

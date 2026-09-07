@@ -1633,7 +1633,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.False((await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-FX-WRONG-PAIR", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 10m, 0m, "4000", "Wrong pair rejected", Currency: "CAD", ExchangeRateId: inverseRateId))).Succeeded);
         Assert.False((await PostInvoiceThroughWorkflowAsync(transactions, new(customer.Id, "INV-FX-BASE-WITH-RATE", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 10m, 0m, "4000", "Base currency rate rejected", Currency: "USD", ExchangeRateId: documentRateId))).Succeeded);
         var recurringForeign = await transactions.SaveRecurringInvoiceTemplateAsync(new(new(customer.Id, "INV-FX-RECUR", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m, 0m, "4000", "Foreign recurring invoice", Currency: "CAD", ExchangeRateId: documentRateId), "Monthly", 1, new DateOnly(2026, 6, 1)));
-        Assert.False(recurringForeign.Succeeded); Assert.Contains("current retained rate", recurringForeign.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(recurringForeign.Succeeded); Assert.Contains("fixed exchange rate", recurringForeign.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var posted = await workspaceService.GetWorkspaceAsync();
         var invoiceSnapshot = posted.Receivables.Invoices.Single(item => item.Id == invoice.Id); var billSnapshot = posted.Payables.Bills.Single(item => item.Id == bill.Id);
         Assert.Equal("CAD", invoiceSnapshot.TransactionCurrency); Assert.Equal(100m, invoiceSnapshot.TransactionBalanceDue); Assert.Equal(75m, invoiceSnapshot.BalanceDue); Assert.Equal(.75m, invoiceSnapshot.ExchangeRateToBase); Assert.Contains("2026-05-01", invoiceSnapshot.ExchangeRateSourceReference);
@@ -2359,6 +2359,99 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True((await transactions.ApproveSubledgerDocumentAsync(generated[0].Id)).Succeeded);
         Assert.True((await transactions.PostApprovedSubledgerDocumentAsync(generated[0].Id)).Succeeded);
         Assert.Equal(before.Payables.OpenBalance + 25m, (await workspaceService.GetWorkspaceAsync()).Payables.OpenBalance);
+    }
+
+    [Fact]
+    public async Task ForeignRecurringInvoiceTemplate_NeverFreezesARateAndRequiresOnePerGeneratedOccurrence()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var customer = before.Receivables.Customers.First();
+
+        var septemberRateId = Guid.NewGuid(); var octoberRateId = Guid.NewGuid(); var futureRateId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.CurrencyExchangeRates.AddRange(
+                new() { Id = septemberRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 9, 1), Source = "Bank of Canada daily rate", SourceReference = "https://example.test/cad-usd/2026-09-01" },
+                new() { Id = octoberRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 10, 1), Source = "Bank of Canada daily rate", SourceReference = "https://example.test/cad-usd/2026-10-01" },
+                new() { Id = futureRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .90m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 11, 1), Source = "Future observation", SourceReference = "https://example.test/cad-usd/2026-11-01" });
+            await db.SaveChangesAsync();
+        }
+
+        // The template itself must never carry a fixed rate for a foreign
+        // currency: supplying one is rejected outright, before any draft or
+        // occurrence exists.
+        var frozenRateRejected = await transactions.SaveRecurringInvoiceTemplateAsync(new(
+            new CreateInvoiceRequest(customer.Id, "INV-FX-RECUR-2", new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30), 100m, 0m, "4000", "Foreign recurring invoice", Currency: "CAD", ExchangeRateId: septemberRateId),
+            "Monthly", 1, new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 1)));
+        Assert.False(frozenRateRejected.Succeeded);
+        Assert.Contains("fixed exchange rate", frozenRateRejected.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var template = await transactions.SaveRecurringInvoiceTemplateAsync(new(
+            new CreateInvoiceRequest(customer.Id, "INV-FX-RECUR-2", new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30), 100m, 0m, "4000", "Foreign recurring invoice", Currency: "CAD"),
+            "Monthly", 1, new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 1)));
+        Assert.True(template.Succeeded, template.ErrorMessage);
+
+        Assert.True((await transactions.GenerateDueRecurringDocumentsAsync(new DateOnly(2026, 10, 1))).Succeeded);
+        var generatedWorkspace = await workspaceService.GetWorkspaceAsync();
+        var generated = generatedWorkspace.Receivables.Workflows!.Where(item => item.SourceTemplateId == template.Id).OrderBy(item => item.DocumentNumber).ToArray();
+        Assert.Equal(2, generated.Length);
+        Assert.Equal(["INV-FX-RECUR-2-20260901", "INV-FX-RECUR-2-20261001"], generated.Select(item => item.DocumentNumber));
+        Assert.All(generated, item => Assert.True(item.RequiresRateAssignment));
+        Assert.All(generated, item => Assert.Equal("CAD", item.TransactionCurrency));
+
+        var septemberOccurrence = generated[0];
+
+        // Approval must fail closed until a rate is assigned -- generating a
+        // draft never silently picks one.
+        var prematureApproval = await transactions.ApproveSubledgerDocumentAsync(septemberOccurrence.Id);
+        Assert.False(prematureApproval.Succeeded);
+        Assert.Contains("retained closing rate", prematureApproval.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        // A rate whose effective date is after the occurrence's own invoice
+        // date must be rejected, exactly like every other FX entry point.
+        var futureRateRejected = await transactions.AssignRecurringOccurrenceRateAsync(
+            new AssignRecurringOccurrenceRateRequest(septemberOccurrence.Id, futureRateId, septemberOccurrence.ConcurrencyToken));
+        Assert.False(futureRateRejected.Succeeded);
+
+        var assigned = await transactions.AssignRecurringOccurrenceRateAsync(
+            new AssignRecurringOccurrenceRateRequest(septemberOccurrence.Id, septemberRateId, septemberOccurrence.ConcurrencyToken));
+        Assert.True(assigned.Succeeded, assigned.ErrorMessage);
+
+        // Assigning a second rate to the same occurrence must be rejected --
+        // one rate, chosen once, per occurrence.
+        var afterAssign = await workspaceService.GetWorkspaceAsync();
+        var septemberAfterAssign = afterAssign.Receivables.Workflows!.Single(item => item.Id == septemberOccurrence.Id);
+        Assert.False(septemberAfterAssign.RequiresRateAssignment);
+        var doubleAssign = await transactions.AssignRecurringOccurrenceRateAsync(
+            new AssignRecurringOccurrenceRateRequest(septemberOccurrence.Id, octoberRateId, septemberAfterAssign.ConcurrencyToken));
+        Assert.False(doubleAssign.Succeeded);
+
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(septemberOccurrence.Id)).Succeeded);
+        var posted = await transactions.PostApprovedSubledgerDocumentAsync(septemberOccurrence.Id);
+        Assert.True(posted.Succeeded, posted.ErrorMessage);
+        var septemberInvoice = (await workspaceService.GetWorkspaceAsync()).Receivables.Invoices.Single(item => item.Id == posted.Id);
+        Assert.Equal("CAD", septemberInvoice.TransactionCurrency);
+        Assert.Equal(.75m, septemberInvoice.ExchangeRateToBase);
+
+        // The second occurrence gets its own, independently selected rate --
+        // proving the fix is "a rate per occurrence," not "a rate per
+        // template" reused silently for every occurrence.
+        var octoberOccurrence = generated[1];
+        var octoberAssigned = await transactions.AssignRecurringOccurrenceRateAsync(
+            new AssignRecurringOccurrenceRateRequest(octoberOccurrence.Id, octoberRateId, octoberOccurrence.ConcurrencyToken));
+        Assert.True(octoberAssigned.Succeeded, octoberAssigned.ErrorMessage);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(octoberOccurrence.Id)).Succeeded);
+        var octoberPosted = await transactions.PostApprovedSubledgerDocumentAsync(octoberOccurrence.Id);
+        Assert.True(octoberPosted.Succeeded, octoberPosted.ErrorMessage);
+        var octoberInvoice = (await workspaceService.GetWorkspaceAsync()).Receivables.Invoices.Single(item => item.Id == octoberPosted.Id);
+        Assert.Equal(.80m, octoberInvoice.ExchangeRateToBase);
     }
 
     [Fact]

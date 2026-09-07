@@ -338,7 +338,7 @@ public sealed class BusinessWorkspaceService(
                     x.CustomerId, x.TransactionCurrency, x.TransactionTotalAmount, x.TransactionBalanceDue, x.ExchangeRateToBase, x.ExchangeRateEffectiveOn, x.ExchangeRateSource, x.ExchangeRateSourceReference)).ToArray(),
                 Payments: subledgerPayments.Where(payment => payment.Direction == "CustomerReceipt").Select(payment => new SubledgerPaymentSnapshot(payment.Id, payment.Direction, customerNames.GetValueOrDefault(payment.CounterpartyId, "Unknown customer"), payment.PaymentDate, payment.Amount, payment.AppliedAmount, payment.UnappliedAmount, payment.Reference, payment.Method, payment.Status, paymentApplicationLookup[payment.Id].Select(application => new PaymentApplicationSnapshot(application.DocumentId, invoiceNumbersById.GetValueOrDefault(application.DocumentId, "Unavailable"), application.Amount, application.TransactionAmount, application.RealizedGainLoss)).ToArray(), payment.TransactionCurrency, payment.TransactionAmount, payment.TransactionAppliedAmount, payment.TransactionUnappliedAmount, payment.ExchangeRateToBase, payment.RealizedGainLoss, payment.ExchangeRateEffectiveOn, payment.ExchangeRateSource, payment.ExchangeRateSourceReference, payment.ConcurrencyToken)).ToArray(),
                 Adjustments: subledgerAdjustments.Where(adjustment => adjustment.Subledger == "Receivables").Select(adjustment => new SubledgerAdjustmentSnapshot(adjustment.Id, adjustment.Subledger, adjustment.Kind, adjustment.CounterpartyId, customerNames.GetValueOrDefault(adjustment.CounterpartyId, "Unknown customer"), adjustment.DocumentId, adjustment.DocumentId.HasValue ? invoiceNumbersById.GetValueOrDefault(adjustment.DocumentId.Value, "Unavailable") : string.Empty, adjustment.PaymentId, adjustment.AdjustmentDate, adjustment.Amount, adjustment.Reference, adjustment.Reason, adjustment.OffsetAccountNumber, adjustment.Status, adjustment.JournalEntryId, adjustment.ReversalJournalEntryId, adjustment.TransactionCurrency, adjustment.TransactionAmount, adjustment.CarryingAmount, adjustment.RateBasis, adjustment.ExchangeRateToBase, adjustment.RealizedGainLoss, adjustment.ExchangeRateEffectiveOn, adjustment.ExchangeRateSource, adjustment.ExchangeRateSourceReference, adjustment.ReversalDate)).ToArray(),
-                Workflows: subledgerWorkflows.Where(workflow => workflow.DocumentType == "Invoice").Select(ToWorkflowSnapshot).ToArray()),
+                Workflows: subledgerWorkflows.Where(workflow => workflow.DocumentType == "Invoice").Select(workflow => ToWorkflowSnapshot(workflow, company.BaseCurrency)).ToArray()),
             Payables: new PayablesWorkspace(
                 OpenBalance: vendorBills.Sum(x => x.BalanceDue),
                 DueThisWeekCount: vendorBills.Count(x => x.DueDate <= DateOnly.FromDateTime(DateTime.Today.AddDays(7)) && x.BalanceDue > 0m),
@@ -356,7 +356,7 @@ public sealed class BusinessWorkspaceService(
                     x.VendorId, x.TransactionCurrency, x.TransactionTotalAmount, x.TransactionBalanceDue, x.ExchangeRateToBase, x.ExchangeRateEffectiveOn, x.ExchangeRateSource, x.ExchangeRateSourceReference)).ToArray(),
                 Payments: subledgerPayments.Where(payment => payment.Direction == "VendorDisbursement").Select(payment => new SubledgerPaymentSnapshot(payment.Id, payment.Direction, vendorNames.GetValueOrDefault(payment.CounterpartyId, "Unknown vendor"), payment.PaymentDate, payment.Amount, payment.AppliedAmount, payment.UnappliedAmount, payment.Reference, payment.Method, payment.Status, paymentApplicationLookup[payment.Id].Select(application => new PaymentApplicationSnapshot(application.DocumentId, billNumbersById.GetValueOrDefault(application.DocumentId, "Unavailable"), application.Amount, application.TransactionAmount, application.RealizedGainLoss)).ToArray(), payment.TransactionCurrency, payment.TransactionAmount, payment.TransactionAppliedAmount, payment.TransactionUnappliedAmount, payment.ExchangeRateToBase, payment.RealizedGainLoss, payment.ExchangeRateEffectiveOn, payment.ExchangeRateSource, payment.ExchangeRateSourceReference, payment.ConcurrencyToken)).ToArray(),
                 Adjustments: subledgerAdjustments.Where(adjustment => adjustment.Subledger == "Payables").Select(adjustment => new SubledgerAdjustmentSnapshot(adjustment.Id, adjustment.Subledger, adjustment.Kind, adjustment.CounterpartyId, vendorNames.GetValueOrDefault(adjustment.CounterpartyId, "Unknown vendor"), adjustment.DocumentId, adjustment.DocumentId.HasValue ? billNumbersById.GetValueOrDefault(adjustment.DocumentId.Value, "Unavailable") : string.Empty, adjustment.PaymentId, adjustment.AdjustmentDate, adjustment.Amount, adjustment.Reference, adjustment.Reason, adjustment.OffsetAccountNumber, adjustment.Status, adjustment.JournalEntryId, adjustment.ReversalJournalEntryId, adjustment.TransactionCurrency, adjustment.TransactionAmount, adjustment.CarryingAmount, adjustment.RateBasis, adjustment.ExchangeRateToBase, adjustment.RealizedGainLoss, adjustment.ExchangeRateEffectiveOn, adjustment.ExchangeRateSource, adjustment.ExchangeRateSourceReference, adjustment.ReversalDate)).ToArray(),
-                Workflows: subledgerWorkflows.Where(workflow => workflow.DocumentType == "VendorBill").Select(ToWorkflowSnapshot).ToArray()),
+                Workflows: subledgerWorkflows.Where(workflow => workflow.DocumentType == "VendorBill").Select(workflow => ToWorkflowSnapshot(workflow, company.BaseCurrency)).ToArray()),
             Operations: new OperationsWorkspace(
                 InventoryItemCount: inventoryItems.Count,
                 ReorderAlerts: inventoryItems.Count(x => x.QuantityOnHand <= x.ReorderPoint),
@@ -603,7 +603,37 @@ public sealed class BusinessWorkspaceService(
         return accounts.Where(x => x.Type == accountType).Sum(x => x.CurrentBalance);
     }
 
-    private static SubledgerDocumentWorkflowSnapshot ToWorkflowSnapshot(SubledgerDocumentWorkflow workflow) => new(workflow.Id, workflow.DocumentType, workflow.DocumentNumber, workflow.Status, workflow.IsRecurringTemplate, workflow.Frequency, workflow.FrequencyInterval, workflow.NextOccurrenceDate, workflow.EndDate, workflow.SourceTemplateId, workflow.PostedDocumentId, workflow.CreatedAtUtc, workflow.ApprovedAtUtc, workflow.RejectedAtUtc, workflow.DecisionReason, workflow.PostedAtUtc, workflow.ConcurrencyToken);
+    private static SubledgerDocumentWorkflowSnapshot ToWorkflowSnapshot(SubledgerDocumentWorkflow workflow, string baseCurrency)
+    {
+        string transactionCurrency = "";
+        bool requiresRateAssignment = false;
+        DateOnly? transactionDate = null;
+        try
+        {
+            if (workflow.DocumentType == "Invoice")
+            {
+                var payload = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(workflow.PayloadJson);
+                if (payload is not null)
+                {
+                    transactionCurrency = string.IsNullOrWhiteSpace(payload.Currency) ? baseCurrency : payload.Currency;
+                    requiresRateAssignment = !workflow.IsRecurringTemplate && workflow.SourceTemplateId.HasValue && workflow.Status == "Draft" && transactionCurrency != baseCurrency && !payload.ExchangeRateId.HasValue;
+                    transactionDate = payload.InvoiceDate;
+                }
+            }
+            else if (workflow.DocumentType == "VendorBill")
+            {
+                var payload = System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(workflow.PayloadJson);
+                if (payload is not null)
+                {
+                    transactionCurrency = string.IsNullOrWhiteSpace(payload.Currency) ? baseCurrency : payload.Currency;
+                    requiresRateAssignment = !workflow.IsRecurringTemplate && workflow.SourceTemplateId.HasValue && workflow.Status == "Draft" && transactionCurrency != baseCurrency && !payload.ExchangeRateId.HasValue;
+                    transactionDate = payload.BillDate;
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException) { }
+        return new(workflow.Id, workflow.DocumentType, workflow.DocumentNumber, workflow.Status, workflow.IsRecurringTemplate, workflow.Frequency, workflow.FrequencyInterval, workflow.NextOccurrenceDate, workflow.EndDate, workflow.SourceTemplateId, workflow.PostedDocumentId, workflow.CreatedAtUtc, workflow.ApprovedAtUtc, workflow.RejectedAtUtc, workflow.DecisionReason, workflow.PostedAtUtc, workflow.ConcurrencyToken, transactionCurrency, requiresRateAssignment, transactionDate);
+    }
 
     private static string MaskTaxId(string taxId)
     {

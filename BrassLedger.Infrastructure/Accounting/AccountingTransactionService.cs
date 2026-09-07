@@ -539,7 +539,7 @@ public sealed partial class AccountingTransactionService(
         return result;
     }
 
-    private async Task<TransactionResult> CreateInvoiceCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateInvoiceRequest request, CancellationToken cancellationToken, ProjectBillingProposal? projectBilling = null)
+    private async Task<TransactionResult> CreateInvoiceCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateInvoiceRequest request, CancellationToken cancellationToken, ProjectBillingProposal? projectBilling = null, bool allowPendingForeignRate = false)
     {
         var requestedLines = request.Lines?.ToArray() ?? [];
         if (string.IsNullOrWhiteSpace(request.InvoiceNumber) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("An invoice number and description are required.");
@@ -549,7 +549,7 @@ public sealed partial class AccountingTransactionService(
         if (requestedLines.Length == 0 && (request.Subtotal < 0 || request.TaxAmount < 0)) return TransactionResult.Failure("Invoice amounts must be non-negative.");
         var customer = await db.Customers.SingleOrDefaultAsync(x => x.Id == request.CustomerId && x.CompanyId == companyId, cancellationToken);
         if (customer is null) return TransactionResult.Failure("Customer not found.");
-        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, request.Currency, request.ExchangeRateId, request.InvoiceDate, cancellationToken);
+        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, request.Currency, request.ExchangeRateId, request.InvoiceDate, cancellationToken, allowPendingForeignRate);
         if (transactionRateError is not null) return TransactionResult.Failure(transactionRateError);
         if (projectBilling is not null && transactionRate!.IsForeign) return TransactionResult.Failure("Project-billing invoices currently require the company base currency; prepare an ordinary foreign-currency invoice instead.");
         if (await db.SalesInvoices.AnyAsync(x => x.CompanyId == companyId && x.InvoiceNumber == request.InvoiceNumber.Trim(), cancellationToken)) return TransactionResult.Failure("Invoice number already exists.");
@@ -639,7 +639,7 @@ public sealed partial class AccountingTransactionService(
         return sources.Sum(source => source.RetainageAmount) - releases.Sum();
     }
 
-    private async Task<TransactionResult> CreateVendorBillCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateVendorBillRequest request, CancellationToken cancellationToken)
+    private async Task<TransactionResult> CreateVendorBillCoreAsync(BrassLedgerDbContext db, Guid companyId, CreateVendorBillRequest request, CancellationToken cancellationToken, bool allowPendingForeignRate = false)
     {
         var requestedLines = request.Lines?.ToArray() ?? [];
         if (string.IsNullOrWhiteSpace(request.BillNumber) || string.IsNullOrWhiteSpace(request.Description)) return TransactionResult.Failure("A bill number and description are required.");
@@ -648,7 +648,7 @@ public sealed partial class AccountingTransactionService(
             return TransactionResult.Failure("Each bill line requires a description, positive quantity, valid cost and discount, non-negative tax, and expense account.");
         if (requestedLines.Length == 0 && request.TotalAmount <= 0) return TransactionResult.Failure("Bill amount must be positive.");
         if (!await db.Vendors.AnyAsync(x => x.Id == request.VendorId && x.CompanyId == companyId, cancellationToken)) return TransactionResult.Failure("Vendor not found.");
-        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, request.Currency, request.ExchangeRateId, request.BillDate, cancellationToken);
+        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, request.Currency, request.ExchangeRateId, request.BillDate, cancellationToken, allowPendingForeignRate);
         if (transactionRateError is not null) return TransactionResult.Failure(transactionRateError);
         var billNumber = request.BillNumber.Trim();
         if (await db.VendorBills.AnyAsync(x => x.CompanyId == companyId && x.VendorId == request.VendorId && x.BillNumber == billNumber, cancellationToken)
@@ -816,22 +816,14 @@ public sealed partial class AccountingTransactionService(
 
     public async Task<TransactionResult> SaveRecurringInvoiceTemplateAsync(SaveRecurringInvoiceTemplateRequest request, CancellationToken cancellationToken = default)
     {
-        if (!await IsBaseCurrencyRequestAsync(request.Invoice.Currency, cancellationToken)) return TransactionResult.Failure("Foreign-currency recurring templates are not supported because each occurrence requires a current retained rate. Generate a base-currency template or prepare each foreign draft with its applicable rate.");
+        if (request.Invoice.ExchangeRateId.HasValue) return TransactionResult.Failure("A recurring template cannot select a fixed exchange rate. Leave it unselected; each generated occurrence gets its own rate chosen when it is prepared.");
         return await SaveSubledgerWorkflowAsync("Invoice", "company", request.Invoice.InvoiceNumber, request.Invoice, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
     }
 
     public async Task<TransactionResult> SaveRecurringVendorBillTemplateAsync(SaveRecurringVendorBillTemplateRequest request, CancellationToken cancellationToken = default)
     {
-        if (!await IsBaseCurrencyRequestAsync(request.Bill.Currency, cancellationToken)) return TransactionResult.Failure("Foreign-currency recurring templates are not supported because each occurrence requires a current retained rate. Generate a base-currency template or prepare each foreign draft with its applicable rate.");
+        if (request.Bill.ExchangeRateId.HasValue) return TransactionResult.Failure("A recurring template cannot select a fixed exchange rate. Leave it unselected; each generated occurrence gets its own rate chosen when it is prepared.");
         return await SaveSubledgerWorkflowAsync("VendorBill", request.Bill.VendorId.ToString("N"), request.Bill.BillNumber, request.Bill, true, request.Frequency, request.FrequencyInterval, request.NextOccurrenceDate, request.EndDate, cancellationToken);
-    }
-
-    private async Task<bool> IsBaseCurrencyRequestAsync(string? currency, CancellationToken cancellationToken)
-    {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
-        var baseCurrency = await db.Companies.AsNoTracking().Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
-        return NormalizeTransactionCurrency(currency, baseCurrency) == baseCurrency;
     }
 
     public async Task<TransactionResult> GenerateDueRecurringDocumentsAsync(DateOnly throughDate, CancellationToken cancellationToken = default)
@@ -851,12 +843,14 @@ public sealed partial class AccountingTransactionService(
                 if (template.DocumentType == "Invoice")
                 {
                     var source = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(template.PayloadJson)!;
-                    payload = System.Text.Json.JsonSerializer.Serialize(source with { InvoiceNumber = number, InvoiceDate = occurrence, DueDate = occurrence.AddDays(source.DueDate.DayNumber - source.InvoiceDate.DayNumber) });
+                    // Never carry a rate forward from the template: a foreign occurrence must have its own
+                    // rate selected at (or near) its own date, not the template's authoring date.
+                    payload = System.Text.Json.JsonSerializer.Serialize(source with { InvoiceNumber = number, InvoiceDate = occurrence, DueDate = occurrence.AddDays(source.DueDate.DayNumber - source.InvoiceDate.DayNumber), ExchangeRateId = null });
                 }
                 else
                 {
                     var source = System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(template.PayloadJson)!;
-                    payload = System.Text.Json.JsonSerializer.Serialize(source with { BillNumber = number, BillDate = occurrence, DueDate = occurrence.AddDays(source.DueDate.DayNumber - source.BillDate.DayNumber) });
+                    payload = System.Text.Json.JsonSerializer.Serialize(source with { BillNumber = number, BillDate = occurrence, DueDate = occurrence.AddDays(source.DueDate.DayNumber - source.BillDate.DayNumber), ExchangeRateId = null });
                 }
                 if (!await db.SubledgerDocumentWorkflows.AnyAsync(item => item.CompanyId == companyId && item.DocumentType == template.DocumentType && item.DocumentScope == template.DocumentScope && item.DocumentNumber == number && !item.IsRecurringTemplate, cancellationToken))
                 {
@@ -870,6 +864,40 @@ public sealed partial class AccountingTransactionService(
         }
         await db.SaveChangesAsync(cancellationToken);
         return generated == 0 ? TransactionResult.Failure("No recurring templates were due through that date.") : TransactionResult.Success(templates.First().Id);
+    }
+
+    public async Task<TransactionResult> AssignRecurringOccurrenceRateAsync(AssignRecurringOccurrenceRateRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!HasPermission(BrassLedgerPermissions.SubledgerPrepare)) return TransactionResult.Failure("You are not authorized to prepare invoice or bill drafts.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var workflow = await db.SubledgerDocumentWorkflows.SingleOrDefaultAsync(item => item.Id == request.WorkflowId && item.CompanyId == companyId, cancellationToken);
+        if (workflow is null || workflow.IsRecurringTemplate || workflow.DocumentType is not ("Invoice" or "VendorBill") || workflow.Status != "Draft" || !workflow.SourceTemplateId.HasValue)
+            return TransactionResult.Failure("Only a draft generated from a recurring template can have an exchange rate assigned.");
+        var modulePermission = workflow.DocumentType == "Invoice" ? BrassLedgerPermissions.ReceivablesManage : BrassLedgerPermissions.PayablesManage;
+        if (!HasPermission(modulePermission)) return TransactionResult.Failure("You are not authorized for this subledger.");
+        if (!string.Equals(workflow.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The draft changed after it was displayed. Refresh before assigning a rate.");
+        string payloadJson;
+        if (workflow.DocumentType == "Invoice")
+        {
+            var source = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(workflow.PayloadJson)!;
+            if (source.ExchangeRateId.HasValue) return TransactionResult.Failure("This draft already has an assigned exchange rate.");
+            payloadJson = System.Text.Json.JsonSerializer.Serialize(source with { ExchangeRateId = request.ExchangeRateId });
+        }
+        else
+        {
+            var source = System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(workflow.PayloadJson)!;
+            if (source.ExchangeRateId.HasValue) return TransactionResult.Failure("This draft already has an assigned exchange rate.");
+            payloadJson = System.Text.Json.JsonSerializer.Serialize(source with { ExchangeRateId = request.ExchangeRateId });
+        }
+        var validation = await ValidateSubledgerPostingAsync(companyId, workflow.DocumentType, workflow.DocumentScope, payloadJson, cancellationToken);
+        if (!validation.Succeeded) return TransactionResult.Failure($"That exchange rate cannot be assigned: {validation.ErrorMessage}");
+        var previousPayloadJson = workflow.PayloadJson;
+        workflow.PayloadJson = payloadJson; workflow.ConcurrencyToken = Guid.NewGuid().ToString("N");
+        AddWorkflowAudit(db, workflow, "subledger-document.rate-assigned", new { previousPayloadJson, replacementPayloadJson = payloadJson });
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The draft changed while the rate was being assigned. Refresh and try again."); }
+        return TransactionResult.Success(workflow.Id);
     }
 
     public async Task<TransactionResult> ApplyInvoicePaymentAsync(ApplyInvoicePaymentRequest request, CancellationToken cancellationToken = default)
@@ -3382,7 +3410,7 @@ public sealed partial class AccountingTransactionService(
         if (existing is not null && (existing.Status != "Rejected" || recurring)) return TransactionResult.Failure("That draft or recurring template number already exists for this customer or vendor.");
         if (existing is not null && await db.ProjectBillingProposals.AnyAsync(item => item.SubledgerDocumentWorkflowId == existing.Id && item.CompanyId == companyId, cancellationToken))
             return TransactionResult.Failure("This rejected invoice was derived from project billing. Correct or cancel it from Projects so its source reservations and audit trail remain consistent.");
-        var validation = await ValidateSubledgerPostingAsync(companyId, documentType, documentScope, payloadJson, cancellationToken);
+        var validation = await ValidateSubledgerPostingAsync(companyId, documentType, documentScope, payloadJson, cancellationToken, allowPendingForeignRate: recurring);
         if (!validation.Succeeded) return TransactionResult.Failure($"The draft or recurring template is not postable: {validation.ErrorMessage}");
         if (existing is not null)
         {
@@ -3400,7 +3428,7 @@ public sealed partial class AccountingTransactionService(
         return TransactionResult.Success(workflow.Id);
     }
 
-    private async Task<TransactionResult> ValidateSubledgerPostingAsync(Guid companyId, string documentType, string documentScope, string payloadJson, CancellationToken cancellationToken, ProjectBillingProposal? projectBilling = null)
+    private async Task<TransactionResult> ValidateSubledgerPostingAsync(Guid companyId, string documentType, string documentScope, string payloadJson, CancellationToken cancellationToken, ProjectBillingProposal? projectBilling = null, bool allowPendingForeignRate = false)
     {
         await using var validationDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await validationDb.Database.BeginTransactionAsync(cancellationToken);
@@ -3412,14 +3440,14 @@ public sealed partial class AccountingTransactionService(
                 var request = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(payloadJson);
                 result = request is null || !string.Equals(documentScope, "company", StringComparison.Ordinal)
                     ? TransactionResult.Failure("The invoice identity or retained payload is invalid.")
-                    : await CreateInvoiceCoreAsync(validationDb, companyId, request, cancellationToken, projectBilling);
+                    : await CreateInvoiceCoreAsync(validationDb, companyId, request, cancellationToken, projectBilling, allowPendingForeignRate);
             }
             else if (documentType == "VendorBill")
             {
                 var request = System.Text.Json.JsonSerializer.Deserialize<CreateVendorBillRequest>(payloadJson);
                 result = request is null || !string.Equals(documentScope, request.VendorId.ToString("N"), StringComparison.Ordinal)
                     ? TransactionResult.Failure("The vendor bill identity or retained payload is invalid.")
-                    : await CreateVendorBillCoreAsync(validationDb, companyId, request, cancellationToken);
+                    : await CreateVendorBillCoreAsync(validationDb, companyId, request, cancellationToken, allowPendingForeignRate);
             }
             else result = TransactionResult.Failure("The subledger document type is not supported.");
         }

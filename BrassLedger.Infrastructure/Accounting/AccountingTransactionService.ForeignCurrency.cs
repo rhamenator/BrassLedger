@@ -25,7 +25,8 @@ public sealed partial class AccountingTransactionService
         string? requestedCurrency,
         Guid? exchangeRateId,
         DateOnly transactionDate,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowPendingForeignRate = false)
     {
         var baseCurrency = await db.Companies.AsNoTracking().Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
         var currency = NormalizeTransactionCurrency(requestedCurrency, baseCurrency);
@@ -34,6 +35,13 @@ public sealed partial class AccountingTransactionService
         {
             if (exchangeRateId.HasValue) return (null, "Do not select an exchange rate for a base-currency transaction.");
             return (new(currency, baseCurrency, null, 1m, transactionDate, "Company base currency", string.Empty), null);
+        }
+        if (allowPendingForeignRate)
+        {
+            // A recurring template must never freeze a rate: each generated occurrence needs its own,
+            // selected by a person at (or near) its own occurrence date, not the template's authoring date.
+            if (exchangeRateId.HasValue) return (null, "A recurring template cannot select a fixed exchange rate; leave it unselected so each generated occurrence gets its own rate chosen at its own date.");
+            return (new(currency, baseCurrency, null, 1m, transactionDate, "Pending per-occurrence rate selection", string.Empty), null);
         }
         if (!exchangeRateId.HasValue) return (null, $"Select a retained closing rate converting {currency} to {baseCurrency} for the transaction date.");
         var retained = await db.CurrencyExchangeRates.AsNoTracking().SingleOrDefaultAsync(rate => rate.Id == exchangeRateId && rate.CompanyId == companyId && rate.IsActive, cancellationToken);

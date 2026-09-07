@@ -457,6 +457,12 @@ api.MapPost("/recurring-subledger-documents/generate", async (DateOnly throughDa
     return result.Succeeded ? Results.Ok(result) : Results.BadRequest(result);
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments);
 
+api.MapPost("/recurring-subledger-documents/assign-rate", async (AssignRecurringOccurrenceRateRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
+{
+    var result = await service.AssignRecurringOccurrenceRateAsync(request, cancellationToken);
+    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["rate"] = [result.ErrorMessage] });
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments);
+
 api.MapPost("/invoices/payments", async (ApplyInvoicePaymentRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
 {
     var result = await service.ApplyInvoicePaymentAsync(request, cancellationToken);
