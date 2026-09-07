@@ -100,7 +100,7 @@ else
                         @if (workflow.RequiresRateAssignment)
                         {
                             <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareSubledgerDocuments">
-                                <div class="field-group"><label class="field-label">@(workflow.TransactionCurrency) closing rate for this occurrence</label><InputSelect aria-label="Recurring occurrence exchange rate" class="field-input" @bind-Value="GetOccurrenceRateSelection(workflow.Id).ExchangeRateId"><option value="">Select retained rate</option>@foreach (var rate in ApplicableRates(workflow.TransactionCurrency, workflow.TransactionDate ?? DateOnly.FromDateTime(DateTime.Today))) { <option value="@rate.Id">@RateLabel(rate)</option> }</InputSelect></div>
+                                <div class="field-group"><label class="field-label">@(workflow.TransactionCurrency) closing rate for this occurrence</label><select aria-label="Recurring occurrence exchange rate" class="field-input" value="@GetOccurrenceRateSelection(workflow.Id).ExchangeRateId" @onchange="@((ChangeEventArgs change) => GetOccurrenceRateSelection(workflow.Id).ExchangeRateId = string.IsNullOrEmpty(change.Value as string) ? null : Guid.Parse((string)change.Value!))"><option value="">Select retained rate</option>@foreach (var rate in ApplicableRates(workflow.TransactionCurrency, workflow.TransactionDate ?? DateOnly.FromDateTime(DateTime.Today))) { <option value="@rate.Id">@RateLabel(rate)</option> }</select></div>
                                 <button class="action-primary" type="button" @onclick="() => AssignOccurrenceRateAsync(workflow)">Assign rate</button>
                             </AuthorizeView>
                         }

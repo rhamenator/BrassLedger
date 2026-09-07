@@ -99,6 +99,25 @@ public sealed class PayablesPage
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Vendor payment recorded.");
     }
 
+    public async Task SaveRecurringVendorBillTemplateAsync(string billNumber, string nextDate)
+    {
+        await _session.Page.GetByLabel("Bill vendor").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Bill number").FillAsync(billNumber);
+        await _session.Page.GetByLabel("Bill line description").First.FillAsync("Monthly service");
+        await _session.Page.GetByLabel("Bill line quantity").First.FillAsync("1");
+        await _session.Page.GetByLabel("Bill line unit cost").First.FillAsync("50");
+        await _session.Page.GetByLabel("Recurring bill next date").FillAsync(nextDate);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save recurring template" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Recurring vendor bill template saved.");
+    }
+
+    public async Task GenerateDueRecurringBillDraftsAsync(string throughDate)
+    {
+        await _session.Page.GetByLabel("Generate recurring bill drafts through").FillAsync(throughDate);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Generate due drafts" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Due recurring drafts generated.");
+    }
+
     public async Task RecordAndReverseVendorCreditAsync(string adjustmentReference)
     {
         await _session.Page.GetByLabel("Vendor credit bill").SelectOptionAsync(new SelectOptionValue { Index = 1 });

@@ -191,6 +191,42 @@ public sealed class ReceivablesPage
         await Assertions.Expect(_session.Page.Locator("tbody tr").Filter(new() { HasText = adjustmentReference })).ToContainTextAsync("Reversed");
     }
 
+    public async Task SaveRecurringInvoiceTemplateAsync(string invoiceNumber, string nextDate, string? transactionCurrency = null)
+    {
+        await _session.Page.GetByLabel("Invoice customer").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await _session.Page.GetByLabel("Invoice number").FillAsync(invoiceNumber);
+        if (transactionCurrency is not null)
+        {
+            await _session.Page.GetByLabel("Invoice transaction currency").FillAsync(transactionCurrency);
+            await _session.Page.GetByLabel("Invoice transaction currency").PressAsync("Tab");
+        }
+        await _session.Page.GetByLabel("Invoice line description").First.FillAsync("Monthly retainer");
+        await _session.Page.GetByLabel("Invoice line quantity").First.FillAsync("1");
+        await _session.Page.GetByLabel("Invoice line unit price").First.FillAsync("100");
+        await _session.Page.GetByLabel("Recurring invoice next date").FillAsync(nextDate);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Save recurring template" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Recurring invoice template saved.");
+    }
+
+    public async Task GenerateDueRecurringInvoiceDraftsAsync(string throughDate)
+    {
+        await _session.Page.GetByLabel("Generate recurring invoice drafts through").FillAsync(throughDate);
+        await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Generate due drafts" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Due recurring drafts generated.");
+    }
+
+    public async Task AssignRecurringOccurrenceRateAsync(string documentNumber, string rateLabelSubstring)
+    {
+        var workflowRow = _session.Page.Locator("tbody tr").Filter(new() { HasText = documentNumber });
+        await Assertions.Expect(workflowRow).ToContainTextAsync("Draft");
+        var rateSelect = workflowRow.GetByLabel("Recurring occurrence exchange rate");
+        var option = rateSelect.Locator("option").Filter(new() { HasText = rateLabelSubstring });
+        await Assertions.Expect(option).ToHaveCountAsync(1);
+        await rateSelect.SelectOptionAsync(await option.GetAttributeAsync("value") ?? throw new InvalidOperationException("The recurring occurrence exchange rate option has no value."));
+        await workflowRow.GetByRole(AriaRole.Button, new() { Name = "Assign rate" }).ClickAsync();
+        await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Exchange rate assigned.");
+    }
+
     private async Task RecordForeignAdjustmentAsync(string invoiceNumber, string kind, string reference, string amount, string? rateBasis)
     {
         await SelectOptionContainingAsync("Adjustment invoice", invoiceNumber);
