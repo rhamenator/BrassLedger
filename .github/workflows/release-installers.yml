@@ -96,14 +96,14 @@ jobs:
             -PackageName $env:MSIX_PACKAGE_NAME
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: BrassLedger-windows-installer
           path: ${{ env.INSTALLER_DIR }}\BrassLedger-setup-win-x64.exe
           if-no-files-found: error
 
       - name: Upload Windows MSIX package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: BrassLedger-windows-msix
           path: ${{ env.INSTALLER_DIR }}\BrassLedger-${{ env.APP_VERSION }}-win-x64.msix
@@ -152,7 +152,7 @@ jobs:
           ./packaging/macos/package-pkg.sh "$PUBLISH_DIR" "$APP_VERSION" "${{ matrix.runtime }}" "$INSTALLER_DIR"
 
       - name: Upload macOS installer
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: BrassLedger-${{ matrix.runtime }}-installer
           path: ${{ env.INSTALLER_DIR }}/BrassLedger-${{ env.APP_VERSION }}-${{ matrix.runtime }}.pkg
@@ -193,7 +193,7 @@ jobs:
           ./packaging/linux/package-deb.sh "$PUBLISH_DIR" "$APP_VERSION" "$INSTALLER_DIR"
 
       - name: Upload Linux installer
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: BrassLedger-linux-installer
           path: ${{ env.INSTALLER_DIR }}/brassledger_${{ env.APP_VERSION }}_amd64.deb
