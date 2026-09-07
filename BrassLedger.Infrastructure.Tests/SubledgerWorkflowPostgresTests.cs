@@ -1,4 +1,5 @@
 using BrassLedger.Application.Accounting;
+using BrassLedger.Domain.Accounting;
 using BrassLedger.Infrastructure.Accounting;
 using BrassLedger.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -153,6 +154,90 @@ public sealed class SubledgerWorkflowPostgresTests
             Assert.Equal(40m, finalPayment.UnappliedAmount);
             Assert.Equal(40m, finalPayment.TransactionUnappliedAmount);
             Assert.Equal(2, finalWorkspace.Receivables.Adjustments!.Count(item => item.PaymentId == paymentId));
+        }
+        finally
+        {
+            NpgsqlConnection.ClearAllPools();
+            await using var administration = new NpgsqlConnection(administrationBuilder.ConnectionString);
+            await administration.OpenAsync();
+            await using var drop = administration.CreateCommand();
+            drop.CommandText = $"DROP DATABASE IF EXISTS {quotedDatabase} WITH (FORCE)";
+            await drop.ExecuteNonQueryAsync();
+            try { Directory.Delete(contentRoot, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [PostgresFact]
+    public async Task PostgreSql_ConcurrentRateAssignmentsCannotDoubleAssignAnOccurrence()
+    {
+        var baseConnectionString = Environment.GetEnvironmentVariable("BRASSLEDGER_TEST_POSTGRES")!;
+        var databaseName = $"brassledger_test_recurring_rate_race_{Guid.NewGuid():N}";
+        var administrationBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString) { Database = "postgres", Pooling = false };
+        var testBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString) { Database = databaseName, Pooling = false };
+        var quotedDatabase = new NpgsqlCommandBuilder().QuoteIdentifier(databaseName);
+        await using (var administration = new NpgsqlConnection(administrationBuilder.ConnectionString))
+        {
+            await administration.OpenAsync();
+            await using var create = administration.CreateCommand();
+            create.CommandText = $"CREATE DATABASE {quotedDatabase}";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        var contentRoot = Path.Combine(Path.GetTempPath(), "BrassLedger.RecurringRate.Postgres.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(contentRoot);
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Postgres"] = testBuilder.ConnectionString
+            }).Build();
+            var collection = new ServiceCollection();
+            collection.AddBrassLedgerInfrastructure(configuration, contentRoot, seedSampleData: true);
+            using var provider = collection.BuildServiceProvider();
+            await provider.InitializeBrassLedgerAsync();
+
+            Guid occurrenceId; Guid rateId; string initialToken;
+            using (var setupScope = provider.CreateScope())
+            {
+                var workspaceService = setupScope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+                var workspace = await workspaceService.GetWorkspaceAsync();
+                var customer = workspace.Receivables.Customers.First();
+                var transactions = setupScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+                var factory = setupScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+                rateId = Guid.NewGuid();
+                await using (var db = await factory.CreateDbContextAsync())
+                {
+                    var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+                    db.CurrencyExchangeRates.Add(new() { Id = rateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 9, 1), Source = "Test rate", SourceReference = "https://example.test/cad-usd" });
+                    await db.SaveChangesAsync();
+                }
+                var template = await transactions.SaveRecurringInvoiceTemplateAsync(new(
+                    new CreateInvoiceRequest(customer.Id, "INV-PG-RATE-RACE-1", new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30), 100m, 0m, "4000", "PostgreSQL concurrent rate assignment", Currency: "CAD"),
+                    "Monthly", 1, new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 1)));
+                Assert.True(template.Succeeded, template.ErrorMessage);
+                Assert.True((await transactions.GenerateDueRecurringDocumentsAsync(new DateOnly(2026, 9, 1))).Succeeded);
+                var generated = (await workspaceService.GetWorkspaceAsync()).Receivables.Workflows!.Single(item => item.SourceTemplateId == template.Id);
+                occurrenceId = generated.Id;
+                initialToken = generated.ConcurrencyToken;
+            }
+
+            using var firstScope = provider.CreateScope();
+            using var secondScope = provider.CreateScope();
+            var firstTransactions = firstScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+            var secondTransactions = secondScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+            var attempts = await Task.WhenAll(
+                firstTransactions.AssignRecurringOccurrenceRateAsync(new(occurrenceId, rateId, initialToken)),
+                secondTransactions.AssignRecurringOccurrenceRateAsync(new(occurrenceId, rateId, initialToken)));
+            Assert.Single(attempts, attempt => attempt.Succeeded);
+
+            using var verificationScope = provider.CreateScope();
+            var verificationWorkspace = await verificationScope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+            var afterRace = verificationWorkspace.Receivables.Workflows!.Single(item => item.Id == occurrenceId);
+            Assert.False(afterRace.RequiresRateAssignment);
+
+            var retry = await verificationScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>().AssignRecurringOccurrenceRateAsync(new(occurrenceId, rateId, afterRace.ConcurrencyToken));
+            Assert.False(retry.Succeeded);
+            Assert.Contains("already has an assigned exchange rate", retry.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

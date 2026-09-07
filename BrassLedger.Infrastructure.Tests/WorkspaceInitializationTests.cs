@@ -2455,6 +2455,88 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task AssignRecurringOccurrenceRateAsync_RejectsUnauthorizedAndCrossCompanyCallers()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
+        var before = await workspaceService.GetWorkspaceAsync();
+        var customer = before.Receivables.Customers.First();
+
+        var rateId = Guid.NewGuid();
+        Guid companyId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.CurrencyExchangeRates.Add(new() { Id = rateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 9, 1), Source = "Test rate", SourceReference = "https://example.test/cad-usd" });
+            await db.SaveChangesAsync();
+        }
+
+        var template = await transactions.SaveRecurringInvoiceTemplateAsync(new(
+            new CreateInvoiceRequest(customer.Id, "INV-FX-RECUR-AUTH", new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30), 100m, 0m, "4000", "Foreign recurring invoice", Currency: "CAD"),
+            "Monthly", 1, new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 1)));
+        Assert.True(template.Succeeded, template.ErrorMessage);
+        Assert.True((await transactions.GenerateDueRecurringDocumentsAsync(new DateOnly(2026, 9, 1))).Succeeded);
+        var occurrence = (await workspaceService.GetWorkspaceAsync()).Receivables.Workflows!.Single(item => item.SourceTemplateId == template.Id);
+        Assert.True(occurrence.RequiresRateAssignment);
+
+        void ActAsCompany(Guid activeCompanyId, params string[] permissions)
+        {
+            var claims = new List<System.Security.Claims.Claim> { new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, activeCompanyId.ToString()) };
+            claims.AddRange(permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
+        }
+        void ActAs(params string[] permissions) => ActAsCompany(companyId, permissions);
+
+        // Authorization denial: a caller without SubledgerPrepare cannot assign a rate at all,
+        // regardless of what module-specific permission they hold.
+        ActAs(BrassLedgerPermissions.ReceivablesManage);
+        var noPrepare = await transactions.AssignRecurringOccurrenceRateAsync(new(occurrence.Id, rateId, occurrence.ConcurrencyToken));
+        Assert.False(noPrepare.Succeeded);
+        Assert.Contains("not authorized to prepare", noPrepare.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        // Authorization denial: SubledgerPrepare alone is not enough -- the caller also needs
+        // the module-specific permission (ReceivablesManage for an Invoice occurrence).
+        ActAs(BrassLedgerPermissions.SubledgerPrepare);
+        var noModulePermission = await transactions.AssignRecurringOccurrenceRateAsync(new(occurrence.Id, rateId, occurrence.ConcurrencyToken));
+        Assert.False(noModulePermission.Succeeded);
+        Assert.Contains("not authorized for this subledger", noModulePermission.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        // Cross-company isolation: a caller scoped to a different company, even holding every
+        // relevant permission, cannot reach another company's generated occurrence.
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedInOwner = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedInOwner.Outcome);
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()),
+                 new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString()),
+                 new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage)], "test"))
+        };
+        var secondCompany = await companies.CreateCompanyAsync(new CreateCompanyRequest("Rate assignment isolation subsidiary", "Rate Assignment Isolation Subsidiary Ltd.", "RATE-ISO", "USD", 1));
+        Assert.True(secondCompany.Succeeded, secondCompany.ErrorMessage);
+        ActAsCompany(secondCompany.CompanyId!.Value, BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PayablesManage);
+        var crossCompany = await transactions.AssignRecurringOccurrenceRateAsync(new(occurrence.Id, rateId, occurrence.ConcurrencyToken));
+        Assert.False(crossCompany.Succeeded);
+        accessor.HttpContext = null;
+
+        // Every rejected attempt above must leave the occurrence entirely untouched.
+        var untouched = (await workspaceService.GetWorkspaceAsync()).Receivables.Workflows!.Single(item => item.Id == occurrence.Id);
+        Assert.True(untouched.RequiresRateAssignment);
+        Assert.Equal(occurrence.ConcurrencyToken, untouched.ConcurrencyToken);
+
+        ActAs(BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage);
+        var assigned = await transactions.AssignRecurringOccurrenceRateAsync(new(occurrence.Id, rateId, occurrence.ConcurrencyToken));
+        Assert.True(assigned.Succeeded, assigned.ErrorMessage);
+    }
+
+    [Fact]
     public async Task SubledgerWorkflow_RollsBackJournalBalancesAndWorkflowWhenSourceDocumentInsertFails()
     {
         using var services = CreateServiceProvider();
