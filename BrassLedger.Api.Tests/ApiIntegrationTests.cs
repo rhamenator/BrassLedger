@@ -1092,7 +1092,7 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
         Assert.Equal(2, recorded.Applications.Count);
 
         var refundResponse = await client.PostAsJsonAsync("/api/subledger-payments/refund-unapplied", new RefundUnappliedPaymentRequest(
-            paymentResult!.Id!.Value, bank.Id, new DateOnly(2026, 5, 3), 5m, "RF-API-PAY-1", "Return excess customer deposit"));
+            paymentResult!.Id!.Value, bank.Id, new DateOnly(2026, 5, 3), 5m, "RF-API-PAY-1", "Return excess customer deposit", PaymentConcurrencyToken: recorded.ConcurrencyToken));
         Assert.Equal(HttpStatusCode.Created, refundResponse.StatusCode);
         var refundResult = await refundResponse.Content.ReadFromJsonAsync<TransactionResult>(); Assert.NotNull(refundResult?.Id);
         var refunded = await client.GetFromJsonAsync<BusinessWorkspaceSnapshot>("/api/workspace");
