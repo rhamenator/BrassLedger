@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddBrassLedgerOperations();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
@@ -15,6 +16,10 @@ builder.Services.AddBrassLedgerInfrastructure(builder.Configuration, builder.Env
 
 var app = builder.Build();
 await app.Services.InitializeBrassLedgerAsync();
+
+app.UseBrassLedgerCorrelationId();
+app.UseExceptionHandler();
+app.UseStatusCodePages();
 
 if (app.Environment.IsDevelopment())
 {
@@ -29,6 +34,7 @@ app.UseRateLimiter();
 app.UseAntiforgery();
 app.UseAuthorization();
 app.MapBrassLedgerAuthenticationEndpoints();
+app.MapBrassLedgerHealthChecks();
 
 var api = app.MapGroup("/api")
     .RequireAuthorization(BrassLedgerAuthorizationPolicies.ViewWorkspace)

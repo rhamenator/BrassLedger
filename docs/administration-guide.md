@@ -131,6 +131,15 @@ The automated infrastructure suite exercises migration-created fresh databases, 
 
 Maintainer commands and the required two-provider migration review procedure are in [database-migrations.md](database-migrations.md).
 
+## Health checks and correlation IDs
+
+Both the web app and the API expose anonymous health endpoints for load balancers and monitors:
+
+- `GET /health/live` returns `200 Healthy` while the process is running.
+- `GET /health/ready` returns `200 Healthy` only when the configured database accepts connections, and `503` otherwise.
+
+Every response carries an `X-Correlation-ID` header. A well-formed caller-supplied value (letters, digits, `.`, `_`, `-`, up to 64 characters) is echoed; anything else is replaced with a generated ID. API errors are returned as RFC 9457 problem-details JSON that includes the same `correlationId`, and log entries for the request are scoped with it, so a user-reported ID can be traced through the logs.
+
 ## Publishing
 
 A clean publish process looks like this:
