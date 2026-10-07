@@ -54,7 +54,11 @@ and the evidence every change must carry.
 8. Writes are idempotent where retries are plausible (idempotency keys on API posts) and
    use optimistic concurrency tokens on editable aggregates.
 
-## Phased plan (one focused PR per phase, each passing CI before the next starts)
+## Phased plan
+
+Work the phases in order. Split each phase into as many focused PRs as it needs (for
+example, Phase 0 might be: framework upgrade; migrations; observability; CI matrix). Each
+PR must pass CI on its own, and a phase is finished only when all its PRs are merged.
 
 ### Phase 0: Platform foundation
 
@@ -91,8 +95,9 @@ and the evidence every change must carry.
 - Cash receipts and payments with application to one or many documents, unapplied credit,
   credit memos, refunds, and write-offs.
 - AR and AP aging, customer statements, 1099 vendor tracking.
-- Payment runs that prepare check and ACH batches (NACHA file export) and print checks
-  through the existing forms pipeline.
+- Payment runs that prepare check and ACH batches (NACHA file export). Check printing
+  is deferred to Phase 7, which builds the rendering pipeline. Until then, a payment run
+  records check numbers and exports a check register.
 
 ### Phase 3: Banking
 
@@ -115,8 +120,12 @@ and the evidence every change must carry.
 - Employees with earnings, deductions, benefits, and direct deposit (sensitive fields
   protected with Data Protection).
 - Pay runs: draft, calculate, review, approve, post, and void/reissue.
-- Withholding calculated from the versioned TaxRuleSet engine already in the repo.
-  Employer liabilities, a liability payment workflow, and GL posting.
+- Build the withholding calculation engine. The repo currently only stores tax rule
+  metadata (`TaxRuleCatalog`, `TaxAdministrationService`); nothing evaluates it. The
+  engine must evaluate the versioned TaxRuleSet data (annualization by pay frequency,
+  brackets, standard deductions and allowances, wage bases and caps, flat and local
+  formulas) with effective-date selection.
+- Employer liabilities, a liability payment workflow, and GL posting.
 - Pay stubs, W-2/W-3, 941/940 worksheet output, and state equivalents where rules exist.
 - Tax tables must come only from cited official sources (IRS Pub 15-T, state agencies),
   with an effective date and provenance on every value. Never invent rates. Add golden
@@ -133,7 +142,8 @@ and the evidence every change must carry.
   budget variants) generated from the ledger. Every figure drills down to source entries.
 - Server-side PDF rendering (e.g. QuestPDF, after checking the license against GPL-3.0)
   for invoices, statements, checks (MICR-ready layout with alignment calibration), pay
-  stubs, labels, and tax forms. Templates are versioned.
+  stubs, labels, and tax forms. Templates are versioned. Add check printing to the
+  Phase 2 payment runs on top of this pipeline.
 - CSV and XLSX export for every grid and report.
 - Printable-output regression tests (rendered text plus image or PDF snapshot
   comparisons).
