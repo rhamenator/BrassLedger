@@ -18,20 +18,20 @@ and the evidence every change must carry.
 
 ## Where the project actually stands (verify, don't assume)
 
-- Most module pages (Ledger, Receivables, Payables, Operations, Payroll, Projects) are
-  read-only views of one `BusinessWorkspaceSnapshot` built from seeded data. Users cannot
-  enter, post, or reverse business transactions. Only Taxes and Administration save data.
+- The statements below were audited on 2026-10-07; see [roadmap-audit-2026-10-07.md](roadmap-audit-2026-10-07.md)
+  for evidence. The ledger in [work-remaining.md](work-remaining.md) is the authoritative queue
+  of unfinished work and takes priority over the phases below.
+- Module workflows (invoices, bills, payments, orders, payroll, projects, consolidation) are
+  implemented behind roughly 270 API endpoints and the Razor pages. Build on them; do not rebuild.
 - Balances (`GeneralLedgerAccount.CurrentBalance`, `Customer/Vendor.OpenBalance`,
-  `BankAccount.CurrentBalance`, invoice/bill `BalanceDue`) are stored values, not derived
-  from posted ledger activity.
-- Document statuses are free-form strings. There are no line items on invoices, bills,
-  or orders.
+  `BankAccount.CurrentBalance`, invoice/bill `BalanceDue`) are still stored values updated at
+  posting time, not derived projections, and statuses are still free-form strings.
+- No automated subledger tie-out or API idempotency keys were found.
 - Schema is managed by provider-specific EF Core migrations (`BrassLedger.Migrations.Sqlite`
   and `BrassLedger.Migrations.PostgreSql`, see docs/database-migrations.md). Legacy
   pre-ledger databases are adopted through `EnsureLegacySchemaCompatibilityAsync`, which is
   covered by upgrade tests in `WorkspaceInitializationTests`.
 - All projects target net10.0 (global.json pins the SDK).
-- The API exposes only GET snapshot endpoints plus auth.
 - Release installers are unsigned. There are no SBOMs or checksums.
 
 ## Non-negotiable accounting invariants (enforce in the domain layer and test them)
