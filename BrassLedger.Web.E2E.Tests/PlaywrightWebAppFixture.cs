@@ -501,7 +501,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
     {
         var configuredPath = Environment.GetEnvironmentVariable("BRASSLEDGER_E2E_APP_PATH");
         var applicationPath = string.IsNullOrWhiteSpace(configuredPath)
-            ? Path.Combine(_projectRoot, "bin", _buildConfiguration, "net8.0", "BrassLedger.Web.dll")
+            ? Path.Combine(_projectRoot, "bin", _buildConfiguration, "net10.0", "BrassLedger.Web.dll")
             : Path.GetFullPath(configuredPath);
         return File.Exists(applicationPath)
             ? applicationPath
