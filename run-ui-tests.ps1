@@ -18,7 +18,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 dotnet build $e2eTestsProject -c $Configuration
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$playwrightScript = Join-Path $root "BrassLedger.Web.E2E.Tests\bin\$Configuration\net8.0\playwright.ps1"
+$playwrightScript = Join-Path $root "BrassLedger.Web.E2E.Tests\bin\$Configuration\net10.0\playwright.ps1"
 
 if ($InstallBrowsers -or $InstallAllBrowsers)
 {
