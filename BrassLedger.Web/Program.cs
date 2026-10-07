@@ -20,7 +20,7 @@ if (desktopHostOptions.UseDynamicLoopbackBinding)
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
-builder.Services.AddBrassLedgerOperations();
+builder.Services.AddBrassLedgerOperations(builder.Configuration);
 builder.Services.AddBrassLedgerCookieAuthentication();
 builder.Services.AddBrassLedgerInfrastructure(builder.Configuration, builder.Environment.ContentRootPath, builder.Environment.IsDevelopment());
 
