@@ -4,13 +4,29 @@ public interface ISecurityAdministrationService
 {
     Task<SecurityAdministrationSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default);
     Task<SecurityOperationResult> CreateRoleAsync(CreateAccessRoleRequest request, CancellationToken cancellationToken = default);
-    Task<SecurityOperationResult> CreateOperatorAsync(CreateOperatorRequest request, CancellationToken cancellationToken = default);
+    Task<SecurityOperationResult> SetRoleMfaRequirementAsync(string roleName, bool requiresMfa, CancellationToken cancellationToken = default);
+    Task<SecurityOperationResult> InviteOperatorAsync(CreateOperatorInvitationRequest request, CancellationToken cancellationToken = default);
+    Task<SecurityOperationResult> RetrySecurityEmailAsync(Guid messageId, CancellationToken cancellationToken = default);
+    Task<SecurityOperationResult> ResetOperatorMfaAsync(AdministratorMfaRecoveryRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed record SecurityAdministrationSnapshot(
     IReadOnlyList<PermissionDefinitionSnapshot> Permissions,
     IReadOnlyList<AccessRoleSnapshot> Roles,
-    IReadOnlyList<OperatorAccountSnapshot> Operators);
+    IReadOnlyList<OperatorAccountSnapshot> Operators,
+    bool SecurityEmailDeliveryConfigured,
+    IReadOnlyList<SecurityEmailDeliverySnapshot> SecurityEmailDeliveries);
+
+public sealed record SecurityEmailDeliverySnapshot(
+    Guid MessageId,
+    string Purpose,
+    string MaskedRecipient,
+    string Status,
+    int AttemptCount,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset NextAttemptAtUtc,
+    DateTimeOffset? DeliveredAtUtc,
+    string LastError);
 
 public sealed record PermissionDefinitionSnapshot(
     string Code,
@@ -22,29 +38,39 @@ public sealed record AccessRoleSnapshot(
     string Description,
     string TemplateCode,
     bool IsSystemRole,
+    bool RequiresMfa,
     int AssignedUserCount,
     IReadOnlyList<string> Permissions);
 
 public sealed record OperatorAccountSnapshot(
+    Guid UserId,
     string UserName,
     string DisplayName,
     string Email,
     string Role,
     bool IsActive,
+    bool MfaEnabled,
+    bool RoleRequiresMfa,
     DateTimeOffset? LastSuccessfulSignInUtc);
 
 public sealed record CreateAccessRoleRequest(
     string Name,
     string Description,
-    IReadOnlyList<string> Permissions);
+    IReadOnlyList<string> Permissions,
+    bool RequiresMfa = false);
 
-public sealed record CreateOperatorRequest(
+public sealed record CreateOperatorInvitationRequest(
     string UserName,
     string DisplayName,
     string Email,
-    string Password,
-    string ConfirmPassword,
     string RoleName);
+
+public sealed record AdministratorMfaRecoveryRequest(
+    Guid TargetUserId,
+    string ConfirmUserName,
+    string CurrentAdministratorPassword,
+    string VerificationMethod,
+    string CaseReference);
 
 public sealed record SecurityOperationResult(
     bool Succeeded,

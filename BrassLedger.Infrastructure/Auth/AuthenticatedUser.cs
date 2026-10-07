@@ -8,4 +8,7 @@ public sealed record AuthenticatedUser(
     string Email,
     string Role,
     string SecurityStamp,
-    IReadOnlyList<string> Permissions);
+    IReadOnlyList<string> Permissions,
+    bool MfaAuthenticated = false,
+    bool MfaEnrollmentRequired = false,
+    Guid? SessionId = null);

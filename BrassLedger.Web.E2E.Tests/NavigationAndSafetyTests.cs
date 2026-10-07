@@ -26,12 +26,11 @@ public sealed class NavigationAndSafetyTests
             ("/ledger", "Core accounting balances and posting history."),
             ("/receivables", "Customers, invoices, and open-balance follow-up."),
             ("/payables", "Vendor management and outgoing cash commitments."),
-            ("/operations", "Operational flow from stock to shipment."),
-            ("/payroll", "Employees, labor cost, and tax-ready setup."),
-            ("/projects", "Job tracking with room for industry-specific workflows."),
+            ("/projects", "Control project scope, cost, billing, and revenue."),
             ("/reporting", "Reports, labels, forms, and print fidelity stay in the product."),
             ("/taxes", "Keep withholdings, filing rules, and odd state behavior in editable tables instead of buried code."),
-            ("/publish", "One .NET web application, packaged per platform.")
+            ("/publish", "One .NET web application, packaged per platform."),
+            ("/account/security", "Protect your operator account and review recent access.")
         };
 
         foreach (var route in routes)
@@ -40,6 +39,18 @@ public sealed class NavigationAndSafetyTests
             await session.WaitForHeadingAsync(route.Heading);
             await session.AssertNoUiFailuresAsync(route.Path);
         }
+
+        await using var operationsSession = await _fixture.CreateSessionAsync(browserKind);
+        await operationsSession.SignInAsync("operations");
+        await operationsSession.GotoAsync("/operations");
+        await operationsSession.WaitForHeadingAsync("Operational flow from stock to shipment.");
+        await operationsSession.AssertNoUiFailuresAsync("/operations");
+
+        await using var payrollSession = await _fixture.CreateSessionAsync(browserKind);
+        await payrollSession.SignInAsync("payroll");
+        await payrollSession.GotoAsync("/payroll");
+        await payrollSession.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
+        await payrollSession.AssertNoUiFailuresAsync("/payroll");
     }
 
     [Theory]
@@ -57,7 +68,18 @@ public sealed class NavigationAndSafetyTests
         await shell.NavigateMenuAsync("reporting", "Reports, labels, forms, and print fidelity stay in the product.");
         await shell.NavigateMenuAsync("publish", "One .NET web application, packaged per platform.");
 
+        Assert.Equal(1, await session.Page.Locator("a.nav-link[href='operations']").CountAsync());
+        Assert.Equal(0, await session.Page.Locator("a.nav-link[href='payroll']").CountAsync());
+
         await session.AssertNoUiFailuresAsync("sidebar navigation");
+
+        await using var operationsSession = await _fixture.CreateSessionAsync(browserKind);
+        await operationsSession.SignInAsync("operations");
+        var operationsShell = new AppShellPage(operationsSession);
+        await operationsShell.OpenAsync();
+        await operationsShell.NavigateMenuAsync("operations", "Operational flow from stock to shipment.");
+        Assert.Equal(0, await operationsSession.Page.Locator("a.nav-link[href='payroll']").CountAsync());
+        await operationsSession.AssertNoUiFailuresAsync("operations sidebar navigation");
     }
 
     [Theory]
@@ -99,5 +121,28 @@ public sealed class NavigationAndSafetyTests
         var content = await session.Page.ContentAsync();
         Assert.Contains("did not match an active operator", content);
         await session.AssertNoUiFailuresAsync("invalid login");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task AccountRecovery_UsesUniformResponseAndRejectsInvalidActionLink(BrowserKind browserKind)
+    {
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+
+        var recoveryResponse = await session.Page.Context.APIRequest.GetAsync($"{session.BaseUrl}/forgot-password");
+        Assert.Equal("no-store, no-cache", recoveryResponse.Headers["cache-control"]);
+        await session.GotoAsync("/forgot-password");
+        await session.WaitForHeadingAsync("Request a password reset.");
+        await session.Page.GetByLabel("Username or verified email").FillAsync("definitely-missing@example.test");
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Button, new() { Name = "Request reset link" }).ClickAsync();
+        await session.Page.GetByText("If the account and verified email are eligible", new() { Exact = false }).WaitForAsync();
+        Assert.DoesNotContain("not found", await session.Page.Locator("body").InnerTextAsync(), StringComparison.OrdinalIgnoreCase);
+
+        var actionResponse = await session.Page.Context.APIRequest.GetAsync($"{session.BaseUrl}/account/action/start?token=invalid-opaque-token", new() { MaxRedirects = 0 });
+        Assert.Equal("no-store, no-cache", actionResponse.Headers["cache-control"]);
+        await session.GotoAsync("/account/action/start?token=invalid-opaque-token");
+        await session.WaitForHeadingAsync("This link cannot be used.");
+        Assert.Contains("invalid, expired, already used", await session.Page.Locator("body").InnerTextAsync(), StringComparison.OrdinalIgnoreCase);
+        await session.AssertNoUiFailuresAsync("account recovery invalid-link handling");
     }
 }

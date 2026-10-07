@@ -1,0 +1,82 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-hi",
+  "capturedAtUtc": "2026-08-25T05:28:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://files.hawaii.gov/tax/news/pubs/25BkltA.pdf", "title": "Hawaii Booklet A, Employer's Tax Guide with 2026 Appendix", "revision": "December 5, 2025", "sha256": "e819a8a48ed9f273014afe0046bc461152228953b545a9aad90e5f7378d3c051", "bytes": 4154063 },
+    { "url": "https://tax.hawaii.gov/payrollupdate/", "title": "2026 Hawaii Employer Payroll Updates", "retrievedAtUtc": "2026-08-25T05:28:00Z", "sha256": "356ff5e972cf5c772d0bed3be81d3d89383620de95ccd66e4d89e97be08f9fd7", "bytes": 197431 }
+  ],
+  "employeeInputs": [
+    { "code": "maritalClass", "source": "Form HW-4", "dataType": "enum", "values": ["SingleOrHeadOfHousehold", "Married"] },
+    { "code": "allowances", "source": "Form HW-4", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Written agreement", "dataType": "money", "minimum": 0 },
+    { "code": "nonresidentCertificate", "source": "Forms HW-6 and HW-7", "dataType": "structured-certificate" },
+    { "code": "hawaiiServiceDays", "dataType": "integer", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["Annualized", "AlternativePeriodicFormula", "WageBracket"],
+    "annualRegularAllowance": 1144,
+    "annualExtraLumpSumAllowance": 4350,
+    "annualFormula": "annualBracketTax(max(0, annualizedWages - allowances * 1144 - 4350), maritalClass) / payPeriodsPerYear + additionalPeriodicWithholding",
+    "annualBrackets": {
+      "SingleOrHeadOfHousehold": [
+        { "over": 0, "through": 9600, "baseTax": 0, "rate": 0.014 },
+        { "over": 9600, "through": 14400, "baseTax": 134, "rate": 0.032 },
+        { "over": 14400, "through": 19200, "baseTax": 288, "rate": 0.055 },
+        { "over": 19200, "through": 24000, "baseTax": 552, "rate": 0.064 },
+        { "over": 24000, "through": 36000, "baseTax": 859, "rate": 0.068 },
+        { "over": 36000, "through": 48000, "baseTax": 1675, "rate": 0.072 },
+        { "over": 48000, "through": 125000, "baseTax": 2539, "rate": 0.076 },
+        { "over": 125000, "baseTax": 8391, "rate": 0.079 }
+      ],
+      "Married": [
+        { "over": 0, "through": 19200, "baseTax": 0, "rate": 0.014 },
+        { "over": 19200, "through": 28800, "baseTax": 269, "rate": 0.032 },
+        { "over": 28800, "through": 38400, "baseTax": 576, "rate": 0.055 },
+        { "over": 38400, "through": 48000, "baseTax": 1104, "rate": 0.064 },
+        { "over": 48000, "through": 72000, "baseTax": 1718, "rate": 0.068 },
+        { "over": 72000, "through": 96000, "baseTax": 3350, "rate": 0.072 },
+        { "over": 96000, "through": 250000, "baseTax": 5078, "rate": 0.076 },
+        { "over": 250000, "baseTax": 16782, "rate": 0.079 }
+      ]
+    },
+    "alternativePeriodicAllowanceAmounts": [
+      { "frequency": "Weekly", "regularAllowance": 22, "extraLumpSumAllowance": 83.65 },
+      { "frequency": "Biweekly", "regularAllowance": 44, "extraLumpSumAllowance": 167.31 },
+      { "frequency": "Semimonthly", "regularAllowance": 47.67, "extraLumpSumAllowance": 181.25 },
+      { "frequency": "Monthly", "regularAllowance": 95.33, "extraLumpSumAllowance": 362.50 },
+      { "frequency": "DailyOrMiscellaneous", "regularAllowance": 3.13, "extraLumpSumAllowance": 11.92 }
+    ],
+    "officialAnnualizedExample": { "maritalClass": "SingleOrHeadOfHousehold", "frequency": "Weekly", "wages": 500, "allowances": 3, "annualWages": 26000, "regularAllowanceDeduction": 3432, "extraLumpSumAllowance": 4350, "wagesSubjectToWithholding": 18218, "annualWithholding": 497.99, "periodicWithholding": 9.58 },
+    "minimumSinglePaymentWithholding": 0.10,
+    "headOfHouseholdUsesSingleSchedule": true,
+    "supplementalWages": { "paidWithRegularWages": "Aggregate as one regular-period payment.", "paidSeparately": "Aggregate with current or preceding regular wages in the same year.", "multiPeriodOption": "Average supplemental and regular wages over consecutive payroll periods, compute tax per average period, then subtract tax already withheld from regular wages." }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Hawaii residents remain subject to withholding, including described temporary mainland service cases.",
+    "nonresidentGeneralRule": "Withhold on Hawaii services unless every qualifying short-term exemption condition is met or another specific exemption applies.",
+    "qualifyingNonresidentDayLimit": 60,
+    "shortTermConditions": ["Nonresidence established through the official certificate process", "No more than 60 aggregate Hawaii service days", "Paid from an office outside Hawaii", "Regular place of employment is outside Hawaii", "Employer does not reasonably expect more than 60 Hawaii service days"],
+    "constructionContractorExclusion": "A nonresident employee of a contractor working on a Hawaii construction project cannot use the 60-day exemption.",
+    "forms": ["HW-6", "HW-7"],
+    "multiStateAllocationRequired": true
+  },
+  "filing": {
+    "quarterlyReturn": "HW-14",
+    "paymentFrequencies": [
+      { "frequency": "Quarterly", "annualLiabilityThrough": 5000 },
+      { "frequency": "Monthly", "annualLiabilityFrom": 5000.01, "annualLiabilityThrough": 40000 },
+      { "frequency": "Semiweekly", "annualLiabilityFrom": 40000.01 }
+    ],
+    "oneDayRule": { "accumulatedLiabilityAtLeast": 100000, "due": "Next banking day" },
+    "electronicInformationReturnThreshold": 10,
+    "annualTransmittal": "HW-30"
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": ["The full alternative periodic bracket matrices and wage-bracket tables remain in the checksummed official booklet; annual brackets and all periodic allowance amounts are transcribed here.", "The booklet does not prescribe a generalized intermediate rounding sequence beyond its published currency results.", "The 60-day exemption requires expectation tracking and an explicit transition when conditions cease to be true."],
+  "review": { "annualFormulaTranscribed": true, "completeAnnualBracketsTranscribed": true, "periodicAllowanceAmountsTranscribed": true, "officialExamplesTranscribed": true, "supplementalMethodsTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": true, "completePeriodicBracketsTranscribed": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import periodic and wage-bracket matrices, verify rounding, implement 60-day expectation and construction branches, and add annual and periodic boundary tests before activation." }
+}

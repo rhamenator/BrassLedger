@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-mt",
+  "capturedAtUtc": "2026-08-25T12:00:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://revenuefiles.mt.gov/files/Forms/Montana_Employer_and_Information_Agent_Guide_with_Tax_Tables.pdf", "title": "Montana Employer and Information Agent Guide with Tax Tables", "revision": "Version 4, November 2025", "mediaType": "application/pdf", "sha256": "be5e53a31b7175ed17fd2457ef40dff1224e4e9737ac18248f1434c6d4b578eb", "bytes": 985472 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "Form MW-4", "dataType": "enum", "values": ["SingleMarriedSeparateOrJointBothWork", "MarriedJointOrQualifyingSurvivingSpouse", "HeadOfHousehold"] },
+    { "code": "additionalPeriodicWithholding", "source": "Form MW-4", "dataType": "money", "minimum": 0 },
+    { "code": "exemptionReason", "source": "Form MW-4 line 5 when required", "dataType": "enum", "values": ["None", "NativeReservation", "MontanaNationalGuard", "NorthDakotaReciprocity", "MilitarySpouse"] },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "montanaWorkDays", "dataType": "integer", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["DirectPayrollPeriodFormula", "WageBracket"],
+    "formula": "W = A + B * (G - C), where G is gross earnings for the payroll period; then add requested extra withholding.",
+    "rounding": { "required": true, "method": "RoundUpToWholeDollar", "stage": "Amount withheld" },
+    "annualSchedules": {
+      "SingleMarriedSeparateOrJointBothWork": [
+        { "over": 0, "through": 16100, "baseTax": 0, "rate": 0 },
+        { "over": 16100, "through": 63600, "baseTax": 0, "rate": 0.047 },
+        { "over": 63600, "baseTax": 2233, "rate": 0.0565 }
+      ],
+      "MarriedJointOrQualifyingSurvivingSpouse": [
+        { "over": 0, "through": 32200, "baseTax": 0, "rate": 0 },
+        { "over": 32200, "through": 127200, "baseTax": 0, "rate": 0.047 },
+        { "over": 127200, "baseTax": 4465, "rate": 0.0565 }
+      ],
+      "HeadOfHousehold": [
+        { "over": 0, "through": 24150, "baseTax": 0, "rate": 0 },
+        { "over": 24150, "through": 95400, "baseTax": 0, "rate": 0.047 },
+        { "over": 95400, "baseTax": 3349, "rate": 0.0565 }
+      ]
+    },
+    "periodThresholdDerivation": "The guide publishes direct Daily, Weekly, Biweekly, Semimonthly, Monthly, and Annual A/B/C tables for each filing-status group. Annual schedules above preserve the complete rate structure; direct period tables remain authoritative where division creates rounded thresholds or bases.",
+    "supplementalWages": {
+      "combined": "Calculate from total regular and supplemental wages.",
+      "separatelyPaidMethods": ["Aggregate with regular wages for the current payroll period", "Aggregate with regular wages for the last preceding payroll period in the same calendar year", "Withhold a flat 5%"],
+      "flatRate": 0.05
+    },
+    "mediaCreditLoanOutWithholdingRate": 0.0565,
+    "officialExamples": [
+      { "filingStatus": "SingleMarriedSeparateOrJointBothWork", "frequency": "Semimonthly", "grossWages": 1375, "baseTax": 0, "rate": 0.047, "threshold": 671, "withholding": 33 },
+      { "filingStatus": "MarriedJointOrQualifyingSurvivingSpouse", "frequency": "Biweekly", "grossWages": 5950, "baseTax": 172, "rate": 0.0565, "threshold": 4892, "withholding": 232 },
+      { "filingStatus": "HeadOfHousehold", "frequency": "Weekly", "grossWages": 575, "baseTax": 0, "rate": 0.047, "threshold": 464, "withholding": 5 }
+    ]
+  },
+  "residencyAndWorkRules": {
+    "generalRule": "Withhold from wages for services performed in Montana unless a federal or Montana exemption applies.",
+    "reciprocalStates": ["ND"],
+    "northDakotaReciprocity": "A North Dakota resident is exempt from Montana wage tax after completing Form MW-4 line 5.",
+    "thirtyDayNonresidentExemption": { "dayLimit": 30, "requiresWorkInMoreThanOneState": true, "excludedWorkers": ["Employee working only in Montana", "Professional athlete", "Entertainer", "Per-event service provider", "Construction worker", "Key employee whose prior-year salary exceeded $500,000", "Qualified MEDIA production employee", "Employee with other Montana-source income"] },
+    "transitionRule": "If the employee is expected to exceed 30 Montana workdays, works only in Montana, or has other Montana-source income, begin withholding when Montana work begins rather than waiting for day 31.",
+    "nativeReservationExemption": "An enrolled tribal member must both reside on and earn the wages on the reservation governed by that tribe; mixed wages and residence periods require allocation.",
+    "interstateMotorAndRailCarrierRule": "Withhold only in the employee's state of residence.",
+    "multiStateWorkLocationRequired": true
+  },
+  "filing": {
+    "lookbackPeriod": "July 1 of the preceding year through June 30 of the current year",
+    "paymentSchedules": [
+      { "frequency": "Accelerated", "lookbackWithholdingAtLeast": 12000, "due": "Federal deposit schedule" },
+      { "frequency": "Monthly", "lookbackWithholdingFrom": 1200, "lookbackWithholdingThrough": 11999, "due": "15th of following month" },
+      { "frequency": "Annual", "lookbackWithholdingThrough": 1199, "due": "January 31 of following year" }
+    ],
+    "newBusinesses": "Monthly until an initial lookback period is complete.",
+    "annualForms": ["MW-3", "W-2"],
+    "annualFormsDue": "January 31",
+    "exemptMW4Submission": "Submit new or updated exemption Forms MW-4 through TAP by the last day of the payroll period in which received; renew annually by January 31."
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The annual schedules preserve every rate and annual threshold, but the official direct payroll-period tables remain necessary for exact A and C values because the agency rounds period thresholds and base amounts.",
+    "The 30-day exemption is prospective and category-sensitive; a single elapsed-day counter is insufficient.",
+    "Native-reservation exemption requires both residence and work-source facts that can change within a pay period."
+  ],
+  "review": { "current2026PublicationCaptured": true, "formulaAndAnnualSchedulesTranscribed": true, "supplementalMethodTranscribed": true, "officialExamplesTranscribed": true, "residencyAndWorkRulesTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "completeDirectPeriodTablesTranscribed": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import all direct period tables, implement required ceiling rounding and prospective 30-day/reservation state, then add example, threshold, reciprocity, and special-worker regression tests." }
+}

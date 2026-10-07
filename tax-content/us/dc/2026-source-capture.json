@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-dc",
+  "capturedAtUtc": "2026-08-25T05:28:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://otr.cfo.dc.gov/page/withholding-tax-forms", "title": "District of Columbia 2026 Withholding Tax Forms", "retrievedAtUtc": "2026-08-25T05:28:00Z", "mediaType": "text/html", "sha256": "cffcef4021f3f20ad53fdd1308b5985ca402a5982c3ff0bd429161aaf2268270", "bytes": 130571 },
+    { "url": "https://otr.cfo.dc.gov/sites/default/files/dc/sites/otr/publication/attachments/48494_FR-230_121715%20FINAL.pdf", "title": "FR-230 Income Tax Withholding Instructions and Tables", "publicationYear": 2016, "usage": "Historical shape reference only; prohibited for 2026 calculation", "sha256": "6301ce21aa5d923224b0e1972b18966acd82656f803592b9d7d8db9bed4d6f65", "bytes": 886551 }
+  ],
+  "employeeInputs": [
+    { "code": "certificate", "source": "D-4", "dataType": "structured-certificate", "captureStatus": "Current form is under agency review" },
+    { "code": "nonresidenceCertificate", "source": "D-4A", "dataType": "boolean", "captureStatus": "Current form is under agency review" }
+  ],
+  "calculation": {
+    "methodFamily": "WageBracket",
+    "current2026FormulaStatus": "MissingOfficialPublication",
+    "current2026BracketsTranscribed": false,
+    "current2026AllowanceValuesTranscribed": false,
+    "current2026RoundingTranscribed": false,
+    "supplementalMethodTranscribed": false,
+    "legacyPublicationMayBeExecuted": false
+  },
+  "residencyAndWorkRules": {
+    "capturedCurrentRule": "Current forms provide D-4A as the certificate of non-residence in the District.",
+    "reciprocityOrNonresidentScopeFullyTranscribed": false,
+    "multiStateAllocationRequired": true
+  },
+  "filing": {
+    "annual": { "eligibility": "Less than $200 per year", "return": "FR-900A", "depositDue": "January 20, 2027", "returnDue": "January 31, 2027" },
+    "monthlyOrQuarterly": { "return": "FR-900Q", "electronicFilingRequired": true, "depositDue": "20th day following assigned monthly or quarterly period", "returnDue": "Last day of month following quarter" },
+    "nonPayroll": { "return": "FR-900NP", "depositFrequency": "Monthly", "depositDue": "20th day following period", "returnDue": "January 31, 2027" },
+    "paperPaymentVoucher": "FR-900P",
+    "paperPaymentMaximum": 4999.99,
+    "forms": ["FR-900A", "FR-900Q", "FR-900NP", "FR-900P", "WT", "D-4", "D-4A"]
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The official 2026 forms page does not publish a current FR-230 calculation guide or table set; the last located FR-230 is from 2016 and is explicitly non-executable.",
+    "The official page marks both D-4 and D-4A as under review, so certificate fields and nonresident applicability are unstable.",
+    "Filing obligations are captured, but no payroll amount may be calculated from this document."
+  ],
+  "review": { "formulaTranscribed": false, "officialExamplesTranscribed": false, "residencyAndWorkRulesTranscribed": false, "filingRulesTranscribed": true, "rawSourcesChecksummed": true, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Obtain a 2026 OTR calculation publication or written agency confirmation of the current tables, then transcribe the formula, certificates, supplemental treatment, residency rules, examples, and boundary tests." }
+}

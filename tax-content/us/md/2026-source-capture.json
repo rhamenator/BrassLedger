@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-md",
+  "capturedAtUtc": "2026-08-25T07:20:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf", "title": "2026 Maryland Employer Withholding Guide", "mediaType": "application/pdf", "sha256": "ce61cef90c00bc41ad4f4a4913ea1f9f5be65db9c08b015d43c191d20883e0bf", "bytes": 1430746 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatusGroup", "source": "Form MW507", "dataType": "enum", "values": ["SingleMarriedSeparateOrDependent", "MarriedJointHeadOrQualifyingSurvivingSpouse"] },
+    { "code": "exemptions", "source": "Form MW507", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Form MW507", "dataType": "money", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "source": "Employee residence", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "source": "Work location", "dataType": "jurisdiction-reference" },
+    { "code": "nonresidentReciprocityCertificate", "source": "Form MW507", "dataType": "boolean" }
+  ],
+  "calculation": {
+    "methods": ["CombinedStateLocalPercentage", "CombinedStateLocalWageBracket"],
+    "annualStandardDeduction": 3400,
+    "annualExemptionAmount": 3200,
+    "periodicDeductions": [
+      { "frequency": "Daily", "oneExemption": 8.77, "standardDeduction": 9.31, "minimumGrossWages": 13.70 },
+      { "frequency": "Weekly", "oneExemption": 61.54, "standardDeduction": 65.38, "minimumGrossWages": 96 },
+      { "frequency": "Biweekly", "oneExemption": 123.08, "standardDeduction": 130.76, "minimumGrossWages": 192 },
+      { "frequency": "Semimonthly", "oneExemption": 133.33, "standardDeduction": 141.66, "minimumGrossWages": 208 },
+      { "frequency": "Monthly", "oneExemption": 266.67, "standardDeduction": 283.33, "minimumGrossWages": 417 },
+      { "frequency": "Quarterly", "oneExemption": 800, "standardDeduction": 850, "minimumGrossWages": 1250 },
+      { "frequency": "Annual", "oneExemption": 3200, "standardDeduction": 3400, "minimumGrossWages": 5000 }
+    ],
+    "taxableIncomeFormula": "max(0, grossWages - periodicStandardDeduction - exemptions * periodicExemptionAmount)",
+    "stateAnnualBrackets": {
+      "SingleMarriedSeparateOrDependent": [
+        { "over": 0, "through": 1000, "baseTax": 0, "rate": 0.02 }, { "over": 1000, "through": 2000, "baseTax": 20, "rate": 0.03 }, { "over": 2000, "through": 3000, "baseTax": 50, "rate": 0.04 }, { "over": 3000, "through": 100000, "baseTax": 90, "rate": 0.0475 }, { "over": 100000, "through": 125000, "baseTax": 4697.50, "rate": 0.05 }, { "over": 125000, "through": 150000, "baseTax": 5947.50, "rate": 0.0525 }, { "over": 150000, "through": 250000, "baseTax": 7260, "rate": 0.055 }, { "over": 250000, "through": 500000, "baseTax": 12760, "rate": 0.0575 }, { "over": 500000, "through": 1000000, "baseTax": 27135, "rate": 0.0625 }, { "over": 1000000, "baseTax": 58385, "rate": 0.065 }
+      ],
+      "MarriedJointHeadOrQualifyingSurvivingSpouse": [
+        { "over": 0, "through": 1000, "baseTax": 0, "rate": 0.02 }, { "over": 1000, "through": 2000, "baseTax": 20, "rate": 0.03 }, { "over": 2000, "through": 3000, "baseTax": 50, "rate": 0.04 }, { "over": 3000, "through": 150000, "baseTax": 90, "rate": 0.0475 }, { "over": 150000, "through": 175000, "baseTax": 7072.50, "rate": 0.05 }, { "over": 175000, "through": 225000, "baseTax": 8322.50, "rate": 0.0525 }, { "over": 225000, "through": 300000, "baseTax": 10947.50, "rate": 0.055 }, { "over": 300000, "through": 600000, "baseTax": 15072.50, "rate": 0.0575 }, { "over": 600000, "through": 1200000, "baseTax": 32322.50, "rate": 0.0625 }, { "over": 1200000, "baseTax": 69822.50, "rate": 0.065 }
+      ]
+    },
+    "withholdingPolicy": "Maryland's published withholding schedules disregard state marginal rates below 4.75% and combine a state schedule with the residence-selected local schedule; execute the official combined schedule, not a return-level state-plus-local reconstruction.",
+    "lumpSumAnnualBonus": { "stateRate": 0.065, "localRate": "Highest local rate for residence county", "nonresidentSpecialRate": 0.0225 },
+    "missingCertificate": "Use one withholding exemption."
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Maryland residents are within the withholding definition for services inside or outside Maryland.",
+    "nonresidentMarylandServices": "Withhold on Maryland services unless the employee's only Maryland-source income is wages and a reciprocal-state exemption is documented.",
+    "reciprocalStates": ["PA", "VA", "WV", "DC"],
+    "nonresidentSpecialTaxRate": 0.0225,
+    "residentNonreciprocalWorkState": "Use the official Delaware/nonreciprocal schedule that includes resident local tax and a prescribed credit for other-state withholding.",
+    "multiStateWorkLocationRequired": true
+  },
+  "filing": {
+    "categories": [
+      { "frequency": "Annual", "annualWithholdingLessThan": 250 },
+      { "frequency": "Quarterly", "quarterlyWithholdingLessThan": 700 },
+      { "frequency": "Monthly", "quarterlyWithholdingMoreThan": 700 },
+      { "frequency": "Accelerated", "priorAnnualWithholdingAtLeast": 15000, "accumulatedWithholdingAtLeast": 700, "due": "Within three business days after payroll" },
+      { "frequency": "Seasonal", "requiresPriorApproval": true }
+    ],
+    "forms": ["MW506", "MW507", "MW508", "W-2", "1099"],
+    "portal": "Maryland Tax Connect"
+  },
+  "localWithholding": {
+    "stateFormulaDependsOnLocalJurisdiction": true,
+    "localIncomeTaxCaptureRequiredForThisStateFormula": true,
+    "sourceCapture": "2026-local-source-capture.json",
+    "selectionBasis": "Employee residence",
+    "combinedScheduleCount": 10,
+    "scheduleSelection": "Use an official combined rate that equals or slightly exceeds the actual residence-locality rate."
+  },
+  "captureWarnings": [
+    "Maryland withholding is not safely implemented by adding return-level state tax to the nominal local rate: the guide uses official combined schedules, disregards state marginal rates below 4.75%, and sometimes rounds a locality upward to one of ten published schedules.",
+    "Anne Arundel and Frederick select income-tiered local rates by filing-status-specific annual income; the local capture preserves those tiers but executable schedule-selection integration is still missing.",
+    "The complete combined percentage schedules for every local-rate family, the nonresident schedule, the Delaware/nonreciprocal schedule, and wage-bracket matrices remain in the checksummed guide.",
+    "No generalized rounding instruction was located."
+  ],
+  "review": { "stateBracketsTranscribed": true, "periodicDeductionsTranscribed": true, "residencyAndWorkRulesTranscribed": true, "localCaptureLinked": true, "lumpSumRatesTranscribed": true, "rawSourcesChecksummed": true, "completeCombinedPercentageSchedulesTranscribed": false, "completeWageBracketTablesTranscribed": false, "officialExamplesTranscribed": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import all official combined percentage and wage-bracket schedules, implement residence and tier selection plus nonresident and nonreciprocal-work branches, and add locality-boundary and reciprocity tests before activation." }
+}

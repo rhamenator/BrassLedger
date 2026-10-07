@@ -17,6 +17,13 @@ if (!string.Equals(arguments[0], "populate-fake-data", StringComparison.OrdinalI
     return 1;
 }
 
+if (!arguments.Any(argument => string.Equals(argument, "--confirm", StringComparison.OrdinalIgnoreCase)))
+{
+    Console.Error.WriteLine("Refusing to add fake data without --confirm.");
+    Console.Error.WriteLine("Use a disposable --data-root; this command must never be used with production data.");
+    return 2;
+}
+
 var dataRoot = GetOption(arguments, "--data-root")
     ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrassLedger", "App_Data");
 
@@ -74,5 +81,6 @@ static void PrintUsage()
     Console.WriteLine("BrassLedger Tools");
     Console.WriteLine();
     Console.WriteLine("Commands:");
-    Console.WriteLine("  populate-fake-data [--data-root <path>]");
+    Console.WriteLine("  populate-fake-data --confirm [--data-root <path>]");
+    Console.WriteLine("    Adds demo records only. Use a disposable data root; it must not be production data.");
 }

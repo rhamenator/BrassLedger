@@ -1,5 +1,5 @@
 @page "/help"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ViewWorkspace)]
 
 <PageTitle>Help Center</PageTitle>
 
@@ -69,4 +69,3 @@
         </article>
     </section>
 </section>
-

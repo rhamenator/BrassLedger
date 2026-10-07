@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-de",
+  "capturedAtUtc": "2026-08-25T05:04:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://revenue.delaware.gov/employers-guide-withholding-regulations-employers-duties/", "title": "Delaware Employer's Guide — Withholding Regulations and Duties", "retrievedAtUtc": "2026-08-25T05:04:00Z", "mediaType": "text/html", "sha256": "0a6bd55158556b156c2c113f230b34533fded2c67f106687d059d61ea9484f38", "bytes": 119796 },
+    { "url": "https://revenue.delaware.gov/employers-guide-withholding-tables/", "title": "Delaware Employer Withholding Tables", "retrievedAtUtc": "2026-08-25T05:04:00Z", "mediaType": "text/html", "sha256": "e2119ddbc85e7e23b50ad25bc6b271ab062fbb5f7800331e62bef240633a4d12", "bytes": 51222, "tableEffectiveOn": "2025-01-01" }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "W-4, SD/W-4A, or W-4NR", "dataType": "enum", "values": ["Single", "MarriedFilingJointly", "MarriedFilingSeparately"] },
+    { "code": "allowances", "source": "W-4, SD/W-4A, or W-4NR", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Written employee-employer agreement", "dataType": "money", "minimum": 0 },
+    { "code": "delawareSourceCompensation", "dataType": "money", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["WageBracket", "ApprovedAnnualizedFormula"],
+    "payPeriodsPerYear": { "Daily": 300, "Weekly": 52, "Biweekly": 26, "Semimonthly": 24, "Monthly": 12 },
+    "annualStandardDeduction": { "Single": 3250, "MarriedFilingJointly": 6500, "MarriedFilingSeparately": 3250 },
+    "annualTaxBrackets": [
+      { "over": 0, "through": 2000, "baseTax": 0, "rate": 0 },
+      { "over": 2000, "through": 5000, "baseTax": 0, "rate": 0.022 },
+      { "over": 5000, "through": 10000, "baseTax": 66, "rate": 0.039 },
+      { "over": 10000, "through": 20000, "baseTax": 261, "rate": 0.048 },
+      { "over": 20000, "through": 25000, "baseTax": 741, "rate": 0.052 },
+      { "over": 25000, "through": 60000, "baseTax": 1001, "rate": 0.0555 },
+      { "over": 60000, "baseTax": 2943.50, "rate": 0.066 }
+    ],
+    "annualExemptionCreditPerAllowance": 110,
+    "formula": "max(0, annualBracketTax(annualizedGrossPay - filingStatusStandardDeduction) - allowances * 110) / payPeriodsPerYear + additionalPeriodicWithholding",
+    "officialExamples": [
+      { "filingStatus": "Single", "annualGrossWages": 25000, "allowances": 1, "standardDeduction": 3250, "taxableIncome": 21750, "taxBeforeCredit": 832, "taxAfterCredit": 722, "weekly": 13.88, "biweekly": 27.77, "semimonthly": 30.08, "monthly": 60.17 },
+      { "filingStatus": "MarriedFilingJointly", "annualGrossWages": 25000, "allowances": 3, "standardDeduction": 6500, "taxableIncome": 18500, "taxBeforeCredit": 669, "taxAfterCredit": 339, "weekly": 6.52, "biweekly": 13.04, "semimonthly": 14.13, "monthly": 28.25 },
+      { "filingStatus": "MarriedFilingSeparately", "annualGrossWages": 25000, "allowances": 2, "standardDeduction": 3250, "taxableIncome": 21750, "taxBeforeCredit": 832, "taxAfterCredit": 612, "weekly": 11.77, "biweekly": 23.54, "semimonthly": 25.50, "monthly": 51.00 }
+    ],
+    "missingCertificate": { "filingStatus": "Single", "allowances": 0 },
+    "supplementalWages": { "paidWithRegularWages": "Aggregate as one regular-period payment.", "paidSeparately": "Annualize regular wages, add supplemental wages, compute combined tax, subtract annualized regular-wage tax, then withhold the remainder from supplemental wages." }
+  },
+  "residencyAndWorkRules": {
+    "delawareWorkRule": "Resident and nonresident compensation is subject to withholding for personal services performed as an employee in Delaware business.",
+    "residentOutsideDelaware": "Outside-state employers are not required to withhold Delaware tax for Delaware residents working elsewhere; after work-state withholding, voluntary Delaware withholding may be elected.",
+    "reciprocalStates": [],
+    "nonresidentWorksheet": "W-4NR",
+    "multiStateAllocationRequired": true
+  },
+  "filing": {
+    "lookbackPeriod": "July 1 through June 30 preceding the calendar year",
+    "frequencies": [
+      { "frequency": "Quarterly", "lookbackWithholdingThrough": 6020, "return": "W-1Q", "due": "Last day of month following quarter" },
+      { "frequency": "Monthly", "lookbackWithholdingFrom": 6020.01, "lookbackWithholdingThrough": 33460, "return": "W-1", "due": "15th day following month" },
+      { "frequency": "EighthMonthly", "lookbackWithholdingFrom": 33460.01, "return": "W-1A", "periodEndDays": [3, 7, 11, 15, 19, 22, 25, "LastDay"], "due": "Within three days excluding weekends and state holidays" }
+    ],
+    "newEmployerFrequency": "Monthly",
+    "annualReconciliation": "W-3",
+    "annualReconciliationDue": "February 28"
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": ["The current official tables are labeled effective January 1, 2025 and the guide's current tax computation schedule is also effective January 1, 2025; no distinct 2026 change was identified.", "The source does not state an explicit final rounding convention for the approved annualized method.", "The guide contains legacy references to federal allowances and forms; certificate-field compatibility with the current federal W-4 must be reviewed before activation."],
+  "review": { "formulaTranscribed": true, "completeBracketsTranscribed": true, "officialExamplesTranscribed": true, "supplementalMethodTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": true, "currentCertificateCompatibilityVerified": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Confirm the unchanged 2025 schedule governs every 2026 payroll, map current certificate fields, verify rounding and nonresident allocation, and add executable bracket-boundary and supplemental cases." }
+}

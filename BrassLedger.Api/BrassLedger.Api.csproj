@@ -14,6 +14,8 @@
   <ItemGroup>
     <ProjectReference Include="..\BrassLedger.Application\BrassLedger.Application.csproj" />
     <ProjectReference Include="..\BrassLedger.Infrastructure\BrassLedger.Infrastructure.csproj" />
+    <ProjectReference Include="..\BrassLedger.Migrations.PostgreSql\BrassLedger.Migrations.PostgreSql.csproj" />
+    <ProjectReference Include="..\BrassLedger.Migrations.Sqlite\BrassLedger.Migrations.Sqlite.csproj" />
   </ItemGroup>
 
 </Project>

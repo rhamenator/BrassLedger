@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-wv",
+  "capturedAtUtc": "2026-08-25T05:25:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://tax.wv.gov/Documents/Withholding/it100.2a.pdf", "title": "West Virginia 2026 Tables for Percentage Method of Withholding, IT-100.2A", "revision": "March 2026", "mediaType": "application/pdf", "sha256": "c103bacc00f5d3c6c02ce3831c76d328e3ada5ee8af3746a48100b9001ee68b2", "bytes": 96507 },
+    { "url": "https://tax.wv.gov/Documents/TSD/tsd381.pdf", "title": "West Virginia TSD 381 Withholding Information for Employers", "revision": "September 2025", "mediaType": "application/pdf", "sha256": "015823d0e17e759ca8cee080e3067563b66b15e4b85a139c4c2d2d1022c8b99e", "bytes": 118597 }
+  ],
+  "employeeInputs": [
+    { "code": "exemptions", "source": "WV IT-104", "dataType": "integer", "minimum": 0 },
+    { "code": "oneEarnerOneJobElection", "source": "WV IT-104 Line 5", "dataType": "boolean" },
+    { "code": "additionalPeriodicWithholding", "source": "WV IT-104 Line 6", "dataType": "money", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "westVirginiaWorkDays", "dataType": "integer", "minimum": 0 },
+    { "code": "totalWorkDays", "dataType": "integer", "minimum": 1 }
+  ],
+  "calculation": {
+    "methods": ["PercentageMethod", "PublishedWageBracketTables"],
+    "defaultSchedule": "TwoEarnerOrTwoOrMoreJobs",
+    "optionalScheduleCondition": "Single, head of household, or married with nonemployed spouse; one job; employee checks IT-104 Line 5",
+    "annualExemptionValue": 2000,
+    "periodicExemptionValues": { "Weekly": 38.46, "Biweekly": 76.92, "Semimonthly": 83.33, "Monthly": 166.67, "Annual": 2000, "Daily": 7.66 },
+    "annualSchedules": {
+      "TwoEarnerOrTwoOrMoreJobs": [
+        { "over": 0, "through": 7500, "baseTax": 0, "rate": 0.0211 },
+        { "over": 7500, "through": 18750, "baseTax": 158.25, "rate": 0.0281 },
+        { "over": 18750, "through": 30000, "baseTax": 474.38, "rate": 0.0316 },
+        { "over": 30000, "through": 45000, "baseTax": 829.88, "rate": 0.0422 },
+        { "over": 45000, "baseTax": 1462.88, "rate": 0.0458 }
+      ],
+      "OneEarnerOrOneJob": [
+        { "over": 0, "through": 10000, "baseTax": 0, "rate": 0.0211 },
+        { "over": 10000, "through": 25000, "baseTax": 211, "rate": 0.0281 },
+        { "over": 25000, "through": 40000, "baseTax": 632.50, "rate": 0.0316 },
+        { "over": 40000, "through": 60000, "baseTax": 1106.50, "rate": 0.0422 },
+        { "over": 60000, "baseTax": 1950.50, "rate": 0.0458 }
+      ]
+    },
+    "rounding": { "method": "NearestWholeDollar", "source": "Companion employer withholding-table instructions" },
+    "supplementalWages": { "distinctMethodLocated": false, "ordinaryCompensationIncludes": ["Commissions", "Fees", "Bonuses", "Vacation allowances", "Back pay", "Tips", "Retroactive wage increases"], "capturedTreatment": "Use the employee's selected ordinary schedule; no separate supplemental flat rate was located." }
+  },
+  "residencyAndWorkRules": {
+    "workStateRule": "Resident and nonresident wages for West Virginia work are subject unless an exemption applies.",
+    "reciprocalStates": ["KY", "MD", "OH", "PA", "VA"],
+    "reciprocityCertificateRequired": "WV IT-104",
+    "nonresidentThirtyDayException": { "maximumWestVirginiaDays": 30, "daysNeedNotBeConsecutive": true, "mustWorkInMoreThanOneState": true, "excludedWorkers": ["Professional athletes", "Professional entertainers", "Public figures"], "residentStateCondition": "Resident state has substantially similar exclusion, has no individual income tax, or income is federally exempt", "overThresholdEffect": "Withholding becomes retroactive to every West Virginia workday including the first 30" },
+    "allocationEvidence": ["Daily time-and-attendance location records", "Employee written statement of reasonably expected West Virginia days"],
+    "allocationMethod": "Reasonable wage allocation among all states where services are performed.",
+    "militaryExceptionsRequireWorkerClassification": true,
+    "multiStateWorkLocationRequired": true
+  },
+  "filing": {
+    "generalPayment": { "frequency": "Monthly", "due": "15th day of following month" },
+    "quarterlyReturn": { "form": "IT-101Q", "due": "Last day of month after quarter" },
+    "annualSmallEmployer": { "condition": "Annual withholding under $600 or qualifying domestic/household employer", "form": "IT-101A", "due": "January 31", "separateIT103Required": false },
+    "annualReconciliation": { "form": "IT-103", "due": "January 31" },
+    "electronicInformationReturnThreshold": 10,
+    "payrollServicesElectronicRequired": true
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": ["The exact March 2026 percentage publication contains no worked example.", "The full wage-bracket matrices are not transcribed.", "Rounding is stated in the companion table instructions rather than in IT-100.2A itself.", "No separate supplemental-wage method was located."],
+  "review": { "exact2026PublicationCaptured": true, "bothAnnualSchedulesTranscribed": true, "allowanceValuesTranscribed": true, "scheduleSelectionTranscribed": true, "thirtyDayRuleTranscribed": true, "reciprocityTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "officialExampleAvailable": false, "supplementalMethodIndependentlyVerified": false, "roundingCrossPublicationVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import direct tables, independently verify rounding and supplemental treatment, and add schedule-selection, bracket, reciprocity, retroactive 31st-day, allocation, and filing regressions." }
+}

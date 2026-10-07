@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-la",
+  "capturedAtUtc": "2026-08-25T07:20:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://dam.ldr.la.gov/publications/1306%281_25%29.pdf", "title": "Louisiana Withholding Tables and Formulas R-1306", "effectiveOn": "2025-01-01", "mediaType": "application/pdf", "sha256": "baae8e6917750e061779ff20ec8382ff7531e160d069c7dff22deec4773807c6", "bytes": 345143 },
+    { "url": "https://dam.ldr.la.gov/taxforms/1300-1-26-F.pdf", "title": "2026 Employee's Withholding Certificate (L-4), R-1300", "revision": "January 2026", "mediaType": "application/pdf", "sha256": "eac8ccbef4ee2681719094ae5af22be403c2d0751cadf7a69b4825f2ff1a99ee", "bytes": 48292 },
+    { "url": "https://revenue.louisiana.gov/businesses/widely-used-tax-types/withholding/?capture=2026", "title": "Louisiana Withholding", "retrievedAtUtc": "2026-08-25T07:20:00Z", "mediaType": "text/html", "sha256": "ea6f3af9c6cb64aefa97e619276c4ae0e87327f8bd914ef08a5db92edb62c380", "bytes": 63279 }
+  ],
+  "employeeInputs": [
+    { "code": "standardDeductionSelection", "source": "2026 Form L-4 block A", "dataType": "enum", "values": ["None", "SingleOrMarriedSeparate", "MarriedJointHeadOrQualifyingSurvivingSpouse"] },
+    { "code": "periodicAdjustment", "source": "2026 Form L-4 line 7", "dataType": "money", "allowNegative": true },
+    { "code": "louisianaWages", "dataType": "money", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["ComputerFormula", "WageBracket"],
+    "rate": 0.0309,
+    "payPeriodsPerYear": { "Daily": 365, "Weekly": 52, "Biweekly": 26, "Semimonthly": 24, "Monthly": 12, "Annual": 1 },
+    "annualStandardDeductions": { "None": 0, "SingleOrMarriedSeparate": 12500, "MarriedJointHeadOrQualifyingSurvivingSpouse": 25000 },
+    "formula": "max(0, (periodWages - annualStandardDeduction / payPeriodsPerYear) * 0.0309 + periodicAdjustment)",
+    "negativeVariablesBecomeZero": true,
+    "missingCertificate": "Withhold without any standard deduction.",
+    "supplementalWages": "Supplemental and vacation pay are subject to withholding using the same method as regular payroll even when paid separately.",
+    "officialExamples": [
+      { "frequency": "Weekly", "grossWages": 700, "standardDeductionSelection": "SingleOrMarriedSeparate", "periodicStandardDeduction": 240.38, "withholding": 14.20 },
+      { "frequency": "Biweekly", "grossWages": 4600, "standardDeductionSelection": "MarriedJointHeadOrQualifyingSurvivingSpouse", "periodicStandardDeduction": 961.54, "publishedWithholding": 112.432 }
+    ]
+  },
+  "residencyAndWorkRules": {
+    "louisianaServices": "Withhold from resident and nonresident employees for services performed in Louisiana unless specifically exempt.",
+    "residentOtherStateWithIncomeTax": "Withhold the work state's tax; Louisiana resident reports all income and may claim a return-level credit for tax paid to the other state.",
+    "residentOtherStateWithoutIncomeTax": "Louisiana withholding is required from the Louisiana resident's wages earned in the no-tax state.",
+    "multiStateWorkLocationRequired": true,
+    "reciprocalStates": []
+  },
+  "filing": {
+    "quarterlyReturn": "L-1",
+    "annualReconciliation": "L-3",
+    "paymentFrequencies": [
+      { "frequency": "Quarterly", "averageMonthlyWithholdingLessThan": 500 },
+      { "frequency": "Monthly", "averageMonthlyWithholdingFrom": 500, "averageMonthlyWithholdingLessThan": 5000 },
+      { "frequency": "Semimonthly", "averageMonthlyWithholdingFrom": 5000 }
+    ],
+    "zeroReturnsRequired": true,
+    "electronicFilingAndPaymentRequired": true,
+    "portal": "LaTAP",
+    "annualReconciliationDue": "January 31"
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The shared source index previously summarized the rate as 3%; the official formula is 3.09%, so the individual capture intentionally corrects that reference value.",
+    "The formula publication is effective January 1, 2025 and the agency identifies it as the current table while issuing a January 2026 L-4; uninterrupted applicability for every 2026 payroll still requires independent sign-off.",
+    "The official second example prints $112.432 and does not state a generalized rounding sequence; executable behavior must resolve final-cent rounding.",
+    "The full wage-bracket matrices are retained in the checksummed publication and are not duplicated here."
+  ],
+  "review": { "formulaTranscribed": true, "currentCertificateTranscribed": true, "officialExamplesTranscribed": true, "supplementalMethodTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": true, "completeWageBracketTablesTranscribed": false, "unchanged2026ApplicabilityVerified": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Confirm the current R-1306 applies to every 2026 payroll, import wage-bracket matrices, verify adjustment and rounding behavior, and add executable residency and formula tests before activation." }
+}

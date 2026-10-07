@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-mn",
+  "capturedAtUtc": "2026-08-25T12:00:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.revenue.state.mn.us/sites/default/files/2025-12/wh-inst-26.pdf", "title": "2026 Minnesota Income Tax Withholding Instruction Booklet and Tax Tables", "revision": "Start using January 1, 2026", "mediaType": "application/pdf", "sha256": "47c22acd256bcb85fe6fd49a8012835acc5e97b1ebaec99362e6a154e1795da9", "bytes": 2068607 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "Form W-4MN", "dataType": "enum", "values": ["Single", "Married"] },
+    { "code": "allowances", "source": "Form W-4MN", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Form W-4MN", "dataType": "money", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "minnesotaSourceWages", "dataType": "money", "minimum": 0 },
+    { "code": "otherStateActualWithholding", "dataType": "money", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["ComputerFormula", "WageBracket"],
+    "payPeriodsPerYear": { "Daily": 360, "Weekly": 52, "Biweekly": 26, "Semimonthly": 24, "Monthly": 12, "Annual": 1 },
+    "annualAllowanceAmount": 5300,
+    "steps": [
+      "Multiply wages for the payroll period by the applicable number of payroll periods.",
+      "Subtract $5,300 for each W-4MN allowance; if the result is zero or less, withholding is zero before requested additional withholding.",
+      "Apply the annual filing-status schedule to the remaining annualized wages.",
+      "Divide annual tax by payroll periods and add requested additional periodic withholding. The employer may round withholding to the nearest dollar."
+    ],
+    "annualSchedules": {
+      "Single": [
+        { "over": 0, "through": 4700, "baseTax": 0, "rate": 0 },
+        { "over": 4700, "through": 38010, "baseTax": 0, "rate": 0.0535 },
+        { "over": 38010, "through": 114130, "baseTax": 1782.09, "rate": 0.068 },
+        { "over": 114130, "through": 207850, "baseTax": 6958.25, "rate": 0.0785 },
+        { "over": 207850, "baseTax": 14315.27, "rate": 0.0985 }
+      ],
+      "Married": [
+        { "over": 0, "through": 14700, "baseTax": 0, "rate": 0 },
+        { "over": 14700, "through": 63400, "baseTax": 0, "rate": 0.0535 },
+        { "over": 63400, "through": 208180, "baseTax": 2605.45, "rate": 0.068 },
+        { "over": 208180, "through": 352630, "baseTax": 12450.49, "rate": 0.0785 },
+        { "over": 352630, "baseTax": 23789.82, "rate": 0.0985 }
+      ]
+    },
+    "rounding": { "optional": true, "method": "NearestWholeDollar", "stage": "Final periodic withholding" },
+    "missingCertificate": { "filingStatus": "Single", "allowances": 0 },
+    "supplementalWages": {
+      "separatelyPaidAndSeparatelyRecordedFlatRate": 0.0625,
+      "separatelyRecordedAlternative": "Aggregate the regular and supplemental wages and subtract tax already withheld from regular wages.",
+      "notSeparatelyRecorded": "Aggregation with regular wages is mandatory.",
+      "separateRecordingRequiredForFlatRate": true
+    }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Minnesota residents are subject to Minnesota withholding on wages for services inside and outside Minnesota, subject to the actual other-state-withholding credit method.",
+    "residentWorkingOutsideMinnesota": "Compute Minnesota withholding and subtract tax actually withheld by the other state for the same wages, but never reduce Minnesota withholding below zero.",
+    "nonresidentRule": "Withhold only from wages for services performed in Minnesota unless an exception applies.",
+    "nonresidentAnnualPayThreshold": { "lessThan": 15300, "effect": "No Minnesota withholding when expected annual Minnesota wages are below the threshold." },
+    "reciprocalStates": ["MI", "ND"],
+    "reciprocityForm": "MWR",
+    "reciprocityRenewal": "Annual; employer sends the form to Minnesota Revenue.",
+    "interstateRailAndMotorCarrierRule": "Withhold only for the employee's state of residence.",
+    "airCarrierRule": "Withholding jurisdiction is the state of residence and any state in which more than 50% of scheduled flight time is worked.",
+    "nonresidentEntertainerTax": { "rate": 0.02, "base": "Gross compensation", "forms": ["ETA", "ETD", "ETR"], "reciprocityExcludesResidentsOf": ["MI", "ND"] },
+    "multiStateWorkLocationRequired": true
+  },
+  "filing": {
+    "depositSchedules": [
+      { "frequency": "Semiweekly", "conditions": ["Federal semiweekly depositor", "Prior-quarter Minnesota withholding exceeded $1,500"], "due": "Wednesday for Wednesday-Friday paydays; Friday for Saturday-Tuesday paydays" },
+      { "frequency": "Monthly", "conditions": ["Federal monthly depositor", "Prior-quarter Minnesota withholding exceeded $1,500"], "due": "15th day of following month" },
+      { "frequency": "Quarterly", "conditions": ["Prior-quarter Minnesota withholding was $1,500 or less", "Previous return was filed on time"], "due": "April 30, July 31, October 31, and January 31" },
+      { "frequency": "Annual", "conditions": ["Department-approved annual filer", "Previous annual withholding was $500 or less"], "due": "January 31; if cumulative withholding exceeds $500 during the year, deposit by the last day of the following month except December" }
+    ],
+    "federalOneDayRuleApplies": false,
+    "electronicPaymentTriggers": ["Withholding and other specified Minnesota taxes totaled at least $10,000 during the 12 months ending June 30", "Required to pay another Minnesota business tax electronically", "Payment made by a payroll service"],
+    "returns": "Generally quarterly through e-Services; zero returns remain required while the account is open.",
+    "forms": ["W-4MN", "MWR", "W-2", "1099"]
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The complete wage-bracket matrices remain in the checksummed official booklet and are not transcribed into this capture.",
+    "The resident other-state credit requires actual other-state withholding and pay-period state, not merely a nominal other-state rate.",
+    "Nonresident entertainer withholding is a separate tax workflow and must not be treated as ordinary employee wage withholding."
+  ],
+  "review": { "annualizedFormulaTranscribed": true, "annualBracketsTranscribed": true, "supplementalMethodTranscribed": true, "residencyAndWorkRulesTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "completeWageBracketTablesTranscribed": false, "officialExamplesTranscribed": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import wage-bracket matrices, independently verify boundary calculations and special-worker branches, then add executable formula, reciprocity, other-state-credit, and supplemental-wage regression tests." }
+}

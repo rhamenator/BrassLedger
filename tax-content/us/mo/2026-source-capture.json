@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-mo",
+  "capturedAtUtc": "2026-08-25T12:00:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://dor.mo.gov/forms/Withholding%20Formula_2026.pdf", "title": "2026 Missouri Withholding Tax Formula", "mediaType": "application/pdf", "sha256": "943ce02894aefe7bdc2bf4cf08fe6428266607ee95a5f1816a1fbffa103b0777", "bytes": 122613 },
+    { "url": "https://dor.mo.gov/forms/4282_2026.pdf", "title": "2026 Missouri Employer's Tax Guide, Form 4282", "mediaType": "application/pdf", "sha256": "9b24eaa6b065f8bb932bdd2038960c3da20e19ba69cf9e3e98614600468fc93e", "bytes": 438526 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "Form MO W-4", "dataType": "enum", "values": ["Single", "MarriedSpouseWorks", "MarriedSeparate", "MarriedSpouseDoesNotWork", "HeadOfHousehold"] },
+    { "code": "additionalPeriodicWithholding", "source": "Form MO W-4 line 2", "dataType": "money", "minimum": 0 },
+    { "code": "missouriAllocationPercentage", "source": "Form MO W-4A or MO W-4C", "dataType": "decimal", "minimum": 0, "maximum": 1 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" }
+  ],
+  "calculation": {
+    "method": "AnnualizedProgressiveStandardDeduction",
+    "payPeriodsPerYear": { "Daily": 260, "Weekly": 52, "Biweekly": 26, "Semimonthly": 24, "Monthly": 12, "Annual": 1 },
+    "annualStandardDeductions": { "Single": 16100, "MarriedSpouseWorks": 16100, "MarriedSeparate": 16100, "MarriedSpouseDoesNotWork": 32200, "HeadOfHousehold": 24150 },
+    "steps": [
+      "Annualize gross taxable wages using the prescribed payroll-period multiplier.",
+      "Subtract the filing-status standard deduction; do not reduce taxable income below zero.",
+      "Accumulate tax through every applicable annual bracket.",
+      "Divide annual tax by payroll periods, round to the nearest whole dollar, and add any MO W-4 line 2 amount."
+    ],
+    "annualBrackets": [
+      { "over": 0, "through": 1348, "rate": 0 },
+      { "over": 1348, "through": 2696, "rate": 0.02 },
+      { "over": 2696, "through": 4044, "rate": 0.025 },
+      { "over": 4044, "through": 5392, "rate": 0.03 },
+      { "over": 5392, "through": 6740, "rate": 0.035 },
+      { "over": 6740, "through": 8088, "rate": 0.04 },
+      { "over": 8088, "through": 9436, "rate": 0.045 },
+      { "over": 9436, "rate": 0.047 }
+    ],
+    "rounding": { "required": true, "method": "NearestWholeDollar", "stage": "Periodic withholding" },
+    "missingCertificate": { "filingStatus": "Single" },
+    "supplementalWages": {
+      "combinedWithRegularWages": "Apply the ordinary formula to the combined payment.",
+      "separatelyPaidMethods": ["Withhold 4.7% of supplemental wages", "Aggregate supplemental and regular wages for the payroll period, then subtract tax already withheld from regular wages"],
+      "flatRate": 0.047,
+      "aggregationRequiredWhenNoRegularWithholding": true
+    },
+    "officialExample": { "filingStatus": "MarriedSpouseWorks", "annualGrossTaxableWages": 35000, "annualStandardDeduction": 16100, "annualTaxableIncome": 18900, "annualWithholding": 707.81, "frequency": "Monthly", "roundedPeriodicWithholding": 59 }
+  },
+  "residencyAndWorkRules": {
+    "nonresidentAllServicesInMissouri": "Withhold from all wages.",
+    "nonresidentMultiState": "Compute withholding on total federal wages, then multiply by Missouri-source wages divided by total federal wages; Form MO W-4A documents the allocation.",
+    "nonresidentAllServicesOutsideMissouri": "No Missouri withholding.",
+    "residentWorkingInAnotherState": "A Missouri employer withholds the difference when the work state's requirement is lower than Missouri's, unless the employee files Form MO W-4C and assumes responsibility.",
+    "reciprocalStates": [],
+    "interstateRailAndMotorCarrierRule": "Withhold only in the employee's state of residence for regularly assigned multistate duties.",
+    "airAndWaterCarrierRule": "Withholding is limited to residence and any different state where more than 50% of wages are earned.",
+    "multiStateWorkLocationRequired": true,
+    "officialAllocationExample": { "totalWages": 20000, "missouriWages": 12000, "allocationPercentage": 0.60, "unallocatedMonthlyWithholding": 100, "missouriWithholding": 60 }
+  },
+  "filing": {
+    "form": "MO-941",
+    "frequencies": [
+      { "frequency": "QuarterMonthly", "trigger": "Withheld at least $9,000 per month in at least two of the preceding 12 months", "paymentDue": "Within three banking days after periods ending the 7th, 15th, 22nd, and last day of each month", "electronicRequired": true, "monthlyReconciliationRequired": true },
+      { "frequency": "Monthly", "trigger": "Withheld at least $500 per month in at least two of the preceding 12 months", "due": "15th of following month; quarter-end months due last day of following month" },
+      { "frequency": "Quarterly", "trigger": "Not monthly and withheld at least $100 in at least one of the preceding four quarters", "due": "Last day of month following quarter" },
+      { "frequency": "Annual", "trigger": "Withheld less than $100 in each of the preceding four quarters", "due": "January 31 of following year" }
+    ],
+    "zeroReturnsRequired": true,
+    "seasonalRegistrationSupported": true
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The Department's separately maintained final administrative-rule PDF indexed during capture describes $20 quarterly/annual thresholds, while the exact 2026 Employer's Tax Guide and current business guidance use $100. This capture follows the 2026 guide but preserves the conflict as an activation blocker.",
+    "The resident-other-state difference method requires both states' actual payroll withholding and a valid MO W-4C branch.",
+    "Complete wage-bracket matrices are retained in the checksummed guide but are not transcribed."
+  ],
+  "review": { "annualizedFormulaTranscribed": true, "annualBracketsTranscribed": true, "supplementalMethodTranscribed": true, "officialExamplesTranscribed": true, "residencyAndWorkRulesTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "completeWageBracketTablesTranscribed": false, "filingThresholdConflictResolved": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Obtain an agency determination of the $20-versus-$100 filing-frequency conflict, import wage-bracket matrices, and add bracket-boundary, allocation, resident-credit, rounding, and supplemental regression tests." }
+}

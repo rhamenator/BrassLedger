@@ -1,5 +1,5 @@
 @page "/help/administration"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.ViewWorkspace)]
 
 <PageTitle>Administration</PageTitle>
 

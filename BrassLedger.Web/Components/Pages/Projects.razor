@@ -1,82 +1,449 @@
 @page "/projects"
-@attribute [Authorize]
+@attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.AccessProjects)]
 @inject IBusinessWorkspaceService WorkspaceService
+@inject IAccountingTransactionService TransactionService
 
 <PageTitle>Projects</PageTitle>
 
 @if (Workspace is null)
 {
-    <section class="panel">
-        <h1>Loading projects...</h1>
-    </section>
+    <section class="panel"><h1>Loading projects...</h1></section>
 }
 else
 {
     <section class="page-shell">
         <header class="page-header">
-            <div>
-                <p class="eyebrow">Projects, Jobs, Property Extensions</p>
-                <h1>Job tracking with room for industry-specific workflows.</h1>
-            </div>
-            <p class="page-intro">
-                Job tracking is live now. Property management can layer on top of the same job ledger instead of becoming
-                a closed-off premium edition.
-            </p>
+            <div><p class="eyebrow">Project accounting</p><h1>Control project scope, cost, billing, and revenue.</h1></div>
+            <p class="page-intro">Amounts come from approved commitments and posted project-tagged ledger lines. Source-derived billing preserves contract, retainage, review, and audit controls.</p>
         </header>
 
+        @if (!string.IsNullOrWhiteSpace(StatusMessage))
+        {
+            <p class="status-banner" role="status">@StatusMessage</p>
+        }
+
         <section class="stats-grid">
-            <article class="stat-card accent-sand">
-                <span class="stat-value">@Workspace.Projects.OpenJobs</span>
-                <span class="stat-label">Open jobs</span>
-            </article>
-            <article class="stat-card accent-sky">
-                <span class="stat-value">@Workspace.Projects.BudgetAmount.ToString("C0")</span>
-                <span class="stat-label">Budgeted</span>
-            </article>
-            <article class="stat-card accent-sage">
-                <span class="stat-value">@Workspace.Projects.ActualCost.ToString("C0")</span>
-                <span class="stat-label">Actual cost</span>
-            </article>
-            <article class="stat-card accent-coral">
-                <span class="stat-value">@((Workspace.Projects.BudgetAmount - Workspace.Projects.ActualCost).ToString("C0"))</span>
-                <span class="stat-label">Remaining margin</span>
-            </article>
+            <article class="stat-card accent-sand"><span class="stat-value">@Workspace.Projects.OpenJobs</span><span class="stat-label">Active projects</span></article>
+            <article class="stat-card accent-sky"><span class="stat-value">@Workspace.Projects.BudgetAmount.ToString("C0")</span><span class="stat-label">Total budget</span></article>
+            <article class="stat-card accent-sage"><span class="stat-value">@Workspace.Projects.ActualCost.ToString("C0")</span><span class="stat-label">Posted costs</span></article>
+            <article class="stat-card accent-coral"><span class="stat-value">@Workspace.Projects.Commitments.ToString("C0")</span><span class="stat-label">Open commitments</span></article>
+        </section>
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized Context="projectAuthorization"><section class="panel">
+            <h2>@(ProjectForm.Id.HasValue ? $"Edit {ProjectForm.JobNumber}" : "Add a project")</h2>
+            <EditForm Model="ProjectForm" OnValidSubmit="SaveProjectAsync"><div class="auth-form">
+                <div class="field-group"><label class="field-label">Project number</label><InputText aria-label="Project number" class="field-input" placeholder="For example, JOB-1001" @bind-Value="ProjectForm.JobNumber" /></div>
+                <div class="field-group"><label class="field-label">Name</label><InputText aria-label="Project name" class="field-input" @bind-Value="ProjectForm.Name" /></div>
+                <div class="field-group"><label class="field-label">Customer</label><InputSelect aria-label="Project customer" class="field-input" @bind-Value="ProjectForm.CustomerId"><option value="@Guid.Empty">Select customer</option>@foreach (var customer in Workspace.Receivables.Customers) { <option value="@customer.Id">@customer.CustomerNumber — @customer.Name</option> }</InputSelect></div>
+                <div class="field-group"><label class="field-label">Start date</label><InputDate aria-label="Project start date" class="field-input" @bind-Value="ProjectForm.StartDate" /></div>
+                <div class="field-group"><label class="field-label">Expected end date</label><InputDate aria-label="Project expected end date" class="field-input" @bind-Value="ProjectForm.ExpectedEndDate" /></div>
+                <div class="field-group"><label class="field-label">Billing method</label><InputSelect aria-label="Project billing method" class="field-input" @bind-Value="ProjectForm.BillingMethod"><option value="TimeAndMaterials">Time and materials</option><option value="FixedPrice">Fixed price</option><option value="CostPlus">Cost plus</option><option value="Internal">Internal</option></InputSelect></div>
+                <div class="field-group"><label class="field-label">Revenue recognition</label><InputSelect aria-label="Project revenue recognition method" class="field-input" @bind-Value="ProjectForm.RevenueRecognitionMethod"><option value="AsBilled">As billed</option><option value="CostToCost">Cost-to-cost percentage complete</option><option value="ManualPercent">Reviewed manual percentage complete</option><option value="CompletedContract">Completed contract</option></InputSelect></div>
+                <div class="field-group"><label class="field-label">Contract amount</label><InputNumber aria-label="Project contract amount" class="field-input" @bind-Value="ProjectForm.ContractAmount" /></div>
+                <div class="field-group"><label class="field-label">Budget</label><InputNumber aria-label="Project budget" class="field-input" @bind-Value="ProjectForm.BudgetAmount" /></div>
+                <div class="field-group"><label class="field-label">Retainage percent</label><InputNumber aria-label="Project retainage percent" class="field-input" @bind-Value="ProjectForm.RetainagePercentDisplay" /></div>
+                <button class="action-primary" type="submit">@(ProjectForm.Id.HasValue ? "Save project changes" : "Create project")</button>
+                @if (ProjectForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelEdit">Cancel edit</button> }
+            </div></EditForm>
+        </section></Authorized></AuthorizeView>
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized Context="dimensionAuthorization">
+            <section class="panel">
+                <h2>Project phases and tasks</h2>
+                <p class="page-intro">Build any depth of phase, task, or work-package hierarchy. Inactive nodes remain in history but are unavailable for new allocations.</p>
+                <EditForm Model="PhaseForm" OnValidSubmit="SavePhaseAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Project</label><InputSelect aria-label="Phase project" class="field-input" @bind-Value="PhaseForm.ProjectJobId" disabled="@PhaseForm.Id.HasValue"><option value="@Guid.Empty">Select project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status == "Active")) { <option value="@project.Id">@project.JobNumber — @project.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Parent</label><InputSelect aria-label="Parent phase" class="field-input" @bind-Value="PhaseForm.ParentProjectPhaseId"><option value="">Top level</option>@foreach (var phase in (Workspace.Projects.Phases ?? []).Where(phase => phase.ProjectJobId == PhaseForm.ProjectJobId && phase.IsActive && phase.Id != PhaseForm.Id)) { <option value="@phase.Id">@phase.Code — @phase.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Code</label><InputText aria-label="Phase code" class="field-input" @bind-Value="PhaseForm.Code" /></div>
+                    <div class="field-group"><label class="field-label">Name</label><InputText aria-label="Phase name" class="field-input" @bind-Value="PhaseForm.Name" /></div>
+                    <div class="field-group"><label class="field-label">Kind</label><InputSelect aria-label="Phase kind" class="field-input" @bind-Value="PhaseForm.Kind"><option value="Phase">Phase</option><option value="Task">Task</option><option value="WorkPackage">Work package</option></InputSelect></div>
+                    <div class="field-group"><label class="field-label">Starts</label><InputDate aria-label="Phase start date" class="field-input" @bind-Value="PhaseForm.StartsOn" /></div>
+                    <div class="field-group"><label class="field-label">Ends</label><InputDate aria-label="Phase end date" class="field-input" @bind-Value="PhaseForm.EndsOn" /></div>
+                    <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Phase description" class="field-input" @bind-Value="PhaseForm.Description" /></div>
+                    <div class="field-group"><label><InputCheckbox aria-label="Phase active" @bind-Value="PhaseForm.IsActive" /> Active</label></div>
+                    <button class="action-primary" type="submit">@(PhaseForm.Id.HasValue ? "Save phase" : "Add phase")</button>
+                    @if (PhaseForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="() => PhaseForm.Reset()">Cancel edit</button> }
+                </div></EditForm>
+                @if ((Workspace.Projects.Phases ?? []).Count == 0) { <p class="empty-state">No phases or tasks are configured.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Project phases"><thead><tr><th>Project</th><th>Code</th><th>Name</th><th>Kind</th><th>Parent</th><th>Dates</th><th>Status</th><th>Action</th></tr></thead><tbody>@foreach (var phase in Workspace.Projects.Phases ?? []) { <tr><td>@phase.ProjectJobNumber</td><td>@phase.Code</td><td>@phase.Name</td><td>@phase.Kind</td><td>@((Workspace.Projects.Phases ?? []).SingleOrDefault(parent => parent.Id == phase.ParentProjectPhaseId)?.Code ?? "—")</td><td>@phase.StartsOn – @phase.EndsOn</td><td>@(phase.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => PhaseForm.Load(phase)">Edit</button></td></tr> }</tbody></table></div> }
+            </section>
+
+            <section class="panel">
+                <h2>Reusable project cost codes</h2>
+                <EditForm Model="CostCodeForm" OnValidSubmit="SaveCostCodeAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Code</label><InputText aria-label="Project cost code" class="field-input" @bind-Value="CostCodeForm.Code" /></div>
+                    <div class="field-group"><label class="field-label">Name</label><InputText aria-label="Project cost code name" class="field-input" @bind-Value="CostCodeForm.Name" /></div>
+                    <div class="field-group"><label class="field-label">Category</label><InputText aria-label="Project cost code category" class="field-input" @bind-Value="CostCodeForm.Category" /></div>
+                    <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Project cost code description" class="field-input" @bind-Value="CostCodeForm.Description" /></div>
+                    <div class="field-group"><label><InputCheckbox aria-label="Project cost code active" @bind-Value="CostCodeForm.IsActive" /> Active</label></div>
+                    <button class="action-primary" type="submit">@(CostCodeForm.Id.HasValue ? "Save cost code" : "Add cost code")</button>
+                    @if (CostCodeForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="() => CostCodeForm.Reset()">Cancel edit</button> }
+                </div></EditForm>
+                @if ((Workspace.Projects.CostCodes ?? []).Count == 0) { <p class="empty-state">No reusable cost codes are configured.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Project cost codes"><thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Status</th><th>Action</th></tr></thead><tbody>@foreach (var costCode in Workspace.Projects.CostCodes ?? []) { <tr><td>@costCode.Code</td><td>@costCode.Name</td><td>@costCode.Category</td><td>@(costCode.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => CostCodeForm.Load(costCode)">Edit</button></td></tr> }</tbody></table></div> }
+            </section>
+
+            <section class="panel">
+                <h2>Phased budgets and forecasts</h2>
+                <p class="page-intro">Allocated budget cannot exceed the project's authorized total. Forecast may exceed it so emerging overruns remain visible instead of being suppressed.</p>
+                <EditForm Model="BudgetForm" OnValidSubmit="SaveBudgetAllocationAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Project</label><InputSelect aria-label="Budget project" class="field-input" @bind-Value="BudgetForm.ProjectJobId" disabled="@BudgetForm.Id.HasValue"><option value="@Guid.Empty">Select project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status == "Active")) { <option value="@project.Id">@project.JobNumber — @project.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Phase / task</label><InputSelect aria-label="Budget phase" class="field-input" @bind-Value="BudgetForm.ProjectPhaseId"><option value="">Unassigned</option>@foreach (var phase in (Workspace.Projects.Phases ?? []).Where(phase => phase.ProjectJobId == BudgetForm.ProjectJobId && phase.IsActive)) { <option value="@phase.Id">@phase.Code — @phase.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Cost code</label><InputSelect aria-label="Budget cost code" class="field-input" @bind-Value="BudgetForm.ProjectCostCodeId"><option value="">Unassigned</option>@foreach (var costCode in (Workspace.Projects.CostCodes ?? []).Where(item => item.IsActive)) { <option value="@costCode.Id">@costCode.Code — @costCode.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Expense account</label><InputSelect aria-label="Budget expense account" class="field-input" @bind-Value="BudgetForm.AccountNumber"><option value="">Unassigned</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => account.Type == "Expense" && !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Period start</label><InputDate aria-label="Budget period start" class="field-input" @bind-Value="BudgetForm.PeriodStart" /></div>
+                    <div class="field-group"><label class="field-label">Period end</label><InputDate aria-label="Budget period end" class="field-input" @bind-Value="BudgetForm.PeriodEnd" /></div>
+                    <div class="field-group"><label class="field-label">Budget</label><InputNumber aria-label="Allocated budget amount" class="field-input" @bind-Value="BudgetForm.BudgetAmount" /></div>
+                    <div class="field-group"><label class="field-label">Forecast</label><InputNumber aria-label="Forecast amount" class="field-input" @bind-Value="BudgetForm.ForecastAmount" /></div>
+                    <div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Budget allocation notes" class="field-input" @bind-Value="BudgetForm.Notes" /></div>
+                    <button class="action-primary" type="submit">@(BudgetForm.Id.HasValue ? "Save allocation" : "Add allocation")</button>
+                    @if (BudgetForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="() => BudgetForm.Reset()">Cancel edit</button> }
+                </div></EditForm>
+                @if ((Workspace.Projects.BudgetAllocations ?? []).Count == 0) { <p class="empty-state">No detailed budget or forecast allocations are configured.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Project budget allocations"><thead><tr><th>Project</th><th>Phase</th><th>Cost code</th><th>Account</th><th>Period</th><th>Budget</th><th>Forecast</th><th>Variance</th><th>Action</th></tr></thead><tbody>@foreach (var allocation in Workspace.Projects.BudgetAllocations ?? []) { <tr><td>@allocation.ProjectJobNumber</td><td>@(string.IsNullOrWhiteSpace(allocation.ProjectPhaseCode) ? "—" : allocation.ProjectPhaseCode)</td><td>@(string.IsNullOrWhiteSpace(allocation.ProjectCostCode) ? "—" : allocation.ProjectCostCode)</td><td>@(string.IsNullOrWhiteSpace(allocation.AccountNumber) ? "—" : allocation.AccountNumber)</td><td>@allocation.PeriodStart – @allocation.PeriodEnd</td><td>@allocation.BudgetAmount.ToString("C")</td><td>@allocation.ForecastAmount.ToString("C")</td><td>@SignedCurrency(allocation.ForecastAmount - allocation.BudgetAmount)</td><td><button class="action-secondary" type="button" @onclick="() => BudgetForm.Load(allocation)">Edit</button></td></tr> }</tbody></table></div> }
+            </section>
+        </Authorized></AuthorizeView>
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized Context="projectDecisionAuthorization">@if (ProjectDecisionForm is not null)
+        {
+            <section class="panel">
+                <h2>@(ProjectDecisionForm.Reopen ? $"Reopen {ProjectDecisionForm.JobNumber}" : $"Close {ProjectDecisionForm.JobNumber}")</h2>
+                <EditForm Model="ProjectDecisionForm" OnValidSubmit="CompleteProjectDecisionAsync"><div class="auth-form">
+                    @if (!ProjectDecisionForm.Reopen) { <div class="field-group"><label class="field-label">Close date</label><InputDate aria-label="Project close date" class="field-input" @bind-Value="ProjectDecisionForm.ClosedOn" /></div> }
+                    <div class="field-group"><label class="field-label">Reason</label><InputText aria-label="Project status change reason" class="field-input" @bind-Value="ProjectDecisionForm.Reason" /></div>
+                    <button class="action-primary" type="submit">@(ProjectDecisionForm.Reopen ? "Reopen project" : "Close project")</button>
+                    <button class="action-secondary" type="button" @onclick="CancelDecision">Cancel</button>
+                </div></EditForm>
+            </section>
+        }</Authorized></AuthorizeView>
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders"><Authorized Context="changeOrderAuthorization">
+            <section class="panel">
+                <h2>@(ChangeOrderForm.Id.HasValue ? $"Correct {ChangeOrderForm.ChangeOrderNumber}" : "Prepare a project change order")</h2>
+                <p class="page-intro">Approved changes revise the authorized contract and budget atomically. Correct rejected changes in place; reverse an approved change with a new negative change order.</p>
+                <EditForm Model="ChangeOrderForm" OnValidSubmit="SaveChangeOrderAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Project</label><InputSelect aria-label="Change order project" class="field-input" @bind-Value="ChangeOrderForm.ProjectJobId" disabled="@ChangeOrderForm.Id.HasValue"><option value="@Guid.Empty">Select project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status == "Active")) { <option value="@project.Id">@project.JobNumber — @project.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Change-order number</label><InputText aria-label="Change order number" class="field-input" @bind-Value="ChangeOrderForm.ChangeOrderNumber" /></div>
+                    <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Change order description" class="field-input" @bind-Value="ChangeOrderForm.Description" /></div>
+                    <div class="field-group"><label class="field-label">Business reason</label><InputText aria-label="Change order reason" class="field-input" @bind-Value="ChangeOrderForm.Reason" /></div>
+                    <div class="field-group"><label class="field-label">Requested date</label><InputDate aria-label="Change order requested date" class="field-input" @bind-Value="ChangeOrderForm.RequestedOn" /></div>
+                    <div class="field-group"><label class="field-label">Effective date</label><InputDate aria-label="Change order effective date" class="field-input" @bind-Value="ChangeOrderForm.EffectiveOn" /></div>
+                    <div class="field-group"><label class="field-label">Contract change</label><InputNumber aria-label="Change order contract amount" class="field-input" @bind-Value="ChangeOrderForm.ContractAmountChange" /></div>
+                    <div class="field-group"><label class="field-label">Budget change</label><InputNumber aria-label="Change order budget amount" class="field-input" @bind-Value="ChangeOrderForm.BudgetAmountChange" /></div>
+                    <button class="action-primary" type="submit">@(ChangeOrderForm.Id.HasValue ? "Save corrected draft" : "Save change-order draft")</button>
+                    @if (ChangeOrderForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelChangeOrderEdit">Cancel edit</button> }
+                </div></EditForm>
+            </section>
+        </Authorized></AuthorizeView>
+
+        @if (ChangeOrderDecisionForm is not null)
+        {
+            <section class="panel">
+                <h2>@(ChangeOrderDecisionForm.Approve ? "Approve" : "Reject") @ChangeOrderDecisionForm.ChangeOrderNumber</h2>
+                <EditForm Model="ChangeOrderDecisionForm" OnValidSubmit="CompleteChangeOrderDecisionAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Decision reason</label><InputText aria-label="Change order decision reason" class="field-input" @bind-Value="ChangeOrderDecisionForm.Reason" /></div>
+                    <button class="action-primary" type="submit">@(ChangeOrderDecisionForm.Approve ? "Approve change order" : "Reject change order")</button>
+                    <button class="action-secondary" type="button" @onclick="() => ChangeOrderDecisionForm = null">Cancel</button>
+                </div></EditForm>
+            </section>
+        }
+
+        @if (ChangeOrderCancellationForm is not null)
+        {
+            <section class="panel">
+                <h2>Cancel @ChangeOrderCancellationForm.ChangeOrderNumber</h2>
+                <EditForm Model="ChangeOrderCancellationForm" OnValidSubmit="CompleteChangeOrderCancellationAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Cancellation reason</label><InputText aria-label="Change order cancellation reason" class="field-input" @bind-Value="ChangeOrderCancellationForm.Reason" /></div>
+                    <button class="action-primary" type="submit">Cancel change order</button>
+                    <button class="action-secondary" type="button" @onclick="() => ChangeOrderCancellationForm = null">Keep change order</button>
+                </div></EditForm>
+            </section>
+        }
+
+        <section class="panel">
+            <h2>Project portfolio</h2>
+            @if (Workspace.Projects.Jobs.Count == 0)
+            {
+                <p class="empty-state">No projects have been created. Add a project above before assigning transactions or time.</p>
+            }
+            else
+            {
+                <div class="table-scroll"><table class="data-table project-portfolio-table" aria-label="Project portfolio">
+                    <thead><tr><th>Project</th><th>Customer</th><th>Status</th><th>Billing / recognition</th><th>Contract</th><th>Budget</th><th>Cost</th><th>Commitments</th><th>Revenue</th><th>Gross margin</th><th>Action</th></tr></thead>
+                    <tbody>@foreach (var job in Workspace.Projects.Jobs) { <tr><td><button class="table-link" type="button" @onclick="() => SelectProject(job.Id)">@job.JobNumber — @job.Name</button></td><td>@job.CustomerName</td><td>@job.Status</td><td>@BillingMethodLabel(job.BillingMethod)<br />@RecognitionMethodLabel(job.RevenueRecognitionMethod)</td><td>@job.ContractAmount.ToString("C")</td><td>@job.BudgetAmount.ToString("C")</td><td>@job.ActualCost.ToString("C")</td><td>@job.Commitments.ToString("C")</td><td>@job.Revenue.ToString("C")</td><td>@((job.Revenue - job.ActualCost).ToString("C"))</td><td><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized><button class="action-secondary" type="button" @onclick="() => EditProject(job)">Edit</button> @if (job.Status == "Closed") { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, true)">Reopen</button> } else { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, false)">Close</button> }</Authorized><NotAuthorized>View only</NotAuthorized></AuthorizeView></td></tr> }</tbody>
+                </table></div>
+            }
         </section>
 
         <section class="panel">
-            <h2>Job ledger</h2>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Job</th>
-                        <th>Customer</th>
-                        <th>Status</th>
-                        <th>Budget</th>
-                        <th>Actual</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var job in Workspace.Projects.Jobs)
-                    {
-                        <tr>
-                            <td>@job.JobNumber - @job.Name</td>
-                            <td>@job.CustomerName</td>
-                            <td>@job.Status</td>
-                            <td>@job.BudgetAmount.ToString("C")</td>
-                            <td>@job.ActualCost.ToString("C")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+            <h2>Project change orders</h2>
+            @if ((Workspace.Projects.ChangeOrders ?? []).Count == 0)
+            {
+                <p class="empty-state">No project change orders have been prepared.</p>
+            }
+            else
+            {
+                <div class="table-scroll"><table class="data-table" aria-label="Project change orders"><thead><tr><th>Project</th><th>Change order</th><th>Effective</th><th>Description</th><th>Contract change</th><th>Budget change</th><th>Status</th><th>Authorized result</th><th>Action</th></tr></thead><tbody>
+                @foreach (var changeOrder in Workspace.Projects.ChangeOrders ?? [])
+                {
+                    <tr><td>@changeOrder.ProjectJobNumber</td><td>@changeOrder.ChangeOrderNumber</td><td>@changeOrder.EffectiveOn</td><td>@changeOrder.Description</td><td>@SignedCurrency(changeOrder.ContractAmountChange)</td><td>@SignedCurrency(changeOrder.BudgetAmountChange)</td><td>@changeOrder.Status</td><td>@if (changeOrder.Status == "Approved") { <span>Contract @changeOrder.ContractAmountAfter?.ToString("C"); budget @changeOrder.BudgetAmountAfter?.ToString("C")</span> } else if (changeOrder.Status == "Rejected") { <span>@changeOrder.DecisionReason</span> } else if (changeOrder.Status == "Cancelled") { <span>@changeOrder.CancellationReason</span> } else { <span>Pending</span> }</td><td>
+                        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareProjectChangeOrders"><Authorized>
+                            @if (changeOrder.Status is "Draft" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => EditChangeOrder(changeOrder)">Edit</button> }
+                            @if (changeOrder.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => SubmitChangeOrderAsync(changeOrder)">Submit</button> }
+                            @if (changeOrder.Status is "Draft" or "Submitted" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => BeginChangeOrderCancellation(changeOrder)">Cancel</button> }
+                        </Authorized></AuthorizeView>
+                        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveProjectChangeOrders"><Authorized>
+                            @if (changeOrder.Status == "Submitted") { <button class="action-secondary" type="button" @onclick="() => BeginChangeOrderDecision(changeOrder, true)">Approve</button> <button class="action-secondary" type="button" @onclick="() => BeginChangeOrderDecision(changeOrder, false)">Reject</button> }
+                        </Authorized></AuthorizeView>
+                    </td></tr>
+                }
+                </tbody></table></div>
+            }
         </section>
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareProjectBilling"><Authorized Context="projectBillingAuthorization">
+            <section class="panel">
+                <h2>@(BillingRateForm.Id.HasValue ? "Edit project billing rate" : "Add project billing rate")</h2>
+                <p class="page-intro">Rates are effective-dated. Use an earning code such as REGULAR, or * as the fallback for time entries without a specific rate.</p>
+                <EditForm Model="BillingRateForm" OnValidSubmit="SaveBillingRateAsync"><div class="auth-form">
+                    <div class="field-group"><label class="field-label">Project</label><InputSelect aria-label="Billing rate project" class="field-input" @bind-Value="BillingRateForm.ProjectJobId" disabled="@BillingRateForm.Id.HasValue"><option value="@Guid.Empty">Select project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status == "Active" && project.BillingMethod == "TimeAndMaterials")) { <option value="@project.Id">@project.JobNumber — @project.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Earning code</label><InputText aria-label="Billing rate earning code" class="field-input" @bind-Value="BillingRateForm.EarningCode" /></div>
+                    <div class="field-group"><label class="field-label">Hourly billing rate</label><InputNumber aria-label="Hourly billing rate" class="field-input" @bind-Value="BillingRateForm.HourlyRate" /></div>
+                    <div class="field-group"><label class="field-label">Effective on</label><InputDate aria-label="Billing rate effective date" class="field-input" @bind-Value="BillingRateForm.EffectiveOn" /></div>
+                    <div class="field-group"><label class="field-label">Effective through</label><InputDate aria-label="Billing rate end date" class="field-input" @bind-Value="BillingRateForm.EffectiveThrough" /></div>
+                    <div class="field-group"><label><InputCheckbox aria-label="Billing rate active" @bind-Value="BillingRateForm.IsActive" /> Active</label></div>
+                    <button class="action-primary" type="submit">Save billing rate</button>
+                    @if (BillingRateForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="BillingRateForm.Reset">Cancel edit</button> }
+                </div></EditForm>
+                @if ((Workspace.Projects.BillingRates ?? []).Count == 0) { <p class="empty-state">No project billing rates have been configured.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Project billing rates"><thead><tr><th>Project</th><th>Earning code</th><th>Rate</th><th>Effective</th><th>Status</th><th>Action</th></tr></thead><tbody>@foreach (var rate in Workspace.Projects.BillingRates ?? []) { <tr><td>@rate.ProjectJobNumber</td><td>@rate.EarningCode</td><td>@rate.HourlyRate.ToString("C")</td><td>@rate.EffectiveOn — @(rate.EffectiveThrough?.ToString() ?? "Open")</td><td>@(rate.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => BillingRateForm.Load(rate)">Edit</button></td></tr> }</tbody></table></div> }
+            </section>
+
+            <section class="panel">
+                <h2>@(BillingForm.Id.HasValue ? $"Correct project billing {BillingForm.InvoiceNumber}" : "Prepare project billing")</h2>
+                <p class="page-intro">Preview first. The preview derives eligible approved time or posted cost, applies contract and retainage controls, and displays every source before it creates a controlled receivables draft.</p>
+                <div class="auth-form">
+                    <div class="field-group"><label class="field-label">Project</label><InputSelect aria-label="Project billing project" class="field-input" @bind-Value="BillingForm.ProjectJobId" disabled="@(BillingForm.Id.HasValue || BillingForm.RetainageReleaseOfProposalId.HasValue)"><option value="@Guid.Empty">Select project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.Status == "Active" && project.BillingMethod != "Internal")) { <option value="@project.Id">@project.JobNumber — @project.Name (@BillingMethodLabel(project.BillingMethod))</option> }</InputSelect></div>
+                    @if (BillingForm.RetainageReleaseOfProposalId.HasValue) { <div class="field-group"><label class="field-label">Retainage source</label><InputSelect aria-label="Retainage source billing" class="field-input" @bind-Value="BillingForm.RetainageReleaseOfProposalId" disabled><option value="@BillingForm.RetainageReleaseOfProposalId">@((Workspace.Projects.BillingProposals ?? []).Single(x => x.Id == BillingForm.RetainageReleaseOfProposalId).InvoiceNumber)</option></InputSelect></div><div class="field-group"><label class="field-label">Retainage release amount</label><InputNumber aria-label="Retainage release amount" class="field-input" @bind-Value="BillingForm.RetainageReleaseAmount" /></div> }
+                    <div class="field-group"><label class="field-label">Invoice number</label><InputText aria-label="Project billing invoice number" class="field-input" @bind-Value="BillingForm.InvoiceNumber" /></div>
+                    <div class="field-group"><label class="field-label">Billing through</label><InputDate aria-label="Project billing through date" class="field-input" @bind-Value="BillingForm.BillingThrough" /></div>
+                    <div class="field-group"><label class="field-label">Invoice date</label><InputDate aria-label="Project billing invoice date" class="field-input" @bind-Value="BillingForm.InvoiceDate" /></div>
+                    <div class="field-group"><label class="field-label">Due date</label><InputDate aria-label="Project billing due date" class="field-input" @bind-Value="BillingForm.DueDate" /></div>
+                    <div class="field-group"><label class="field-label">Revenue account</label><InputSelect aria-label="Project billing revenue account" class="field-input" @bind-Value="BillingForm.RevenueAccountNumber"><option value="">Select revenue account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => account.Type == "Revenue" && !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Description</label><InputText aria-label="Project billing description" class="field-input" @bind-Value="BillingForm.Description" /></div>
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject?.BillingMethod == "FixedPrice") { <div class="field-group"><label class="field-label">Cumulative progress percent</label><InputNumber aria-label="Project billing cumulative progress percent" class="field-input" @bind-Value="BillingForm.ProgressPercentDisplay" /></div><div class="field-group"><label class="field-label">Milestone amount</label><InputNumber aria-label="Project billing milestone amount" class="field-input" @bind-Value="BillingForm.MilestoneAmount" /></div><p class="page-intro">Enter cumulative progress or a milestone amount, not both.</p> }
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject?.BillingMethod is "TimeAndMaterials" or "CostPlus") { <div class="field-group"><label class="field-label">Cost markup percent</label><InputNumber aria-label="Project billing cost markup percent" class="field-input" @bind-Value="BillingForm.CostMarkupPercentDisplay" /></div> }
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject?.BillingMethod == "TimeAndMaterials") { <div class="field-group"><label><InputCheckbox aria-label="Include approved labor" @bind-Value="BillingForm.IncludeLabor" /> Include approved labor</label></div><div class="field-group"><label><InputCheckbox aria-label="Include posted project costs" @bind-Value="BillingForm.IncludeCosts" /> Include posted non-payroll project costs</label></div> }
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject?.BillingMethod == "CostPlus") { <p class="page-intro">Cost-plus billing includes eligible posted project expense lines through the cutoff, including posted payroll cost.</p> }
+                    @if (!BillingForm.RetainageReleaseOfProposalId.HasValue && BillingProject is null) { <p class="page-intro">Select a project to display the inputs required by its billing method.</p> }
+                    <button class="action-primary" type="button" @onclick="PreviewBillingAsync">Preview billing</button>
+                    @if (BillingForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelBillingEdit">Cancel correction</button> }
+                </div>
+                @if (BillingPreview is not null)
+                {
+                    <div class="panel-subsection"><h3>Billing preview</h3><p class="page-intro">Basis: @BillingPreview.BillingBasis. Prior gross billing: @BillingPreview.PreviouslyBilledGross.ToString("C"). Gross: @BillingPreview.GrossAmount.ToString("C"); retainage: @BillingPreview.RetainageAmount.ToString("C"); invoice draft: @BillingPreview.InvoiceAmount.ToString("C").</p>
+                    <div class="table-scroll"><table class="data-table" aria-label="Project billing preview"><thead><tr><th>Source</th><th>Phase / task</th><th>Cost code</th><th>Department</th><th>Class</th><th>Description</th><th>Quantity</th><th>Rate / price</th><th>Source cost</th><th>Markup</th><th>Gross</th><th>Retainage</th><th>Invoice</th></tr></thead><tbody>@foreach (var line in BillingPreview.Lines) { <tr><td>@line.SourceType</td><td>@PhaseCode(line.ProjectPhaseId)</td><td>@CostCode(line.ProjectCostCodeId)</td><td>@TrackingCode(line.DepartmentId)</td><td>@TrackingCode(line.ClassId)</td><td>@line.Description</td><td>@line.Quantity</td><td>@line.UnitPrice.ToString("C")</td><td>@line.SourceCost.ToString("C")</td><td>@line.MarkupAmount.ToString("C")</td><td>@line.GrossAmount.ToString("C")</td><td>@line.RetainageAmount.ToString("C")</td><td>@line.InvoiceAmount.ToString("C")</td></tr> }</tbody></table></div>
+                    <button class="action-primary" type="button" @onclick="SaveBillingProposalAsync">Create controlled invoice draft</button></div>
+                }
+            </section>
+
+            <section class="panel"><h2>Project billing proposals</h2>
+                @if ((Workspace.Projects.BillingProposals ?? []).Count == 0) { <p class="empty-state">No project billing proposals have been prepared.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Project billing proposals"><thead><tr><th>Project</th><th>Invoice</th><th>Through</th><th>Basis</th><th>Gross</th><th>Retainage</th><th>Invoice amount</th><th>Status</th><th>Sources</th><th>Action</th></tr></thead><tbody>@foreach (var proposal in Workspace.Projects.BillingProposals ?? []) { <tr><td>@proposal.ProjectJobNumber</td><td>@proposal.InvoiceNumber</td><td>@proposal.BillingThrough</td><td>@proposal.BillingBasis</td><td>@proposal.GrossAmount.ToString("C")</td><td>@proposal.RetainageAmount.ToString("C")</td><td>@proposal.InvoiceAmount.ToString("C")</td><td>@proposal.Status</td><td>@proposal.Lines.Count</td><td>@if (proposal.Status == "Rejected") { <button class="action-secondary" type="button" @onclick="() => BeginBillingCorrection(proposal)">Correct</button> } @if (proposal.Status is "Draft" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => BeginBillingCancellation(proposal)">Cancel</button> } @if (proposal.Status == "Posted" && proposal.BillingBasis != "RetainageRelease" && proposal.RetainageAmount > 0m) { <button class="action-secondary" type="button" @onclick="() => BeginRetainageRelease(proposal)">Release retainage</button> }</td></tr> }</tbody></table></div> }
+            </section>
+        </Authorized></AuthorizeView>
+
+        <section class="panel"><h2>Retainage receivable aging</h2>
+            <p class="page-intro">Posted retained amounts remain in the retainage-receivable control account until a controlled release invoice moves them to ordinary accounts receivable. Aging total: @Workspace.Projects.RetainageReceivable.ToString("C"). Control-account balance: @Workspace.Projects.RetainageControlBalance.ToString("C"). Difference: @Workspace.Projects.RetainageReconciliationDifference.ToString("C").</p>
+            @if (Workspace.Projects.RetainageReconciliationDifference != 0m) { <div class="auth-error" role="alert">The retainage aging does not reconcile to the configured control account. Stop retainage posting and investigate the ledger difference.</div> }
+            @if ((Workspace.Projects.RetainageAging ?? []).Count == 0) { <p class="empty-state">No posted project retainage is awaiting release.</p> }
+            else { <div class="table-scroll"><table class="data-table" aria-label="Project retainage receivable aging"><thead><tr><th>Project</th><th>Customer</th><th>Source invoice</th><th>Held on</th><th>Age</th><th>Original</th><th>Released</th><th>Outstanding</th><th>0–30</th><th>31–60</th><th>61–90</th><th>Over 90</th></tr></thead><tbody>@foreach (var item in Workspace.Projects.RetainageAging ?? []) { <tr><td>@item.ProjectJobNumber</td><td>@item.CustomerName</td><td>@item.InvoiceNumber</td><td>@item.HeldOn</td><td>@item.AgeDays days</td><td>@item.OriginalRetainage.ToString("C")</td><td>@item.ReleasedAmount.ToString("C")</td><td>@item.OutstandingAmount.ToString("C")</td><td>@item.Days0To30.ToString("C")</td><td>@item.Days31To60.ToString("C")</td><td>@item.Days61To90.ToString("C")</td><td>@item.DaysOver90.ToString("C")</td></tr> }</tbody></table></div> }
+        </section>
+
+        @if (BillingCancellationForm is not null)
+        {
+            <section class="panel"><h2>Cancel project billing @BillingCancellationForm.InvoiceNumber</h2><EditForm Model="BillingCancellationForm" OnValidSubmit="CompleteBillingCancellationAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Cancellation reason</label><InputText aria-label="Project billing cancellation reason" class="field-input" @bind-Value="BillingCancellationForm.Reason" /></div><button class="action-primary" type="submit">Cancel and release sources</button><button class="action-secondary" type="button" @onclick="() => BillingCancellationForm = null">Keep billing</button></div></EditForm></section>
+        }
+
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareProjectWip"><Authorized Context="wipAuthorization">
+            <section class="panel">
+                <h2>@(WipForm.Id.HasValue ? "Correct project WIP schedule" : "Prepare project WIP schedule")</h2>
+                <p class="page-intro">Preview derives cumulative cost, completion, earned revenue, billings, and the contract asset or liability. Posting records only the cumulative true-up delta. Contract asset: subledger @Workspace.Projects.ContractAssetSubledger.ToString("C"), control @Workspace.Projects.ContractAssetBalance.ToString("C"), difference @Workspace.Projects.ContractAssetReconciliationDifference.ToString("C"). Contract liability: subledger @Workspace.Projects.ContractLiabilitySubledger.ToString("C"), control @Workspace.Projects.ContractLiabilityBalance.ToString("C"), difference @Workspace.Projects.ContractLiabilityReconciliationDifference.ToString("C").</p>
+                @if (Workspace.Projects.ContractAssetReconciliationDifference != 0m || Workspace.Projects.ContractLiabilityReconciliationDifference != 0m) { <p class="status-banner" role="alert">Project WIP does not reconcile to its contract-asset or contract-liability control account. Investigate account routing and posted schedule history before relying on project or financial reports.</p> }
+                <div class="auth-form">
+                    <div class="field-group"><label class="field-label">Project</label><InputSelect aria-label="WIP project" class="field-input" @bind-Value="WipForm.ProjectJobId" disabled="@WipForm.Id.HasValue"><option value="@Guid.Empty">Select project</option>@foreach (var project in Workspace.Projects.Jobs.Where(project => project.RevenueRecognitionMethod != "AsBilled" && (project.Status == "Active" || project.RevenueRecognitionMethod == "CompletedContract" && project.Status == "Closed"))) { <option value="@project.Id">@project.JobNumber — @project.Name (@RecognitionMethodLabel(project.RevenueRecognitionMethod))</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Through date</label><InputDate aria-label="WIP through date" class="field-input" @bind-Value="WipForm.ThroughDate" /></div>
+                    <div class="field-group"><label class="field-label">Posting date</label><InputDate aria-label="WIP posting date" class="field-input" @bind-Value="WipForm.PostingDate" /></div>
+                    @if (WipProject?.RevenueRecognitionMethod == "ManualPercent") { <div class="field-group"><label class="field-label">Completion percent</label><InputNumber aria-label="WIP manual completion percent" class="field-input" @bind-Value="WipForm.ManualCompletionPercentDisplay" /></div> }
+                    <div class="field-group"><label class="field-label">Revenue account</label><InputSelect aria-label="WIP revenue account" class="field-input" @bind-Value="WipForm.RevenueAccountNumber"><option value="">Select account</option>@foreach (var account in Workspace.GeneralLedger.Accounts.Where(account => account.Type == "Revenue" && !account.IsControlAccount)) { <option value="@account.Number">@account.Number — @account.Name</option> }</InputSelect></div>
+                    <div class="field-group"><label class="field-label">Description</label><InputText aria-label="WIP description" class="field-input" @bind-Value="WipForm.Description" /></div>
+                    <button class="action-secondary" type="button" @onclick="PreviewWipAsync">Preview WIP</button>
+                    @if (WipPreview is not null) { <button class="action-primary" type="button" @onclick="SaveWipAsync">Save controlled draft</button> }
+                    @if (WipForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelWipEdit">Cancel edit</button> }
+                </div>
+                @if (WipPreview is not null)
+                {
+                    <div class="table-scroll"><table class="data-table" aria-label="WIP preview"><thead><tr><th>Method</th><th>Cost / estimate</th><th>Completion</th><th>Earned</th><th>Billed</th><th>Prior position</th><th>Desired position</th><th>Revenue true-up</th></tr></thead><tbody><tr><td>@RecognitionMethodLabel(WipPreview.RecognitionMethod)</td><td>@WipPreview.ActualCostToDate.ToString("C") / @WipPreview.EstimatedCost.ToString("C")</td><td>@WipPreview.CompletionPercent.ToString("P2")</td><td>@WipPreview.EarnedRevenueToDate.ToString("C")</td><td>@WipPreview.BilledRevenueToDate.ToString("C")</td><td>Asset @WipPreview.PriorContractAsset.ToString("C"); liability @WipPreview.PriorContractLiability.ToString("C")</td><td>Asset @WipPreview.DesiredContractAsset.ToString("C"); liability @WipPreview.DesiredContractLiability.ToString("C")</td><td>@SignedCurrency(WipPreview.RevenueAdjustment)</td></tr></tbody></table></div>
+                }
+            </section>
+        </Authorized></AuthorizeView>
+
+        <section class="panel">
+            <h2>WIP and earned-revenue schedules</h2>
+            @if ((Workspace.Projects.WipSchedules ?? []).Count == 0) { <p class="empty-state">No controlled WIP schedules have been prepared.</p> }
+            else { <div class="table-scroll"><table class="data-table" aria-label="Project WIP schedules"><thead><tr><th>Project</th><th>Through / posted</th><th>Method</th><th>Completion</th><th>Earned</th><th>Billed</th><th>Contract position</th><th>Revenue true-up</th><th>Status</th><th>Action</th></tr></thead><tbody>@foreach (var schedule in Workspace.Projects.WipSchedules ?? []) { <tr><td>@schedule.ProjectJobNumber</td><td>@schedule.ThroughDate / @schedule.PostingDate</td><td>@RecognitionMethodLabel(schedule.RecognitionMethod)</td><td>@schedule.CompletionPercent.ToString("P2")</td><td>@schedule.EarnedRevenueToDate.ToString("C")</td><td>@schedule.BilledRevenueToDate.ToString("C")</td><td>Asset @schedule.DesiredContractAsset.ToString("C"); liability @schedule.DesiredContractLiability.ToString("C")</td><td>@SignedCurrency(schedule.RevenueAdjustment)</td><td>@schedule.Status</td><td>
+                    <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareProjectWip"><Authorized>@if (schedule.Status is "Draft" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => EditWip(schedule)">Edit</button> } @if (schedule.Status == "Draft") { <button class="action-secondary" type="button" @onclick="() => SubmitWipAsync(schedule)">Submit</button> } @if (schedule.Status is "Draft" or "Submitted" or "Rejected") { <button class="action-secondary" type="button" @onclick="() => BeginWipCancellation(schedule)">Cancel</button> }</Authorized></AuthorizeView>
+                    <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveProjectWip"><Authorized>@if (schedule.Status == "Submitted") { <button class="action-secondary" type="button" @onclick="() => BeginWipApproval(schedule)">Approve</button> <button class="action-secondary" type="button" @onclick="() => BeginWipRejection(schedule)">Reject</button> }</Authorized></AuthorizeView>
+                    <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostProjectWip"><Authorized>@if (schedule.Status == "Approved") { <button class="action-primary" type="button" @onclick="() => PostWipAsync(schedule)">Post</button> }</Authorized></AuthorizeView>
+                    <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ReverseProjectWip"><Authorized>@if (schedule.Status == "Posted") { <button class="action-secondary" type="button" @onclick="() => BeginWipReversal(schedule)">Reverse</button> }</Authorized></AuthorizeView>
+                </td></tr> }</tbody></table></div> }
+        </section>
+
+        @if (WipActionForm is not null)
+        {
+            <section class="panel"><h2>@WipActionForm.Action project WIP for @WipActionForm.ProjectNumber</h2><EditForm Model="WipActionForm" OnValidSubmit="CompleteWipActionAsync"><div class="auth-form">@if (WipActionForm.Action == "Reverse") { <div class="field-group"><label class="field-label">Reversal date</label><InputDate aria-label="WIP reversal date" class="field-input" @bind-Value="WipActionForm.ReversalDate" /></div> }<div class="field-group"><label class="field-label">Reason</label><InputText aria-label="WIP action reason" class="field-input" @bind-Value="WipActionForm.Reason" /></div><button class="action-primary" type="submit">Confirm @WipActionForm.Action.ToLowerInvariant()</button><button class="action-secondary" type="button" @onclick="() => WipActionForm = null">Keep schedule</button></div></EditForm></section>
+        }
+
+        @if (SelectedProject is not null)
+        {
+            <section class="panel">
+                <h2>@SelectedProject.JobNumber ledger</h2>
+                <p class="page-intro">Budget remaining after posted cost and open commitments: @((SelectedProject.BudgetAmount - SelectedProject.ActualCost - SelectedProject.Commitments).ToString("C")); retainage: @SelectedProject.RetainagePercent.ToString("P2").</p>
+                @{ var ledgerLines = (Workspace.Projects.LedgerLines ?? []).Where(line => line.ProjectJobId == SelectedProject.Id).ToArray(); }
+                @if (ledgerLines.Length == 0) { <p class="empty-state">No posted ledger lines are assigned to this project.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Selected project ledger"><thead><tr><th>Date</th><th>Reference</th><th>Source</th><th>Phase / task</th><th>Cost code</th><th>Account</th><th>Description</th><th>Debit</th><th>Credit</th><th>Cost</th><th>Revenue</th></tr></thead><tbody>@foreach (var line in ledgerLines) { <tr><td>@line.PostedOn</td><td>@line.Reference</td><td>@line.SourceModule</td><td>@(string.IsNullOrWhiteSpace(line.ProjectPhaseCode) ? "—" : line.ProjectPhaseCode)</td><td>@(string.IsNullOrWhiteSpace(line.ProjectCostCode) ? "—" : line.ProjectCostCode)</td><td>@line.AccountNumber — @line.AccountName</td><td>@line.Description</td><td>@line.Debit.ToString("C")</td><td>@line.Credit.ToString("C")</td><td>@line.Cost.ToString("C")</td><td>@line.Revenue.ToString("C")</td></tr> }</tbody></table></div> }
+            </section>
+        }
     </section>
 }
 
 @code {
     private BusinessWorkspaceSnapshot? Workspace;
+    private ProjectEditor ProjectForm { get; } = new();
+    private ProjectPhaseEditor PhaseForm { get; } = new();
+    private ProjectCostCodeEditor CostCodeForm { get; } = new();
+    private ProjectBudgetAllocationEditor BudgetForm { get; } = new();
+    private ProjectDecisionEditor? ProjectDecisionForm;
+    private ChangeOrderEditor ChangeOrderForm { get; } = new();
+    private ChangeOrderDecisionEditor? ChangeOrderDecisionForm;
+    private ChangeOrderCancellationEditor? ChangeOrderCancellationForm;
+    private BillingRateEditor BillingRateForm { get; } = new();
+    private ProjectBillingEditor BillingForm { get; } = new();
+    private ProjectBillingPreview? BillingPreview;
+    private BillingCancellationEditor? BillingCancellationForm;
+    private ProjectWipEditor WipForm { get; } = new();
+    private ProjectWipPreview? WipPreview;
+    private WipActionEditor? WipActionForm;
+    private Guid? SelectedProjectId;
+    private string StatusMessage = string.Empty;
+    private ProjectJobSnapshot? SelectedProject => Workspace?.Projects.Jobs.SingleOrDefault(project => project.Id == SelectedProjectId);
+    private ProjectJobSnapshot? BillingProject => Workspace?.Projects.Jobs.SingleOrDefault(project => project.Id == BillingForm.ProjectJobId);
+    private ProjectJobSnapshot? WipProject => Workspace?.Projects.Jobs.SingleOrDefault(project => project.Id == WipForm.ProjectJobId);
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    private async Task ReloadAsync() { Workspace = await WorkspaceService.GetWorkspaceAsync(); if (SelectedProjectId.HasValue && Workspace.Projects.Jobs.All(project => project.Id != SelectedProjectId)) SelectedProjectId = null; if (string.IsNullOrWhiteSpace(BillingForm.RevenueAccountNumber)) BillingForm.RevenueAccountNumber = DefaultRevenueAccountNumber; if (string.IsNullOrWhiteSpace(WipForm.RevenueAccountNumber)) WipForm.RevenueAccountNumber = DefaultRevenueAccountNumber; }
+    private async Task SaveProjectAsync() { var result = await TransactionService.SaveProjectJobAsync(new(ProjectForm.Id, ProjectForm.JobNumber, ProjectForm.Name, ProjectForm.CustomerId, ProjectForm.StartDate, ProjectForm.ExpectedEndDate, ProjectForm.BillingMethod, ProjectForm.ContractAmount, ProjectForm.BudgetAmount, ProjectForm.RetainagePercentDisplay / 100m, ProjectForm.ConcurrencyToken, ProjectForm.RevenueRecognitionMethod)); StatusMessage = result.Succeeded ? $"Project {ProjectForm.JobNumber} saved." : result.ErrorMessage; if (result.Succeeded) { SelectedProjectId = result.Id; ProjectForm.Reset(); await ReloadAsync(); } }
+    private void EditProject(ProjectJobSnapshot project) { ProjectForm.Load(project); StatusMessage = string.Empty; }
+    private void CancelEdit() => ProjectForm.Reset();
+    private void SelectProject(Guid id) => SelectedProjectId = id;
+    private void BeginDecision(ProjectJobSnapshot project, bool reopen) => ProjectDecisionForm = new(project.Id, project.JobNumber, project.ConcurrencyToken, reopen, project.StartDate);
+    private void CancelDecision() => ProjectDecisionForm = null;
+    private async Task CompleteProjectDecisionAsync() { var form = ProjectDecisionForm!; var result = form.Reopen ? await TransactionService.ReopenProjectJobAsync(new(form.ProjectJobId, form.Reason, form.ConcurrencyToken)) : await TransactionService.CloseProjectJobAsync(new(form.ProjectJobId, form.ClosedOn, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project {form.JobNumber} {(form.Reopen ? "reopened" : "closed")}." : result.ErrorMessage; if (result.Succeeded) { ProjectDecisionForm = null; await ReloadAsync(); } }
+    private async Task SavePhaseAsync() { var form = PhaseForm; var result = await TransactionService.SaveProjectPhaseAsync(new(form.Id, form.ProjectJobId, form.ParentProjectPhaseId, form.Code, form.Name, form.Kind, form.Description, form.StartsOn, form.EndsOn, form.IsActive, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project phase {form.Code} saved." : result.ErrorMessage; if (result.Succeeded) { form.Reset(); await ReloadAsync(); } }
+    private async Task SaveCostCodeAsync() { var form = CostCodeForm; var result = await TransactionService.SaveProjectCostCodeAsync(new(form.Id, form.Code, form.Name, form.Category, form.Description, form.IsActive, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project cost code {form.Code} saved." : result.ErrorMessage; if (result.Succeeded) { form.Reset(); await ReloadAsync(); } }
+    private async Task SaveBudgetAllocationAsync() { var form = BudgetForm; var result = await TransactionService.SaveProjectBudgetAllocationAsync(new(form.Id, form.ProjectJobId, form.ProjectPhaseId, form.ProjectCostCodeId, form.AccountNumber, form.PeriodStart, form.PeriodEnd, form.BudgetAmount, form.ForecastAmount, form.Notes, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Project budget and forecast allocation saved." : result.ErrorMessage; if (result.Succeeded) { form.Reset(); await ReloadAsync(); } }
+    private static string BillingMethodLabel(string method) => method switch { "FixedPrice" => "Fixed price", "TimeAndMaterials" => "Time and materials", "CostPlus" => "Cost plus", "Internal" => "Internal", _ => method };
+    private static string RecognitionMethodLabel(string method) => method switch { "AsBilled" => "As billed", "CostToCost" => "Cost-to-cost", "ManualPercent" => "Manual percentage", "CompletedContract" => "Completed contract", _ => method };
+    private static string SignedCurrency(decimal amount) => $"{(amount > 0 ? "+" : string.Empty)}{amount:C}";
+    private string PhaseCode(Guid? id) => id.HasValue ? (Workspace?.Projects.Phases ?? []).SingleOrDefault(phase => phase.Id == id)?.Code ?? "Unavailable" : "—";
+    private string CostCode(Guid? id) => id.HasValue ? (Workspace?.Projects.CostCodes ?? []).SingleOrDefault(costCode => costCode.Id == id)?.Code ?? "Unavailable" : "—";
+    private string TrackingCode(Guid? id) => id.HasValue ? (Workspace?.GeneralLedger.TrackingDimensions ?? []).SingleOrDefault(value => value.Id == id)?.Code ?? "Unavailable" : "—";
+    private async Task SaveChangeOrderAsync() { var form = ChangeOrderForm; var result = await TransactionService.SaveProjectChangeOrderDraftAsync(new(form.Id, form.ProjectJobId, form.ChangeOrderNumber, form.Description, form.Reason, form.RequestedOn, form.EffectiveOn, form.ContractAmountChange, form.BudgetAmountChange, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {form.ChangeOrderNumber} saved as a draft." : result.ErrorMessage; if (result.Succeeded) { form.Reset(); await ReloadAsync(); } }
+    private void EditChangeOrder(ProjectChangeOrderSnapshot changeOrder) { ChangeOrderForm.Load(changeOrder); StatusMessage = string.Empty; }
+    private void CancelChangeOrderEdit() => ChangeOrderForm.Reset();
+    private async Task SubmitChangeOrderAsync(ProjectChangeOrderSnapshot changeOrder) { var result = await TransactionService.SubmitProjectChangeOrderAsync(new(changeOrder.Id, changeOrder.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {changeOrder.ChangeOrderNumber} submitted for independent review." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync(); }
+    private void BeginChangeOrderDecision(ProjectChangeOrderSnapshot changeOrder, bool approve) => ChangeOrderDecisionForm = new(changeOrder.Id, changeOrder.ChangeOrderNumber, approve, changeOrder.ConcurrencyToken);
+    private async Task CompleteChangeOrderDecisionAsync() { var form = ChangeOrderDecisionForm!; var result = await TransactionService.DecideProjectChangeOrderAsync(new(form.Id, form.Approve, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {form.ChangeOrderNumber} {(form.Approve ? "approved" : "rejected")}." : result.ErrorMessage; if (result.Succeeded) { ChangeOrderDecisionForm = null; await ReloadAsync(); } }
+    private void BeginChangeOrderCancellation(ProjectChangeOrderSnapshot changeOrder) => ChangeOrderCancellationForm = new(changeOrder.Id, changeOrder.ChangeOrderNumber, changeOrder.ConcurrencyToken);
+    private async Task CompleteChangeOrderCancellationAsync() { var form = ChangeOrderCancellationForm!; var result = await TransactionService.CancelProjectChangeOrderAsync(new(form.Id, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Change order {form.ChangeOrderNumber} cancelled." : result.ErrorMessage; if (result.Succeeded) { ChangeOrderCancellationForm = null; await ReloadAsync(); } }
+    private async Task SaveBillingRateAsync() { var form = BillingRateForm; var result = await TransactionService.SaveProjectBillingRateAsync(new(form.Id, form.ProjectJobId, form.EarningCode, form.HourlyRate, form.EffectiveOn, form.EffectiveThrough, form.IsActive, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Project billing rate saved." : result.ErrorMessage; if (result.Succeeded) { form.Reset(); await ReloadAsync(); } }
+    private ProjectBillingPreviewRequest CurrentBillingRequest() => new(BillingForm.ProjectJobId, BillingForm.InvoiceNumber, BillingForm.BillingThrough, BillingForm.InvoiceDate, BillingForm.DueDate, BillingForm.RevenueAccountNumber, BillingForm.Description, BillingForm.ProgressPercentDisplay / 100m, BillingForm.MilestoneAmount, BillingForm.CostMarkupPercentDisplay / 100m, BillingForm.IncludeLabor, BillingForm.IncludeCosts, ExistingProposalId: BillingForm.Id, RetainageReleaseOfProposalId: BillingForm.RetainageReleaseOfProposalId, RetainageReleaseAmount: BillingForm.RetainageReleaseAmount);
+    private async Task PreviewBillingAsync() { BillingPreview = await TransactionService.PreviewProjectBillingAsync(CurrentBillingRequest()); StatusMessage = BillingPreview.Succeeded ? "Review the derived billing sources and totals before creating the invoice draft." : BillingPreview.ErrorMessage; if (!BillingPreview.Succeeded) BillingPreview = null; }
+    private async Task SaveBillingProposalAsync() { var preview = BillingPreview!; var result = await TransactionService.SaveProjectBillingProposalAsync(new(BillingForm.Id, CurrentBillingRequest(), preview.Fingerprint, preview.ProjectConcurrencyToken, BillingForm.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project billing {BillingForm.InvoiceNumber} saved as a controlled receivables draft." : result.ErrorMessage; if (result.Succeeded) { BillingForm.Reset(DefaultRevenueAccountNumber); BillingPreview = null; await ReloadAsync(); } }
+    private void BeginBillingCorrection(ProjectBillingProposalSnapshot proposal) { BillingForm.Load(proposal); BillingPreview = null; StatusMessage = "Preview the corrected billing before saving it."; }
+    private void BeginRetainageRelease(ProjectBillingProposalSnapshot proposal) { BillingForm.Reset(proposal.RevenueAccountNumber); BillingForm.ProjectJobId = proposal.ProjectJobId; BillingForm.RetainageReleaseOfProposalId = proposal.Id; BillingForm.RetainageReleaseAmount = proposal.RetainageAmount; BillingForm.BillingThrough = DateOnly.FromDateTime(DateTime.Today); BillingForm.InvoiceDate = BillingForm.BillingThrough; BillingForm.DueDate = BillingForm.InvoiceDate.AddDays(30); BillingForm.Description = $"Retainage release from {proposal.InvoiceNumber}"; BillingForm.IncludeLabor = false; BillingForm.IncludeCosts = false; BillingPreview = null; StatusMessage = "Enter a release invoice number and preview the remaining retainage before creating its controlled draft."; }
+    private void CancelBillingEdit() { BillingForm.Reset(DefaultRevenueAccountNumber); BillingPreview = null; }
+    private void BeginBillingCancellation(ProjectBillingProposalSnapshot proposal) => BillingCancellationForm = new(proposal.Id, proposal.InvoiceNumber, proposal.ConcurrencyToken);
+    private async Task CompleteBillingCancellationAsync() { var form = BillingCancellationForm!; var result = await TransactionService.CancelProjectBillingProposalAsync(new(form.Id, form.Reason, form.ConcurrencyToken)); StatusMessage = result.Succeeded ? $"Project billing {form.InvoiceNumber} cancelled and its source reservations released." : result.ErrorMessage; if (result.Succeeded) { BillingCancellationForm = null; await ReloadAsync(); } }
+    private ProjectWipPreviewRequest CurrentWipRequest() => new(WipForm.ProjectJobId, WipForm.ThroughDate, WipForm.PostingDate, WipForm.RevenueAccountNumber, WipForm.Description, WipForm.ManualCompletionPercentDisplay / 100m, WipForm.Id);
+    private async Task PreviewWipAsync() { WipPreview = await TransactionService.PreviewProjectWipScheduleAsync(CurrentWipRequest()); StatusMessage = WipPreview.Succeeded ? "Review the cumulative WIP calculation and true-up before saving the controlled draft." : WipPreview.ErrorMessage; if (!WipPreview.Succeeded) WipPreview = null; }
+    private async Task SaveWipAsync() { var preview = WipPreview!; var result = await TransactionService.SaveProjectWipScheduleAsync(new(WipForm.Id, CurrentWipRequest(), preview.Fingerprint, preview.ProjectConcurrencyToken, WipForm.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Project WIP schedule saved as a controlled draft." : result.ErrorMessage; if (result.Succeeded) { WipForm.Reset(DefaultRevenueAccountNumber); WipPreview = null; await ReloadAsync(); } }
+    private void EditWip(ProjectWipScheduleSnapshot schedule) { WipForm.Load(schedule); WipPreview = null; StatusMessage = "Preview the corrected WIP schedule before saving it."; }
+    private void CancelWipEdit() { WipForm.Reset(DefaultRevenueAccountNumber); WipPreview = null; }
+    private async Task SubmitWipAsync(ProjectWipScheduleSnapshot schedule) { var result = await TransactionService.SubmitProjectWipScheduleAsync(new(schedule.Id, schedule.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Project WIP submitted for independent review." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync(); }
+    private void BeginWipAction(ProjectWipScheduleSnapshot schedule, string action) => WipActionForm = new(schedule.Id, schedule.ProjectJobNumber, action, schedule.ConcurrencyToken, schedule.PostingDate);
+    private void BeginWipCancellation(ProjectWipScheduleSnapshot schedule) => BeginWipAction(schedule, "Cancel");
+    private void BeginWipApproval(ProjectWipScheduleSnapshot schedule) => BeginWipAction(schedule, "Approve");
+    private void BeginWipRejection(ProjectWipScheduleSnapshot schedule) => BeginWipAction(schedule, "Reject");
+    private void BeginWipReversal(ProjectWipScheduleSnapshot schedule) => BeginWipAction(schedule, "Reverse");
+    private async Task CompleteWipActionAsync() { var form = WipActionForm!; var result = form.Action switch { "Approve" => await TransactionService.DecideProjectWipScheduleAsync(new(form.Id, true, form.Reason, form.ConcurrencyToken)), "Reject" => await TransactionService.DecideProjectWipScheduleAsync(new(form.Id, false, form.Reason, form.ConcurrencyToken)), "Cancel" => await TransactionService.CancelProjectWipScheduleAsync(new(form.Id, form.Reason, form.ConcurrencyToken)), _ => await TransactionService.ReverseProjectWipScheduleAsync(new(form.Id, form.ReversalDate, form.Reason, form.ConcurrencyToken)) }; StatusMessage = result.Succeeded ? $"Project WIP {form.Action.ToLowerInvariant()} completed." : result.ErrorMessage; if (result.Succeeded) { WipActionForm = null; await ReloadAsync(); } }
+    private async Task PostWipAsync(ProjectWipScheduleSnapshot schedule) { var result = await TransactionService.PostProjectWipScheduleAsync(new(schedule.Id, schedule.ConcurrencyToken)); StatusMessage = result.Succeeded ? "Approved project WIP posted to the ledger." : result.ErrorMessage; if (result.Succeeded) await ReloadAsync(); }
+    private string DefaultRevenueAccountNumber => Workspace?.GeneralLedger.Accounts.SingleOrDefault(account => account.OperationalRole == BrassLedger.Domain.Accounting.AccountingAccountRoles.DefaultRevenue)?.Number ?? string.Empty;
+
+    private sealed class ProjectEditor
     {
-        Workspace = await WorkspaceService.GetWorkspaceAsync();
+        public Guid? Id { get; set; } public string JobNumber { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public Guid CustomerId { get; set; } public DateOnly StartDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? ExpectedEndDate { get; set; } public string BillingMethod { get; set; } = "TimeAndMaterials"; public string RevenueRecognitionMethod { get; set; } = "AsBilled"; public decimal ContractAmount { get; set; } public decimal BudgetAmount { get; set; } public decimal RetainagePercentDisplay { get; set; } public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectJobSnapshot project) { Id = project.Id; JobNumber = project.JobNumber; Name = project.Name; CustomerId = project.CustomerId ?? Guid.Empty; StartDate = project.StartDate ?? DateOnly.FromDateTime(DateTime.Today); ExpectedEndDate = project.ExpectedEndDate; BillingMethod = project.BillingMethod; RevenueRecognitionMethod = project.RevenueRecognitionMethod; ContractAmount = project.ContractAmount; BudgetAmount = project.BudgetAmount; RetainagePercentDisplay = project.RetainagePercent * 100m; ConcurrencyToken = project.ConcurrencyToken; }
+        public void Reset() { Id = null; JobNumber = string.Empty; Name = string.Empty; CustomerId = Guid.Empty; StartDate = DateOnly.FromDateTime(DateTime.Today); ExpectedEndDate = null; BillingMethod = "TimeAndMaterials"; RevenueRecognitionMethod = "AsBilled"; ContractAmount = 0m; BudgetAmount = 0m; RetainagePercentDisplay = 0m; ConcurrencyToken = string.Empty; }
     }
+    private sealed class ProjectPhaseEditor
+    {
+        public Guid? Id { get; set; } public Guid ProjectJobId { get; set; } public Guid? ParentProjectPhaseId { get; set; } public string Code { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public string Kind { get; set; } = "Phase"; public string Description { get; set; } = string.Empty; public DateOnly? StartsOn { get; set; } public DateOnly? EndsOn { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectPhaseSnapshot value) { Id = value.Id; ProjectJobId = value.ProjectJobId; ParentProjectPhaseId = value.ParentProjectPhaseId; Code = value.Code; Name = value.Name; Kind = value.Kind; Description = value.Description; StartsOn = value.StartsOn; EndsOn = value.EndsOn; IsActive = value.IsActive; ConcurrencyToken = value.ConcurrencyToken; }
+        public void Reset() { Id = null; ProjectJobId = Guid.Empty; ParentProjectPhaseId = null; Code = string.Empty; Name = string.Empty; Kind = "Phase"; Description = string.Empty; StartsOn = null; EndsOn = null; IsActive = true; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class ProjectCostCodeEditor
+    {
+        public Guid? Id { get; set; } public string Code { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public string Category { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectCostCodeSnapshot value) { Id = value.Id; Code = value.Code; Name = value.Name; Category = value.Category; Description = value.Description; IsActive = value.IsActive; ConcurrencyToken = value.ConcurrencyToken; }
+        public void Reset() { Id = null; Code = string.Empty; Name = string.Empty; Category = string.Empty; Description = string.Empty; IsActive = true; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class ProjectBudgetAllocationEditor
+    {
+        public Guid? Id { get; set; } public Guid ProjectJobId { get; set; } public Guid? ProjectPhaseId { get; set; } public Guid? ProjectCostCodeId { get; set; } public string AccountNumber { get; set; } = string.Empty; public DateOnly PeriodStart { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly PeriodEnd { get; set; } = new(DateTime.Today.Year, 12, 31); public decimal BudgetAmount { get; set; } public decimal ForecastAmount { get; set; } public string Notes { get; set; } = string.Empty; public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectBudgetAllocationSnapshot value) { Id = value.Id; ProjectJobId = value.ProjectJobId; ProjectPhaseId = value.ProjectPhaseId; ProjectCostCodeId = value.ProjectCostCodeId; AccountNumber = value.AccountNumber; PeriodStart = value.PeriodStart; PeriodEnd = value.PeriodEnd; BudgetAmount = value.BudgetAmount; ForecastAmount = value.ForecastAmount; Notes = value.Notes; ConcurrencyToken = value.ConcurrencyToken; }
+        public void Reset() { Id = null; ProjectJobId = Guid.Empty; ProjectPhaseId = null; ProjectCostCodeId = null; AccountNumber = string.Empty; PeriodStart = new(DateTime.Today.Year, 1, 1); PeriodEnd = new(DateTime.Today.Year, 12, 31); BudgetAmount = 0m; ForecastAmount = 0m; Notes = string.Empty; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class ProjectDecisionEditor(Guid projectJobId, string jobNumber, string concurrencyToken, bool reopen, DateOnly? startDate)
+    {
+        public Guid ProjectJobId { get; } = projectJobId; public string JobNumber { get; } = jobNumber; public string ConcurrencyToken { get; } = concurrencyToken; public bool Reopen { get; } = reopen; public DateOnly ClosedOn { get; set; } = startDate.HasValue && startDate > DateOnly.FromDateTime(DateTime.Today) ? startDate.Value : DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty;
+    }
+    private sealed class ChangeOrderEditor
+    {
+        public Guid? Id { get; set; } public Guid ProjectJobId { get; set; } public string ChangeOrderNumber { get; set; } = string.Empty; public string Description { get; set; } = string.Empty; public string Reason { get; set; } = string.Empty; public DateOnly RequestedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal ContractAmountChange { get; set; } public decimal BudgetAmountChange { get; set; } public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectChangeOrderSnapshot value) { Id = value.Id; ProjectJobId = value.ProjectJobId; ChangeOrderNumber = value.ChangeOrderNumber; Description = value.Description; Reason = value.Reason; RequestedOn = value.RequestedOn; EffectiveOn = value.EffectiveOn; ContractAmountChange = value.ContractAmountChange; BudgetAmountChange = value.BudgetAmountChange; ConcurrencyToken = value.ConcurrencyToken; }
+        public void Reset() { Id = null; ProjectJobId = Guid.Empty; ChangeOrderNumber = string.Empty; Description = string.Empty; Reason = string.Empty; RequestedOn = DateOnly.FromDateTime(DateTime.Today); EffectiveOn = RequestedOn; ContractAmountChange = 0m; BudgetAmountChange = 0m; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class ChangeOrderDecisionEditor(Guid id, string changeOrderNumber, bool approve, string concurrencyToken) { public Guid Id { get; } = id; public string ChangeOrderNumber { get; } = changeOrderNumber; public bool Approve { get; } = approve; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = string.Empty; }
+    private sealed class ChangeOrderCancellationEditor(Guid id, string changeOrderNumber, string concurrencyToken) { public Guid Id { get; } = id; public string ChangeOrderNumber { get; } = changeOrderNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = string.Empty; }
+    private sealed class BillingRateEditor
+    {
+        public Guid? Id { get; set; } public Guid ProjectJobId { get; set; } public string EarningCode { get; set; } = "*"; public decimal HourlyRate { get; set; } public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? EffectiveThrough { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectBillingRateSnapshot rate) { Id = rate.Id; ProjectJobId = rate.ProjectJobId; EarningCode = rate.EarningCode; HourlyRate = rate.HourlyRate; EffectiveOn = rate.EffectiveOn; EffectiveThrough = rate.EffectiveThrough; IsActive = rate.IsActive; ConcurrencyToken = rate.ConcurrencyToken; }
+        public void Reset() { Id = null; ProjectJobId = Guid.Empty; EarningCode = "*"; HourlyRate = 0m; EffectiveOn = DateOnly.FromDateTime(DateTime.Today); EffectiveThrough = null; IsActive = true; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class ProjectBillingEditor
+    {
+        public Guid? Id { get; set; } public Guid ProjectJobId { get; set; } public Guid? RetainageReleaseOfProposalId { get; set; } public decimal RetainageReleaseAmount { get; set; } public string InvoiceNumber { get; set; } = string.Empty; public DateOnly BillingThrough { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly InvoiceDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today).AddDays(30); public string RevenueAccountNumber { get; set; } = string.Empty; public string Description { get; set; } = "Project billing"; public decimal ProgressPercentDisplay { get; set; } public decimal MilestoneAmount { get; set; } public decimal CostMarkupPercentDisplay { get; set; } public bool IncludeLabor { get; set; } = true; public bool IncludeCosts { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectBillingProposalSnapshot proposal) { Id = proposal.Id; ProjectJobId = proposal.ProjectJobId; RetainageReleaseOfProposalId = proposal.RetainageReleaseOfProposalId; RetainageReleaseAmount = proposal.BillingBasis == "RetainageRelease" ? proposal.InvoiceAmount : 0m; InvoiceNumber = proposal.InvoiceNumber; BillingThrough = proposal.BillingThrough; InvoiceDate = proposal.InvoiceDate; DueDate = proposal.DueDate; RevenueAccountNumber = proposal.RevenueAccountNumber; Description = proposal.Description; ProgressPercentDisplay = proposal.ProgressPercentToDate * 100m; MilestoneAmount = proposal.BillingBasis == "FixedPriceMilestone" ? proposal.GrossAmount : 0m; CostMarkupPercentDisplay = proposal.CostMarkupPercent * 100m; IncludeLabor = proposal.BillingBasis == "TimeAndMaterials"; IncludeCosts = proposal.BillingBasis is "TimeAndMaterials" or "CostPlus"; ConcurrencyToken = proposal.ConcurrencyToken; }
+        public void Reset(string revenueAccount = "") { Id = null; ProjectJobId = Guid.Empty; RetainageReleaseOfProposalId = null; RetainageReleaseAmount = 0m; InvoiceNumber = string.Empty; BillingThrough = DateOnly.FromDateTime(DateTime.Today); InvoiceDate = BillingThrough; DueDate = BillingThrough.AddDays(30); RevenueAccountNumber = revenueAccount; Description = "Project billing"; ProgressPercentDisplay = 0m; MilestoneAmount = 0m; CostMarkupPercentDisplay = 0m; IncludeLabor = true; IncludeCosts = true; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class BillingCancellationEditor(Guid id, string invoiceNumber, string concurrencyToken) { public Guid Id { get; } = id; public string InvoiceNumber { get; } = invoiceNumber; public string ConcurrencyToken { get; } = concurrencyToken; public string Reason { get; set; } = string.Empty; }
+    private sealed class ProjectWipEditor
+    {
+        public Guid? Id { get; set; } public Guid ProjectJobId { get; set; } public DateOnly ThroughDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly PostingDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal ManualCompletionPercentDisplay { get; set; } public string RevenueAccountNumber { get; set; } = string.Empty; public string Description { get; set; } = "Period-end project WIP and earned revenue"; public string ConcurrencyToken { get; set; } = string.Empty;
+        public void Load(ProjectWipScheduleSnapshot schedule) { Id = schedule.Id; ProjectJobId = schedule.ProjectJobId; ThroughDate = schedule.ThroughDate; PostingDate = schedule.PostingDate; ManualCompletionPercentDisplay = schedule.RecognitionMethod == "ManualPercent" ? schedule.CompletionPercent * 100m : 0m; RevenueAccountNumber = schedule.RevenueAccountNumber; Description = schedule.Description; ConcurrencyToken = schedule.ConcurrencyToken; }
+        public void Reset(string revenueAccount = "") { Id = null; ProjectJobId = Guid.Empty; ThroughDate = DateOnly.FromDateTime(DateTime.Today); PostingDate = ThroughDate; ManualCompletionPercentDisplay = 0m; RevenueAccountNumber = revenueAccount; Description = "Period-end project WIP and earned revenue"; ConcurrencyToken = string.Empty; }
+    }
+    private sealed class WipActionEditor(Guid id, string projectNumber, string action, string concurrencyToken, DateOnly postingDate) { public Guid Id { get; } = id; public string ProjectNumber { get; } = projectNumber; public string Action { get; } = action; public string ConcurrencyToken { get; } = concurrencyToken; public DateOnly ReversalDate { get; set; } = postingDate > DateOnly.FromDateTime(DateTime.Today) ? postingDate : DateOnly.FromDateTime(DateTime.Today); public string Reason { get; set; } = string.Empty; }
 }

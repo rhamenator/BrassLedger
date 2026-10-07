@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ia",
+  "capturedAtUtc": "2026-08-25T06:30:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://revenue.iowa.gov/media/53/download?inline=", "title": "2026 Iowa Withholding Formula and Instructions", "revision": "November 2025", "mediaType": "application/pdf", "sha256": "690911fa64266dffe9b21eac207220c18762dd4d02a4ca4807eb8ff02c8ca0e2", "bytes": 211186 },
+    { "url": "https://revenue.iowa.gov/taxes/tax-guidance/withholding-tax/iowa-withholding-tax-information", "title": "Iowa Withholding Tax Information", "retrievedAtUtc": "2026-08-25T06:30:00Z", "mediaType": "text/html", "sha256": "f1f99eab67c6e700bd635794d706f050dd71dc80fad93c72546c8382a16d6417", "bytes": 205114 }
+  ],
+  "employeeInputs": [
+    { "code": "certificateVersion", "source": "IA W-4", "dataType": "enum", "values": ["2024OrLater", "2023OrEarlier"] },
+    { "code": "filingStatus", "source": "IA W-4", "dataType": "enum", "values": ["Other", "HeadOfHousehold", "MarriedFilingJointlySpouseNoIncomeOrQualifyingSurvivingSpouse"] },
+    { "code": "spouseHasIncome", "source": "IA W-4", "dataType": "boolean" },
+    { "code": "allowanceDollarAmount", "source": "2024-or-later IA W-4 line 6", "dataType": "money", "minimum": 0 },
+    { "code": "legacyAllowanceCount", "source": "2023-or-earlier IA W-4 line 6", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "IA W-4", "dataType": "money", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["FourStepPercentage", "WageBracket"],
+    "payPeriodsPerYear": { "Daily": 260, "Weekly": 52, "Biweekly": 26, "Semimonthly": 24, "Monthly": 12, "Annual": 1 },
+    "formula": [
+      "T1 = grossPeriodicWages - periodicStandardDeduction",
+      "T2 = T1 * 0.038",
+      "T3 = T2 - periodicAllowanceDollarAmount",
+      "T4 = max(0, T3 + additionalPeriodicWithholding)"
+    ],
+    "rate": 0.038,
+    "modernAnnualStandardDeductions": { "OtherOrMarriedJointSpouseEarnsOrMissing": 13000, "HeadOfHousehold": 19500, "MarriedJointSpouseNoIncomeOrQualifyingSurvivingSpouse": 26000 },
+    "modernPeriodicStandardDeductions": [
+      { "frequency": "Daily", "other": 50, "headOfHousehold": 75, "marriedJointSpouseNoIncome": 100 },
+      { "frequency": "Weekly", "other": 250, "headOfHousehold": 375, "marriedJointSpouseNoIncome": 500 },
+      { "frequency": "Biweekly", "other": 500, "headOfHousehold": 750, "marriedJointSpouseNoIncome": 1000 },
+      { "frequency": "Semimonthly", "other": 541.67, "headOfHousehold": 812.50, "marriedJointSpouseNoIncome": 1083.33 },
+      { "frequency": "Monthly", "other": 1083.33, "headOfHousehold": 1625, "marriedJointSpouseNoIncome": 2166.67 },
+      { "frequency": "Annual", "other": 13000, "headOfHousehold": 19500, "marriedJointSpouseNoIncome": 26000 }
+    ],
+    "legacyCertificate": { "annualStandardDeductionSingleOrMissing": 13000, "annualStandardDeductionMarried": 26000, "annualAllowanceDollarsPerClaimedAllowance": 40 },
+    "nonstandardFrequency": "Annualize gross wages, subtract the applicable annual standard deduction, multiply by 3.8%, subtract the annual allowance amount, divide by the number of pay periods, then add periodic additional withholding.",
+    "supplementalWages": { "combinedWithRegular": "Use the regular tables or formula on the combined payment.", "separatelyStatedFlatRate": 0.038 },
+    "officialExamples": [
+      { "frequency": "Biweekly", "filingStatus": "Other", "grossWages": 2100, "standardDeduction": 500, "allowanceDollarAmount": 40, "withholding": 59.26 },
+      { "frequency": "Biweekly", "filingStatus": "MarriedFilingJointlySpouseNoIncomeOrQualifyingSurvivingSpouse", "grossWages": 2100, "standardDeduction": 1000, "allowanceDollarAmount": 80, "withholding": 38.72 },
+      { "frequency": "Biweekly", "filingStatus": "HeadOfHousehold", "grossWages": 2100, "standardDeduction": 750, "allowanceDollarAmount": 160, "withholding": 45.15 },
+      { "frequency": "Monthly", "filingStatus": "Other", "grossWages": 5000, "standardDeduction": 1083.33, "allowanceDollarAmount": 40, "withholding": 145.50 },
+      { "frequency": "Monthly", "filingStatus": "MarriedFilingJointlySpouseNoIncomeOrQualifyingSurvivingSpouse", "grossWages": 5000, "standardDeduction": 2166.67, "allowanceDollarAmount": 80, "withholding": 101.00 }
+    ]
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Iowa withholding applies to compensation for Iowa services and Iowa residents working in reciprocal Illinois remain taxable only to Iowa.",
+    "nonresidentRule": "Withhold from nonresident wages for Iowa services at the resident rate unless a documented exception applies.",
+    "reciprocalStates": ["IL"],
+    "reciprocityCertificate": "44-016",
+    "interstateCarrierException": true,
+    "filmAndTelevisionReleaseAvailable": true,
+    "disasterResponseException": true,
+    "multiStateAllocationRequired": true
+  },
+  "filing": {
+    "frequencies": [
+      { "frequency": "Quarterly", "annualRemittanceLessThan": 6000, "monthlyEquivalentLessThan": 500 },
+      { "frequency": "Monthly", "annualRemittanceFrom": 6000, "annualRemittanceThrough": 120000 },
+      { "frequency": "Semimonthly", "annualRemittanceMoreThan": 120000 }
+    ],
+    "zeroReturnsRequired": true,
+    "electronicPortal": "GovConnect"
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The formula examples publish cent results but do not state a generalized intermediate-rounding rule.",
+    "The full wage-bracket matrices are retained in the checksummed publication and are not duplicated here.",
+    "Legacy and modern IA W-4 records must remain versioned because pre-2024 allowance counts are converted at $40 each instead of interpreted as modern dollar amounts."
+  ],
+  "review": { "formulaTranscribed": true, "certificateVersionBranchesTranscribed": true, "officialExamplesTranscribed": true, "supplementalMethodTranscribed": true, "residencyAndWorkRulesTranscribed": true, "rawSourcesChecksummed": true, "completeWageBracketTablesTranscribed": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import wage-bracket matrices, verify exact rounding and nonstandard-frequency behavior, and add executable tests for both IA W-4 generations and reciprocity before activation." }
+}

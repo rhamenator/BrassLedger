@@ -62,6 +62,10 @@ Overview is the control tower for the day. Use it to answer these questions quic
 
 Ledger is the home for journal entries, accruals, reclasses, and period adjustments that genuinely belong in the general ledger.
 
+Save an ordinary journal as a draft. Its preparer cannot approve or reject it, and its approver cannot post it. A reviewer can reject an ordinary draft or approved-but-unposted journal with a specific correction note. The preparer then chooses **Correct**, revises the same journal, and resubmits it for independent approval. Account balances change only at posting; prior versions and decisions remain in the audit history. Correct journals created by another module through that module's own workflow rather than editing their generated entries.
+
+Use **Departments and classes** on the Ledger page to maintain controlled tracking values. Each value has a type, code, name, optional parent, optional effective dates, active state, and concurrency token. Use Department for an organizational or location-oriented reporting axis and Class for the separate QuickBooks-style classification axis; do not use Class as a substitute for Project. Select these values on journal, invoice, bill, sales, purchasing, payroll-time, and related source lines. Deactivate a value to stop new use while preserving posted history and exact reversals.
+
 Best practices:
 
 - include reference text and effective dates on every batch
@@ -76,6 +80,7 @@ Receivables manages invoices, customer balances, cash application, and collectio
 Best practices:
 
 - issue invoices with complete customer and document detail
+- reviewers should reject incomplete drafts with a specific correction reason; the preparer can correct and resubmit using the same invoice number without erasing review history
 - apply cash promptly and explicitly
 - separate disputes from write-offs
 - review aging and unapplied cash before period close
@@ -87,13 +92,30 @@ Payables handles vendor invoices, due dates, credits, approvals, and payment rel
 Best practices:
 
 - capture due dates, references, and approval state
+- reviewers should reject incomplete drafts with a specific correction reason; the preparer can correct and resubmit using the same vendor and bill number without erasing review history
 - keep vendor credits visible until intentionally applied
 - review payment proposals before releasing checks or payments
 - reconcile payable aging to the control account
 
+### Projects
+
+Use Projects to maintain the customer contract, cost budget, billing method, revenue-recognition method, retainage, effective-dated labor billing rates, and controlled change orders. Prepare a billing preview before creating an invoice draft. Review every included approved-time or posted-cost source, markup, contract-to-date amount, retainage, and net invoice total. If the underlying project, rates, prior billing, or eligible sources change after preview, BrassLedger requires a new preview.
+
+Project billing creates an ordinary receivables draft; it does not post an invoice immediately. The preparer cannot approve that draft, and its approver cannot post it. Correct a rejected project billing from Projects so source reservations and derivation remain synchronized. Cancel a draft or rejected proposal to release its sources. Posting retained billing recognizes gross project revenue and separates the collectible amount from the holdback in the retainage-receivable control account. After it posts, use **Release retainage** for partial or full controlled release invoices; release posting moves the approved amount to ordinary receivables without recognizing revenue again. Review the retainage aging and its control-account difference before relying on it, and void dependent releases before voiding their original invoice. See the [project accounting guide](project-accounting-guide.md) for calculation rules and current accounting boundaries.
+
+For cost-to-cost, manual-percentage, or completed-contract projects, prepare a period-end WIP preview after costs and billing for the cutoff are posted. Review cumulative cost, estimate, completion, earned revenue, billings, prior control position, desired contract asset or liability, and the revenue true-up. Save and submit it; a different user approves or rejects it, and someone other than the approver posts it. Correct rejected schedules from a fresh preview. Reverse later schedules before earlier ones. Never rely on WIP reporting while either displayed control-account difference is nonzero.
+
 ### Operations
 
 Operations covers inventory, order flow, fulfillment, and the documents that accompany physical work.
+
+The current purchasing workflow separates requesting, supplier commitment, receiving, invoice preparation, and invoice review. A requisitioning user creates and submits a reasoned request; a purchasing user approves or rejects it, converts an approval once into a purchase-order draft, and separately approves the order. Receive only the quantities physically accepted. Partial receipts remain open. Each receipt updates on-hand quantity and moving-average cost and posts Inventory against GRNI. Use **Prepare supplier invoice** for each full or partial invoice and enter the supplier's actual quantities and prices. The system separates GRNI clearance, price variance, and quantity variance; Purchasing must review the draft before Payables posts the bill. Use **Allocate landed cost** before affected stock moves out to distribute reviewed freight and import charges by value, quantity, or exact manual amounts; Payables prepares and posts, while a different purchasing operator reviews. For damaged or rejected goods, use **Return to supplier** on the source receipt, authorize exact line quantities, and ship from the physical warehouse/bin. A return can split between GRNI reduction for uninvoiced units and vendor credit for invoiced units, including receipts with several partial bills. See [Purchasing and inventory receiving](purchasing-guide.md) for accounting, corrections, and current-boundary details.
+
+Warehouses and bins retain the exact physical location of adjustments, receipts, reservations, shipments, and reversals. Configure addresses and defaults in Operations, then use a reasoned stock transfer to move unreserved quantity between bins without changing company-wide on-hand quantity or posting a journal. See [Inventory warehouses, bins, and transfers](inventory-locations-guide.md).
+
+Sales can first prepare an expiring, priced, line-based quote. Approval locks the offer for conversion; an approved quote can create one draft sales order using the exact customer, items, quantities, prices, discounts, tax, and revenue distributions. Expired quotes cannot be converted, and withdrawn quotes retain their required reason and audit history. A quote never reserves inventory or posts accounting.
+
+The downstream sales workflow separates duties. Sales prepares and approves priced line-based orders; the warehouse reserves available quantities and posts partial or complete shipments; receivables creates an invoice from each exact shipment. Before shipment, Sales can make a reasoned amendment that releases reservations, preserves before-and-after evidence, and requires approval again. Sales can also cancel all open quantity without changing shipment or invoice history; partially fulfilled orders remain pending until their retained shipments are invoiced. Shipment posting relieves inventory to COGS at moving-average cost, while invoice posting records AR, revenue, and sales tax with line-level source provenance. For customer returns, Sales authorizes exact shipped units, fulfillment receives them into a warehouse/bin at original shipment cost, and receivables creates an exact source-derived credit that can reduce the original invoice, apply to another invoice, or be refunded. Void a fully open shipment invoice before correcting its physical shipment. See [Sales orders and inventory fulfillment](sales-fulfillment-guide.md).
 
 Best practices:
 
@@ -101,6 +123,7 @@ Best practices:
 - keep quantity movement aligned with financial posting timing
 - review open orders and backorders daily in active environments
 - treat printed operational documents as controlled output
+- reverse or compensate incorrect receipts through the displayed workflow; never edit their generated journals
 
 ### Payroll
 
@@ -116,6 +139,10 @@ Best practices:
 ### Projects
 
 Projects organize activity by job, engagement, or cost-tracking unit.
+
+Create and maintain projects from the Projects page. Build phase/task hierarchies, maintain reusable company cost codes, and allocate project budgets and forecasts by period, expense account, phase, and cost code. Assign an active project and optional active phase/task and cost code on journal, invoice, bill, quote, sales-order, requisition, purchase-order, timecard, and payroll earning lines. Posted expense and revenue lines drive actual cost, revenue, and margin; unreceived purchase-order value drives commitments. The ledger and billing drill-downs display retained phase and cost-code attribution. The on-screen ledger shows the 250 most recent tagged lines while portfolio totals continue to use the complete posted ledger.
+
+Use a project change order for contract or budget revisions after activity begins. Save and submit the signed changes, then have a different operator approve or reject them. Correct a rejected proposal in place. Use a new negative change order instead of deleting or editing an approval. Close a job only after its open orders, requisitions, timecards, and unresolved change orders are resolved. Closing and reopening require a reason and preserve audit evidence. See [Project and job accounting](project-accounting-guide.md) for accounting behavior, QuickBooks mapping, roles, and current limitations.
 
 Best practices:
 
@@ -177,8 +204,13 @@ A disciplined close usually follows this order:
 Current expectations:
 
 - authenticated access is required before users can load accounting data
+- invitations require a one-use email link; operators choose their own password and activate their company membership
+- verify the account email from **Account security** before relying on self-service password recovery
+- password-reset requests use the same response for eligible and unknown identifiers and invalidate prior sessions after a successful reset
+- review **Signed-in browsers** under **Account security** and individually revoke a browser you no longer control; network values are masked and browser names are approximate
+- use **Sign out other sessions** after suspected compromise; this rotates account security and preserves only a newly issued session for the current browser
+- if every MFA factor is lost, follow the company's documented identity-verification process and ask an authorized MFA-authenticated administrator to perform controlled recovery
 - confidential data should live in the database, not copied publish folders
 - local fallback data directories should not be committed to Git
 - static site assets should come from `BrassLedger.Web/wwwroot`
 - published output under `artifacts` should be treated as disposable packaging
-

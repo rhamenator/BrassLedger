@@ -1,0 +1,110 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "parentJurisdictionId": "jurisdiction-us-md",
+  "capturedAtUtc": "2026-08-25T03:45:00Z",
+  "scope": "Maryland county and Baltimore City resident local income-tax withholding rates",
+  "selection": {
+    "basis": "employeeResidence",
+    "workLocationIsNotSelectionBasis": true,
+    "combinedWithStateWithholding": true,
+    "missingOrNonresidentResidenceRule": "Use the separately defined Maryland nonresident special tax rule; do not infer a work-county rate."
+  },
+  "filingStatusGroups": {
+    "singleGroup": ["Single", "MarriedFilingSeparately", "DependentTaxpayer"],
+    "jointGroup": ["MarriedFilingJointly", "HeadOfHousehold", "QualifyingSurvivingSpouse"]
+  },
+  "sources": [
+    {
+      "url": "https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf",
+      "title": "2026 Maryland Employer Withholding Guide",
+      "sha256": "ce61cef90c00bc41ad4f4a4913ea1f9f5be65db9c08b015d43c191d20883e0bf",
+      "bytes": 1430746
+    },
+    {
+      "url": "https://services.marylandcomptroller.gov/taxes/en/maryland-income-tax-rates-and-brackets?id=kb_article_view&sysparm_article=KB0010014",
+      "title": "Maryland individual income tax rates and brackets — 2026 local rates"
+    }
+  ],
+  "localJurisdictions": [
+    { "jurisdictionId": "jurisdiction-us-md-allegany", "code": "MD-ALLEGANY", "name": "Allegany County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    {
+      "jurisdictionId": "jurisdiction-us-md-anne-arundel", "code": "MD-ANNE-ARUNDEL", "name": "Anne Arundel County", "type": "County",
+      "rateSchedule": {
+        "type": "IncomeTieredRateByFilingStatus",
+        "singleGroup": [
+          { "overExclusive": 0, "notOverInclusive": 50000, "rate": 0.0270 },
+          { "overExclusive": 50000, "notOverInclusive": 400000, "rate": 0.0294 },
+          { "overExclusive": 400000, "notOverInclusive": null, "rate": 0.0320 }
+        ],
+        "jointGroup": [
+          { "overExclusive": 0, "notOverInclusive": 75000, "rate": 0.0270 },
+          { "overExclusive": 75000, "notOverInclusive": 480000, "rate": 0.0294 },
+          { "overExclusive": 480000, "notOverInclusive": null, "rate": 0.0320 }
+        ],
+        "boundarySemantics": "The lower rate applies through the displayed whole-dollar ceiling; the next rate starts with the following dollar."
+      }
+    },
+    { "jurisdictionId": "jurisdiction-us-md-baltimore-city", "code": "MD-BALTIMORE-CITY", "name": "Baltimore City", "type": "City", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-baltimore", "code": "MD-BALTIMORE", "name": "Baltimore County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-calvert", "code": "MD-CALVERT", "name": "Calvert County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-caroline", "code": "MD-CAROLINE", "name": "Caroline County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-carroll", "code": "MD-CARROLL", "name": "Carroll County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0303 } },
+    { "jurisdictionId": "jurisdiction-us-md-cecil", "code": "MD-CECIL", "name": "Cecil County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0274 } },
+    { "jurisdictionId": "jurisdiction-us-md-charles", "code": "MD-CHARLES", "name": "Charles County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0303 } },
+    { "jurisdictionId": "jurisdiction-us-md-dorchester", "code": "MD-DORCHESTER", "name": "Dorchester County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0330 } },
+    {
+      "jurisdictionId": "jurisdiction-us-md-frederick", "code": "MD-FREDERICK", "name": "Frederick County", "type": "County",
+      "rateSchedule": {
+        "type": "IncomeTieredRateByFilingStatus",
+        "singleGroup": [
+          { "overExclusive": 0, "notOverInclusive": 25000, "rate": 0.0225 },
+          { "overExclusive": 25000, "notOverInclusive": 50000, "rate": 0.0275 },
+          { "overExclusive": 50000, "notOverInclusive": 150000, "rate": 0.0296 },
+          { "overExclusive": 150000, "notOverInclusive": null, "rate": 0.0320 }
+        ],
+        "jointGroup": [
+          { "overExclusive": 0, "notOverInclusive": 25000, "rate": 0.0225 },
+          { "overExclusive": 25000, "notOverInclusive": 100000, "rate": 0.0275 },
+          { "overExclusive": 100000, "notOverInclusive": 250000, "rate": 0.0296 },
+          { "overExclusive": 250000, "notOverInclusive": null, "rate": 0.0320 }
+        ],
+        "boundarySemantics": "The lower rate applies through the displayed whole-dollar ceiling; the next rate starts with the following dollar."
+      }
+    },
+    { "jurisdictionId": "jurisdiction-us-md-garrett", "code": "MD-GARRETT", "name": "Garrett County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0265 } },
+    { "jurisdictionId": "jurisdiction-us-md-harford", "code": "MD-HARFORD", "name": "Harford County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0306 } },
+    { "jurisdictionId": "jurisdiction-us-md-howard", "code": "MD-HOWARD", "name": "Howard County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-kent", "code": "MD-KENT", "name": "Kent County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0330 } },
+    { "jurisdictionId": "jurisdiction-us-md-montgomery", "code": "MD-MONTGOMERY", "name": "Montgomery County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-prince-georges", "code": "MD-PRINCE-GEORGES", "name": "Prince George's County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-queen-annes", "code": "MD-QUEEN-ANNES", "name": "Queen Anne's County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-st-marys", "code": "MD-ST-MARYS", "name": "St. Mary's County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-somerset", "code": "MD-SOMERSET", "name": "Somerset County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-talbot", "code": "MD-TALBOT", "name": "Talbot County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0240 } },
+    { "jurisdictionId": "jurisdiction-us-md-washington", "code": "MD-WASHINGTON", "name": "Washington County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0295 } },
+    { "jurisdictionId": "jurisdiction-us-md-wicomico", "code": "MD-WICOMICO", "name": "Wicomico County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0320 } },
+    { "jurisdictionId": "jurisdiction-us-md-worcester", "code": "MD-WORCESTER", "name": "Worcester County", "type": "County", "rateSchedule": { "type": "Flat", "rate": 0.0225 } }
+  ],
+  "sharedRelationship": {
+    "type": "ContainedBy",
+    "targetJurisdictionId": "jurisdiction-us-md",
+    "validFrom": "2026-01-01",
+    "validThrough": null
+  },
+  "specialRules": {
+    "nonresidentSpecialTaxRate": 0.0225,
+    "nonresidentSpecialTaxIsNotACountyAssignment": true,
+    "residentWorkingInDelawareOrOtherNonreciprocalJurisdiction": "Apply Maryland's prescribed other-state calculation and withholding-credit procedure; implement as a separate sourced rule branch rather than modifying a county schedule.",
+    "countyChangeNoticeDeadline": "Counties must report local rate changes to the Comptroller by July 1 preceding the calendar year."
+  },
+  "review": {
+    "rateSchedulesTranscribed": true,
+    "formulaTranscribed": false,
+    "officialExamplesTranscribed": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Transcribe the Maryland state/local combined withholding procedure and precise boundary semantics, add official and independently calculated examples for every rate branch, then review before activation."
+  }
+}

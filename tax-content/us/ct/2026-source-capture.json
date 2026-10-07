@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "jurisdictionId": "jurisdiction-us-ct",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "capturedAtUtc": "2026-08-25T03:00:00Z",
+  "sources": [
+    {
+      "url": "https://portal.ct.gov/-/media/drs/forms/2025/wth/tpg-211_1225.pdf?rev=e16ef13773ec42d4bf0afd2e192e0176&hash=CCF9990D8EE0AA580A11BC6E97235650",
+      "title": "TPG-211, 2026 Connecticut Withholding Calculation Rules",
+      "sha256": "a3df892d72740c5daa7633373b750ee9346ec2c78dea06dd6c22b1b4a63c4aec"
+    },
+    {
+      "url": "https://portal.ct.gov/drs/drs-forms/current-year-forms/withholding-forms",
+      "title": "Connecticut 2026 withholding forms and publications"
+    }
+  ],
+  "capturedRules": {
+    "effectiveOn": "2026-01-01",
+    "unchangedFrom": 2025,
+    "requiredInputs": ["payrollFrequency", "ctW4WithholdingCode", "additionalWithholding", "reducedWithholding"],
+    "withholdingCodes": ["A", "B", "C", "D", "E", "F"],
+    "algorithm": [
+      "Annualize wages by payroll frequency.",
+      "Select personal exemption from Table A by annualized salary and withholding code.",
+      "Subtract the exemption and calculate initial progressive tax from Table B.",
+      "Add the Table C two-percent-rate phase-out amount.",
+      "Add the Table D tax recapture amount.",
+      "Apply the Table E personal-tax-credit decimal.",
+      "Deannualize, add CT-W4 line 2, subtract line 3, and clamp at zero."
+    ],
+    "specialRules": [
+      "There is no general percentage shortcut; use the calculation rules or withholding tables.",
+      "Nonresident wages may require apportionment and convenience-of-employer treatment.",
+      "Certain lump-sum retirement-distribution mandatory withholding is suspended through December 31, 2026 unless requested."
+    ]
+  },
+  "review": { "formulaTranscribed": false, "tablesTranscribed": false, "activationAllowed": false }
+}

@@ -1,0 +1,3648 @@
+{
+  "$schema": "../../../schema/tax-content-package-v1.schema.json",
+  "schemaVersion": "1.0",
+  "packageCode": "NY-WITHHOLDING",
+  "version": "2026.01.01-draft.1",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "source": "https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nys.pdf",
+  "changeSummary": "Models New York State methods and the NYC and Yonkers obligations as parented calculation jurisdictions with exclusive variants.",
+  "jurisdiction": {
+    "code": "NY",
+    "name": "New York",
+    "type": "State",
+    "countryCode": "US",
+    "parentCode": "US"
+  },
+  "sources": [
+    {
+      "url": "https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nys.pdf",
+      "title": "NYS-50-T-NYS (1/26)",
+      "capturedAtUtc": "2026-08-25T15:00:00Z",
+      "sha256": "e1c2b3440572a10019efe8d8e4d727474c55afb37dd5d18a6a73b94463baf3e8"
+    },
+    {
+      "url": "https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nyc.pdf",
+      "title": "NYS-50-T-NYC (1/26)",
+      "capturedAtUtc": "2026-08-25T05:05:00Z",
+      "sha256": "c380ffaf226332451b4f1609cdf0e0e10dfbf9b976d3961e3e23b09da92a2f4c"
+    },
+    {
+      "url": "https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_y.pdf",
+      "title": "NYS-50-T-Y (1/26)",
+      "capturedAtUtc": "2026-08-25T05:05:00Z",
+      "sha256": "2fb609e46fbd1a7cc481b85558f0c3543aa7c982b6ac4c4402320234d6307858"
+    }
+  ],
+  "businessRules": [
+    {
+      "code": "NY-OBLIGATION-HIERARCHY",
+      "description": "State, NYC resident, Yonkers resident, and Yonkers nonresident are independent additive obligations."
+    },
+    {
+      "code": "NY-EXCLUSIVE-VARIANTS",
+      "description": "Only one calculation variant in an exclusive group may apply to an employee payment."
+    },
+    {
+      "code": "NY-METHOD-II-ROUNDING",
+      "description": "Use the printed Method II table rate and base amount, rounding the variable-rate product to cents away from zero. The publication's two inconsistent semimonthly examples are treated as agency publication errors rather than overrides of the tables."
+    }
+  ],
+  "rules": [
+    {
+      "code": "NY-STATE-SINGLE-EXACT",
+      "jurisdictionCode": "NY",
+      "jurisdictionName": "New York",
+      "jurisdictionType": "State",
+      "taxType": "Employee withholding",
+      "calculationMethod": "base-plus-rate-schedule",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "US",
+      "obligationCode": "NY-STATE-WITHHOLDING",
+      "calculationVariant": "Method II exact — single",
+      "exclusiveGroup": "NY-STATE-WITHHOLDING",
+      "variantPriority": 100,
+      "applicability": {
+        "allOf": [
+          {
+            "field": "filingStatus",
+            "value": "Single"
+          },
+          {
+            "anyOf": [
+              {
+                "field": "residenceState",
+                "value": "NY"
+              },
+              {
+                "field": "workState",
+                "value": "NY"
+              }
+            ]
+          },
+          {
+            "field": "annualizedNetWages",
+            "operator": "lessThan",
+            "value": 1077550
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 7400,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 28.45,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 142.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 284.6,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 308.35,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 616.7,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 1,
+          "notes": "Multiplier applied after the underlying schedule."
+        },
+        {
+          "code": "schedules-json",
+          "label": "Payroll-period schedules",
+          "json": {
+            "Weekly": [
+              {
+                "over": 0,
+                "through": 163,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 163,
+                "through": 225,
+                "baseTax": 6.38,
+                "rate": 0.044
+              },
+              {
+                "over": 225,
+                "through": 267,
+                "baseTax": 9.08,
+                "rate": 0.0515
+              },
+              {
+                "over": 267,
+                "through": 1551,
+                "baseTax": 11.27,
+                "rate": 0.054
+              },
+              {
+                "over": 1551,
+                "through": 1862,
+                "baseTax": 80.58,
+                "rate": 0.059
+              },
+              {
+                "over": 1862,
+                "through": 2070,
+                "baseTax": 98.9,
+                "rate": 0.0703
+              },
+              {
+                "over": 2070,
+                "through": 3032,
+                "baseTax": 113.58,
+                "rate": 0.0753
+              },
+              {
+                "over": 3032,
+                "through": 4142,
+                "baseTax": 186.02,
+                "rate": 0.064
+              },
+              {
+                "over": 4142,
+                "through": 5104,
+                "baseTax": 257.1,
+                "rate": 0.1144
+              },
+              {
+                "over": 5104,
+                "through": 20722,
+                "baseTax": 367.13,
+                "rate": 0.0735
+              }
+            ],
+            "Biweekly": [
+              {
+                "over": 0,
+                "through": 327,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 327,
+                "through": 450,
+                "baseTax": 12.77,
+                "rate": 0.044
+              },
+              {
+                "over": 450,
+                "through": 535,
+                "baseTax": 18.15,
+                "rate": 0.0515
+              },
+              {
+                "over": 535,
+                "through": 3102,
+                "baseTax": 22.54,
+                "rate": 0.054
+              },
+              {
+                "over": 3102,
+                "through": 3723,
+                "baseTax": 161.15,
+                "rate": 0.059
+              },
+              {
+                "over": 3723,
+                "through": 4140,
+                "baseTax": 197.81,
+                "rate": 0.0703
+              },
+              {
+                "over": 4140,
+                "through": 6063,
+                "baseTax": 227.15,
+                "rate": 0.0753
+              },
+              {
+                "over": 6063,
+                "through": 8285,
+                "baseTax": 372.04,
+                "rate": 0.064
+              },
+              {
+                "over": 8285,
+                "through": 10208,
+                "baseTax": 514.19,
+                "rate": 0.1144
+              },
+              {
+                "over": 10208,
+                "through": 41444,
+                "baseTax": 734.27,
+                "rate": 0.0735
+              }
+            ],
+            "Semimonthly": [
+              {
+                "over": 0,
+                "through": 354,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 354,
+                "through": 488,
+                "baseTax": 13.83,
+                "rate": 0.044
+              },
+              {
+                "over": 488,
+                "through": 579,
+                "baseTax": 19.67,
+                "rate": 0.0515
+              },
+              {
+                "over": 579,
+                "through": 3360,
+                "baseTax": 24.42,
+                "rate": 0.054
+              },
+              {
+                "over": 3360,
+                "through": 4033,
+                "baseTax": 174.58,
+                "rate": 0.059
+              },
+              {
+                "over": 4033,
+                "through": 4485,
+                "baseTax": 214.29,
+                "rate": 0.0703
+              },
+              {
+                "over": 4485,
+                "through": 6569,
+                "baseTax": 246.08,
+                "rate": 0.0753
+              },
+              {
+                "over": 6569,
+                "through": 8975,
+                "baseTax": 403.04,
+                "rate": 0.064
+              },
+              {
+                "over": 8975,
+                "through": 11058,
+                "baseTax": 557.04,
+                "rate": 0.1144
+              },
+              {
+                "over": 11058,
+                "through": 44898,
+                "baseTax": 795.46,
+                "rate": 0.0735
+              }
+            ],
+            "Monthly": [
+              {
+                "over": 0,
+                "through": 708,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 708,
+                "through": 975,
+                "baseTax": 27.67,
+                "rate": 0.044
+              },
+              {
+                "over": 975,
+                "through": 1158,
+                "baseTax": 39.33,
+                "rate": 0.0515
+              },
+              {
+                "over": 1158,
+                "through": 6721,
+                "baseTax": 48.83,
+                "rate": 0.054
+              },
+              {
+                "over": 6721,
+                "through": 8067,
+                "baseTax": 349.17,
+                "rate": 0.059
+              },
+              {
+                "over": 8067,
+                "through": 8971,
+                "baseTax": 428.58,
+                "rate": 0.0703
+              },
+              {
+                "over": 8971,
+                "through": 13138,
+                "baseTax": 492.17,
+                "rate": 0.0753
+              },
+              {
+                "over": 13138,
+                "through": 17950,
+                "baseTax": 806.08,
+                "rate": 0.064
+              },
+              {
+                "over": 17950,
+                "through": 22117,
+                "baseTax": 1114.08,
+                "rate": 0.1144
+              },
+              {
+                "over": 22117,
+                "through": 89796,
+                "baseTax": 1590.92,
+                "rate": 0.0735
+              }
+            ],
+            "Daily": [
+              {
+                "over": 0,
+                "through": 33,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 33,
+                "through": 45,
+                "baseTax": 1.28,
+                "rate": 0.044
+              },
+              {
+                "over": 45,
+                "through": 53,
+                "baseTax": 1.82,
+                "rate": 0.0515
+              },
+              {
+                "over": 53,
+                "through": 310,
+                "baseTax": 2.25,
+                "rate": 0.054
+              },
+              {
+                "over": 310,
+                "through": 372,
+                "baseTax": 16.12,
+                "rate": 0.059
+              },
+              {
+                "over": 372,
+                "through": 414,
+                "baseTax": 19.78,
+                "rate": 0.0703
+              },
+              {
+                "over": 414,
+                "through": 606,
+                "baseTax": 22.72,
+                "rate": 0.0753
+              },
+              {
+                "over": 606,
+                "through": 828,
+                "baseTax": 37.2,
+                "rate": 0.064
+              },
+              {
+                "over": 828,
+                "through": 1021,
+                "baseTax": 51.42,
+                "rate": 0.1144
+              },
+              {
+                "over": 1021,
+                "through": 4144,
+                "baseTax": 73.43,
+                "rate": 0.0735
+              }
+            ],
+            "Annual": [
+              {
+                "over": 0,
+                "through": 8500,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 8500,
+                "through": 11700,
+                "baseTax": 332,
+                "rate": 0.044
+              },
+              {
+                "over": 11700,
+                "through": 13900,
+                "baseTax": 472,
+                "rate": 0.0515
+              },
+              {
+                "over": 13900,
+                "through": 80650,
+                "baseTax": 586,
+                "rate": 0.054
+              },
+              {
+                "over": 80650,
+                "through": 96800,
+                "baseTax": 4190,
+                "rate": 0.059
+              },
+              {
+                "over": 96800,
+                "through": 107650,
+                "baseTax": 5143,
+                "rate": 0.0703
+              },
+              {
+                "over": 107650,
+                "through": 157650,
+                "baseTax": 5906,
+                "rate": 0.0753
+              },
+              {
+                "over": 157650,
+                "through": 215400,
+                "baseTax": 9673,
+                "rate": 0.064
+              },
+              {
+                "over": 215400,
+                "through": 265400,
+                "baseTax": 13369,
+                "rate": 0.1144
+              },
+              {
+                "over": 265400,
+                "through": 1077550,
+                "baseTax": 19091,
+                "rate": 0.0735
+              }
+            ]
+          },
+          "notes": "Exact source tables keyed by payroll frequency."
+        }
+      ],
+      "brackets": [],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Official weekly single example",
+          "inputJson": "{\"grossPay\":400,\"allowances\":3,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Weekly\"}",
+          "expectedOutputJson": "{\"withholding\":8.01}"
+        },
+        {
+          "name": "Semimonthly single table calculation",
+          "inputJson": "{\"grossPay\":5000,\"allowances\":1,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Semimonthly\"}",
+          "expectedOutputJson": "{\"withholding\":258.50}"
+        },
+        {
+          "name": "Official monthly single example",
+          "inputJson": "{\"grossPay\":50000,\"allowances\":3,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Monthly\"}",
+          "expectedOutputJson": "{\"withholding\":3576.63}"
+        },
+        {
+          "name": "Official daily single example",
+          "inputJson": "{\"grossPay\":750,\"allowances\":2,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Daily\"}",
+          "expectedOutputJson": "{\"withholding\":44.10}"
+        }
+      ]
+    },
+    {
+      "code": "NY-STATE-MARRIED-EXACT",
+      "jurisdictionCode": "NY",
+      "jurisdictionName": "New York",
+      "jurisdictionType": "State",
+      "taxType": "Employee withholding",
+      "calculationMethod": "base-plus-rate-schedule",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "US",
+      "obligationCode": "NY-STATE-WITHHOLDING",
+      "calculationVariant": "Method II exact — married",
+      "exclusiveGroup": "NY-STATE-WITHHOLDING",
+      "variantPriority": 100,
+      "applicability": {
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "field": "filingStatus",
+                "value": "Married"
+              },
+              {
+                "field": "filingStatus",
+                "value": "Married filing jointly"
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "field": "residenceState",
+                "value": "NY"
+              },
+              {
+                "field": "workState",
+                "value": "NY"
+              }
+            ]
+          },
+          {
+            "field": "annualizedNetWages",
+            "operator": "lessThan",
+            "value": 2155350
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 7950,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 30.6,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 152.9,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 305.8,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 331.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 662.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 1,
+          "notes": "Multiplier applied after the underlying schedule."
+        },
+        {
+          "code": "schedules-json",
+          "label": "Payroll-period schedules",
+          "json": {
+            "Weekly": [
+              {
+                "over": 0,
+                "through": 163,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 163,
+                "through": 225,
+                "baseTax": 6.38,
+                "rate": 0.044
+              },
+              {
+                "over": 225,
+                "through": 267,
+                "baseTax": 9.08,
+                "rate": 0.0515
+              },
+              {
+                "over": 267,
+                "through": 1551,
+                "baseTax": 11.27,
+                "rate": 0.054
+              },
+              {
+                "over": 1551,
+                "through": 1862,
+                "baseTax": 80.58,
+                "rate": 0.059
+              },
+              {
+                "over": 1862,
+                "through": 2070,
+                "baseTax": 98.9,
+                "rate": 0.0657
+              },
+              {
+                "over": 2070,
+                "through": 3032,
+                "baseTax": 112.6,
+                "rate": 0.0707
+              },
+              {
+                "over": 3032,
+                "through": 4068,
+                "baseTax": 180.54,
+                "rate": 0.0801
+              },
+              {
+                "over": 4068,
+                "through": 6215,
+                "baseTax": 263.62,
+                "rate": 0.064
+              },
+              {
+                "over": 6215,
+                "through": 7177,
+                "baseTax": 401.04,
+                "rate": 0.1349
+              },
+              {
+                "over": 7177,
+                "through": 20722,
+                "baseTax": 530.77,
+                "rate": 0.0735
+              },
+              {
+                "over": 20722,
+                "through": 41449,
+                "baseTax": 1526.33,
+                "rate": 0.0765
+              }
+            ],
+            "Biweekly": [
+              {
+                "over": 0,
+                "through": 327,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 327,
+                "through": 450,
+                "baseTax": 12.77,
+                "rate": 0.044
+              },
+              {
+                "over": 450,
+                "through": 535,
+                "baseTax": 18.15,
+                "rate": 0.0515
+              },
+              {
+                "over": 535,
+                "through": 3102,
+                "baseTax": 22.54,
+                "rate": 0.054
+              },
+              {
+                "over": 3102,
+                "through": 3723,
+                "baseTax": 161.15,
+                "rate": 0.059
+              },
+              {
+                "over": 3723,
+                "through": 4140,
+                "baseTax": 197.81,
+                "rate": 0.0657
+              },
+              {
+                "over": 4140,
+                "through": 6063,
+                "baseTax": 225.19,
+                "rate": 0.0707
+              },
+              {
+                "over": 6063,
+                "through": 8137,
+                "baseTax": 361.08,
+                "rate": 0.0801
+              },
+              {
+                "over": 8137,
+                "through": 12431,
+                "baseTax": 527.23,
+                "rate": 0.064
+              },
+              {
+                "over": 12431,
+                "through": 14354,
+                "baseTax": 802.08,
+                "rate": 0.1349
+              },
+              {
+                "over": 14354,
+                "through": 41444,
+                "baseTax": 1061.54,
+                "rate": 0.0735
+              },
+              {
+                "over": 41444,
+                "through": 82898,
+                "baseTax": 3052.65,
+                "rate": 0.0765
+              }
+            ],
+            "Semimonthly": [
+              {
+                "over": 0,
+                "through": 354,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 354,
+                "through": 488,
+                "baseTax": 13.83,
+                "rate": 0.044
+              },
+              {
+                "over": 488,
+                "through": 579,
+                "baseTax": 19.67,
+                "rate": 0.0515
+              },
+              {
+                "over": 579,
+                "through": 3360,
+                "baseTax": 24.42,
+                "rate": 0.054
+              },
+              {
+                "over": 3360,
+                "through": 4033,
+                "baseTax": 174.58,
+                "rate": 0.059
+              },
+              {
+                "over": 4033,
+                "through": 4485,
+                "baseTax": 214.29,
+                "rate": 0.0657
+              },
+              {
+                "over": 4485,
+                "through": 6569,
+                "baseTax": 243.96,
+                "rate": 0.0707
+              },
+              {
+                "over": 6569,
+                "through": 8815,
+                "baseTax": 391.17,
+                "rate": 0.0801
+              },
+              {
+                "over": 8815,
+                "through": 13467,
+                "baseTax": 571.17,
+                "rate": 0.064
+              },
+              {
+                "over": 13467,
+                "through": 15550,
+                "baseTax": 868.92,
+                "rate": 0.1349
+              },
+              {
+                "over": 15550,
+                "through": 44898,
+                "baseTax": 1150,
+                "rate": 0.0735
+              },
+              {
+                "over": 44898,
+                "through": 89806,
+                "baseTax": 3307.04,
+                "rate": 0.0765
+              }
+            ],
+            "Monthly": [
+              {
+                "over": 0,
+                "through": 708,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 708,
+                "through": 975,
+                "baseTax": 27.67,
+                "rate": 0.044
+              },
+              {
+                "over": 975,
+                "through": 1158,
+                "baseTax": 39.33,
+                "rate": 0.0515
+              },
+              {
+                "over": 1158,
+                "through": 6721,
+                "baseTax": 48.83,
+                "rate": 0.054
+              },
+              {
+                "over": 6721,
+                "through": 8067,
+                "baseTax": 349.17,
+                "rate": 0.059
+              },
+              {
+                "over": 8067,
+                "through": 8971,
+                "baseTax": 428.58,
+                "rate": 0.0657
+              },
+              {
+                "over": 8971,
+                "through": 13138,
+                "baseTax": 487.92,
+                "rate": 0.0707
+              },
+              {
+                "over": 13138,
+                "through": 17629,
+                "baseTax": 782.33,
+                "rate": 0.0801
+              },
+              {
+                "over": 17629,
+                "through": 26933,
+                "baseTax": 1142.33,
+                "rate": 0.064
+              },
+              {
+                "over": 26933,
+                "through": 31100,
+                "baseTax": 1737.83,
+                "rate": 0.1349
+              },
+              {
+                "over": 31100,
+                "through": 89796,
+                "baseTax": 2300,
+                "rate": 0.0735
+              },
+              {
+                "over": 89796,
+                "through": 179613,
+                "baseTax": 6614.08,
+                "rate": 0.0765
+              }
+            ],
+            "Daily": [
+              {
+                "over": 0,
+                "through": 33,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 33,
+                "through": 45,
+                "baseTax": 1.28,
+                "rate": 0.044
+              },
+              {
+                "over": 45,
+                "through": 53,
+                "baseTax": 1.82,
+                "rate": 0.0515
+              },
+              {
+                "over": 53,
+                "through": 310,
+                "baseTax": 2.25,
+                "rate": 0.054
+              },
+              {
+                "over": 310,
+                "through": 372,
+                "baseTax": 16.12,
+                "rate": 0.059
+              },
+              {
+                "over": 372,
+                "through": 414,
+                "baseTax": 19.78,
+                "rate": 0.0657
+              },
+              {
+                "over": 414,
+                "through": 606,
+                "baseTax": 22.52,
+                "rate": 0.0707
+              },
+              {
+                "over": 606,
+                "through": 814,
+                "baseTax": 36.11,
+                "rate": 0.0801
+              },
+              {
+                "over": 814,
+                "through": 1243,
+                "baseTax": 52.72,
+                "rate": 0.064
+              },
+              {
+                "over": 1243,
+                "through": 1435,
+                "baseTax": 80.21,
+                "rate": 0.1349
+              },
+              {
+                "over": 1435,
+                "through": 4144,
+                "baseTax": 106.15,
+                "rate": 0.0735
+              },
+              {
+                "over": 4144,
+                "through": 8290,
+                "baseTax": 305.27,
+                "rate": 0.0765
+              }
+            ],
+            "Annual": [
+              {
+                "over": 0,
+                "through": 8500,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 8500,
+                "through": 11700,
+                "baseTax": 332,
+                "rate": 0.044
+              },
+              {
+                "over": 11700,
+                "through": 13900,
+                "baseTax": 472,
+                "rate": 0.0515
+              },
+              {
+                "over": 13900,
+                "through": 80650,
+                "baseTax": 586,
+                "rate": 0.054
+              },
+              {
+                "over": 80650,
+                "through": 96800,
+                "baseTax": 4190,
+                "rate": 0.059
+              },
+              {
+                "over": 96800,
+                "through": 107650,
+                "baseTax": 5143,
+                "rate": 0.0657
+              },
+              {
+                "over": 107650,
+                "through": 157650,
+                "baseTax": 5855,
+                "rate": 0.0707
+              },
+              {
+                "over": 157650,
+                "through": 211550,
+                "baseTax": 9388,
+                "rate": 0.0801
+              },
+              {
+                "over": 211550,
+                "through": 323200,
+                "baseTax": 13708,
+                "rate": 0.064
+              },
+              {
+                "over": 323200,
+                "through": 373200,
+                "baseTax": 20854,
+                "rate": 0.1349
+              },
+              {
+                "over": 373200,
+                "through": 1077550,
+                "baseTax": 27600,
+                "rate": 0.0735
+              },
+              {
+                "over": 1077550,
+                "through": 2155350,
+                "baseTax": 79369,
+                "rate": 0.0765
+              }
+            ]
+          },
+          "notes": "Exact source tables keyed by payroll frequency."
+        }
+      ],
+      "brackets": [],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Semimonthly married table calculation",
+          "inputJson": "{\"grossPay\":5000,\"allowances\":3,\"filingStatus\":\"Married\",\"payrollFrequency\":\"Semimonthly\"}",
+          "expectedOutputJson": "{\"withholding\":248.12}"
+        },
+        {
+          "name": "Official weekly married example",
+          "inputJson": "{\"grossPay\":400,\"allowances\":4,\"filingStatus\":\"Married\",\"payrollFrequency\":\"Weekly\"}",
+          "expectedOutputJson": "{\"withholding\":6.69}"
+        },
+        {
+          "name": "Official monthly married example",
+          "inputJson": "{\"grossPay\":50000,\"allowances\":3,\"filingStatus\":\"Married\",\"payrollFrequency\":\"Monthly\"}",
+          "expectedOutputJson": "{\"withholding\":3622.09}"
+        },
+        {
+          "name": "Official daily married example",
+          "inputJson": "{\"grossPay\":750,\"allowances\":2,\"filingStatus\":\"Married\",\"payrollFrequency\":\"Daily\"}",
+          "expectedOutputJson": "{\"withholding\":44.58}"
+        }
+      ]
+    },
+    {
+      "code": "NY-STATE-SINGLE-WHOLE",
+      "jurisdictionCode": "NY",
+      "jurisdictionName": "New York",
+      "jurisdictionType": "State",
+      "taxType": "Employee withholding",
+      "calculationMethod": "whole-wage-annualized",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "US",
+      "obligationCode": "NY-STATE-WITHHOLDING",
+      "calculationVariant": "Method III whole wage — single",
+      "exclusiveGroup": "NY-STATE-WITHHOLDING",
+      "variantPriority": 200,
+      "applicability": {
+        "allOf": [
+          {
+            "field": "filingStatus",
+            "value": "Single"
+          },
+          {
+            "anyOf": [
+              {
+                "field": "residenceState",
+                "value": "NY"
+              },
+              {
+                "field": "workState",
+                "value": "NY"
+              }
+            ]
+          },
+          {
+            "field": "annualizedNetWages",
+            "operator": "atLeast",
+            "value": 1077550
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 7400,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 28.45,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 142.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 284.6,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 308.35,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 616.7,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 1,
+          "notes": "Multiplier applied to the whole-wage result."
+        }
+      ],
+      "brackets": [
+        {
+          "sequence": 1,
+          "upperBoundAmount": 5000000,
+          "fixedAmount": 0,
+          "rate": 0.1045
+        },
+        {
+          "sequence": 2,
+          "upperBoundAmount": 25000000,
+          "fixedAmount": 0,
+          "rate": 0.111
+        },
+        {
+          "sequence": 3,
+          "upperBoundAmount": 0,
+          "fixedAmount": 0,
+          "rate": 0.117
+        }
+      ],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Single first whole-wage band",
+          "inputJson": "{\"grossPay\":1207400,\"allowances\":0,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Annual\"}",
+          "expectedOutputJson": "{\"withholding\":125400}"
+        }
+      ]
+    },
+    {
+      "code": "NY-STATE-MARRIED-WHOLE",
+      "jurisdictionCode": "NY",
+      "jurisdictionName": "New York",
+      "jurisdictionType": "State",
+      "taxType": "Employee withholding",
+      "calculationMethod": "whole-wage-annualized",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "US",
+      "obligationCode": "NY-STATE-WITHHOLDING",
+      "calculationVariant": "Method III whole wage — married",
+      "exclusiveGroup": "NY-STATE-WITHHOLDING",
+      "variantPriority": 200,
+      "applicability": {
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "field": "filingStatus",
+                "value": "Married"
+              },
+              {
+                "field": "filingStatus",
+                "value": "Married filing jointly"
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "field": "residenceState",
+                "value": "NY"
+              },
+              {
+                "field": "workState",
+                "value": "NY"
+              }
+            ]
+          },
+          {
+            "field": "annualizedNetWages",
+            "operator": "atLeast",
+            "value": 2155350
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 7950,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 30.6,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 152.9,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 305.8,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 331.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 662.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 1,
+          "notes": "Multiplier applied to the whole-wage result."
+        }
+      ],
+      "brackets": [
+        {
+          "sequence": 1,
+          "upperBoundAmount": 5000000,
+          "fixedAmount": 0,
+          "rate": 0.1045
+        },
+        {
+          "sequence": 2,
+          "upperBoundAmount": 25000000,
+          "fixedAmount": 0,
+          "rate": 0.111
+        },
+        {
+          "sequence": 3,
+          "upperBoundAmount": 0,
+          "fixedAmount": 0,
+          "rate": 0.117
+        }
+      ],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Married first whole-wage band",
+          "inputJson": "{\"grossPay\":2307950,\"allowances\":0,\"filingStatus\":\"Married\",\"payrollFrequency\":\"Annual\"}",
+          "expectedOutputJson": "{\"withholding\":240350}"
+        }
+      ]
+    },
+    {
+      "code": "NYC-RESIDENT-SINGLE-EXACT",
+      "jurisdictionCode": "NY-NYC",
+      "jurisdictionName": "New York City",
+      "jurisdictionType": "City",
+      "taxType": "Employee withholding",
+      "calculationMethod": "base-plus-rate-schedule",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "NY",
+      "obligationCode": "NYC-RESIDENT-WITHHOLDING",
+      "calculationVariant": "Method II exact — single",
+      "exclusiveGroup": "NYC-RESIDENT-WITHHOLDING",
+      "variantPriority": 100,
+      "applicability": {
+        "allOf": [
+          {
+            "field": "filingStatus",
+            "value": "Single"
+          },
+          {
+            "field": "residenceCity",
+            "value": "New York City"
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 5000,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 19.25,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 96.15,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 192.3,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 208.35,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 416.7,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 1,
+          "notes": "Multiplier applied after the underlying schedule."
+        },
+        {
+          "code": "schedules-json",
+          "label": "Payroll-period schedules",
+          "json": {
+            "Weekly": [
+              {
+                "over": 0,
+                "through": 154,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 154,
+                "through": 167,
+                "baseTax": 3.15,
+                "rate": 0.028
+              },
+              {
+                "over": 167,
+                "through": 288,
+                "baseTax": 3.54,
+                "rate": 0.0325
+              },
+              {
+                "over": 288,
+                "through": 481,
+                "baseTax": 7.46,
+                "rate": 0.0395
+              },
+              {
+                "over": 481,
+                "through": 1154,
+                "baseTax": 15.06,
+                "rate": 0.0415
+              },
+              {
+                "over": 1154,
+                "through": null,
+                "baseTax": 43,
+                "rate": 0.0425
+              }
+            ],
+            "Biweekly": [
+              {
+                "over": 0,
+                "through": 308,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 308,
+                "through": 334,
+                "baseTax": 6.31,
+                "rate": 0.028
+              },
+              {
+                "over": 334,
+                "through": 577,
+                "baseTax": 7.08,
+                "rate": 0.0325
+              },
+              {
+                "over": 577,
+                "through": 962,
+                "baseTax": 14.92,
+                "rate": 0.0395
+              },
+              {
+                "over": 962,
+                "through": 2308,
+                "baseTax": 30.12,
+                "rate": 0.0415
+              },
+              {
+                "over": 2308,
+                "through": null,
+                "baseTax": 86,
+                "rate": 0.0425
+              }
+            ],
+            "Semimonthly": [
+              {
+                "over": 0,
+                "through": 333,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 333,
+                "through": 362,
+                "baseTax": 6.83,
+                "rate": 0.028
+              },
+              {
+                "over": 362,
+                "through": 625,
+                "baseTax": 7.67,
+                "rate": 0.0325
+              },
+              {
+                "over": 625,
+                "through": 1042,
+                "baseTax": 16.17,
+                "rate": 0.0395
+              },
+              {
+                "over": 1042,
+                "through": 2500,
+                "baseTax": 32.63,
+                "rate": 0.0415
+              },
+              {
+                "over": 2500,
+                "through": null,
+                "baseTax": 93.17,
+                "rate": 0.0425
+              }
+            ],
+            "Monthly": [
+              {
+                "over": 0,
+                "through": 667,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 667,
+                "through": 725,
+                "baseTax": 13.67,
+                "rate": 0.028
+              },
+              {
+                "over": 725,
+                "through": 1250,
+                "baseTax": 15.33,
+                "rate": 0.0325
+              },
+              {
+                "over": 1250,
+                "through": 2083,
+                "baseTax": 32.33,
+                "rate": 0.0395
+              },
+              {
+                "over": 2083,
+                "through": 5000,
+                "baseTax": 65.25,
+                "rate": 0.0415
+              },
+              {
+                "over": 5000,
+                "through": null,
+                "baseTax": 186.33,
+                "rate": 0.0425
+              }
+            ],
+            "Daily": [
+              {
+                "over": 0,
+                "through": 31,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 31,
+                "through": 33.5,
+                "baseTax": 0.63,
+                "rate": 0.028
+              },
+              {
+                "over": 33.5,
+                "through": 57.5,
+                "baseTax": 0.71,
+                "rate": 0.0325
+              },
+              {
+                "over": 57.5,
+                "through": 96,
+                "baseTax": 1.49,
+                "rate": 0.0395
+              },
+              {
+                "over": 96,
+                "through": 231,
+                "baseTax": 3.01,
+                "rate": 0.0415
+              },
+              {
+                "over": 231,
+                "through": null,
+                "baseTax": 8.6,
+                "rate": 0.0425
+              }
+            ],
+            "Annual": [
+              {
+                "over": 0,
+                "through": 8000,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 8000,
+                "through": 8700,
+                "baseTax": 164,
+                "rate": 0.028
+              },
+              {
+                "over": 8700,
+                "through": 15000,
+                "baseTax": 184,
+                "rate": 0.0325
+              },
+              {
+                "over": 15000,
+                "through": 25000,
+                "baseTax": 388,
+                "rate": 0.0395
+              },
+              {
+                "over": 25000,
+                "through": 60000,
+                "baseTax": 783,
+                "rate": 0.0415
+              },
+              {
+                "over": 60000,
+                "through": null,
+                "baseTax": 2236,
+                "rate": 0.0425
+              }
+            ]
+          },
+          "notes": "Exact source tables keyed by payroll frequency."
+        }
+      ],
+      "brackets": [],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Official NYC weekly single example",
+          "inputJson": "{\"grossPay\":400,\"allowances\":3,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Weekly\"}",
+          "expectedOutputJson": "{\"withholding\":6.11}"
+        }
+      ]
+    },
+    {
+      "code": "NYC-RESIDENT-MARRIED-EXACT",
+      "jurisdictionCode": "NY-NYC",
+      "jurisdictionName": "New York City",
+      "jurisdictionType": "City",
+      "taxType": "Employee withholding",
+      "calculationMethod": "base-plus-rate-schedule",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "NY",
+      "obligationCode": "NYC-RESIDENT-WITHHOLDING",
+      "calculationVariant": "Method II exact — married",
+      "exclusiveGroup": "NYC-RESIDENT-WITHHOLDING",
+      "variantPriority": 100,
+      "applicability": {
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "field": "filingStatus",
+                "value": "Married"
+              },
+              {
+                "field": "filingStatus",
+                "value": "Married filing jointly"
+              }
+            ]
+          },
+          {
+            "field": "residenceCity",
+            "value": "New York City"
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 5500,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 21.15,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 105.75,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 211.5,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 229.15,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 458.3,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T-NYC period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 1,
+          "notes": "Multiplier applied after the underlying schedule."
+        },
+        {
+          "code": "schedules-json",
+          "label": "Payroll-period schedules",
+          "json": {
+            "Weekly": [
+              {
+                "over": 0,
+                "through": 154,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 154,
+                "through": 167,
+                "baseTax": 3.15,
+                "rate": 0.028
+              },
+              {
+                "over": 167,
+                "through": 288,
+                "baseTax": 3.54,
+                "rate": 0.0325
+              },
+              {
+                "over": 288,
+                "through": 481,
+                "baseTax": 7.46,
+                "rate": 0.0395
+              },
+              {
+                "over": 481,
+                "through": 1154,
+                "baseTax": 15.06,
+                "rate": 0.0415
+              },
+              {
+                "over": 1154,
+                "through": null,
+                "baseTax": 43,
+                "rate": 0.0425
+              }
+            ],
+            "Biweekly": [
+              {
+                "over": 0,
+                "through": 308,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 308,
+                "through": 334,
+                "baseTax": 6.31,
+                "rate": 0.028
+              },
+              {
+                "over": 334,
+                "through": 577,
+                "baseTax": 7.08,
+                "rate": 0.0325
+              },
+              {
+                "over": 577,
+                "through": 962,
+                "baseTax": 14.92,
+                "rate": 0.0395
+              },
+              {
+                "over": 962,
+                "through": 2308,
+                "baseTax": 30.12,
+                "rate": 0.0415
+              },
+              {
+                "over": 2308,
+                "through": null,
+                "baseTax": 86,
+                "rate": 0.0425
+              }
+            ],
+            "Semimonthly": [
+              {
+                "over": 0,
+                "through": 333,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 333,
+                "through": 362,
+                "baseTax": 6.83,
+                "rate": 0.028
+              },
+              {
+                "over": 362,
+                "through": 625,
+                "baseTax": 7.67,
+                "rate": 0.0325
+              },
+              {
+                "over": 625,
+                "through": 1042,
+                "baseTax": 16.17,
+                "rate": 0.0395
+              },
+              {
+                "over": 1042,
+                "through": 2500,
+                "baseTax": 32.63,
+                "rate": 0.0415
+              },
+              {
+                "over": 2500,
+                "through": null,
+                "baseTax": 93.17,
+                "rate": 0.0425
+              }
+            ],
+            "Monthly": [
+              {
+                "over": 0,
+                "through": 667,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 667,
+                "through": 725,
+                "baseTax": 13.67,
+                "rate": 0.028
+              },
+              {
+                "over": 725,
+                "through": 1250,
+                "baseTax": 15.33,
+                "rate": 0.0325
+              },
+              {
+                "over": 1250,
+                "through": 2083,
+                "baseTax": 32.33,
+                "rate": 0.0395
+              },
+              {
+                "over": 2083,
+                "through": 5000,
+                "baseTax": 65.25,
+                "rate": 0.0415
+              },
+              {
+                "over": 5000,
+                "through": null,
+                "baseTax": 186.33,
+                "rate": 0.0425
+              }
+            ],
+            "Daily": [
+              {
+                "over": 0,
+                "through": 31,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 31,
+                "through": 33.5,
+                "baseTax": 0.63,
+                "rate": 0.028
+              },
+              {
+                "over": 33.5,
+                "through": 57.5,
+                "baseTax": 0.71,
+                "rate": 0.0325
+              },
+              {
+                "over": 57.5,
+                "through": 96,
+                "baseTax": 1.49,
+                "rate": 0.0395
+              },
+              {
+                "over": 96,
+                "through": 231,
+                "baseTax": 3.01,
+                "rate": 0.0415
+              },
+              {
+                "over": 231,
+                "through": null,
+                "baseTax": 8.6,
+                "rate": 0.0425
+              }
+            ],
+            "Annual": [
+              {
+                "over": 0,
+                "through": 8000,
+                "baseTax": 0,
+                "rate": 0.0205
+              },
+              {
+                "over": 8000,
+                "through": 8700,
+                "baseTax": 164,
+                "rate": 0.028
+              },
+              {
+                "over": 8700,
+                "through": 15000,
+                "baseTax": 184,
+                "rate": 0.0325
+              },
+              {
+                "over": 15000,
+                "through": 25000,
+                "baseTax": 388,
+                "rate": 0.0395
+              },
+              {
+                "over": 25000,
+                "through": 60000,
+                "baseTax": 783,
+                "rate": 0.0415
+              },
+              {
+                "over": 60000,
+                "through": null,
+                "baseTax": 2236,
+                "rate": 0.0425
+              }
+            ]
+          },
+          "notes": "Exact source tables keyed by payroll frequency."
+        }
+      ],
+      "brackets": [],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Official NYC semimonthly married example",
+          "inputJson": "{\"grossPay\":5000,\"allowances\":3,\"filingStatus\":\"Married\",\"payrollFrequency\":\"Semimonthly\"}",
+          "expectedOutputJson": "{\"withholding\":184.37}"
+        }
+      ]
+    },
+    {
+      "code": "YONKERS-RESIDENT-SINGLE-EXACT",
+      "jurisdictionCode": "NY-YON-R",
+      "jurisdictionName": "Yonkers",
+      "jurisdictionType": "City",
+      "taxType": "Employee withholding",
+      "calculationMethod": "base-plus-rate-schedule",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "NY",
+      "obligationCode": "YONKERS-RESIDENT-SURCHARGE",
+      "calculationVariant": "Method II state schedule surcharge — single",
+      "exclusiveGroup": "YONKERS-RESIDENT-SURCHARGE",
+      "variantPriority": 100,
+      "applicability": {
+        "allOf": [
+          {
+            "field": "filingStatus",
+            "value": "Single"
+          },
+          {
+            "field": "residenceCity",
+            "value": "Yonkers"
+          },
+          {
+            "field": "annualizedNetWages",
+            "operator": "lessThan",
+            "value": 1077550
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 7400,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 28.45,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 142.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 284.6,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 308.35,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 616.7,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 0.1675,
+          "notes": "Multiplier applied after the underlying schedule."
+        },
+        {
+          "code": "schedules-json",
+          "label": "Payroll-period schedules",
+          "json": {
+            "Weekly": [
+              {
+                "over": 0,
+                "through": 163,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 163,
+                "through": 225,
+                "baseTax": 6.38,
+                "rate": 0.044
+              },
+              {
+                "over": 225,
+                "through": 267,
+                "baseTax": 9.08,
+                "rate": 0.0515
+              },
+              {
+                "over": 267,
+                "through": 1551,
+                "baseTax": 11.27,
+                "rate": 0.054
+              },
+              {
+                "over": 1551,
+                "through": 1862,
+                "baseTax": 80.58,
+                "rate": 0.059
+              },
+              {
+                "over": 1862,
+                "through": 2070,
+                "baseTax": 98.9,
+                "rate": 0.0703
+              },
+              {
+                "over": 2070,
+                "through": 3032,
+                "baseTax": 113.58,
+                "rate": 0.0753
+              },
+              {
+                "over": 3032,
+                "through": 4142,
+                "baseTax": 186.02,
+                "rate": 0.064
+              },
+              {
+                "over": 4142,
+                "through": 5104,
+                "baseTax": 257.1,
+                "rate": 0.1144
+              },
+              {
+                "over": 5104,
+                "through": 20722,
+                "baseTax": 367.13,
+                "rate": 0.0735
+              }
+            ],
+            "Biweekly": [
+              {
+                "over": 0,
+                "through": 327,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 327,
+                "through": 450,
+                "baseTax": 12.77,
+                "rate": 0.044
+              },
+              {
+                "over": 450,
+                "through": 535,
+                "baseTax": 18.15,
+                "rate": 0.0515
+              },
+              {
+                "over": 535,
+                "through": 3102,
+                "baseTax": 22.54,
+                "rate": 0.054
+              },
+              {
+                "over": 3102,
+                "through": 3723,
+                "baseTax": 161.15,
+                "rate": 0.059
+              },
+              {
+                "over": 3723,
+                "through": 4140,
+                "baseTax": 197.81,
+                "rate": 0.0703
+              },
+              {
+                "over": 4140,
+                "through": 6063,
+                "baseTax": 227.15,
+                "rate": 0.0753
+              },
+              {
+                "over": 6063,
+                "through": 8285,
+                "baseTax": 372.04,
+                "rate": 0.064
+              },
+              {
+                "over": 8285,
+                "through": 10208,
+                "baseTax": 514.19,
+                "rate": 0.1144
+              },
+              {
+                "over": 10208,
+                "through": 41444,
+                "baseTax": 734.27,
+                "rate": 0.0735
+              }
+            ],
+            "Semimonthly": [
+              {
+                "over": 0,
+                "through": 354,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 354,
+                "through": 488,
+                "baseTax": 13.83,
+                "rate": 0.044
+              },
+              {
+                "over": 488,
+                "through": 579,
+                "baseTax": 19.67,
+                "rate": 0.0515
+              },
+              {
+                "over": 579,
+                "through": 3360,
+                "baseTax": 24.42,
+                "rate": 0.054
+              },
+              {
+                "over": 3360,
+                "through": 4033,
+                "baseTax": 174.58,
+                "rate": 0.059
+              },
+              {
+                "over": 4033,
+                "through": 4485,
+                "baseTax": 214.29,
+                "rate": 0.0703
+              },
+              {
+                "over": 4485,
+                "through": 6569,
+                "baseTax": 246.08,
+                "rate": 0.0753
+              },
+              {
+                "over": 6569,
+                "through": 8975,
+                "baseTax": 403.04,
+                "rate": 0.064
+              },
+              {
+                "over": 8975,
+                "through": 11058,
+                "baseTax": 557.04,
+                "rate": 0.1144
+              },
+              {
+                "over": 11058,
+                "through": 44898,
+                "baseTax": 795.46,
+                "rate": 0.0735
+              }
+            ],
+            "Monthly": [
+              {
+                "over": 0,
+                "through": 708,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 708,
+                "through": 975,
+                "baseTax": 27.67,
+                "rate": 0.044
+              },
+              {
+                "over": 975,
+                "through": 1158,
+                "baseTax": 39.33,
+                "rate": 0.0515
+              },
+              {
+                "over": 1158,
+                "through": 6721,
+                "baseTax": 48.83,
+                "rate": 0.054
+              },
+              {
+                "over": 6721,
+                "through": 8067,
+                "baseTax": 349.17,
+                "rate": 0.059
+              },
+              {
+                "over": 8067,
+                "through": 8971,
+                "baseTax": 428.58,
+                "rate": 0.0703
+              },
+              {
+                "over": 8971,
+                "through": 13138,
+                "baseTax": 492.17,
+                "rate": 0.0753
+              },
+              {
+                "over": 13138,
+                "through": 17950,
+                "baseTax": 806.08,
+                "rate": 0.064
+              },
+              {
+                "over": 17950,
+                "through": 22117,
+                "baseTax": 1114.08,
+                "rate": 0.1144
+              },
+              {
+                "over": 22117,
+                "through": 89796,
+                "baseTax": 1590.92,
+                "rate": 0.0735
+              }
+            ],
+            "Daily": [
+              {
+                "over": 0,
+                "through": 33,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 33,
+                "through": 45,
+                "baseTax": 1.28,
+                "rate": 0.044
+              },
+              {
+                "over": 45,
+                "through": 53,
+                "baseTax": 1.82,
+                "rate": 0.0515
+              },
+              {
+                "over": 53,
+                "through": 310,
+                "baseTax": 2.25,
+                "rate": 0.054
+              },
+              {
+                "over": 310,
+                "through": 372,
+                "baseTax": 16.12,
+                "rate": 0.059
+              },
+              {
+                "over": 372,
+                "through": 414,
+                "baseTax": 19.78,
+                "rate": 0.0703
+              },
+              {
+                "over": 414,
+                "through": 606,
+                "baseTax": 22.72,
+                "rate": 0.0753
+              },
+              {
+                "over": 606,
+                "through": 828,
+                "baseTax": 37.2,
+                "rate": 0.064
+              },
+              {
+                "over": 828,
+                "through": 1021,
+                "baseTax": 51.42,
+                "rate": 0.1144
+              },
+              {
+                "over": 1021,
+                "through": 4144,
+                "baseTax": 73.43,
+                "rate": 0.0735
+              }
+            ],
+            "Annual": [
+              {
+                "over": 0,
+                "through": 8500,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 8500,
+                "through": 11700,
+                "baseTax": 332,
+                "rate": 0.044
+              },
+              {
+                "over": 11700,
+                "through": 13900,
+                "baseTax": 472,
+                "rate": 0.0515
+              },
+              {
+                "over": 13900,
+                "through": 80650,
+                "baseTax": 586,
+                "rate": 0.054
+              },
+              {
+                "over": 80650,
+                "through": 96800,
+                "baseTax": 4190,
+                "rate": 0.059
+              },
+              {
+                "over": 96800,
+                "through": 107650,
+                "baseTax": 5143,
+                "rate": 0.0703
+              },
+              {
+                "over": 107650,
+                "through": 157650,
+                "baseTax": 5906,
+                "rate": 0.0753
+              },
+              {
+                "over": 157650,
+                "through": 215400,
+                "baseTax": 9673,
+                "rate": 0.064
+              },
+              {
+                "over": 215400,
+                "through": 265400,
+                "baseTax": 13369,
+                "rate": 0.1144
+              },
+              {
+                "over": 265400,
+                "through": 1077550,
+                "baseTax": 19091,
+                "rate": 0.0735
+              }
+            ]
+          },
+          "notes": "Exact source tables keyed by payroll frequency."
+        }
+      ],
+      "brackets": [],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Weekly single resident surcharge",
+          "inputJson": "{\"grossPay\":400,\"allowances\":3,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Weekly\"}",
+          "expectedOutputJson": "{\"withholding\":1.34}"
+        }
+      ]
+    },
+    {
+      "code": "YONKERS-RESIDENT-MARRIED-EXACT",
+      "jurisdictionCode": "NY-YON-R",
+      "jurisdictionName": "Yonkers",
+      "jurisdictionType": "City",
+      "taxType": "Employee withholding",
+      "calculationMethod": "base-plus-rate-schedule",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "NY",
+      "obligationCode": "YONKERS-RESIDENT-SURCHARGE",
+      "calculationVariant": "Method II state schedule surcharge — married",
+      "exclusiveGroup": "YONKERS-RESIDENT-SURCHARGE",
+      "variantPriority": 100,
+      "applicability": {
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "field": "filingStatus",
+                "value": "Married"
+              },
+              {
+                "field": "filingStatus",
+                "value": "Married filing jointly"
+              }
+            ]
+          },
+          {
+            "field": "residenceCity",
+            "value": "Yonkers"
+          },
+          {
+            "field": "annualizedNetWages",
+            "operator": "lessThan",
+            "value": 2155350
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 7950,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 30.6,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 152.9,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 305.8,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 331.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 662.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 0.1675,
+          "notes": "Multiplier applied after the underlying schedule."
+        },
+        {
+          "code": "schedules-json",
+          "label": "Payroll-period schedules",
+          "json": {
+            "Weekly": [
+              {
+                "over": 0,
+                "through": 163,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 163,
+                "through": 225,
+                "baseTax": 6.38,
+                "rate": 0.044
+              },
+              {
+                "over": 225,
+                "through": 267,
+                "baseTax": 9.08,
+                "rate": 0.0515
+              },
+              {
+                "over": 267,
+                "through": 1551,
+                "baseTax": 11.27,
+                "rate": 0.054
+              },
+              {
+                "over": 1551,
+                "through": 1862,
+                "baseTax": 80.58,
+                "rate": 0.059
+              },
+              {
+                "over": 1862,
+                "through": 2070,
+                "baseTax": 98.9,
+                "rate": 0.0657
+              },
+              {
+                "over": 2070,
+                "through": 3032,
+                "baseTax": 112.6,
+                "rate": 0.0707
+              },
+              {
+                "over": 3032,
+                "through": 4068,
+                "baseTax": 180.54,
+                "rate": 0.0801
+              },
+              {
+                "over": 4068,
+                "through": 6215,
+                "baseTax": 263.62,
+                "rate": 0.064
+              },
+              {
+                "over": 6215,
+                "through": 7177,
+                "baseTax": 401.04,
+                "rate": 0.1349
+              },
+              {
+                "over": 7177,
+                "through": 20722,
+                "baseTax": 530.77,
+                "rate": 0.0735
+              },
+              {
+                "over": 20722,
+                "through": 41449,
+                "baseTax": 1526.33,
+                "rate": 0.0765
+              }
+            ],
+            "Biweekly": [
+              {
+                "over": 0,
+                "through": 327,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 327,
+                "through": 450,
+                "baseTax": 12.77,
+                "rate": 0.044
+              },
+              {
+                "over": 450,
+                "through": 535,
+                "baseTax": 18.15,
+                "rate": 0.0515
+              },
+              {
+                "over": 535,
+                "through": 3102,
+                "baseTax": 22.54,
+                "rate": 0.054
+              },
+              {
+                "over": 3102,
+                "through": 3723,
+                "baseTax": 161.15,
+                "rate": 0.059
+              },
+              {
+                "over": 3723,
+                "through": 4140,
+                "baseTax": 197.81,
+                "rate": 0.0657
+              },
+              {
+                "over": 4140,
+                "through": 6063,
+                "baseTax": 225.19,
+                "rate": 0.0707
+              },
+              {
+                "over": 6063,
+                "through": 8137,
+                "baseTax": 361.08,
+                "rate": 0.0801
+              },
+              {
+                "over": 8137,
+                "through": 12431,
+                "baseTax": 527.23,
+                "rate": 0.064
+              },
+              {
+                "over": 12431,
+                "through": 14354,
+                "baseTax": 802.08,
+                "rate": 0.1349
+              },
+              {
+                "over": 14354,
+                "through": 41444,
+                "baseTax": 1061.54,
+                "rate": 0.0735
+              },
+              {
+                "over": 41444,
+                "through": 82898,
+                "baseTax": 3052.65,
+                "rate": 0.0765
+              }
+            ],
+            "Semimonthly": [
+              {
+                "over": 0,
+                "through": 354,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 354,
+                "through": 488,
+                "baseTax": 13.83,
+                "rate": 0.044
+              },
+              {
+                "over": 488,
+                "through": 579,
+                "baseTax": 19.67,
+                "rate": 0.0515
+              },
+              {
+                "over": 579,
+                "through": 3360,
+                "baseTax": 24.42,
+                "rate": 0.054
+              },
+              {
+                "over": 3360,
+                "through": 4033,
+                "baseTax": 174.58,
+                "rate": 0.059
+              },
+              {
+                "over": 4033,
+                "through": 4485,
+                "baseTax": 214.29,
+                "rate": 0.0657
+              },
+              {
+                "over": 4485,
+                "through": 6569,
+                "baseTax": 243.96,
+                "rate": 0.0707
+              },
+              {
+                "over": 6569,
+                "through": 8815,
+                "baseTax": 391.17,
+                "rate": 0.0801
+              },
+              {
+                "over": 8815,
+                "through": 13467,
+                "baseTax": 571.17,
+                "rate": 0.064
+              },
+              {
+                "over": 13467,
+                "through": 15550,
+                "baseTax": 868.92,
+                "rate": 0.1349
+              },
+              {
+                "over": 15550,
+                "through": 44898,
+                "baseTax": 1150,
+                "rate": 0.0735
+              },
+              {
+                "over": 44898,
+                "through": 89806,
+                "baseTax": 3307.04,
+                "rate": 0.0765
+              }
+            ],
+            "Monthly": [
+              {
+                "over": 0,
+                "through": 708,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 708,
+                "through": 975,
+                "baseTax": 27.67,
+                "rate": 0.044
+              },
+              {
+                "over": 975,
+                "through": 1158,
+                "baseTax": 39.33,
+                "rate": 0.0515
+              },
+              {
+                "over": 1158,
+                "through": 6721,
+                "baseTax": 48.83,
+                "rate": 0.054
+              },
+              {
+                "over": 6721,
+                "through": 8067,
+                "baseTax": 349.17,
+                "rate": 0.059
+              },
+              {
+                "over": 8067,
+                "through": 8971,
+                "baseTax": 428.58,
+                "rate": 0.0657
+              },
+              {
+                "over": 8971,
+                "through": 13138,
+                "baseTax": 487.92,
+                "rate": 0.0707
+              },
+              {
+                "over": 13138,
+                "through": 17629,
+                "baseTax": 782.33,
+                "rate": 0.0801
+              },
+              {
+                "over": 17629,
+                "through": 26933,
+                "baseTax": 1142.33,
+                "rate": 0.064
+              },
+              {
+                "over": 26933,
+                "through": 31100,
+                "baseTax": 1737.83,
+                "rate": 0.1349
+              },
+              {
+                "over": 31100,
+                "through": 89796,
+                "baseTax": 2300,
+                "rate": 0.0735
+              },
+              {
+                "over": 89796,
+                "through": 179613,
+                "baseTax": 6614.08,
+                "rate": 0.0765
+              }
+            ],
+            "Daily": [
+              {
+                "over": 0,
+                "through": 33,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 33,
+                "through": 45,
+                "baseTax": 1.28,
+                "rate": 0.044
+              },
+              {
+                "over": 45,
+                "through": 53,
+                "baseTax": 1.82,
+                "rate": 0.0515
+              },
+              {
+                "over": 53,
+                "through": 310,
+                "baseTax": 2.25,
+                "rate": 0.054
+              },
+              {
+                "over": 310,
+                "through": 372,
+                "baseTax": 16.12,
+                "rate": 0.059
+              },
+              {
+                "over": 372,
+                "through": 414,
+                "baseTax": 19.78,
+                "rate": 0.0657
+              },
+              {
+                "over": 414,
+                "through": 606,
+                "baseTax": 22.52,
+                "rate": 0.0707
+              },
+              {
+                "over": 606,
+                "through": 814,
+                "baseTax": 36.11,
+                "rate": 0.0801
+              },
+              {
+                "over": 814,
+                "through": 1243,
+                "baseTax": 52.72,
+                "rate": 0.064
+              },
+              {
+                "over": 1243,
+                "through": 1435,
+                "baseTax": 80.21,
+                "rate": 0.1349
+              },
+              {
+                "over": 1435,
+                "through": 4144,
+                "baseTax": 106.15,
+                "rate": 0.0735
+              },
+              {
+                "over": 4144,
+                "through": 8290,
+                "baseTax": 305.27,
+                "rate": 0.0765
+              }
+            ],
+            "Annual": [
+              {
+                "over": 0,
+                "through": 8500,
+                "baseTax": 0,
+                "rate": 0.039
+              },
+              {
+                "over": 8500,
+                "through": 11700,
+                "baseTax": 332,
+                "rate": 0.044
+              },
+              {
+                "over": 11700,
+                "through": 13900,
+                "baseTax": 472,
+                "rate": 0.0515
+              },
+              {
+                "over": 13900,
+                "through": 80650,
+                "baseTax": 586,
+                "rate": 0.054
+              },
+              {
+                "over": 80650,
+                "through": 96800,
+                "baseTax": 4190,
+                "rate": 0.059
+              },
+              {
+                "over": 96800,
+                "through": 107650,
+                "baseTax": 5143,
+                "rate": 0.0657
+              },
+              {
+                "over": 107650,
+                "through": 157650,
+                "baseTax": 5855,
+                "rate": 0.0707
+              },
+              {
+                "over": 157650,
+                "through": 211550,
+                "baseTax": 9388,
+                "rate": 0.0801
+              },
+              {
+                "over": 211550,
+                "through": 323200,
+                "baseTax": 13708,
+                "rate": 0.064
+              },
+              {
+                "over": 323200,
+                "through": 373200,
+                "baseTax": 20854,
+                "rate": 0.1349
+              },
+              {
+                "over": 373200,
+                "through": 1077550,
+                "baseTax": 27600,
+                "rate": 0.0735
+              },
+              {
+                "over": 1077550,
+                "through": 2155350,
+                "baseTax": 79369,
+                "rate": 0.0765
+              }
+            ]
+          },
+          "notes": "Exact source tables keyed by payroll frequency."
+        }
+      ],
+      "brackets": [],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Semimonthly married resident surcharge",
+          "inputJson": "{\"grossPay\":5000,\"allowances\":3,\"filingStatus\":\"Married\",\"payrollFrequency\":\"Semimonthly\"}",
+          "expectedOutputJson": "{\"withholding\":41.56}"
+        }
+      ]
+    },
+    {
+      "code": "YONKERS-RESIDENT-SINGLE-WHOLE",
+      "jurisdictionCode": "NY-YON-R",
+      "jurisdictionName": "Yonkers",
+      "jurisdictionType": "City",
+      "taxType": "Employee withholding",
+      "calculationMethod": "whole-wage-annualized",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "NY",
+      "obligationCode": "YONKERS-RESIDENT-SURCHARGE",
+      "calculationVariant": "Method III whole wage surcharge — single",
+      "exclusiveGroup": "YONKERS-RESIDENT-SURCHARGE",
+      "variantPriority": 200,
+      "applicability": {
+        "allOf": [
+          {
+            "field": "filingStatus",
+            "value": "Single"
+          },
+          {
+            "field": "residenceCity",
+            "value": "Yonkers"
+          },
+          {
+            "field": "annualizedNetWages",
+            "operator": "atLeast",
+            "value": 1077550
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 7400,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 28.45,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 142.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 284.6,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 308.35,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 616.7,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 0.1675,
+          "notes": "Multiplier applied to the whole-wage result."
+        }
+      ],
+      "brackets": [
+        {
+          "sequence": 1,
+          "upperBoundAmount": 5000000,
+          "fixedAmount": 0,
+          "rate": 0.1045
+        },
+        {
+          "sequence": 2,
+          "upperBoundAmount": 25000000,
+          "fixedAmount": 0,
+          "rate": 0.111
+        },
+        {
+          "sequence": 3,
+          "upperBoundAmount": 0,
+          "fixedAmount": 0,
+          "rate": 0.117
+        }
+      ],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Single whole-wage resident surcharge",
+          "inputJson": "{\"grossPay\":1207400,\"allowances\":0,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Annual\"}",
+          "expectedOutputJson": "{\"withholding\":21004.5}"
+        }
+      ]
+    },
+    {
+      "code": "YONKERS-RESIDENT-MARRIED-WHOLE",
+      "jurisdictionCode": "NY-YON-R",
+      "jurisdictionName": "Yonkers",
+      "jurisdictionType": "City",
+      "taxType": "Employee withholding",
+      "calculationMethod": "whole-wage-annualized",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "NY",
+      "obligationCode": "YONKERS-RESIDENT-SURCHARGE",
+      "calculationVariant": "Method III whole wage surcharge — married",
+      "exclusiveGroup": "YONKERS-RESIDENT-SURCHARGE",
+      "variantPriority": 200,
+      "applicability": {
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "field": "filingStatus",
+                "value": "Married"
+              },
+              {
+                "field": "filingStatus",
+                "value": "Married filing jointly"
+              }
+            ]
+          },
+          {
+            "field": "residenceCity",
+            "value": "Yonkers"
+          },
+          {
+            "field": "annualizedNetWages",
+            "operator": "atLeast",
+            "value": 2155350
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "code": "annual-deduction",
+          "label": "annual-deduction",
+          "number": 7950,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "annual-exemption",
+          "label": "annual-exemption",
+          "number": 1000,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-deduction",
+          "label": "daily-deduction",
+          "number": 30.6,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "daily-exemption",
+          "label": "daily-exemption",
+          "number": 3.85,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-deduction",
+          "label": "weekly-deduction",
+          "number": 152.9,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "weekly-exemption",
+          "label": "weekly-exemption",
+          "number": 19.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-deduction",
+          "label": "biweekly-deduction",
+          "number": 305.8,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "biweekly-exemption",
+          "label": "biweekly-exemption",
+          "number": 38.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-deduction",
+          "label": "semimonthly-deduction",
+          "number": 331.25,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "semimonthly-exemption",
+          "label": "semimonthly-exemption",
+          "number": 41.65,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-deduction",
+          "label": "monthly-deduction",
+          "number": 662.5,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "monthly-exemption",
+          "label": "monthly-exemption",
+          "number": 83.3,
+          "notes": "NYS-50-T period allowance"
+        },
+        {
+          "code": "result-multiplier",
+          "label": "Result multiplier",
+          "number": 0.1675,
+          "notes": "Multiplier applied to the whole-wage result."
+        }
+      ],
+      "brackets": [
+        {
+          "sequence": 1,
+          "upperBoundAmount": 5000000,
+          "fixedAmount": 0,
+          "rate": 0.1045
+        },
+        {
+          "sequence": 2,
+          "upperBoundAmount": 25000000,
+          "fixedAmount": 0,
+          "rate": 0.111
+        },
+        {
+          "sequence": 3,
+          "upperBoundAmount": 0,
+          "fixedAmount": 0,
+          "rate": 0.117
+        }
+      ],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Married whole-wage resident surcharge",
+          "inputJson": "{\"grossPay\":2307950,\"allowances\":0,\"filingStatus\":\"Married\",\"payrollFrequency\":\"Annual\"}",
+          "expectedOutputJson": "{\"withholding\":40258.63}"
+        }
+      ]
+    },
+    {
+      "code": "YONKERS-NONRESIDENT-ANNUALIZED",
+      "jurisdictionCode": "NY-YON-NR",
+      "jurisdictionName": "Yonkers",
+      "jurisdictionType": "City",
+      "taxType": "Employee withholding",
+      "calculationMethod": "annualized-exclusion-rate",
+      "withholdingFrequency": "Employee payroll frequency",
+      "isEmployerSpecific": false,
+      "parentJurisdictionCode": "NY",
+      "obligationCode": "YONKERS-NONRESIDENT-EARNINGS",
+      "calculationVariant": "Method VIII annualized exclusion",
+      "exclusiveGroup": "YONKERS-NONRESIDENT-EARNINGS",
+      "variantPriority": 100,
+      "applicability": {
+        "allOf": [
+          {
+            "field": "workCity",
+            "value": "Yonkers"
+          },
+          {
+            "field": "residenceCity",
+            "operator": "notEquals",
+            "value": "Yonkers"
+          }
+        ]
+      },
+      "parameters": [],
+      "brackets": [
+        {
+          "sequence": 1,
+          "upperBoundAmount": 3999.99,
+          "fixedAmount": 0,
+          "rate": 0
+        },
+        {
+          "sequence": 2,
+          "upperBoundAmount": 10000,
+          "fixedAmount": 3000,
+          "rate": 0.005
+        },
+        {
+          "sequence": 3,
+          "upperBoundAmount": 20000,
+          "fixedAmount": 2000,
+          "rate": 0.005
+        },
+        {
+          "sequence": 4,
+          "upperBoundAmount": 30000,
+          "fixedAmount": 1000,
+          "rate": 0.005
+        },
+        {
+          "sequence": 5,
+          "upperBoundAmount": 0,
+          "fixedAmount": 0,
+          "rate": 0.005
+        }
+      ],
+      "forms": [],
+      "tests": [
+        {
+          "name": "Official weekly no-withholding example",
+          "inputJson": "{\"grossPay\":75,\"allowances\":0,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Weekly\"}",
+          "expectedOutputJson": "{\"withholding\":0}"
+        },
+        {
+          "name": "Official weekly exclusion example",
+          "inputJson": "{\"grossPay\":200,\"allowances\":0,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Weekly\"}",
+          "expectedOutputJson": "{\"withholding\":0.81}"
+        },
+        {
+          "name": "Official semimonthly exclusion example",
+          "inputJson": "{\"grossPay\":400,\"allowances\":0,\"filingStatus\":\"Single\",\"payrollFrequency\":\"Semimonthly\"}",
+          "expectedOutputJson": "{\"withholding\":1.38}"
+        }
+      ]
+    }
+  ],
+  "extensions": {
+    "reviewStatus": "Executable draft with official example coverage",
+    "activationAllowed": true,
+    "limitations": [
+      "Wage-bracket and dollar-to-dollar variants are not included because the exact method is used as the default.",
+      "New York 14-day and convenience-of-employer fact gathering still requires employer configuration."
+    ]
+  }
+}

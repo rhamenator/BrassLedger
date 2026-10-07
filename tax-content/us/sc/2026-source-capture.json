@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-sc",
+  "capturedAtUtc": "2026-08-25T05:14:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://dor.sc.gov/sites/dor/files/forms/WH1603F_2026.pdf", "title": "Formula for Computing South Carolina 2026 Withholding Tax, WH-1603F", "revision": "11/4/25", "mediaType": "application/pdf", "sha256": "588edf32e0876bc842d41dea20eebac59c2b12e5457562d052c0c28ac5e9ffff", "bytes": 101841 },
+    { "url": "https://dor.sc.gov/withholding", "title": "South Carolina Department of Revenue — Withholding", "retrievedAtUtc": "2026-08-25T05:14:00Z", "mediaType": "text/html", "sha256": "29364a75e97f6ebe318d2330affa82eb73886d0b340aa423983eb07336372780", "bytes": 178633 },
+    { "url": "https://www.dor.sc.gov/withholding/withholding-forms", "title": "South Carolina Department of Revenue — Withholding Forms", "retrievedAtUtc": "2026-08-25T05:14:00Z", "mediaType": "text/html", "sha256": "0dcaf8f5561da89672a9108b34c9d10c84ad8e3bf6c763cdb601527264f8ba55", "bytes": 164761 }
+  ],
+  "employeeInputs": [
+    { "code": "allowances", "source": "2026 SC W-4", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "2026 SC W-4", "dataType": "money", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" }
+  ],
+  "calculation": {
+    "method": "AnnualizeDeductThenApplySubtractionOrAdditionSchedule",
+    "annualPersonalAllowance": 5000,
+    "standardDeduction": { "whenZeroAllowances": 0, "whenOneOrMoreAllowancesRateOfGrossWages": 0.10, "annualMaximum": 7500 },
+    "taxableIncomeFormula": "annualGrossWages - (allowances * 5000) - (allowances > 0 ? min(annualGrossWages * 0.10, 7500) : 0)",
+    "annualSubtractionMethod": [
+      { "taxableIncomeAtLeast": 0, "taxableIncomeUnder": 3640, "rate": 0, "subtract": 0 },
+      { "taxableIncomeAtLeast": 3640, "taxableIncomeUnder": 18230, "rate": 0.03, "subtract": 109.20 },
+      { "taxableIncomeAtLeast": 18230, "rate": 0.06, "subtract": 656.10 }
+    ],
+    "annualAdditionMethod": [
+      { "taxableIncomeAtLeast": 0, "taxableIncomeUnder": 3640, "rate": 0, "bracketFloor": 0, "add": 0 },
+      { "taxableIncomeAtLeast": 3640, "taxableIncomeUnder": 18230, "rate": 0.03, "bracketFloor": 3640, "add": 0 },
+      { "taxableIncomeAtLeast": 18230, "rate": 0.06, "bracketFloor": 18230, "add": 437.70 }
+    ],
+    "periodConstants": {
+      "Annual": { "allowance": 5000, "maximumStandardDeduction": 7500 },
+      "Monthly": { "allowance": 416.67, "maximumStandardDeduction": 625 },
+      "Semimonthly": { "allowance": 208.33, "maximumStandardDeduction": 312.50 },
+      "Biweekly": { "allowance": 192.31, "maximumStandardDeduction": 288.46 },
+      "Weekly": { "allowance": 96.15, "maximumStandardDeduction": 144.23 }
+    },
+    "missingCertificate": { "allowances": 0 },
+    "supplementalWages": { "distinctMethodLocated": false, "capturedTreatment": "Taxable wages use the same 2026 formula; no separate flat supplemental rate was located in the captured official sources." },
+    "rounding": { "generalInstructionLocated": false, "officialExampleUsesCents": true },
+    "officialExample": { "weeklyGrossWages": 750, "annualGrossWages": 39000, "allowances": 3, "personalAllowanceDeduction": 15000, "standardDeduction": 3900, "annualTaxableIncome": 20100, "annualWithholding": 549.90, "weeklyWithholding": 10.58 }
+  },
+  "residencyAndWorkRules": {
+    "workStateRule": "Wages are taxed where earned; work performed in South Carolina is subject regardless of residence.",
+    "residentNoTaxStateRule": "When a South Carolina resident earns wages in a state without an individual income tax, withhold South Carolina tax.",
+    "residentOtherTaxStateRule": "When work is performed in another state that imposes withholding, withhold that state's tax rather than South Carolina tax.",
+    "reciprocalStates": [],
+    "multiStateWorkLocationRequired": true,
+    "mixedWorkAllocationMethodLocated": false
+  },
+  "filing": {
+    "quarterlyReturns": [{ "form": "WH-1605", "quarters": [1, 2, 3] }, { "form": "WH-1606", "quarters": [4], "alsoAnnualReturn": true }],
+    "returnDue": "Last day of month following quarter",
+    "zeroReturnsRequiredWhileAccountOpen": true,
+    "residentAgentPayments": "Same frequency as federal withholding payments.",
+    "nonresidentAgentPayments": [{ "quarterlyLiability": "Under $500", "frequency": "Quarterly", "due": "Last day of month after quarter" }, { "quarterlyLiability": "$500 or more", "frequency": "Monthly", "due": "15th of following month" }],
+    "electronicMandate": { "quarterlyWithholdingAtLeast": 15000, "orAnnualPaymentCountAtLeast": 24 },
+    "wageStatementsDue": "January 31"
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": ["No distinct supplemental-wage method, general rounding instruction, or mixed-state allocation formula was located in the captured sources.", "The complete wage-bracket matrix is represented by the official publication and not transcribed here."],
+  "review": { "exact2026PublicationCaptured": true, "formulaTranscribed": true, "bothEquivalentMethodsTranscribed": true, "periodConstantsTranscribed": true, "officialExampleTranscribed": true, "residencyAndWorkRulesTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "supplementalMethodIndependentlyVerified": false, "roundingIndependentlyVerified": false, "mixedWorkAllocationVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Verify supplemental pay, rounding, and mixed-location allocation; import direct tables; and add formula, missing-certificate, residency, and filing-frequency regressions." }
+}

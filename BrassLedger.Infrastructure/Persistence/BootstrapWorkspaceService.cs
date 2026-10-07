@@ -36,6 +36,12 @@ public sealed class BootstrapWorkspaceService(
             return BootstrapWorkspaceResult.AlreadyConfigured();
         }
 
+        var normalizedUserName = request.AdminUserName.Trim().ToUpperInvariant();
+        if (await dbContext.Users.AnyAsync(user => user.UserName.ToUpper() == normalizedUserName, cancellationToken))
+        {
+            return BootstrapWorkspaceResult.Invalid("That administrator username is already in use.");
+        }
+
         var companyId = Guid.NewGuid();
         var company = new Company
         {
@@ -54,13 +60,16 @@ public sealed class BootstrapWorkspaceService(
             .AsNoTracking()
             .SingleAsync(role => role.CompanyId == companyId && role.Name == "Administrator", cancellationToken);
 
+        _ = AccountEmailIdentity.TryNormalize(request.AdminEmail, out var normalizedAdminEmail, out var adminEmailLookupHash);
+
         var adminUser = new AppUser
         {
             Id = Guid.NewGuid(),
             CompanyId = companyId,
             UserName = request.AdminUserName.Trim(),
             DisplayName = request.AdminDisplayName.Trim(),
-            Email = request.AdminEmail.Trim(),
+            Email = normalizedAdminEmail,
+            EmailLookupHash = adminEmailLookupHash,
             SecurityStamp = Guid.NewGuid().ToString("N"),
             Role = adminRole.Name,
             IsActive = true,
@@ -70,6 +79,10 @@ public sealed class BootstrapWorkspaceService(
         adminUser.PasswordHash = passwordHasher.HashPassword(adminUser, request.AdminPassword);
 
         await dbContext.Users.AddAsync(adminUser, cancellationToken);
+        await dbContext.CompanyMemberships.AddAsync(new CompanyMembership { Id = Guid.NewGuid(), UserId = adminUser.Id, CompanyId = companyId, Role = adminRole.Name, IsOwner = true, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow }, cancellationToken);
+        var accounts = DefaultAccountingSetup.CreateAccounts(companyId);
+        await dbContext.Accounts.AddRangeAsync(accounts, cancellationToken);
+        await dbContext.BankAccounts.AddAsync(DefaultAccountingSetup.CreateOperatingBankAccount(companyId, accounts.Single(account => account.OperationalRole == AccountingAccountRoles.OperatingCash).Id), cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return BootstrapWorkspaceResult.Created(new AuthenticatedUser(
@@ -80,8 +93,10 @@ public sealed class BootstrapWorkspaceService(
             adminUser.Email,
             adminUser.Role,
             adminUser.SecurityStamp,
-            adminRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+            adminRole.RequiresMfa ? [] : adminRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            MfaEnrollmentRequired: adminRole.RequiresMfa));
     }
+
 
     private static string Validate(BootstrapWorkspaceRequest request)
     {
@@ -105,9 +120,9 @@ public sealed class BootstrapWorkspaceService(
             return "Enter an administrator display name.";
         }
 
-        if (string.IsNullOrWhiteSpace(request.AdminEmail))
+        if (!AccountEmailIdentity.TryNormalize(request.AdminEmail, out _, out _))
         {
-            return "Enter an administrator email address.";
+            return "Enter a valid administrator email address.";
         }
 
         if (string.IsNullOrWhiteSpace(request.AdminPassword) || request.AdminPassword.Length < 12)

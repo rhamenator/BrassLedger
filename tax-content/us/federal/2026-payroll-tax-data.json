@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "1.0",
+  "packageCode": "US-FEDERAL-PAYROLL-2026",
+  "contentVersion": "2026.1-official",
+  "effectiveOn": "2026-01-01",
+  "expiresOn": "2026-12-31",
+  "reviewStatus": "EngineeringVerified",
+  "activationStatus": "Active",
+  "professionalReviewStatus": "Pending",
+  "retrievedOn": "2026-08-25",
+  "sources": [
+    {
+      "title": "IRS Publication 15-T (2026)",
+      "url": "https://www.irs.gov/pub/irs-pdf/p15t.pdf",
+      "sha256": "31b3e2428628e8d2e40f6266c2c8f1b9b0b6ccd24607895f9b3be3d9d306d3fb"
+    },
+    {
+      "title": "IRS Publication 15 (2026)",
+      "url": "https://www.irs.gov/pub/irs-pdf/p15.pdf",
+      "sha256": "b46c3622439d8521e3a0faca4cd5b5ece3451b526f65f06a5e38d5c9f804c88b"
+    },
+    {
+      "title": "SSA Contribution and Benefit Base",
+      "url": "https://www.ssa.gov/oact/COLA/cbb.html"
+    }
+  ],
+  "worksheet1A": {
+    "periodsPerYear": {
+      "Annual": 1,
+      "Semiannual": 2,
+      "Quarterly": 4,
+      "Monthly": 12,
+      "Semimonthly": 24,
+      "Biweekly": 26,
+      "Weekly": 52,
+      "Daily": 260
+    },
+    "standardAdjustment": {
+      "marriedFilingJointly": 12900,
+      "allOtherStatuses": 8600,
+      "step2Checkbox": 0
+    },
+    "legacyAllowanceAmount": 4300,
+    "standardSchedules": {
+      "Married filing jointly": [
+        [0, 19300, 0, 0], [19300, 44100, 0, 0.10], [44100, 120100, 2480, 0.12], [120100, 230700, 11600, 0.22],
+        [230700, 422850, 35932, 0.24], [422850, 531750, 82048, 0.32], [531750, 788000, 116896, 0.35], [788000, null, 206583.50, 0.37]
+      ],
+      "Single": [
+        [0, 7500, 0, 0], [7500, 19900, 0, 0.10], [19900, 57900, 1240, 0.12], [57900, 113200, 5800, 0.22],
+        [113200, 209275, 17966, 0.24], [209275, 263725, 41024, 0.32], [263725, 648100, 58448, 0.35], [648100, null, 192979.25, 0.37]
+      ],
+      "Head of household": [
+        [0, 15550, 0, 0], [15550, 33250, 0, 0.10], [33250, 83000, 1770, 0.12], [83000, 121250, 7740, 0.22],
+        [121250, 217300, 16155, 0.24], [217300, 271750, 39207, 0.32], [271750, 656150, 56631, 0.35], [656150, null, 191171, 0.37]
+      ]
+    },
+    "step2CheckboxSchedules": {
+      "Married filing jointly": [
+        [0, 16100, 0, 0], [16100, 28500, 0, 0.10], [28500, 66500, 1240, 0.12], [66500, 121800, 5800, 0.22],
+        [121800, 217875, 17966, 0.24], [217875, 272325, 41024, 0.32], [272325, 400450, 58448, 0.35], [400450, null, 103291.75, 0.37]
+      ],
+      "Single": [
+        [0, 8050, 0, 0], [8050, 14250, 0, 0.10], [14250, 33250, 620, 0.12], [33250, 60900, 2900, 0.22],
+        [60900, 108938, 8983, 0.24], [108938, 136163, 20512, 0.32], [136163, 328350, 29224, 0.35], [328350, null, 96489.63, 0.37]
+      ],
+      "Head of household": [
+        [0, 12075, 0, 0], [12075, 20925, 0, 0.10], [20925, 45800, 885, 0.12], [45800, 64925, 3870, 0.22],
+        [64925, 112950, 8077.50, 0.24], [112950, 140175, 19603.50, 0.32], [140175, 332375, 28315.50, 0.35], [332375, null, 95585.50, 0.37]
+      ]
+    }
+  },
+  "fica": {
+    "socialSecurity": { "employeeRate": 0.062, "employerRate": 0.062, "annualWageBase": 184500 },
+    "medicare": { "employeeRate": 0.0145, "employerRate": 0.0145, "annualWageBase": null },
+    "additionalMedicare": { "employeeRate": 0.009, "employerRate": 0, "withholdingThreshold": 200000 }
+  },
+  "futa": {
+    "grossRate": 0.06,
+    "annualWageBase": 7000,
+    "maximumStateCredit": 0.054,
+    "maximumCreditNetRate": 0.006,
+    "activation": "EmployerConfigurationRequired",
+    "warning": "The 0.6% net rate is not universal; eligibility, excluded wages, late state payments, and credit-reduction states can increase FUTA liability."
+  }
+}
