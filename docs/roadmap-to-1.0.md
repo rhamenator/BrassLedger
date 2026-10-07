@@ -26,10 +26,11 @@ and the evidence every change must carry.
   from posted ledger activity.
 - Document statuses are free-form strings. There are no line items on invoices, bills,
   or orders.
-- Schema is created with `EnsureCreatedAsync` and patched with hand-written ALTER TABLE
-  statements (`EnsureLegacySchemaCompatibilityAsync`). There are no EF migrations.
-- All projects target net8.0, which goes out of support on 2026-11-10. CI already uses the
-  .NET 10 SDK.
+- Schema is managed by provider-specific EF Core migrations (`BrassLedger.Migrations.Sqlite`
+  and `BrassLedger.Migrations.PostgreSql`, see docs/database-migrations.md). Legacy
+  pre-ledger databases are adopted through `EnsureLegacySchemaCompatibilityAsync`, which is
+  covered by upgrade tests in `WorkspaceInitializationTests`.
+- All projects target net10.0 (global.json pins the SDK).
 - The API exposes only GET snapshot endpoints plus auth.
 - Release installers are unsigned. There are no SBOMs or checksums.
 
@@ -66,7 +67,7 @@ PR must pass CI on its own, and a phase is finished only when all its PRs are me
   the test stack to matching supported versions. Pin SDK via global.json. Enable
   `<Nullable>enable`, `<TreatWarningsAsErrors>`, .NET analyzers at a sensible level, and
   `Directory.Build.props` / central package management (`Directory.Packages.props`).
-- Replace `EnsureCreated` and the hand-written ALTER TABLE logic with EF Core migrations,
+- (Done: migrations exist; keep the remaining legacy bridge covered by tests.) Replace `EnsureCreated` and the hand-written ALTER TABLE logic with EF Core migrations,
   maintained separately for SQLite and PostgreSQL. Provide a one-time upgrade path for
   existing prerelease databases (detect the legacy schema, then baseline the migration
   history), with a test that upgrades a pre.6-shaped database.

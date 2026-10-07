@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BrassLedger.Web\BrassLedger.Web.csproj" ReferenceOutputAssembly="false" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
   </ItemGroup>
 
   <ItemGroup>

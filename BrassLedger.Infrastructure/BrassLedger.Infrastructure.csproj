@@ -12,6 +12,8 @@
     <PackageReference Include="MailKit" Version="4.17.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="PDFsharp" Version="6.2.4" />
+    <!-- Security pins: override vulnerable transitive versions. -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
   </ItemGroup>
 
   <ItemGroup>
