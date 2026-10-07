@@ -74,7 +74,7 @@ PR must pass CI on its own, and a phase is finished only when all its PRs are me
 - Add structured logging (Serilog or the built-in logging with JSON output),
   OpenTelemetry traces and metrics, health checks (`/health/live`, `/health/ready`), and a
   global ProblemDetails error handler with correlation IDs.
-- Run CI on Ubuntu, Windows, and macOS, plus a PostgreSQL service container job so both
+- (Windows and macOS build-and-test jobs added in dotnet-quality.yml.) Run CI on Ubuntu, Windows, and macOS, plus a PostgreSQL service container job so both
   providers run the infrastructure test suite.
 
 ### Phase 1: Core general ledger
