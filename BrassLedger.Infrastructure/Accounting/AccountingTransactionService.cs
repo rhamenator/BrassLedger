@@ -551,7 +551,7 @@ public sealed partial class AccountingTransactionService(
         if (customer is null) return TransactionResult.Failure("Customer not found.");
         var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, request.Currency, request.ExchangeRateId, request.InvoiceDate, cancellationToken, allowPendingForeignRate);
         if (transactionRateError is not null) return TransactionResult.Failure(transactionRateError);
-        if (projectBilling is not null && transactionRate!.IsForeign) return TransactionResult.Failure("Project-billing invoices currently require the company base currency; prepare an ordinary foreign-currency invoice instead.");
+        if (projectBilling?.BillingBasis == "RetainageRelease" && transactionRate!.IsForeign) return TransactionResult.Failure("Retainage release currently requires the company base currency.");
         if (await db.SalesInvoices.AnyAsync(x => x.CompanyId == companyId && x.InvoiceNumber == request.InvoiceNumber.Trim(), cancellationToken)) return TransactionResult.Failure("Invoice number already exists.");
         var revenueNumbers = (requestedLines.Length == 0 ? [request.RevenueAccountNumber] : requestedLines.Select(line => line.RevenueAccountNumber)).Select(number => number?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (revenueNumbers.Any(string.IsNullOrWhiteSpace)) return TransactionResult.Failure("Every invoice line requires a revenue account.");
@@ -575,7 +575,7 @@ public sealed partial class AccountingTransactionService(
         var taxAmount = requestedLines.Length == 0 ? transactionRate!.ToBase(transactionTaxAmount) : lineAmounts.Sum(line => line.BaseTaxAmount);
         var total = subtotal + taxAmount;
         if (transactionTotal <= 0 || total <= 0) return TransactionResult.Failure("Invoice total must be greater than zero in both transaction and base currency.");
-        var projectPayloadRetainage = projectBilling is null ? 0m : lineAmounts.Sum(line => RoundCurrency(line.Request.DiscountAmount));
+        var projectPayloadRetainage = projectBilling is null ? 0m : lineAmounts.Sum(line => transactionRate!.ToBase(RoundCurrency(line.Request.DiscountAmount)));
         var projectPayloadGross = subtotal + projectPayloadRetainage;
         if (projectBilling is not null
             && (projectBilling.CustomerId != customer.Id || projectBilling.InvoiceNumber != request.InvoiceNumber.Trim() || projectBilling.InvoiceAmount != subtotal || taxAmount != 0m

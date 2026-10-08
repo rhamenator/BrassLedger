@@ -99,9 +99,11 @@ public sealed record ProjectBillingPreviewRequest(
     IReadOnlyList<Guid>? SelectedJournalEntryLineIds = null,
     Guid? ExistingProposalId = null,
     Guid? RetainageReleaseOfProposalId = null,
-    decimal RetainageReleaseAmount = 0m);
-public sealed record ProjectBillingPreviewLine(string SourceType, Guid? SourceId, string SourceKey, string Description, decimal Quantity, decimal UnitPrice, decimal SourceCost, decimal MarkupAmount, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
-public sealed record ProjectBillingPreview(bool Succeeded, string ErrorMessage, Guid ProjectJobId, string ProjectConcurrencyToken, string BillingBasis, decimal ContractAmount, decimal PreviouslyBilledGross, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string Fingerprint, IReadOnlyList<ProjectBillingPreviewLine> Lines)
+    decimal RetainageReleaseAmount = 0m,
+    string Currency = "",
+    Guid? ExchangeRateId = null);
+public sealed record ProjectBillingPreviewLine(string SourceType, Guid? SourceId, string SourceKey, string Description, decimal Quantity, decimal UnitPrice, decimal SourceCost, decimal MarkupAmount, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string RevenueAccountNumber, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null, decimal TransactionUnitPrice = 0m, decimal TransactionGrossAmount = 0m, decimal TransactionRetainageAmount = 0m, decimal TransactionInvoiceAmount = 0m);
+public sealed record ProjectBillingPreview(bool Succeeded, string ErrorMessage, Guid ProjectJobId, string ProjectConcurrencyToken, string BillingBasis, decimal ContractAmount, decimal PreviouslyBilledGross, decimal GrossAmount, decimal RetainageAmount, decimal InvoiceAmount, string Fingerprint, IReadOnlyList<ProjectBillingPreviewLine> Lines, string TransactionCurrency = "", decimal TransactionGrossAmount = 0m, decimal TransactionRetainageAmount = 0m, decimal TransactionInvoiceAmount = 0m, decimal BaseRoundingDifference = 0m)
 {
     public static ProjectBillingPreview Failure(string error) => new(false, error, Guid.Empty, string.Empty, string.Empty, 0m, 0m, 0m, 0m, 0m, string.Empty, []);
 }
