@@ -96,8 +96,9 @@ public sealed partial class AccountingTransactionService
         var project = await db.ProjectJobs.SingleAsync(x => x.Id == preview.ProjectJobId && x.CompanyId == companyId, cancellationToken);
         if (!string.Equals(project.ConcurrencyToken, request.ProjectConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The project changed after preview. Refresh and preview the billing again.");
 
-        var invoiceLines = preview.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, line.UnitPrice, line.RetainageAmount, 0m, line.RevenueAccountNumber, project.Id, line.ProjectPhaseId, line.ProjectCostCodeId, line.DepartmentId, line.ClassId)).ToArray();
-        var invoiceRequest = new CreateInvoiceRequest(project.CustomerId!.Value, request.PreviewRequest.InvoiceNumber.Trim(), request.PreviewRequest.InvoiceDate, request.PreviewRequest.DueDate, preview.GrossAmount, 0m, request.PreviewRequest.RevenueAccountNumber.Trim(), request.PreviewRequest.Description.Trim(), invoiceLines);
+        var foreign = !string.IsNullOrEmpty(preview.TransactionCurrency) && preview.TransactionInvoiceAmount > 0m;
+        var invoiceLines = preview.Lines.Select(line => new SalesInvoiceLineRequest(line.Description, line.Quantity, foreign ? line.TransactionUnitPrice : line.UnitPrice, foreign ? line.TransactionRetainageAmount : line.RetainageAmount, 0m, line.RevenueAccountNumber, project.Id, line.ProjectPhaseId, line.ProjectCostCodeId, line.DepartmentId, line.ClassId)).ToArray();
+        var invoiceRequest = new CreateInvoiceRequest(project.CustomerId!.Value, request.PreviewRequest.InvoiceNumber.Trim(), request.PreviewRequest.InvoiceDate, request.PreviewRequest.DueDate, preview.GrossAmount, 0m, request.PreviewRequest.RevenueAccountNumber.Trim(), request.PreviewRequest.Description.Trim(), invoiceLines, request.PreviewRequest.Currency, request.PreviewRequest.ExchangeRateId);
         var payloadJson = JsonSerializer.Serialize(invoiceRequest);
         var validationContext = new ProjectBillingProposal
         {
@@ -333,9 +334,39 @@ public sealed partial class AccountingTransactionService
         }
         var invoiceTotal = grossTotal - retainageTotal;
         if (invoiceTotal <= 0m) return ProjectBillingPreview.Failure("Retainage leaves no amount to invoice. Reduce retainage or use a future retainage-release workflow.");
-        var fingerprintPayload = JsonSerializer.Serialize(new { Request = request, project.Id, project.ConcurrencyToken, project.ContractAmount, project.RetainagePercent, previousGross, basis, Lines = lines.Select(x => new { x.SourceKey, x.ProjectPhaseId, x.ProjectCostCodeId, x.DepartmentId, x.ClassId, x.Quantity, x.UnitPrice, x.SourceCost, x.MarkupAmount, x.GrossAmount, x.RetainageAmount, x.InvoiceAmount }) });
+        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, request.Currency, request.ExchangeRateId, request.InvoiceDate, cancellationToken);
+        if (transactionRateError is not null) return ProjectBillingPreview.Failure(transactionRateError);
+        var transactionTotals = (Gross: 0m, Retainage: 0m, Invoice: 0m);
+        var baseRoundingDifference = 0m;
+        if (transactionRate!.IsForeign)
+        {
+            if (basis == "RetainageRelease") return ProjectBillingPreview.Failure("Retainage release currently requires the company base currency.");
+            // The foreign invoice is authoritative: translate each base line into the transaction
+            // currency, then derive the posted base amounts exactly as invoice posting does
+            // (ToBase of each transaction amount). Any rounding difference against the base-currency
+            // preview is retained and reported.
+            for (var index = 0; index < lines.Count; index++)
+            {
+                var line = lines[index];
+                var unitPrice = transactionRate.FromBase(line.UnitPrice);
+                var gross = RoundCurrency(line.Quantity * unitPrice);
+                var retainage = Math.Min(transactionRate.FromBase(line.RetainageAmount), gross);
+                var invoice = gross - retainage;
+                var baseRetainage = transactionRate.ToBase(retainage);
+                var baseInvoice = transactionRate.ToBase(invoice);
+                lines[index] = line with { GrossAmount = baseInvoice + baseRetainage, RetainageAmount = baseRetainage, InvoiceAmount = baseInvoice, TransactionUnitPrice = unitPrice, TransactionGrossAmount = gross, TransactionRetainageAmount = retainage, TransactionInvoiceAmount = invoice };
+                transactionTotals = (transactionTotals.Gross + gross, transactionTotals.Retainage + retainage, transactionTotals.Invoice + invoice);
+            }
+            var postedGross = lines.Sum(x => x.GrossAmount);
+            var postedRetainage = lines.Sum(x => x.RetainageAmount);
+            var postedInvoice = lines.Sum(x => x.InvoiceAmount);
+            if (transactionTotals.Invoice <= 0m || postedInvoice <= 0m) return ProjectBillingPreview.Failure("Retainage leaves no amount to invoice in the transaction currency.");
+            baseRoundingDifference = postedInvoice - invoiceTotal;
+            grossTotal = postedGross; retainageTotal = postedRetainage; invoiceTotal = postedInvoice;
+        }
+        var fingerprintPayload = JsonSerializer.Serialize(new { Request = request, TransactionRate = new { transactionRate.TransactionCurrency, transactionRate.ExchangeRateId, transactionRate.FactorToBase }, project.Id, project.ConcurrencyToken, project.ContractAmount, project.RetainagePercent, previousGross, basis, Lines = lines.Select(x => new { x.SourceKey, x.ProjectPhaseId, x.ProjectCostCodeId, x.DepartmentId, x.ClassId, x.Quantity, x.UnitPrice, x.SourceCost, x.MarkupAmount, x.GrossAmount, x.RetainageAmount, x.InvoiceAmount, x.TransactionUnitPrice, x.TransactionGrossAmount, x.TransactionRetainageAmount }) });
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintPayload))).ToLowerInvariant();
-        return new(true, string.Empty, project.Id, project.ConcurrencyToken, basis, project.ContractAmount, previousGross, grossTotal, retainageTotal, invoiceTotal, fingerprint, lines);
+        return new(true, string.Empty, project.Id, project.ConcurrencyToken, basis, project.ContractAmount, previousGross, grossTotal, retainageTotal, invoiceTotal, fingerprint, lines, transactionRate.TransactionCurrency, transactionTotals.Gross, transactionTotals.Retainage, transactionTotals.Invoice, baseRoundingDifference);
     }
 
     private static async Task AddEligibleCostLinesAsync(BrassLedgerDbContext db, Guid companyId, Guid projectId, ProjectBillingPreviewRequest request, HashSet<string> blocked, string revenueAccount, bool includePayroll, List<ProjectBillingPreviewLine> lines, CancellationToken cancellationToken)
