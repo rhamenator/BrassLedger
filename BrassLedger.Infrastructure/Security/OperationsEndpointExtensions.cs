@@ -40,7 +40,7 @@ public static class OperationsEndpointExtensions
     public static IApplicationBuilder UseBrassLedgerCorrelationId(this IApplicationBuilder app) =>
         app.Use(async (context, next) =>
         {
-            var supplied = context.Request.Headers[CorrelationIdHeader].ToString();
+            var supplied = context.Request.Headers[CorrelationIdHeader].ToString().Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal);
             var correlationId = SafeCorrelationId.IsMatch(supplied) ? supplied : Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
             context.TraceIdentifier = correlationId;
             context.Response.OnStarting(() =>

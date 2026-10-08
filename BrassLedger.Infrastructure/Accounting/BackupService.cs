@@ -80,6 +80,8 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
         catch (Exception exception) { return new(false, $"Recovery rehearsal failed: {exception.Message}", backupId); }
         finally
         {
+            // Pooled SQLite handles keep the restored file locked on Windows until released.
+            SqliteConnection.ClearAllPools();
             if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
         }
     }
