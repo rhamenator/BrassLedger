@@ -2536,6 +2536,7 @@ public sealed partial class AccountingTransactionService(
             var taxableEarnings = input.Earnings is { Count: > 0 } ? input.Earnings.Where(earning => earning.IsTaxable).Sum(earning => earning.Amount) : grossPay;
             var preTax = RoundCurrency(requestedDeductions.Where(deduction => deduction.IsPreTax).Sum(deduction => deduction.EmployeeAmount));
             var taxable = Math.Max(0, taxableEarnings - preTax);
+            var futaTaxable = Math.Max(0, taxableEarnings - RoundCurrency(requestedDeductions.Where(deduction => deduction.IsPreTax && deduction.ExemptFromFuta).Sum(deduction => deduction.EmployeeAmount)));
             var allocations = BuildPayrollWorkAllocations(input, employee, taxableEarnings, taxable);
             var residenceJurisdictions = ResidenceJurisdictions(employee);
             var workJurisdictions = allocations.SelectMany(AllocationJurisdictions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -2545,9 +2546,10 @@ public sealed partial class AccountingTransactionService(
             var matchedRules = contentRules.Select(rule =>
                 {
                     var isEmployeeTax = IsEmployeeTax(rule.TaxType);
-                    var scope = ResolvePayrollTaxScope(rule.JurisdictionCode, rule.JurisdictionName, isEmployeeTax, taxable, employee, allocations);
+                    var ruleObligation = NormalizeObligation(rule.ObligationCode, rule.TaxType, rule.JurisdictionCode);
+                    var scope = ResolvePayrollTaxScope(rule.JurisdictionCode, rule.JurisdictionName, isEmployeeTax, IsFutaTax(rule.Code, rule.ObligationCode, rule.TaxType) ? futaTaxable : taxable, employee, allocations);
                     if (scope is null || IsWorkWithholdingExempt(rule.JurisdictionCode, rule.JurisdictionName, isEmployeeTax, scope, rules)) return null;
-                    var context = PayrollTaxContext(scope, employee);
+                    var context = PayrollTaxContext(scope, employee) with { PriorTaxableWages = employeePriorTaxLines.Where(line => line.ObligationCode == ruleObligation).Sum(line => line.TaxableWages) };
                     return TaxRuleEvaluator.IsApplicable(rule, contentParameters.Where(parameter => parameter.TaxRuleSetId == rule.Id), context) ? new ScopedTaxRule(rule, scope, context) : null;
                 })
                 .Where(candidate => candidate is not null)
@@ -2580,7 +2582,7 @@ public sealed partial class AccountingTransactionService(
                 var obligation = NormalizeObligation(string.Empty, profile.TaxType, profile.Jurisdiction);
                 if (selectedObligations.Contains(obligation)) continue;
                 var isEmployeeTax = IsEmployeeTax(profile.TaxType);
-                var scope = ResolvePayrollTaxScope(profile.Jurisdiction, profile.Jurisdiction, isEmployeeTax, taxable, employee, allocations);
+                var scope = ResolvePayrollTaxScope(profile.Jurisdiction, profile.Jurisdiction, isEmployeeTax, IsFutaTax(profile.TaxType, obligation) ? futaTaxable : taxable, employee, allocations);
                 if (scope is null || IsWorkWithholdingExempt(profile.Jurisdiction, profile.Jurisdiction, isEmployeeTax, scope, rules)) continue;
                 selectedObligations.Add(obligation);
                 var priorGross = employeePriorTaxLines.Where(line => line.ObligationCode == obligation).Sum(line => line.TaxableWages);
@@ -2602,7 +2604,7 @@ public sealed partial class AccountingTransactionService(
                 employerTaxes += federal.EmployerAmount;
                 taxLines.Add(new PayrollTaxEstimate(federal.ObligationCode, "US", "Federal", federal.TaxType, federal.TaxableWages, federal.YearToDateTaxableWagesBefore, federal.EmployeeAmount, federal.EmployerAmount, null, null, FederalPayrollTaxCalculator.ContentVersion, federal.Source, federal.CalculationTraceJson));
             }
-            var residentCredit = RoundCurrency(residentEmployeeTaxes * rules.Select(rule => rule.ResidentCreditRate).DefaultIfEmpty(0m).Max());
+            var residentCredit = RoundCurrency(residentEmployeeTaxes * ResidentCreditShare(allocations, rules));
             employeeTaxes -= residentCredit;
             ApplyResidentCredit(taxLines, residentObligations, residentCredit);
             var additionalWithholding = employee.FederalWithholdingExempt ? 0 : Math.Max(0, employee.AdditionalWithholding);
@@ -2622,7 +2624,7 @@ public sealed partial class AccountingTransactionService(
     }
 
     private sealed record PayrollWorkLocationKey(string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict);
-    private sealed record PayrollWorkAllocation(string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict, decimal TaxableWages);
+    internal sealed record PayrollWorkAllocation(string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict, decimal TaxableWages);
     private sealed record PayrollTaxScope(decimal TaxableWages, bool IsResidence, string WorkState, string WorkCounty, string WorkCity, string WorkSchoolDistrict);
     private sealed record ScopedTaxRule(TaxRuleSet Rule, PayrollTaxScope Scope, TaxRuleEvaluationContext Context);
 
@@ -2697,7 +2699,7 @@ public sealed partial class AccountingTransactionService(
             employee.ResidenceSchoolDistrict
         }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
-    private static string[] AllocationJurisdictions(PayrollWorkAllocation allocation) =>
+    internal static string[] AllocationJurisdictions(PayrollWorkAllocation allocation) =>
         new[] { allocation.WorkState, StateJurisdiction(allocation.WorkState), allocation.WorkCounty, allocation.WorkCity, allocation.WorkSchoolDistrict }
             .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
@@ -2878,6 +2880,20 @@ public sealed partial class AccountingTransactionService(
     }
 
     private static string NormalizeLiabilityAccountNumber(string accountNumber, string defaultAccountNumber) => string.IsNullOrWhiteSpace(accountNumber) ? defaultAccountNumber : accountNumber.Trim();
+
+    internal static bool IsFutaTax(params string[] values) => values.Any(value => value.Contains("FUTA", StringComparison.OrdinalIgnoreCase));
+
+    internal static decimal ResidentCreditShare(IReadOnlyList<PayrollWorkAllocation> allocations, IReadOnlyCollection<PayrollJurisdictionRule> rules)
+    {
+        var totalWages = allocations.Sum(allocation => allocation.TaxableWages);
+        if (totalWages <= 0) return 0m;
+        return allocations.Sum(allocation =>
+        {
+            var jurisdictions = AllocationJurisdictions(allocation);
+            var rate = rules.Where(rule => TargetMatchesJurisdictions(rule.WorkJurisdiction, rule.WorkJurisdiction, jurisdictions)).Select(rule => rule.ResidentCreditRate).DefaultIfEmpty(0m).Max();
+            return allocation.TaxableWages / totalWages * rate;
+        });
+    }
 
     private static void ApplyResidentCredit(List<PayrollTaxEstimate> taxLines, IReadOnlySet<string> residentObligations, decimal credit)
     {

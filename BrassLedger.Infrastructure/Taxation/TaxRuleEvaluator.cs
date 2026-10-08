@@ -12,7 +12,8 @@ internal sealed record TaxRuleEvaluationContext(
     string ResidenceCity = "",
     string WorkState = "",
     string WorkCity = "",
-    decimal OtherStateWithholding = 0m);
+    decimal OtherStateWithholding = 0m,
+    decimal PriorTaxableWages = 0m);
 
 internal static class TaxRuleEvaluator
 {
@@ -86,7 +87,7 @@ internal static class TaxRuleEvaluator
         {
             var standardAllowance = Math.Clamp(context.GrossPay * values.GetValueOrDefault("allowance-percent", 0m), values.GetValueOrDefault("allowance-minimum", 0m), values.GetValueOrDefault("allowance-maximum", decimal.MaxValue));
             var localTaxable = Math.Max(0, context.GrossPay - standardAllowance - context.Allowances * values.GetValueOrDefault("dependent-allowance", 0m));
-            amount = Math.Min(localTaxable, values.GetValueOrDefault("wage-base", decimal.MaxValue)) * values.GetValueOrDefault("tax-rate", values.GetValueOrDefault("rate", 0m));
+            amount = Math.Min(localTaxable, RemainingWageBase(values, context)) * values.GetValueOrDefault("tax-rate", values.GetValueOrDefault("rate", 0m));
         }
         else if (rule.CalculationMethod.Equals("hourly-assessment", StringComparison.OrdinalIgnoreCase))
         {
@@ -95,12 +96,15 @@ internal static class TaxRuleEvaluator
         else
         {
             var rate = values.GetValueOrDefault("flat-rate", values.GetValueOrDefault("employer-rate", values.GetValueOrDefault("tax-rate", values.GetValueOrDefault("rate", 0m))));
-            amount = Math.Min(pay, values.GetValueOrDefault("wage-base", decimal.MaxValue)) * rate;
+            amount = Math.Min(pay, RemainingWageBase(values, context)) * rate;
         }
 
         amount = Math.Max(0, amount - context.Allowances * values.GetValueOrDefault("allowance-credit", 0m));
         return decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
     }
+
+    private static decimal RemainingWageBase(IReadOnlyDictionary<string, decimal> values, TaxRuleEvaluationContext context) =>
+        values.TryGetValue("wage-base", out var wageBase) ? Math.Max(0, wageBase - Math.Max(0, context.PriorTaxableWages)) : decimal.MaxValue;
 
     public static bool IsApplicable(TaxRuleSet rule, IEnumerable<TaxRuleParameter> parameters, TaxRuleEvaluationContext context)
     {
