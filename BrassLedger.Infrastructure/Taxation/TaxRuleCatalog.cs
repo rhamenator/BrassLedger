@@ -4,12 +4,24 @@ namespace BrassLedger.Infrastructure.Taxation;
 
 internal static class TaxRuleCatalog
 {
+    public static IReadOnlyList<TaxJurisdictionDefinition> StateJurisdictions { get; } =
+    [
+        new("AL", "Alabama"), new("AK", "Alaska"), new("AZ", "Arizona"), new("AR", "Arkansas"), new("CA", "California"), new("CO", "Colorado"), new("CT", "Connecticut"), new("DE", "Delaware"), new("FL", "Florida"), new("GA", "Georgia"),
+        new("HI", "Hawaii"), new("ID", "Idaho"), new("IL", "Illinois"), new("IN", "Indiana"), new("IA", "Iowa"), new("KS", "Kansas"), new("KY", "Kentucky"), new("LA", "Louisiana"), new("ME", "Maine"), new("MD", "Maryland"),
+        new("MA", "Massachusetts"), new("MI", "Michigan"), new("MN", "Minnesota"), new("MS", "Mississippi"), new("MO", "Missouri"), new("MT", "Montana"), new("NE", "Nebraska"), new("NV", "Nevada"), new("NH", "New Hampshire"), new("NJ", "New Jersey"),
+        new("NM", "New Mexico"), new("NY", "New York"), new("NC", "North Carolina"), new("ND", "North Dakota"), new("OH", "Ohio"), new("OK", "Oklahoma"), new("OR", "Oregon"), new("PA", "Pennsylvania"), new("RI", "Rhode Island"), new("SC", "South Carolina"),
+        new("SD", "South Dakota"), new("TN", "Tennessee"), new("TX", "Texas"), new("UT", "Utah"), new("VT", "Vermont"), new("VA", "Virginia"), new("WA", "Washington"), new("WV", "West Virginia"), new("WI", "Wisconsin"), new("WY", "Wyoming")
+    ];
     public static IReadOnlyList<TaxCalculationMethodDefinition> Methods { get; } =
     [
         new("progressive-annualized", "Progressive annualized", "Annualize wages by pay frequency, apply brackets, then de-annualize withholding."),
+        new("base-plus-rate-schedule", "Base plus rate schedule", "Select the payroll-period schedule, add its base tax to the rate applied above the bracket floor, and optionally apply an obligation multiplier."),
+        new("whole-wage-annualized", "Whole-wage annualized", "Annualize net wages and apply the selected rate to the entire amount rather than only the bracket excess."),
+        new("annualized-exclusion-rate", "Annualized exclusion rate", "Annualize wages, subtract the schedule's exclusion, apply the rate, and de-annualize the result."),
         new("wage-bracket", "Wage bracket", "Use bracket thresholds and fixed amounts from the editable tax tables."),
         new("employer-rate-wage-base", "Employer rate with wage base", "Apply an employer rate until a wage-base ceiling is reached."),
         new("exemption-credit", "Exemption credit", "Apply a flat rate and reduce tax through per-exemption credits or allowances."),
+        new("allowance-phaseout", "Allowance phaseout", "Apply a rate, then subtract a filing-status and payroll-frequency allowance reduced by an income phaseout."),
         new("hourly-assessment", "Hourly assessment", "Calculate the assessment per hour worked instead of by wages."),
         new("local-code-a", "Local code A", "Local percentage with ceiling support, matching the archived local code A behavior."),
         new("local-code-e", "Local code E", "Standard allowance plus dependent allowance before local tax is applied."),
@@ -222,6 +234,8 @@ internal static class TaxRuleCatalog
         string Code,
         string Name,
         string Description);
+
+    public sealed record TaxJurisdictionDefinition(string Code, string Name);
 
     public sealed record LegacyTaxArtifactDefinition(
         string Name,

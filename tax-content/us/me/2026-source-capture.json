@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "1.0",
+  "jurisdictionId": "jurisdiction-us-me",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "capturedAtUtc": "2026-08-25T03:15:00Z",
+  "sources": [
+    {
+      "url": "https://www.maine.gov/revenue/sites/maine.gov.revenue/files/inline-files/26_wh_tab_instr.pdf",
+      "title": "Maine Income Tax Withholding Tables for Individual Income Tax — 2026",
+      "sha256": "8b481a6e8eb732d55212632fa58a1159d656e1289b844183d33f0d1b9a71afb3",
+      "publishedOn": "2025-12-23"
+    },
+    {
+      "url": "https://www.maine.gov/revenue/faq/income-tax-withholding",
+      "title": "Maine income tax withholding FAQ",
+      "reviewedOn": "2026-08-24"
+    }
+  ],
+  "capturedRules": {
+    "effectiveOn": "2026-01-01",
+    "methods": [
+      "Percentage method",
+      "Wage-bracket tables",
+      "Employee-requested flat amount or fixed percentage",
+      "Approved equivalent alternate method"
+    ],
+    "preferredComputerMethod": "Percentage method",
+    "requiredInputs": [
+      "grossPay",
+      "payrollFrequency",
+      "filingStatus",
+      "withholdingAllowances",
+      "additionalWithholding"
+    ],
+    "filingStatuses": {
+      "single": ["Single", "HeadOfHousehold", "MarriedWithholdAtHigherSingleRate"],
+      "married": ["Married"]
+    },
+    "payrollFrequencyAnnualization": {
+      "weekly": 52,
+      "biweekly": 26,
+      "semimonthly": 24,
+      "monthly": 12,
+      "dailyOrMiscellaneous": 260
+    },
+    "allowanceDeduction": 5300,
+    "standardDeduction": {
+      "single": {
+        "fullAmount": 12450,
+        "fullThroughAnnualWages": 102250,
+        "zeroFromAnnualWages": 177250,
+        "phaseoutFormula": "12450 * (177250 - annualWages) / 75000"
+      },
+      "married": {
+        "fullAmount": 27750,
+        "fullThroughAnnualWages": 204550,
+        "zeroFromAnnualWages": 354550,
+        "phaseoutFormula": "27750 * (354550 - annualWages) / 150000"
+      },
+      "phaseoutMultiplierRoundingDigits": 4
+    },
+    "annualWithholdingSchedules": {
+      "single": [
+        { "from": 0, "throughExclusive": 27400, "baseTax": 0, "rate": 0.058, "excessOver": 0 },
+        { "from": 27400, "throughExclusive": 64850, "baseTax": 1589, "rate": 0.0675, "excessOver": 27400 },
+        { "from": 64850, "throughExclusive": null, "baseTax": 4117, "rate": 0.0715, "excessOver": 64850 }
+      ],
+      "married": [
+        { "from": 0, "throughExclusive": 54850, "baseTax": 0, "rate": 0.058, "excessOver": 0 },
+        { "from": 54850, "throughExclusive": 129750, "baseTax": 3181, "rate": 0.0675, "excessOver": 54850 },
+        { "from": 129750, "throughExclusive": null, "baseTax": 8237, "rate": 0.0715, "excessOver": 129750 }
+      ]
+    },
+    "calculationSteps": [
+      "Annualize gross pay using the payroll-frequency multiplier.",
+      "Multiply withholding allowances by $5,300.",
+      "Compute the filing-status standard deduction, including its annual-wage phaseout.",
+      "Subtract allowance and standard deductions from annual wages; clamp taxable annual income at zero.",
+      "Apply the filing-status annual withholding schedule.",
+      "Divide annual withholding by payroll frequency and round to the nearest whole dollar."
+    ],
+    "rounding": {
+      "standardDeductionPhaseoutMultiplierDigits": 4,
+      "payPeriodWithholdingDigits": 0,
+      "midpointRule": "Not stated explicitly; requires reviewer decision and boundary tests before activation."
+    },
+    "supplementalWages": {
+      "combinedWithRegularWages": "Treat as one payment for the regular payroll period.",
+      "paidSeparatelyOptionalRate": 0.05
+    },
+    "specialRules": [
+      "If a Form W-4ME is missing or invalid, withhold as single with zero allowances.",
+      "A nonresident employee ordinarily becomes subject to withholding after working more than 12 days in Maine and earning more than $3,000 during the year.",
+      "Income earned on Maine tribal land by qualifying enrolled tribal members residing on tribal land is not subject to Maine income tax withholding.",
+      "Backup withholding and specified non-wage payments use a flat 5%; qualifying gambling winnings use 7.15%.",
+      "Additional employee-requested withholding is added after the calculated amount."
+    ],
+    "officialExamples": [
+      { "name": "Single weekly below zero taxable income", "grossPay": 300, "payrollFrequency": "weekly", "filingStatus": "single", "withholdingAllowances": 2, "expectedWithholding": 0 },
+      { "name": "Single weekly second bracket", "grossPay": 1000, "payrollFrequency": "weekly", "filingStatus": "single", "withholdingAllowances": 2, "expectedWithholding": 33 },
+      { "name": "Married weekly standard-deduction phaseout", "grossPay": 4500, "payrollFrequency": "weekly", "filingStatus": "married", "withholdingAllowances": 2, "expectedWithholding": 257 }
+    ]
+  },
+  "review": {
+    "formulaTranscribed": true,
+    "wageBracketTablesTranscribed": false,
+    "officialExamplesTranscribed": true,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "blockingItems": [
+      "Implement a declarative standard-deduction phaseout operation.",
+      "Confirm midpoint rounding behavior with boundary cases.",
+      "Execute the three official examples plus generated bracket and phaseout boundary tests."
+    ]
+  }
+}

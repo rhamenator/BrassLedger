@@ -12,6 +12,7 @@ runtime="$3"
 output_dir="$4"
 
 package_root="$(mktemp -d)"
+trap 'rm -rf "$package_root"' EXIT
 app_root="$package_root/Applications/BrassLedger"
 bin_root="$package_root/usr/local/bin"
 
@@ -31,5 +32,3 @@ pkgbuild \
   --version "$version" \
   --install-location "/" \
   "$output_dir/BrassLedger-${version}-${runtime}.pkg"
-
-rm -rf "$package_root"

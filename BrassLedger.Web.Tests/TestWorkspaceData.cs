@@ -7,6 +7,11 @@ internal static class TestWorkspaceData
 {
     public static BusinessWorkspaceSnapshot CreateWorkspace()
     {
+        var projectId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var phaseId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var costCodeId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var departmentId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var classId = Guid.Parse("77777777-7777-7777-7777-777777777777");
         return new BusinessWorkspaceSnapshot(
             GeneratedAtUtc: new DateTime(2026, 4, 3, 12, 0, 0, DateTimeKind.Utc),
             Company: new CompanySnapshot("Brass Ledger Manufacturing", "Brass Ledger Manufacturing, LLC", "84-9923145", "USD", 1, 4),
@@ -23,7 +28,31 @@ internal static class TestWorkspaceData
                 640225.18m,
                 511130.09m,
                 new[] { new AccountSnapshot("1000", "Operating Cash", "Asset", 112540.32m, false) },
-                new[] { new JournalEntrySnapshot("JE-2401", new DateOnly(2026, 3, 30), "Accounts Receivable", "March billing batch", 12720m) }),
+                new[]
+                {
+                    new JournalEntrySnapshot("JE-2401", new DateOnly(2026, 3, 30), "Accounts Receivable", "March billing batch", 12720m),
+                    new JournalEntrySnapshot(
+                        "DRAFT-REVIEW-1",
+                        new DateOnly(2026, 4, 2),
+                        "General Ledger",
+                        "Correct cash classification",
+                        25m,
+                        Guid.Parse("05e8de66-563d-46d2-afde-b9629c078fe2"),
+                        "JE-CORRECT-1",
+                        "Rejected",
+                        DecisionReason: "Attach the supporting bank statement.",
+                        ConcurrencyToken: "journal-review-token",
+                        Lines:
+                        [
+                            new JournalEntryLineSnapshot("1000", "Cash", 25m, 0m),
+                            new JournalEntryLineSnapshot("4000", "Revenue", 0m, 25m)
+                        ])
+                },
+                TrackingDimensions:
+                [
+                    new TrackingDimensionValueSnapshot(departmentId, "Department", null, "FIELD", "Field service", "", new DateOnly(2026, 1, 1), null, true, "department-token"),
+                    new TrackingDimensionValueSnapshot(classId, "Class", null, "COMMERCIAL", "Commercial", "", new DateOnly(2026, 1, 1), null, true, "class-token")
+                ]),
             Receivables: new ReceivablesWorkspace(
                 34715.75m,
                 0,
@@ -54,7 +83,30 @@ internal static class TestWorkspaceData
                 3,
                 135500m,
                 103630m,
-                new[] { new ProjectJobSnapshot("JOB-5007", "Red Mesa Expansion", "Red Mesa Builders", "Open", 45000m, 27600m) }),
+                new[] { new ProjectJobSnapshot("JOB-5007", "Red Mesa Expansion", "Red Mesa Builders", "Active", 45000m, 27600m, projectId) },
+                RetainageReceivable: 125m,
+                RetainageAging:
+                [
+                    new ProjectRetainageAgingSnapshot(
+                        Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                        Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                        "JOB-5007",
+                        "Red Mesa Builders",
+                        "PB-5007-1",
+                        new DateOnly(2026, 3, 1),
+                        30,
+                        250m,
+                        125m,
+                        125m,
+                        125m,
+                        0m,
+                        0m,
+                        0m)
+                ],
+                RetainageControlBalance: 125m,
+                RetainageReconciliationDifference: 0m,
+                Phases: [new ProjectPhaseSnapshot(phaseId, projectId, "JOB-5007", null, "01.10", "Excavation", "Task", "Site preparation", null, null, true, "phase-token")],
+                CostCodes: [new ProjectCostCodeSnapshot(costCodeId, "LAB", "Labor", "Direct cost", "Direct project labor", true, "cost-code-token")]),
             Reporting: new ReportingWorkspace(
                 6,
                 3,
@@ -119,4 +171,3 @@ internal sealed class StubProductCatalogService : IProductCatalogService
         return _assessment;
     }
 }
-

@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-oh",
+  "capturedAtUtc": "2026-08-25T06:35:00Z",
+  "sources": [
+    {
+      "url": "https://dam.assets.ohio.gov/image/upload/tax.ohio.gov/employer_withholding/2025%20Withholding%20Tables/WHT_PercentageMethod_2025.pdf",
+      "title": "Ohio Employer Withholding Percentage Method — effective October 1, 2025",
+      "sha256": "b726a7db435a59f5f9239059840b478d32ea8666b9e7813bb7b342b44099e2e1",
+      "bytes": 161776
+    },
+    {
+      "url": "https://content.govdelivery.com/accounts/OHTAX/bulletins/420a1ea",
+      "title": "New Ohio Withholding Rates Effective August 1, 2026"
+    },
+    {
+      "url": "https://content.govdelivery.com/accounts/OHTAX/bulletins/421a404",
+      "title": "Corrected explanatory text for the August 2026 Percentage Method table"
+    },
+    {
+      "url": "https://content.govdelivery.com/attachments/fancy_images/OHTAX/2026/07/14065694/7024384/wht-percentagemethod-2026_crop.jpg",
+      "title": "Ohio Employer Withholding Percentage Method — effective August 1, 2026",
+      "sha256": "62d378969cc6ad9e2dedd063d4f4bbefe65a854c5b33c60598584a75a03401f3",
+      "bytes": 96692
+    },
+    {
+      "url": "https://dam.assets.ohio.gov/image/upload/tax.ohio.gov/employer_withholding/2025-2026%20NYP%20Updates/2026_OH_Employer_School_District_Withholding_Tax_Filing_Guidelines.pdf",
+      "title": "2026 Ohio Employer and School District Withholding Tax Filing Guidelines",
+      "sha256": "d9d0bfd7ca19115cfc69a52382b9ac88ee1a244cecf3ae872dc3c995796c8f4a",
+      "bytes": 246267
+    },
+    { "url": "https://codes.ohio.gov/ohio-revised-code/section-718.03", "title": "Ohio Revised Code 718.03 — municipal withholding" },
+    { "url": "https://codes.ohio.gov/ohio-revised-code/section-718.011", "title": "Ohio Revised Code 718.011 — municipal work-location day rules" }
+  ],
+  "employeeInputs": [
+    { "code": "stateExemptions", "source": "Ohio IT 4", "dataType": "integer", "missingCertificateDefault": 0 },
+    { "code": "schoolDistrictName", "source": "Ohio IT 4 and The Finder", "dataType": "text" },
+    { "code": "schoolDistrictCode", "source": "Ohio IT 4 and The Finder", "dataType": "text", "format": "Four digits" },
+    { "code": "residenceMunicipality", "dataType": "jurisdiction" },
+    { "code": "principalWorkMunicipality", "dataType": "jurisdiction" },
+    { "code": "workMunicipalityByDay", "dataType": "time-allocation" },
+    { "code": "employerIsSmallEmployerForMunicipalRule", "dataType": "boolean" },
+    { "code": "petroleumRefineryWork", "dataType": "boolean" }
+  ],
+  "stateWithholdingVersions": [
+    {
+      "effectiveOn": "2026-01-01",
+      "effectiveThrough": "2026-07-31",
+      "sourceTableEffectiveOn": "2025-10-01",
+      "annualExemptionValue": 650,
+      "tables": [
+        { "frequency": "Weekly", "exemptionValue": 12.50, "brackets": [{"over":0,"notOver":500.96,"baseTax":0,"rate":0.01775},{"over":500.96,"notOver":1923.08,"baseTax":8.89,"rate":0.02990},{"over":1923.08,"notOver":null,"baseTax":51.41,"rate":0.03640}] },
+        { "frequency": "Biweekly", "exemptionValue": 25.00, "brackets": [{"over":0,"notOver":1001.92,"baseTax":0,"rate":0.01775},{"over":1001.92,"notOver":3846.15,"baseTax":17.78,"rate":0.02990},{"over":3846.15,"notOver":null,"baseTax":102.82,"rate":0.03640}] },
+        { "frequency": "Semimonthly", "exemptionValue": 27.08, "brackets": [{"over":0,"notOver":1085.42,"baseTax":0,"rate":0.01775},{"over":1085.42,"notOver":4166.67,"baseTax":19.27,"rate":0.02990},{"over":4166.67,"notOver":null,"baseTax":111.40,"rate":0.03640}] },
+        { "frequency": "Monthly", "exemptionValue": 54.17, "brackets": [{"over":0,"notOver":2170.83,"baseTax":0,"rate":0.01775},{"over":2170.83,"notOver":8333.33,"baseTax":38.53,"rate":0.02990},{"over":8333.33,"notOver":null,"baseTax":222.79,"rate":0.03640}] },
+        { "frequency": "DailyOrMiscellaneous", "exemptionValue": 2.50, "brackets": [{"over":0,"notOver":100.19,"baseTax":0,"rate":0.01775},{"over":100.19,"notOver":384.62,"baseTax":1.78,"rate":0.02990},{"over":384.62,"notOver":null,"baseTax":10.28,"rate":0.03640}] }
+      ]
+    },
+    {
+      "effectiveOn": "2026-08-01",
+      "effectiveThrough": null,
+      "appliesTo": "Payroll periods ending on or after the effective date",
+      "annualExemptionValue": 650,
+      "tables": [
+        { "frequency": "Weekly", "exemptionValue": 12.50, "brackets": [{"over":0,"notOver":500.96,"baseTax":0,"rate":0.01600},{"over":500.96,"notOver":1923.08,"baseTax":8.02,"rate":0.02990},{"over":1923.08,"notOver":null,"baseTax":50.54,"rate":0.03400}] },
+        { "frequency": "Biweekly", "exemptionValue": 25.00, "brackets": [{"over":0,"notOver":1001.92,"baseTax":0,"rate":0.01600},{"over":1001.92,"notOver":3846.15,"baseTax":16.03,"rate":0.02990},{"over":3846.15,"notOver":null,"baseTax":101.07,"rate":0.03400}] },
+        { "frequency": "Semimonthly", "exemptionValue": 27.08, "brackets": [{"over":0,"notOver":1085.42,"baseTax":0,"rate":0.01600},{"over":1085.42,"notOver":4166.67,"baseTax":17.37,"rate":0.02990},{"over":4166.67,"notOver":null,"baseTax":109.50,"rate":0.03400}] },
+        { "frequency": "Monthly", "exemptionValue": 54.17, "brackets": [{"over":0,"notOver":2170.83,"baseTax":0,"rate":0.01600},{"over":2170.83,"notOver":8333.33,"baseTax":34.73,"rate":0.02990},{"over":8333.33,"notOver":null,"baseTax":218.99,"rate":0.03400}] },
+        { "frequency": "DailyOrMiscellaneous", "exemptionValue": 2.50, "brackets": [{"over":0,"notOver":100.19,"baseTax":0,"rate":0.01600},{"over":100.19,"notOver":384.62,"baseTax":1.60,"rate":0.02990},{"over":384.62,"notOver":null,"baseTax":10.10,"rate":0.03400}] }
+      ]
+    }
+  ],
+  "stateSpecialRules": {
+    "supplementalCompensationRateFrom2026": 0.0275,
+    "missingIt4Exemptions": 0,
+    "electronicFilingRequired": true,
+    "forms": ["IT 4", "IT 501", "IT 941"]
+  },
+  "schoolDistrictWithholding": {
+    "jurisdictionType": "SchoolDistrict",
+    "selectionBasis": "employeeResidenceAddress",
+    "employerPresenceInDistrictRequired": false,
+    "jurisdictionLookup": "https://thefinder.tax.ohio.gov/StreamlineSalesTaxWeb/default_schooldistrict.aspx",
+    "traditionalTaxBase": "Use the state employer-withholding wage base and exemption count, then the district rate table.",
+    "earnedIncomeTaxBase": "Apply the district flat withholding rate without personal-exemption reduction.",
+    "forms": ["IT 4", "SD 101", "SD 141"],
+    "districtRateCaptureStatus": "PendingOfficialFinderExport",
+    "reasonNotEmbedded": "Rates and four-digit district codes are address-sensitive and must be captured as effective-dated jurisdictions from The Finder rather than inferred from postal city or county."
+  },
+  "municipalWithholding": {
+    "jurisdictionType": "City",
+    "requiredWorkRule": "Withhold qualifying wages earned in a taxing municipality at that municipality's rate.",
+    "optionalResidenceRule": "An employer may also withhold for the employee's residence municipality at the employee's request.",
+    "generalTransientWorkThresholdDays": 20,
+    "petroleumRefineryThresholdDays": 12,
+    "smallEmployerFixedLocationBranch": true,
+    "multiMunicipalityAllocationRequired": true,
+    "rateAndBoundaryCaptureStatus": "PendingOfficialMunicipalFinderAndAdministratorExports",
+    "administrationMayVary": ["Municipality", "Regional Income Tax Agency", "Central Collection Agency"]
+  },
+  "review": {
+    "statePercentageTablesTranscribed": true,
+    "midyearVersionBoundaryTranscribed": true,
+    "schoolDistrictBusinessLogicTranscribed": true,
+    "municipalBusinessLogicTranscribed": true,
+    "schoolDistrictRatesTranscribed": false,
+    "municipalRatesTranscribed": false,
+    "officialExamplesTranscribed": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Import the effective-dated school-district and municipal lookup datasets, add official examples and rounding tests for both state intervals, and implement municipal day tracking before activation."
+  }
+}

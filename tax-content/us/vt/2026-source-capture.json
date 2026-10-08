@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-vt",
+  "capturedAtUtc": "2026-08-25T05:14:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://tax.vermont.gov/sites/tax/files/documents/GB-1210-2026.pdf", "title": "2026 Vermont Income Tax Withholding Instructions, Tables, and Charts, GB-1210-2026", "revision": "2026", "mediaType": "application/pdf", "sha256": "4656760209691fdd4404f2a10fa4edf57622e24dc7dbaa10ac113f2775f9687d", "bytes": 992046 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "W-4VT", "dataType": "enum", "values": ["Single", "Married"] },
+    { "code": "withholdingAllowances", "source": "W-4VT", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "W-4VT or federal W-4 fallback", "dataType": "money", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "vermontHours", "dataType": "decimal", "minimum": 0 },
+    { "code": "totalHours", "dataType": "decimal", "exclusiveMinimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["PercentageMethod", "PublishedWageBracketCharts"],
+    "annualAllowanceValue": 5400,
+    "periodicAllowanceValues": { "Weekly": 103.85, "Biweekly": 207.69, "Semimonthly": 225, "Monthly": 450, "Quarterly": 1350, "Annual": 5400, "DailyOrMiscellaneous": 20.77 },
+    "annualSchedules": {
+      "Single": [
+        { "over": 0, "through": 3925, "baseTax": 0, "rate": 0 },
+        { "over": 3925, "through": 54675, "baseTax": 0, "rate": 0.0335 },
+        { "over": 54675, "through": 126775, "baseTax": 1700.13, "rate": 0.066 },
+        { "over": 126775, "through": 260225, "baseTax": 6458.73, "rate": 0.076 },
+        { "over": 260225, "baseTax": 16600.93, "rate": 0.0875 }
+      ],
+      "Married": [
+        { "over": 0, "through": 11775, "baseTax": 0, "rate": 0 },
+        { "over": 11775, "through": 96475, "baseTax": 0, "rate": 0.0335 },
+        { "over": 96475, "through": 216525, "baseTax": 2837.45, "rate": 0.066 },
+        { "over": 216525, "through": 323825, "baseTax": 10760.75, "rate": 0.076 },
+        { "over": 323825, "baseTax": 18915.55, "rate": 0.0875 }
+      ]
+    },
+    "federalW4Fallback": { "allowedWhenW4VTMissing": true, "additionalVermontWithholding": "30 percent of federal W-4 additional withholding" },
+    "supplementalAndNonwage": { "periodicPayments": "Use Vermont wage charts or tables", "nonperiodicEstimate": "30 percent of federal withholding", "nonqualifiedDeferredCompensationRate": 0.06 },
+    "rounding": { "generalInstructionLocated": false, "tablesAndExampleUseCents": true },
+    "officialExample": { "frequency": "Weekly", "status": "Married", "grossWages": 1800, "allowances": 2, "allowanceDeduction": 207.70, "netWages": 1592.30, "bracketFloor": 226, "rate": 0.0335, "withholding": 45.77 }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Vermont withholding generally applies to federally subject payments to Vermont residents.",
+    "nonresidentRule": "Vermont withholding applies to federally subject payments for services performed in Vermont.",
+    "nonresidentMixedWorkFormula": "fullPaymentVermontWithholding * (vermontHours / totalHours)",
+    "nonresidentOfficialExample": { "vermontHours": 16, "totalHours": 40, "fullPaymentWithholding": 48, "vermontWithholding": 19.20 },
+    "residentMixedWorkFormula": "Withholding on full payment minus income tax withheld by state where outside services were performed.",
+    "movesIntoVermont": "Treat as resident for withholding purposes.",
+    "reciprocalStates": [],
+    "multiStateWorkLocationRequired": true
+  },
+  "filing": {
+    "assignedFrequencies": ["Quarterly", "Monthly", "Semiweekly"],
+    "assignmentBasis": "Department determines frequency from annual withholding totals; thresholds are not published in GB-1210.",
+    "quarterlyReconciliation": { "form": "WHT-436", "dueDates": ["April 25", "July 25", "October 25", "January 25"], "zeroReturnsRequired": true },
+    "monthlyPaymentDue": "25th day of following month",
+    "annualReconciliation": { "form": "WHT-434", "due": "January 31" },
+    "electronicAnnualThreshold": 10,
+    "payrollFilingServicesElectronicRequired": true
+  },
+  "otherPayrollTaxes": {
+    "childCareContribution": { "rate": 0.0044, "wageBase": "IRC section 3401 wages subject to Vermont withholding", "maximumEmployeeShareOfContribution": 0.25, "maximumEmployeeWageRate": 0.0011, "employerMinimumShareOfContribution": 0.75, "samePaymentFrequencyAsWithholding": true, "reportedOn": "WHT-436", "physicalVermontRemoteWorkIncluded": true, "courtesyResidentWithholdingOnOutsideWorkExcluded": true }
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": ["The full wage-bracket charts remain in the checksummed publication rather than being duplicated.", "The Department assigns filing frequency but GB-1210 does not state numeric assignment thresholds.", "No general calculation rounding rule is stated."],
+  "review": { "exact2026PublicationCaptured": true, "annualSchedulesTranscribed": true, "allowanceValuesTranscribed": true, "supplementalAndDeferredMethodsTranscribed": true, "officialExamplesTranscribed": true, "multiStateRulesTranscribed": true, "childCareContributionTranscribed": true, "rawSourcesChecksummed": true, "filingAssignmentThresholdsVerified": false, "roundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import direct tables, obtain filing-assignment thresholds, verify rounding, and add allowance, bracket, hour-allocation, resident-credit, nonperiodic, deferred-compensation, CCC, and filing regressions." }
+}

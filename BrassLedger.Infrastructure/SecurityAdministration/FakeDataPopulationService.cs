@@ -104,6 +104,13 @@ public sealed class FakeDataPopulationService(
             new SalesInvoice { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[Math.Min(1, customers.Count - 1)].Id, InvoiceNumber = "INV-30104", InvoiceDate = new DateOnly(2026, 4, 3), DueDate = new DateOnly(2026, 5, 3), Status = "Partial", Subtotal = 11620m, TaxAmount = 0m, TotalAmount = 11620m, BalanceDue = 5820m },
             new SalesInvoice { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[Math.Min(2, customers.Count - 1)].Id, InvoiceNumber = "INV-30106", InvoiceDate = new DateOnly(2026, 4, 5), DueDate = new DateOnly(2026, 5, 5), Status = "Open", Subtotal = 8420.15m, TaxAmount = 505.21m, TotalAmount = 8925.36m, BalanceDue = 8925.36m }
         };
+        var baseCurrency = await dbContext.Companies.Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        foreach (var invoice in invoices)
+        {
+            invoice.TransactionCurrency = baseCurrency; invoice.TransactionSubtotal = invoice.Subtotal; invoice.TransactionTaxAmount = invoice.TaxAmount;
+            invoice.TransactionTotalAmount = invoice.TotalAmount; invoice.TransactionBalanceDue = invoice.BalanceDue; invoice.ExchangeRateToBase = 1m;
+            invoice.ExchangeRateEffectiveOn = invoice.InvoiceDate; invoice.ExchangeRateSource = "Company base currency";
+        }
 
         await dbContext.SalesInvoices.AddRangeAsync(invoices, cancellationToken);
         return invoices.Length;
@@ -146,6 +153,12 @@ public sealed class FakeDataPopulationService(
             new VendorBill { Id = Guid.NewGuid(), CompanyId = companyId, VendorId = vendors[Math.Min(1, vendors.Count - 1)].Id, BillNumber = "B-9304", BillDate = new DateOnly(2026, 4, 4), DueDate = new DateOnly(2026, 4, 19), Status = "Open", TotalAmount = 4630.75m, BalanceDue = 4630.75m },
             new VendorBill { Id = Guid.NewGuid(), CompanyId = companyId, VendorId = vendors[Math.Min(2, vendors.Count - 1)].Id, BillNumber = "B-9307", BillDate = new DateOnly(2026, 4, 6), DueDate = new DateOnly(2026, 4, 16), Status = "Open", TotalAmount = 2190m, BalanceDue = 2190m }
         };
+        var baseCurrency = await dbContext.Companies.Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        foreach (var bill in bills)
+        {
+            bill.TransactionCurrency = baseCurrency; bill.TransactionTotalAmount = bill.TotalAmount; bill.TransactionBalanceDue = bill.BalanceDue;
+            bill.ExchangeRateToBase = 1m; bill.ExchangeRateEffectiveOn = bill.BillDate; bill.ExchangeRateSource = "Company base currency";
+        }
 
         await dbContext.VendorBills.AddRangeAsync(bills, cancellationToken);
         return bills.Length;
@@ -184,8 +197,8 @@ public sealed class FakeDataPopulationService(
 
         var orders = new[]
         {
-            new SalesOrder { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[0].Id, OrderNumber = "SO-8801", OrderedOn = new DateOnly(2026, 4, 7), Status = "Open", TotalAmount = 15440m },
-            new SalesOrder { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[Math.Min(1, customers.Count - 1)].Id, OrderNumber = "SO-8802", OrderedOn = new DateOnly(2026, 4, 7), Status = "Allocated", TotalAmount = 9320m }
+            new SalesOrder { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[0].Id, OrderNumber = "SO-8801", OrderedOn = new DateOnly(2026, 4, 7), Status = "LegacyReference", TotalAmount = 15440m, Notes = "Synthetic header-only reference; create a line-based order before fulfillment.", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") },
+            new SalesOrder { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customers[Math.Min(1, customers.Count - 1)].Id, OrderNumber = "SO-8802", OrderedOn = new DateOnly(2026, 4, 7), Status = "LegacyReference", TotalAmount = 9320m, Notes = "Synthetic header-only reference; create a line-based order before fulfillment.", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }
         };
 
         await dbContext.SalesOrders.AddRangeAsync(orders, cancellationToken);
@@ -240,10 +253,12 @@ public sealed class FakeDataPopulationService(
             return 0;
         }
 
+        var customers = await dbContext.Customers.Where(customer => customer.CompanyId == companyId).ToDictionaryAsync(customer => customer.Name, cancellationToken);
+        if (!customers.TryGetValue("Harbor View Contractors", out var harborCustomer) || !customers.TryGetValue("Blue Canyon Transit", out var transitCustomer)) return 0;
         var jobs = new[]
         {
-            new ProjectJob { Id = Guid.NewGuid(), CompanyId = companyId, JobNumber = "JOB-8801", Name = "Harbor Retrofit Phase 1", CustomerName = "Harbor View Contractors", Status = "Open", BudgetAmount = 58000m, ActualCost = 17120m },
-            new ProjectJob { Id = Guid.NewGuid(), CompanyId = companyId, JobNumber = "JOB-8802", Name = "Transit Depot Refit", CustomerName = "Blue Canyon Transit", Status = "Billing", BudgetAmount = 41300m, ActualCost = 40110m }
+            new ProjectJob { Id = Guid.NewGuid(), CompanyId = companyId, JobNumber = "JOB-8801", Name = "Harbor Retrofit Phase 1", CustomerId = harborCustomer.Id, CustomerName = harborCustomer.Name, Status = "Active", StartDate = new DateOnly(2026, 1, 12), ExpectedEndDate = new DateOnly(2026, 11, 30), BillingMethod = "TimeAndMaterials", ContractAmount = 76000m, BudgetAmount = 58000m, CreatedAtUtc = DateTimeOffset.UtcNow },
+            new ProjectJob { Id = Guid.NewGuid(), CompanyId = companyId, JobNumber = "JOB-8802", Name = "Transit Depot Refit", CustomerId = transitCustomer.Id, CustomerName = transitCustomer.Name, Status = "Active", StartDate = new DateOnly(2026, 2, 9), ExpectedEndDate = new DateOnly(2026, 9, 30), BillingMethod = "FixedPrice", ContractAmount = 55000m, RetainagePercent = 0.05m, BudgetAmount = 41300m, CreatedAtUtc = DateTimeOffset.UtcNow }
         };
 
         await dbContext.ProjectJobs.AddRangeAsync(jobs, cancellationToken);
@@ -315,6 +330,7 @@ public sealed class FakeDataPopulationService(
             UserName = userName,
             DisplayName = displayName,
             Email = email,
+            EmailLookupHash = AccountEmailIdentity.ComputeLookupHash(email),
             SecurityStamp = Guid.NewGuid().ToString("N"),
             Role = role,
             IsActive = true,

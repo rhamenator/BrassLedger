@@ -49,19 +49,27 @@ Module-by-module usage links:
 
 - Overview and daily review: [docs/user-guide.md#overview](docs/user-guide.md#overview)
 - General ledger: [docs/user-guide.md#ledger](docs/user-guide.md#ledger)
+- Banking imports, matching, transfers, and reconciliation: [docs/banking-guide.md](docs/banking-guide.md)
+- QuickBooks and accounting interchange: [docs/accounting-interchange-guide.md](docs/accounting-interchange-guide.md)
 - Receivables: [docs/user-guide.md#receivables](docs/user-guide.md#receivables)
 - Payables: [docs/user-guide.md#payables](docs/user-guide.md#payables)
-- Operations: [docs/user-guide.md#operations](docs/user-guide.md#operations)
+- Operations, including controlled quote-to-order conversion: [docs/user-guide.md#operations](docs/user-guide.md#operations)
+- Purchasing and inventory receiving: [docs/purchasing-guide.md](docs/purchasing-guide.md)
+- Inventory warehouses, bins, and transfers: [docs/inventory-locations-guide.md](docs/inventory-locations-guide.md)
+- Sales orders and inventory fulfillment: [docs/sales-fulfillment-guide.md](docs/sales-fulfillment-guide.md)
 - Payroll: [docs/user-guide.md#payroll](docs/user-guide.md#payroll)
+- Payroll workflow and federal calculation: [docs/payroll-guide.md](docs/payroll-guide.md)
 - Projects: [docs/user-guide.md#projects](docs/user-guide.md#projects)
 - Reporting and forms: [docs/user-guide.md#reporting-and-forms](docs/user-guide.md#reporting-and-forms)
 - Taxes: [docs/user-guide.md#taxes](docs/user-guide.md#taxes)
 - Publish workspace: [docs/user-guide.md#publish](docs/user-guide.md#publish)
 - Month-end review: [docs/user-guide.md#month-end-review](docs/user-guide.md#month-end-review)
 - Security and data handling: [docs/user-guide.md#security-and-data-handling](docs/user-guide.md#security-and-data-handling)
+- Security email, invitations, verification, and password recovery: [docs/security-email-guide.md](docs/security-email-guide.md)
 
 Specialized documentation:
 
+- Agent-readable production completion queue: [docs/work-remaining.md](docs/work-remaining.md)
 - Financial statements: [docs/reporting-guide.md#financial-statements](docs/reporting-guide.md#financial-statements)
 - Receivables output: [docs/reporting-guide.md#receivables-output](docs/reporting-guide.md#receivables-output)
 - Payables output: [docs/reporting-guide.md#payables-output](docs/reporting-guide.md#payables-output)
@@ -69,6 +77,7 @@ Specialized documentation:
 - Tax-facing output: [docs/reporting-guide.md#tax-facing-output](docs/reporting-guide.md#tax-facing-output)
 - Operations documents and labels: [docs/reporting-guide.md#operations-documents-and-labels](docs/reporting-guide.md#operations-documents-and-labels)
 - Administrative data handling: [docs/administration-guide.md#data-handling](docs/administration-guide.md#data-handling)
+- Fixed assets, prepaids, and loans: [docs/accounting-schedules-guide.md](docs/accounting-schedules-guide.md)
 - Administrative publishing guidance: [docs/administration-guide.md#publishing](docs/administration-guide.md#publishing)
 - Updated WinBiz/newproj parity boundary: [docs/legacy-parity-audit.md](docs/legacy-parity-audit.md)
 
@@ -78,12 +87,18 @@ The current application includes:
 
 - authenticated access before accounting data loads in the web app or API
 - password hashing through ASP.NET Core Identity primitives
+- durable named browser sessions, individual and all-other-session revocation, and immutable authentication audit events
+- temporary lockout plus per-network login throttling for browser and API sign-in
+- membership-aware session validation for company-specific roles and permissions
+- RFC 6238 authenticator MFA, hashed one-use recovery codes, bounded login challenges, replay prevention, MFA lockout, configurable privileged-role enforcement, and controlled administrator-assisted recovery
+- expiring one-use operator invitations, verified-email enrollment, enumeration-resistant password recovery, protected SMTP outbox delivery, and administrative retry visibility
 - protection of sensitive fields at rest with ASP.NET Core Data Protection
+- QuickBooks Online OAuth with protected rotating tokens, expiring cross-instance credential-operation leases, company validation, confirmed revocation, and dry-run-first inbound account/customer/vendor synchronization
 - persisted application key material under `App_Data\keys`
 - security headers in the web application and API
 - first-run administrator setup through the built-in setup flow for non-development installs
 
-Before live production use, administrators should still review operational backup, recovery, secrets management, access control, and deployment procedures.
+Passkeys remain desirable future phishing-resistant authentication. Before live production use, each deployment must configure and operationally verify its own HTTPS public URL, SMTP provider, mailbox delivery, DNS authentication, secret management, backup and recovery, access control, administrator identity-verification procedure, and deployment procedures.
 
 ## Build, test, and publish
 

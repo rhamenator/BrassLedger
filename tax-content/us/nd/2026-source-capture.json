@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-nd",
+  "capturedAtUtc": "2026-08-25T13:30:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.tax.nd.gov/sites/www/files/documents/forms/individual/2026-iit/2026-income-tax-withholding-rates-booklet.pdf", "title": "2026 North Dakota Income Tax Withholding Rates and Instructions", "revision": "28216 12/2025", "mediaType": "application/pdf", "sha256": "b265477a04e5932a79efc5bbc1be6db812febbe018a4f8b7018b7a72553f0415", "bytes": 3837719 },
+    { "url": "https://www.tax.nd.gov/sites/www/files/documents/guidelines/business/it-withhold/income-tax-withholding-information-returns-guideline.pdf", "title": "North Dakota Income Tax Withholding and Information Returns Guideline", "mediaType": "application/pdf", "sha256": "7995589cb4e2540b6e90e11232e477f5aa5d74ec19953092f7ae21fedcc94f49", "bytes": 827713 }
+  ],
+  "employeeInputs": [
+    { "code": "federalW4Generation", "dataType": "enum", "values": ["Before2020", "2020OrLater"] },
+    { "code": "filingStatus", "source": "Federal Form W-4", "dataType": "enum", "values": ["Single", "MarriedFilingJointly", "HeadOfHousehold"] },
+    { "code": "legacyAllowances", "source": "Federal Form W-4 before 2020", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "dataType": "money", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "minnesotaMonthlyReturnToResidence", "source": "Form NDW-R", "dataType": "boolean" }
+  ],
+  "calculation": {
+    "methods": ["PercentagePre2020W4", "WageBracketPre2020W4", "AnnualizedPercentageModernW4", "WageBracketModernW4"],
+    "payPeriodsPerYear": { "Weekly": 52, "Biweekly": 26, "Semimonthly": 24, "Monthly": 12, "Quarterly": 4, "Semiannual": 2, "Daily": 260, "Annual": 1 },
+    "legacyAllowanceValues": { "Weekly": 97, "Biweekly": 194, "Semimonthly": 210, "Monthly": 420, "Quarterly": 1268, "Semiannual": 2525, "Annual": 5050, "DailyOrMiscellaneous": 19 },
+    "modernSteps": ["Annualize federal taxable wages using the payroll-period multiplier.", "Apply the annual table for Federal Form W-4 Step 1(c) filing status.", "Divide annual withholding by payroll periods and round to the nearest whole dollar."],
+    "legacySteps": ["Subtract the period allowance value multiplied by legacy allowances.", "Apply the direct period Single or Married table and round to the nearest whole dollar."],
+    "annualSchedules": {
+      "Single": [{ "over": 0, "through": 57625, "baseTax": 0, "rate": 0 }, { "over": 57625, "through": 258450, "baseTax": 0, "rate": 0.0195 }, { "over": 258450, "baseTax": 3916.09, "rate": 0.025 }],
+      "MarriedFilingJointly": [{ "over": 0, "through": 57500, "baseTax": 0, "rate": 0 }, { "over": 57500, "through": 168525, "baseTax": 0, "rate": 0.0195 }, { "over": 168525, "baseTax": 2164.99, "rate": 0.025 }],
+      "HeadOfHousehold": [{ "over": 0, "through": 78475, "baseTax": 0, "rate": 0 }, { "over": 78475, "through": 289675, "baseTax": 0, "rate": 0.0195 }, { "over": 289675, "baseTax": 4118.40, "rate": 0.025 }]
+    },
+    "legacyHeadOfHouseholdUses": "Single",
+    "rounding": { "required": true, "method": "NearestWholeDollar", "minimumCalculatedWithholding": "Amounts below $1 need not be withheld" },
+    "missingCertificate": { "federalW4Generation": "2020OrLater", "filingStatus": "Single" },
+    "supplementalWages": { "notSeparatelyIdentified": "Apply an ordinary regular-wage method to the combined payment.", "separatelyPaidOrIdentifiedMethods": ["Withhold 1.5%", "Aggregate with current or most recent regular wages, calculate through the applicable W-4-generation method, and subtract regular withholding"], "flatRate": 0.015, "officialExamples": [{ "method": "Flat", "regularMonthlyWages": 5500, "bonus": 1000, "withholding": 15 }, { "method": "AggregateLegacy", "regularWithholding": 12, "combinedWithholding": 32, "bonusWithholding": 20 }] },
+    "officialModernExample": { "filingStatus": "Single", "frequency": "Weekly", "wages": 1800, "annualWages": 93600, "annualWithholding": 734, "roundedPeriodicWithholding": 14 }
+  },
+  "residencyAndWorkRules": {
+    "northDakotaServices": "Withhold from wages subject to federal withholding for services performed in North Dakota unless an exemption applies.",
+    "residentOutsideState": "A North Dakota-based employer withholds for a North Dakota resident working in another state unless required to withhold that other state's income tax on the wages earned there.",
+    "reciprocalStates": ["MN", "MT"],
+    "reciprocityForm": "NDW-R",
+    "minnesotaAdditionalCondition": "Minnesota resident must return to the permanent Minnesota residence at least once each month.",
+    "employeeFormDue": "February 28 or within 30 days after beginning work or changing permanent residence",
+    "employerFormDue": "March 31 for forms received by February 28",
+    "annualRenewalRequired": true,
+    "militarySpouseForm": "NDW-M",
+    "multiStateWorkLocationRequired": true
+  },
+  "filing": {
+    "quarterly": { "form": "306", "due": "April 30, July 31, October 31, and January 31", "zeroReturnsRequired": true },
+    "annualOption": { "priorYearWithholdingLessThan": 1000, "requiresAllPriorQuarterReturnsTimely": true, "requiresAllPriorQuarterPaymentsTimely": true, "requiresAgencyContactBeforeFirstQuarterDue": true, "due": "January 31" },
+    "electronicQuarterlyTrigger": ["Previous-calendar-year withholding was $1,000 or more", "Third-party payroll service electronically files and remits federal withholding"],
+    "annualReconciliation": { "form": "307", "due": "January 31", "electronicRequired": true, "requiredWithNoW2s": true }
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "A pre-2020 federal W-4 remains a distinct live calculation branch with allowances; it must not be silently migrated to the modern method.",
+    "Minnesota reciprocity depends on a monthly return-to-residence fact and annual form deadlines, not residence code alone.",
+    "Complete wage-bracket matrices for both W-4 generations remain in the checksummed publication but are not transcribed."
+  ],
+  "review": { "bothW4GenerationMethodsTranscribed": true, "annualSchedulesTranscribed": true, "supplementalMethodTranscribed": true, "officialExamplesTranscribed": true, "reciprocityConditionsTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "completeWageBracketTablesTranscribed": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import both wage-table families, implement W-4-generation selection and reciprocity renewal state, then add example, bracket-boundary, allowance, supplemental, and form-deadline regressions." }
+}

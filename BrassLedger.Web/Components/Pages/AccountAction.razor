@@ -1,0 +1,69 @@
+@page "/account/action"
+@attribute [AllowAnonymous]
+@inject IAccountActionService AccountActionService
+@inject IHttpContextAccessor HttpContextAccessor
+
+<PageTitle>Complete Account Security Action</PageTitle>
+
+<section class="auth-shell">
+    <article class="auth-card">
+        <p class="eyebrow">One-time security action</p>
+        @if (Action is null)
+        {
+            <h1>This link cannot be used.</h1>
+            <div class="auth-error" role="alert">The invitation or password-reset link is invalid, expired, already used, or was invalidated by another account change.</div>
+            <p class="auth-note"><a href="/forgot-password">Request a new password-reset link</a> or contact your administrator for a new invitation.</p>
+        }
+        else
+        {
+            <h1>@ActionTitle(Action.Purpose)</h1>
+            <p class="page-intro">This one-time action applies to @Action.MaskedEmail and expires at @Action.ExpiresAtUtc.LocalDateTime.</p>
+            @if (string.Equals(Error, "invalid-password", StringComparison.OrdinalIgnoreCase))
+            {
+                <div class="auth-error" role="alert">Enter matching passwords of at least 12 characters that differ from the current password.</div>
+            }
+            else if (string.Equals(Error, "too-many-requests", StringComparison.OrdinalIgnoreCase))
+            {
+                <div class="auth-error" role="alert">Too many attempts came from this network. Wait one minute and try again.</div>
+            }
+            @if (Action.Purpose == "EmailVerification")
+            {
+                <p class="page-intro">Confirm that you control this address. This does not change your password or sign-in sessions.</p>
+                <form method="post" action="/account/action/verify-email">
+                    <AntiforgeryToken />
+                    <button class="action-primary" type="submit">Verify email address</button>
+                </form>
+            }
+            else
+            {
+                <p class="page-intro">Choose at least 12 characters. You will sign in normally afterward.</p>
+                <form class="auth-form" method="post" action="/account/action">
+                    <AntiforgeryToken />
+                    <div class="field-group"><label class="field-label" for="newPassword">New password</label><input id="newPassword" class="field-input" name="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required /></div>
+                    <div class="field-group"><label class="field-label" for="confirmPassword">Confirm new password</label><input id="confirmPassword" class="field-input" name="confirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required /></div>
+                    <button class="action-primary" type="submit">@(Action.Purpose == "Invitation" ? "Activate account" : "Reset password")</button>
+                </form>
+            }
+        }
+    </article>
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private AccountActionSnapshot? Action { get; set; }
+
+    private static string ActionTitle(string purpose) => purpose switch
+    {
+        "Invitation" => "Accept your invitation.",
+        "EmailVerification" => "Verify your email address.",
+        _ => "Choose a new password."
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (HttpContextAccessor.HttpContext?.Request.Cookies.TryGetValue(BrassLedgerAuthenticationDefaults.AccountActionCookieName, out var token) == true)
+            Action = await AccountActionService.GetActionAsync(token);
+    }
+}

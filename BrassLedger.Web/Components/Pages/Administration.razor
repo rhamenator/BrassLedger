@@ -1,6 +1,15 @@
 @page "/administration"
 @attribute [Authorize(Policy = BrassLedgerAuthorizationPolicies.AdministerSystem)]
 @inject ISecurityAdministrationService SecurityAdministrationService
+@inject IIntegrationService IntegrationService
+@inject IQuickBooksOnlineConnectionService QuickBooksOnlineConnectionService
+@inject IQuickBooksOnlineSyncService QuickBooksOnlineSyncService
+@inject ICompanyManagementService CompanyManagementService
+@inject IConsolidationService ConsolidationService
+@inject IAccountingPeriodService AccountingPeriodService
+@inject IAccountingAccountRoleService AccountingAccountRoleService
+@inject IBackupService BackupService
+@inject NavigationManager NavigationManager
 
 <PageTitle>Administration</PageTitle>
 
@@ -34,6 +43,39 @@ else
             </aside>
         </section>
 
+        <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageUsers" Context="emailDeliveryAuthorization">
+            <section class="panel">
+                <h2>Security-email delivery</h2>
+                <p class="page-intro">“Accepted by SMTP” means the configured mail server accepted the message; it does not prove inbox delivery. BrassLedger retains protected delivery metadata and clears message bodies after SMTP acceptance.</p>
+                @if (Snapshot.SecurityEmailDeliveries.Count == 0)
+                {
+                    <p class="page-intro">No security-email attempts have been recorded for this company.</p>
+                }
+                else
+                {
+                    <div class="table-scroll">
+                        <table class="data-table">
+                            <thead><tr><th>Created</th><th>Purpose</th><th>Recipient</th><th>Status</th><th>Attempts</th><th>Next attempt / accepted</th><th>Action</th></tr></thead>
+                            <tbody>
+                            @foreach (var delivery in Snapshot.SecurityEmailDeliveries)
+                            {
+                                <tr>
+                                    <td>@delivery.CreatedAtUtc.LocalDateTime</td>
+                                    <td>@delivery.Purpose</td>
+                                    <td>@delivery.MaskedRecipient</td>
+                                    <td>@(delivery.DeliveredAtUtc is null ? delivery.Status : "Accepted by SMTP")@if (!string.IsNullOrWhiteSpace(delivery.LastError)) { <div class="muted-copy">@delivery.LastError</div> }</td>
+                                    <td>@delivery.AttemptCount</td>
+                                    <td>@((delivery.DeliveredAtUtc ?? delivery.NextAttemptAtUtc).LocalDateTime)</td>
+                                    <td>@if (delivery.DeliveredAtUtc is null && delivery.Status is "Failed" or "FailedPermanent") { <button class="action-secondary" type="button" @onclick="() => RetrySecurityEmailAsync(delivery.MessageId)">Retry</button> }</td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+        </AuthorizeView>
+
         @if (!string.IsNullOrWhiteSpace(StatusMessage))
         {
             <section class="panel">
@@ -51,18 +93,22 @@ else
                             <span class="module-code">@(role.IsSystemRole ? "SYS" : "CUS")</span>
                             <h3>@role.Name</h3>
                             <p class="module-area">@role.Description</p>
-                            <p><strong>@role.AssignedUserCount</strong> assigned</p>
+                            <p><strong>@role.AssignedUserCount</strong> assigned · <strong>@(role.RequiresMfa ? "MFA required" : "MFA optional")</strong></p>
                             <ul class="feature-list">
                                 @foreach (var permission in role.Permissions)
                                 {
                                     <li>@PermissionLabels.GetValueOrDefault(permission, permission)</li>
                                 }
                             </ul>
+                            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageRoles" Context="roleMfaAuthorization">
+                                <button class="action-secondary" type="button" @onclick="() => SetRoleMfaRequirementAsync(role)">@(role.RequiresMfa ? "Make MFA optional" : "Require MFA")</button>
+                            </AuthorizeView>
                         </article>
                     }
                 </div>
             </article>
 
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageRoles" Context="roleAuthorization">
             <article class="panel">
                 <h2>Create custom role</h2>
                 <EditForm Model="RoleForm" OnSubmit="CreateRoleAsync">
@@ -93,13 +139,17 @@ else
                             </div>
                         </div>
 
+                        <label><InputCheckbox @bind-Value="RoleForm.RequiresMfa" /> Require authenticator MFA before this role can access business data.</label>
+
                         <button class="action-primary" type="submit">Save custom role</button>
                     </div>
                 </EditForm>
             </article>
+            </AuthorizeView>
         </section>
 
         <section class="content-grid">
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageUsers" Context="userAuthorization">
             <article class="panel">
                 <h2>Operators</h2>
                 <div class="detail-grid">
@@ -108,15 +158,19 @@ else
                         <div>
                             <span class="detail-label">@user.Role</span>
                             <strong>@user.DisplayName</strong>
-                            <p>@user.UserName · @user.Email</p>
+                            <p>@user.UserName · @user.Email · @(user.IsActive ? "Active" : "Invitation pending") · MFA @(user.MfaEnabled ? "enabled" : user.RoleRequiresMfa ? "enrollment required" : "optional")</p>
                         </div>
                     }
                 </div>
             </article>
 
             <article class="panel">
-                <h2>Create operator</h2>
-                <EditForm Model="OperatorForm" OnSubmit="CreateOperatorAsync">
+                <h2>Invite operator</h2>
+                @if (!Snapshot.SecurityEmailDeliveryConfigured)
+                {
+                    <div class="auth-error" role="alert">Configure an HTTPS public base URL and SMTP security-email delivery before inviting operators.</div>
+                }
+                <EditForm Model="OperatorForm" OnSubmit="InviteOperatorAsync">
                     <div class="auth-form">
                         <div class="field-group">
                             <label class="field-label" for="userName">Username</label>
@@ -144,20 +198,324 @@ else
                             </InputSelect>
                         </div>
 
-                        <div class="field-group">
-                            <label class="field-label" for="password">Password</label>
-                            <InputText id="password" class="field-input" type="password" @bind-Value="OperatorForm.Password" />
-                        </div>
-
-                        <div class="field-group">
-                            <label class="field-label" for="confirmPassword">Confirm password</label>
-                            <InputText id="confirmPassword" class="field-input" type="password" @bind-Value="OperatorForm.ConfirmPassword" />
-                        </div>
-
-                        <button class="action-primary" type="submit">Create operator</button>
+                        <button class="action-primary" type="submit" disabled="@(!Snapshot.SecurityEmailDeliveryConfigured)">Queue secure invitation</button>
                     </div>
                 </EditForm>
             </article>
+
+            <article class="panel">
+                <h2>Administrator MFA recovery</h2>
+                <p class="page-intro">Use only from an MFA-authenticated administrator session after following the company’s identity-verification procedure. You cannot reset yourself; owner accounts require another owner. The reset invalidates every session, authenticator secret, recovery code, pending MFA challenge, and account-action link.</p>
+                <EditForm Model="MfaRecoveryForm" OnValidSubmit="ResetOperatorMfaAsync">
+                    <div class="auth-form">
+                        <div class="field-group">
+                            <label class="field-label" for="mfaRecoveryOperator">MFA-enabled operator</label>
+                            <InputSelect id="mfaRecoveryOperator" class="field-input" @bind-Value="MfaRecoveryForm.TargetUserId">
+                                <option value="@Guid.Empty">Select an operator</option>
+                                @foreach (var user in Snapshot.Operators.Where(user => user.IsActive && user.MfaEnabled))
+                                {
+                                    <option value="@user.UserId">@user.DisplayName — @user.UserName</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="field-group"><label class="field-label" for="mfaRecoveryConfirm">Type the exact username</label><InputText id="mfaRecoveryConfirm" class="field-input" autocomplete="off" @bind-Value="MfaRecoveryForm.ConfirmUserName" /></div>
+                        <div class="field-group"><label class="field-label" for="mfaRecoveryPassword">Your current password</label><InputText id="mfaRecoveryPassword" class="field-input" type="password" autocomplete="current-password" maxlength="1024" @bind-Value="MfaRecoveryForm.CurrentAdministratorPassword" /></div>
+                        <div class="field-group">
+                            <label class="field-label" for="mfaRecoveryMethod">Identity-verification method</label>
+                            <InputSelect id="mfaRecoveryMethod" class="field-input" @bind-Value="MfaRecoveryForm.VerificationMethod">
+                                <option value="">Select the documented method</option>
+                                <option>In-person identity verification</option>
+                                <option>Video verification with known employee</option>
+                                <option>Manager and HR attestation</option>
+                                <option>Company-approved recovery procedure</option>
+                            </InputSelect>
+                        </div>
+                        <div class="field-group"><label class="field-label" for="mfaRecoveryCase">Case or incident reference</label><InputText id="mfaRecoveryCase" class="field-input" maxlength="200" aria-describedby="mfaRecoveryCaseHelp" @bind-Value="MfaRecoveryForm.CaseReference" /><small id="mfaRecoveryCaseHelp" class="muted-copy">Enter only an internal reference; do not enter identity documents or other sensitive evidence.</small></div>
+                        <button class="action-secondary" type="submit">Clear MFA and revoke access</button>
+                    </div>
+                </EditForm>
+            </article>
+            </AuthorizeView>
+        </section>
+
+        <section class="panel">
+            <h2>Companies</h2>
+            <p class="page-intro">Each company has isolated books, roles, bank accounts, tax content, and reporting currency. Use the active-company API endpoint to switch sessions after creating a company.</p>
+            <div class="detail-grid">@foreach (var company in Companies) { <div><span class="detail-label">@company.Role@(company.IsOwner ? " · Owner" : "")</span><strong>@company.Name</strong><p>@company.LegalName · @company.BaseCurrency</p></div> }</div>
+            <form method="post" action="/account/active-company" class="auth-form"><AntiforgeryToken /><input type="hidden" name="returnUrl" value="/" /><div class="field-group"><label class="field-label" for="activeCompany">Switch active company</label><select id="activeCompany" name="companyId" class="field-input">@foreach (var company in Companies) { <option value="@company.CompanyId">@company.Name — @company.BaseCurrency</option> }</select></div><button class="action-secondary" type="submit">Switch company</button></form>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageUsers" Context="companyAuthorization"><EditForm Model="CompanyForm" OnValidSubmit="CreateCompanyAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Company name</label><InputText aria-label="Company name" class="field-input" @bind-Value="CompanyForm.Name" /></div><div class="field-group"><label class="field-label">Legal name</label><InputText aria-label="Company legal name" class="field-input" @bind-Value="CompanyForm.LegalName" /></div><div class="field-group"><label class="field-label">Tax ID</label><InputText aria-label="Company tax ID" class="field-input" @bind-Value="CompanyForm.TaxId" /></div><div class="field-group"><label class="field-label">Base currency</label><InputText aria-label="Company base currency" class="field-input" @bind-Value="CompanyForm.BaseCurrency" /></div><div class="field-group"><label class="field-label">Fiscal-year start month</label><InputNumber aria-label="Fiscal year start month" class="field-input" @bind-Value="CompanyForm.FiscalYearStartMonth" /></div></div><button class="action-primary" type="submit">Create company</button></EditForm></AuthorizeView>
+        </section>
+
+        <section class="panel">
+            <h2>Backup and recovery rehearsal</h2>
+            <p class="page-intro">SQLite backups are consistent snapshots with the data-protection key ring. Verification checks integrity; the restore rehearsal opens an isolated copy and never writes over the live database.</p>
+            <div class="hero-actions"><button class="action-primary" type="button" @onclick="CreateBackupAsync">Create backup</button>@if (LatestBackup?.BackupId is { } backupId) { <button class="action-secondary" type="button" @onclick="VerifyBackupAsync">Verify backup</button><button class="action-secondary" type="button" @onclick="RehearseRestoreAsync">Rehearse restore</button> }</div>
+            @if (LatestBackup is not null) { <p class="muted-copy">@(LatestBackup.Succeeded ? $"Latest backup: {LatestBackup.BackupId} at {LatestBackup.CreatedAtUtc:u}" : LatestBackup.ErrorMessage)</p> }
+            @if (BackupVerification is not null) { <p class="muted-copy">@(BackupVerification.Succeeded ? $"Verified at {BackupVerification.VerifiedAtUtc:u}" : BackupVerification.ErrorMessage)</p> }
+            @if (RecoveryRehearsal is not null) { <p class="muted-copy">@(RecoveryRehearsal.Succeeded ? $"Restore rehearsal passed: {RecoveryRehearsal.CompanyCount} company(ies), {RecoveryRehearsal.JournalEntryCount} journals, {RecoveryRehearsal.PayrollRunCount} payroll runs, and {RecoveryRehearsal.DataProtectionKeyCount} key file(s)." : RecoveryRehearsal.ErrorMessage)</p> }
+        </section>
+
+        <section class="panel">
+            <h2>Operational account routing</h2>
+            <p class="page-intro">Choose which active ledger account each accounting workflow uses. Account numbers remain yours to design; BrassLedger routes by these company-scoped roles. Reassigning a control role requires zero balances and no open dependent records.</p>
+            @if (!AccountingAccountRoles.Authorized)
+            {
+                <p class="muted-copy">Managing operational routing requires both user-administration and ledger-management authority.</p>
+            }
+            else
+            {
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>Workflow role</th><th>Current account</th><th>Replacement</th><th>Action</th></tr></thead>
+                        <tbody>
+                        @foreach (var role in AccountingAccountRoles.Roles)
+                        {
+                            <tr>
+                                <td><strong>@role.Name</strong><br /><small>@role.Description<br />Requires @(role.RequiresControlAccount ? "control" : "non-control") @role.RequiredAccountType.ToLowerInvariant() account.</small></td>
+                                <td>@(role.AccountId.HasValue ? $"{role.AccountNumber} — {role.AccountName}" : "Not configured")<br /><small>Balance @role.AccountBalance.ToString("N2")</small></td>
+                                <td>
+                                    <select class="field-input" aria-label="@($"Account for {role.Name}")" value="@OperationalAccountSelections.GetValueOrDefault(role.Code)" @onchange="args => SelectOperationalAccount(role.Code, args.Value)">
+                                        <option value="@Guid.Empty">Select an eligible account</option>
+                                        @foreach (var account in EligibleOperationalAccounts(role))
+                                        {
+                                            <option value="@account.AccountId">@account.Number — @account.Name (@account.Balance.ToString("N2"))</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td>
+                                    @if (PendingOperationalAccountRole == role.Code)
+                                    {
+                                        <button class="action-danger" type="button" @onclick="() => AssignOperationalAccountAsync(role, true)">Confirm routing change</button>
+                                        <button class="action-secondary" type="button" @onclick="CancelOperationalAccountAssignment">Cancel</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="action-secondary" type="button" disabled="@(OperationalAccountSelections.GetValueOrDefault(role.Code) == Guid.Empty || OperationalAccountSelections.GetValueOrDefault(role.Code) == role.AccountId)" @onclick="() => AssignOperationalAccountAsync(role, false)">Review change</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="panel">
+            <h2>Accounting controls and audit trail</h2>
+            <p class="page-intro">Close a period only after review. Every journal posting and period status change is retained as business audit evidence for the active company.</p>
+            <EditForm Model="AccountingPeriodForm" OnValidSubmit="SaveAccountingPeriodAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Period starts</label><InputDate aria-label="Accounting period start" class="field-input" @bind-Value="AccountingPeriodForm.StartsOn" /></div><div class="field-group"><label class="field-label">Period ends</label><InputDate aria-label="Accounting period end" class="field-input" @bind-Value="AccountingPeriodForm.EndsOn" /></div><div class="field-group"><label class="field-label">Notes</label><InputText aria-label="Accounting period notes" class="field-input" @bind-Value="AccountingPeriodForm.Notes" /></div></div><button class="action-secondary" type="submit">Save accounting period</button></EditForm>
+            @if (AccountingControls.Periods.Count > 0) { <table class="data-table"><thead><tr><th>Period</th><th>Status</th><th>Closed by</th><th></th></tr></thead><tbody>@foreach (var period in AccountingControls.Periods) { <tr><td>@period.StartsOn to @period.EndsOn<br />@period.Notes</td><td>@period.Status</td><td>@(period.ClosedBy ?? "—") @period.ClosedAtUtc</td><td><button class="action-secondary" type="button" @onclick="() => TogglePeriodStatusAsync(period)">@(period.Status == "Closed" ? "Reopen" : "Close")</button></td></tr> }</tbody></table> }
+            <h3>Recent business audit events</h3>
+            @if (AccountingControls.AuditEntries.Count == 0) { <p class="page-intro">No audited business events have been recorded yet.</p> }
+            else { <table class="data-table"><thead><tr><th>When</th><th>Action</th><th>Entity</th><th>Operator</th></tr></thead><tbody>@foreach (var audit in AccountingControls.AuditEntries) { <tr><td>@audit.OccurredAtUtc.LocalDateTime</td><td>@audit.Action</td><td>@audit.EntityType</td><td>@(audit.PerformedBy ?? "System")</td></tr> }</tbody></table> }
+        </section>
+
+        <section class="panel">
+            <h2>Consolidation and currencies</h2>
+            <p class="page-intro">Consolidations use controlled closing, period-average, and historical rates according to each account mapping. Classify each effective relationship as reporting parent, controlled subsidiary, combined affiliate, or proportionate interest; percentage alone does not determine the accounting. Dedicated CTA and NCI equity accounts remain outside source mappings. Configure effective-dated customer and vendor links here so Reporting can discover strict intercompany invoice and bill matches without guessing from names.</p>
+            <div class="content-grid">
+                <EditForm Model="ExchangeRateForm" OnValidSubmit="SaveExchangeRateAsync">
+                    <div class="auth-form"><h3>@(ExchangeRateForm.Id.HasValue ? "Correct exchange rate" : "Effective exchange rate")</h3><div class="field-group"><label class="field-label">Base currency</label><InputText aria-label="Exchange rate base currency" class="field-input" @bind-Value="ExchangeRateForm.BaseCurrency" disabled="@ExchangeRateForm.Id.HasValue" /></div><div class="field-group"><label class="field-label">Quote currency</label><InputText aria-label="Exchange rate quote currency" class="field-input" @bind-Value="ExchangeRateForm.QuoteCurrency" disabled="@ExchangeRateForm.Id.HasValue" /></div><div class="field-group"><label class="field-label">Rate type</label><InputSelect aria-label="Exchange rate type" class="field-input" @bind-Value="ExchangeRateForm.RateType" disabled="@ExchangeRateForm.Id.HasValue"><option value="Closing">Closing</option><option value="Average">Period average</option><option value="Historical">Historical</option></InputSelect></div>@if (ExchangeRateForm.RateType == "Average") { <div class="field-group"><label class="field-label">Average period start</label><InputDate aria-label="Average exchange rate period start" class="field-input" @bind-Value="ExchangeRateForm.PeriodStartOn" disabled="@ExchangeRateForm.Id.HasValue" /></div> }<div class="field-group"><label class="field-label">@(ExchangeRateForm.RateType == "Average" ? "Average period end" : "Effective date")</label><InputDate aria-label="Exchange rate effective date" class="field-input" @bind-Value="ExchangeRateForm.EffectiveOn" disabled="@ExchangeRateForm.Id.HasValue" /></div><div class="field-group"><label class="field-label">Rate</label><InputNumber aria-label="Exchange rate" class="field-input" @bind-Value="ExchangeRateForm.Rate" /></div><div class="field-group"><label class="field-label">Source</label><InputText aria-label="Exchange rate source" class="field-input" @bind-Value="ExchangeRateForm.Source" /></div><div class="field-group"><label class="field-label">Source reference or URL</label><InputText aria-label="Exchange rate source reference" class="field-input" @bind-Value="ExchangeRateForm.SourceReference" /></div><div class="field-group"><label class="field-label">Retrieved on</label><InputDate aria-label="Exchange rate source retrieval date" class="field-input" @bind-Value="ExchangeRateForm.RetrievedOn" /></div><label><InputCheckbox @bind-Value="ExchangeRateForm.IsActive" /> Approved for reports</label><button class="action-secondary" type="submit">Save exchange rate</button>@if (ExchangeRateForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelExchangeRateEdit">Cancel edit</button> }</div>
+                </EditForm>
+                <EditForm Model="ConsolidationForm" OnValidSubmit="SaveConsolidationGroupAsync">
+                    <div class="auth-form"><h3>@(ConsolidationForm.Id.HasValue ? "Consolidation policy" : "Consolidation group")</h3><div class="field-group"><label class="field-label">Group name</label><InputText aria-label="Consolidation group name" class="field-input" @bind-Value="ConsolidationForm.Name" /></div><div class="field-group"><label class="field-label">Reporting currency</label><InputText aria-label="Consolidation reporting currency" class="field-input" @bind-Value="ConsolidationForm.ReportingCurrency" /></div><div class="field-group"><label class="field-label">CTA reporting account number</label><InputText aria-label="CTA reporting account number" class="field-input" @bind-Value="ConsolidationForm.CtaAccountNumber" /></div><div class="field-group"><label class="field-label">CTA reporting account name</label><InputText aria-label="CTA reporting account name" class="field-input" @bind-Value="ConsolidationForm.CtaAccountName" /></div><div class="field-group"><label class="field-label">NCI equity account number</label><InputText aria-label="NCI reporting account number" class="field-input" @bind-Value="ConsolidationForm.NciAccountNumber" /></div><div class="field-group"><label class="field-label">NCI equity account name</label><InputText aria-label="NCI reporting account name" class="field-input" @bind-Value="ConsolidationForm.NciAccountName" /></div>@if (!ConsolidationForm.Id.HasValue) { <div class="field-group"><label class="field-label">Initial ownership effective from</label><InputDate aria-label="Initial ownership effective from" class="field-input" @bind-Value="ConsolidationForm.EffectiveFrom" /></div><div class="field-group"><label class="field-label">Initial ownership effective through (optional)</label><InputDate aria-label="Initial ownership effective through" class="field-input" @bind-Value="ConsolidationForm.EffectiveThrough" /></div><div class="field-group"><label class="field-label">Basis reviewed on</label><InputDate aria-label="Initial consolidation basis reviewed on" class="field-input" @bind-Value="ConsolidationForm.BasisReviewedOn" /></div><span class="field-label">Owned member companies, basis, and economic ownership</span>@foreach (var company in Companies.Where(item => item.IsOwner)) { var companyId = company.CompanyId; <div class="field-group"><label><input type="checkbox" checked="@ConsolidationForm.MemberCompanyIds.Contains(companyId)" @onchange="args => ToggleConsolidationMember(companyId, args.Value)" /> @company.Name (@company.BaseCurrency)</label><select aria-label="@($"{company.Name} consolidation basis")" class="field-input" value="@ConsolidationForm.ConsolidationBases.GetValueOrDefault(companyId, "CombinedAffiliate")" @onchange="args => SetConsolidationBasis(companyId, args.Value)" disabled="@(!ConsolidationForm.MemberCompanyIds.Contains(companyId))"><option value="ReportingParent">Reporting parent</option><option value="ControlledSubsidiary">Controlled subsidiary — full consolidation</option><option value="CombinedAffiliate">Combined affiliate — common control</option><option value="ProportionateInterest">Proportionate interest</option></select><input type="number" min="0" max="1" step="0.0001" aria-label="@($"{company.Name} ownership percentage")" class="field-input" value="@ConsolidationForm.OwnershipPercentages.GetValueOrDefault(companyId, 1m).ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="args => SetConsolidationOwnership(companyId, args.Value)" disabled="@(!ConsolidationForm.MemberCompanyIds.Contains(companyId))" /><input type="text" aria-label="@($"{company.Name} consolidation basis rationale")" class="field-input" placeholder="Control or combination evidence" value="@ConsolidationForm.BasisRationales.GetValueOrDefault(companyId, string.Empty)" @onchange="args => SetConsolidationBasisRationale(companyId, args.Value)" disabled="@(!ConsolidationForm.MemberCompanyIds.Contains(companyId))" /></div> } }<button class="action-primary" type="submit">Save consolidation group</button>@if (ConsolidationForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelConsolidationEdit">Cancel edit</button> }</div>
+                </EditForm>
+            </div>
+            @if (ExchangeRates.Count > 0)
+            {
+                <div class="table-scroll"><table class="data-table" aria-label="Controlled exchange rates"><thead><tr><th>Pair</th><th>Type and period</th><th>Rate</th><th>Source</th><th>Status</th><th></th></tr></thead><tbody>@foreach (var rate in ExchangeRates) { <tr><td>@rate.BaseCurrency/@rate.QuoteCurrency</td><td>@rate.RateType · @(rate.PeriodStartOn?.ToString("yyyy-MM-dd") is { } start ? $"{start}–{rate.EffectiveOn:yyyy-MM-dd}" : rate.EffectiveOn.ToString("yyyy-MM-dd"))</td><td>@rate.Rate</td><td>@rate.Source<br /><small>@rate.SourceReference</small></td><td>@(rate.IsActive ? "Approved" : "Retracted")</td><td><button class="action-secondary" type="button" @onclick="() => LoadExchangeRate(rate)">Edit</button></td></tr> }</tbody></table></div>
+            }
+            @if (ConsolidationGroups.Count > 0)
+            {
+                <div class="content-grid"><div class="field-group"><label class="field-label">Report period start</label><InputDate aria-label="Consolidation report period start" class="field-input" @bind-Value="ConsolidationReportForm.PeriodStart" /></div><div class="field-group"><label class="field-label">Report as-of date</label><InputDate aria-label="Consolidation report as-of date" class="field-input" @bind-Value="ConsolidationReportForm.AsOf" /></div></div>
+                <table class="data-table"><thead><tr><th>Group</th><th>Effective basis and ownership</th><th>Reporting currency</th><th>System equity accounts</th><th></th></tr></thead><tbody>@foreach (var group in ConsolidationGroups) { <tr><td>@group.Name</td><td><ul class="feature-list">@foreach (var member in group.Members) { <li>@member.CompanyName — @DisplayConsolidationBasis(member.ConsolidationBasis) (@member.OwnershipPercentage.ToString("P2"), @member.EffectiveFrom.ToString("yyyy-MM-dd")–@(member.EffectiveThrough?.ToString("yyyy-MM-dd") ?? "open"))@if (!string.IsNullOrWhiteSpace(member.BasisRationale)) { <br /><small>@member.BasisRationale · reviewed @member.BasisReviewedOn?.ToString("yyyy-MM-dd")</small> } <button class="action-secondary" type="button" @onclick="() => LoadOwnershipPeriod(group.Id, member)">Edit period</button></li> }</ul></td><td>@group.ReportingCurrency</td><td>CTA: @(string.IsNullOrWhiteSpace(group.CtaAccountNumber) ? "Not configured" : $"{group.CtaAccountNumber} · {group.CtaAccountName}")<br />NCI: @(string.IsNullOrWhiteSpace(group.NciAccountNumber) ? "Not configured" : $"{group.NciAccountNumber} · {group.NciAccountName}")</td><td><button class="action-secondary" type="button" @onclick="() => LoadConsolidationGroup(group)">Policy</button> <button class="action-secondary" type="button" @onclick="() => LoadAccountMappingsAsync(group.Id)">Map accounts</button> <button class="action-secondary" type="button" @onclick="() => LoadStatementPresentationsAsync(group.Id)">Present statements</button> <button class="action-secondary" type="button" @onclick="() => LoadTradingPartnersAsync(group.Id)">Trading partners</button> <button class="action-secondary" type="button" @onclick="() => LoadConsolidatedBalanceAsync(group.Id)">View balance</button></td></tr> }</tbody></table>
+                <EditForm Model="OwnershipForm" OnValidSubmit="SaveOwnershipPeriodAsync">
+                    <div class="auth-form"><h3>@(OwnershipForm.Id.HasValue ? "Correct or close ownership period" : "Add ownership period")</h3><div class="field-group"><label class="field-label">Consolidation group</label><InputSelect aria-label="Ownership consolidation group" class="field-input" @bind-Value="OwnershipForm.ConsolidationGroupId" disabled="@OwnershipForm.Id.HasValue"><option value="@Guid.Empty">Select group</option>@foreach (var group in ConsolidationGroups.Where(item => item.IsActive)) { <option value="@group.Id">@group.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Member company</label><InputSelect aria-label="Ownership member company" class="field-input" @bind-Value="OwnershipForm.MemberCompanyId" disabled="@OwnershipForm.Id.HasValue"><option value="@Guid.Empty">Select company</option>@foreach (var company in Companies.Where(item => item.IsOwner)) { <option value="@company.CompanyId">@company.Name</option> }</InputSelect></div><div class="field-group"><label class="field-label">Consolidation basis</label><InputSelect aria-label="Ownership consolidation basis" class="field-input" @bind-Value="OwnershipForm.ConsolidationBasis"><option value="ReportingParent">Reporting parent</option><option value="ControlledSubsidiary">Controlled subsidiary — full consolidation</option><option value="CombinedAffiliate">Combined affiliate — common control</option><option value="ProportionateInterest">Proportionate interest</option></InputSelect></div><div class="field-group"><label class="field-label">Ownership percentage (decimal)</label><InputNumber aria-label="Ownership period percentage" class="field-input" @bind-Value="OwnershipForm.OwnershipPercentage" /></div><div class="field-group"><label class="field-label">Basis rationale</label><InputText aria-label="Ownership basis rationale" class="field-input" @bind-Value="OwnershipForm.BasisRationale" /></div><div class="field-group"><label class="field-label">Basis reviewed on</label><InputDate aria-label="Ownership basis reviewed on" class="field-input" @bind-Value="OwnershipForm.BasisReviewedOn" /></div><div class="field-group"><label class="field-label">Effective from</label><InputDate aria-label="Ownership period effective from" class="field-input" @bind-Value="OwnershipForm.EffectiveFrom" /></div><div class="field-group"><label class="field-label">Effective through (optional)</label><InputDate aria-label="Ownership period effective through" class="field-input" @bind-Value="OwnershipForm.EffectiveThrough" /></div><button class="action-primary" type="submit">Save ownership period</button>@if (OwnershipForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelOwnershipEdit">Cancel edit</button> }</div>
+                </EditForm>
+            }
+            @if (AccountMappingWorkspace is not null)
+            {
+                <h3>@AccountMappingWorkspace.GroupName account mappings</h3>
+                <p class="page-intro">Every material source balance needs one effective mapping. Unmapped or overlapping balances are excluded from the report with a visible warning.</p>
+                <EditForm Model="AccountMappingForm" OnValidSubmit="SaveAccountMappingAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Source account</label><select aria-label="Consolidation source account" class="field-input" value="@AccountMappingForm.MemberAccountId" @onchange="SelectMappingSource" disabled="@AccountMappingForm.Id.HasValue"><option value="@Guid.Empty">Select source account</option>@foreach (var account in AccountMappingWorkspace.SourceAccounts) { <option value="@account.AccountId">@account.CompanyName · @account.AccountNumber · @account.AccountName (@account.AccountType)</option> }</select></div><div class="field-group"><label class="field-label">Reporting account number</label><InputText aria-label="Consolidation reporting account number" class="field-input" @bind-Value="AccountMappingForm.ReportingAccountNumber" /></div><div class="field-group"><label class="field-label">Reporting account name</label><InputText aria-label="Consolidation reporting account name" class="field-input" @bind-Value="AccountMappingForm.ReportingAccountName" /></div><div class="field-group"><label class="field-label">Translation method</label><InputSelect aria-label="Consolidation translation method" class="field-input" @bind-Value="AccountMappingForm.TranslationMethod"><option value="">Default from account type</option><option value="Closing">Closing</option><option value="Average">Period average</option><option value="Historical">Historical</option></InputSelect></div><div class="field-group"><label class="field-label">Cash-flow activity</label><InputSelect aria-label="Consolidation cash-flow activity" class="field-input" @bind-Value="AccountMappingForm.CashFlowActivity"><option value="Unclassified">Unclassified</option><option value="Operating">Operating</option><option value="Investing">Investing</option><option value="Financing">Financing</option></InputSelect><small class="muted-copy">Classify noncash counterpart accounts. Bank mappings identify cash and cash equivalents and must remain unclassified.</small></div><div class="field-group"><label class="field-label">Cash-flow rationale</label><InputText aria-label="Consolidation cash-flow rationale" class="field-input" maxlength="1000" @bind-Value="AccountMappingForm.CashFlowRationale" /></div><div class="field-group"><label class="field-label">Cash-flow reviewed on</label><InputDate aria-label="Consolidation cash-flow reviewed on" class="field-input" @bind-Value="AccountMappingForm.CashFlowReviewedOn" /></div><div class="field-group"><label class="field-label">Effective from</label><InputDate aria-label="Account mapping effective from" class="field-input" @bind-Value="AccountMappingForm.EffectiveFrom" /></div><div class="field-group"><label class="field-label">Effective through (optional)</label><InputDate aria-label="Account mapping effective through" class="field-input" @bind-Value="AccountMappingForm.EffectiveThrough" /></div><label><InputCheckbox @bind-Value="AccountMappingForm.IsActive" /> Active</label><button class="action-primary" type="submit">Save account mapping</button>@if (AccountMappingForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelMappingEdit">Cancel edit</button> }</div></EditForm>
+                @if (AccountMappingWorkspace.Mappings.Count > 0) { <div class="table-scroll"><table class="data-table" aria-label="Consolidation account mappings"><thead><tr><th>Source</th><th>Reporting account</th><th>Translation</th><th>Cash flow</th><th>Effective</th><th>Status</th><th></th></tr></thead><tbody>@foreach (var mapping in AccountMappingWorkspace.Mappings) { <tr><td>@mapping.CompanyName · @mapping.AccountNumber · @mapping.AccountName (@mapping.AccountType)</td><td>@mapping.ReportingAccountNumber · @mapping.ReportingAccountName (@mapping.ReportingAccountType)</td><td>@mapping.TranslationMethod</td><td>@mapping.CashFlowActivity@if (!string.IsNullOrWhiteSpace(mapping.CashFlowRationale)) { <br /><small>@mapping.CashFlowRationale · reviewed @mapping.CashFlowReviewedOn?.ToString("yyyy-MM-dd")</small> }</td><td>@mapping.EffectiveFrom.ToString("yyyy-MM-dd")–@(mapping.EffectiveThrough?.ToString("yyyy-MM-dd") ?? "open")</td><td>@(mapping.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => LoadAccountMapping(mapping)">Edit</button></td></tr> }</tbody></table></div> }
+            }
+            @if (StatementPresentationWorkspace is not null)
+            {
+                <h3>@StatementPresentationWorkspace.GroupName statement presentation</h3>
+                <p class="page-intro">Assign every material reporting account to an effective-dated section. Free-form section codes and captions support current/noncurrent and future presentation changes without altering source mappings.</p>
+                <EditForm Model="StatementPresentationForm" OnValidSubmit="SaveStatementPresentationAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Reporting account</label><select aria-label="Statement presentation reporting account" class="field-input" value="@StatementPresentationForm.CandidateIndex" @onchange="SelectStatementPresentationAccount" disabled="@StatementPresentationForm.Id.HasValue"><option value="-1">Select reporting account</option>@for (var candidateIndex = 0; candidateIndex < StatementPresentationWorkspace.Candidates.Count; candidateIndex++) { var candidate = StatementPresentationWorkspace.Candidates[candidateIndex]; <option value="@candidateIndex">@candidate.StatementCode · @candidate.ReportingAccountNumber · @candidate.ReportingAccountName (@candidate.ReportingAccountType)</option> }</select></div><div class="field-group"><label class="field-label">Section code</label><InputText aria-label="Statement presentation section code" class="field-input" @bind-Value="StatementPresentationForm.SectionCode" /></div><div class="field-group"><label class="field-label">Section caption</label><InputText aria-label="Statement presentation section caption" class="field-input" @bind-Value="StatementPresentationForm.SectionName" /></div><div class="field-group"><label class="field-label">Section order</label><InputNumber aria-label="Statement presentation section order" class="field-input" @bind-Value="StatementPresentationForm.SectionSortOrder" /></div><div class="field-group"><label class="field-label">Line caption</label><InputText aria-label="Statement presentation line caption" class="field-input" @bind-Value="StatementPresentationForm.LineCaption" /></div><div class="field-group"><label class="field-label">Line order</label><InputNumber aria-label="Statement presentation line order" class="field-input" @bind-Value="StatementPresentationForm.LineSortOrder" /></div><div class="field-group"><label class="field-label">Presentation rationale</label><InputText aria-label="Statement presentation rationale" class="field-input" maxlength="1000" @bind-Value="StatementPresentationForm.Rationale" /></div><div class="field-group"><label class="field-label">Reviewed on</label><InputDate aria-label="Statement presentation reviewed on" class="field-input" @bind-Value="StatementPresentationForm.ReviewedOn" /></div><div class="field-group"><label class="field-label">Effective from</label><InputDate aria-label="Statement presentation effective from" class="field-input" @bind-Value="StatementPresentationForm.EffectiveFrom" /></div><div class="field-group"><label class="field-label">Effective through (optional)</label><InputDate aria-label="Statement presentation effective through" class="field-input" @bind-Value="StatementPresentationForm.EffectiveThrough" /></div><label><InputCheckbox @bind-Value="StatementPresentationForm.IsActive" /> Active</label><button class="action-primary" type="submit">Save presentation policy</button>@if (StatementPresentationForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelStatementPresentationEdit">Cancel edit</button> }</div></EditForm>
+                @if (StatementPresentationWorkspace.Presentations.Count == 0) { <p class="muted-copy">No reviewed presentation policies exist. Nonzero accounts will be shown in explicit unconfigured sections and the package will remain incomplete.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Consolidation statement presentation policies"><thead><tr><th>Statement/account</th><th>Section</th><th>Line</th><th>Evidence</th><th>Effective</th><th></th></tr></thead><tbody>@foreach (var presentation in StatementPresentationWorkspace.Presentations) { <tr><td>@presentation.StatementCode<br />@presentation.ReportingAccountNumber · @presentation.ReportingAccountName (@presentation.ReportingAccountType)</td><td>@presentation.SectionSortOrder · @presentation.SectionCode · @presentation.SectionName</td><td>@presentation.LineSortOrder · @presentation.LineCaption</td><td>@presentation.Rationale<br /><small>reviewed @presentation.ReviewedOn.ToString("yyyy-MM-dd")</small></td><td>@presentation.EffectiveFrom.ToString("yyyy-MM-dd")–@(presentation.EffectiveThrough?.ToString("yyyy-MM-dd") ?? "open") · @(presentation.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => LoadStatementPresentation(presentation)">Edit</button></td></tr> }</tbody></table></div> }
+            }
+            @if (TradingPartnerWorkspace is not null)
+            {
+                <h3>@TradingPartnerWorkspace.GroupName intercompany trading partners</h3>
+                <p class="page-intro">Map the customer or vendor record in one member’s books to the company it represents. Configure both directions—for example, Seller’s customer for Buyer and Buyer’s vendor for Seller—before discovery.</p>
+                <EditForm Model="TradingPartnerForm" OnValidSubmit="SaveTradingPartnerAsync"><div class="auth-form"><div class="field-group"><label class="field-label">Member customer or vendor</label><select aria-label="Intercompany member customer or vendor" class="field-input" value="@TradingPartnerForm.RecordKey" @onchange="SelectTradingPartnerRecord" disabled="@TradingPartnerForm.Id.HasValue"><option value="">Select customer or vendor</option>@foreach (var candidate in TradingPartnerWorkspace.Candidates) { <option value="@TradingPartnerRecordKey(candidate)">@candidate.CompanyName · @candidate.Kind · @candidate.Number · @candidate.Name</option> }</select></div><div class="field-group"><label class="field-label">Represents member company</label><InputSelect aria-label="Intercompany counterparty company" class="field-input" @bind-Value="TradingPartnerForm.CounterpartyCompanyId" disabled="@TradingPartnerForm.Id.HasValue"><option value="@Guid.Empty">Select counterparty</option>@foreach (var member in TradingPartnerWorkspace.Members.GroupBy(item => item.CompanyId).Select(items => items.First()).Where(item => item.CompanyId != TradingPartnerForm.MemberCompanyId)) { <option value="@member.CompanyId">@member.CompanyName</option> }</InputSelect></div><div class="field-group"><label class="field-label">Effective from</label><InputDate aria-label="Trading partner effective from" class="field-input" @bind-Value="TradingPartnerForm.EffectiveFrom" /></div><div class="field-group"><label class="field-label">Effective through (optional)</label><InputDate aria-label="Trading partner effective through" class="field-input" @bind-Value="TradingPartnerForm.EffectiveThrough" /></div><label><InputCheckbox @bind-Value="TradingPartnerForm.IsActive" /> Active</label><button class="action-primary" type="submit">Save trading-partner link</button>@if (TradingPartnerForm.Id.HasValue) { <button class="action-secondary" type="button" @onclick="CancelTradingPartnerEdit">Cancel edit</button> }</div></EditForm>
+                @if (TradingPartnerWorkspace.Links.Count == 0) { <p class="muted-copy">No retained trading-partner links exist for this group.</p> }
+                else { <div class="table-scroll"><table class="data-table" aria-label="Intercompany trading partner links"><thead><tr><th>Member record</th><th>Represents</th><th>Effective</th><th>Status</th><th></th></tr></thead><tbody>@foreach (var link in TradingPartnerWorkspace.Links) { <tr><td>@link.MemberCompanyName · @link.Kind · @link.Number · @link.Name</td><td>@link.CounterpartyCompanyName</td><td>@link.EffectiveFrom–@(link.EffectiveThrough?.ToString() ?? "open")</td><td>@(link.IsActive ? "Active" : "Inactive")</td><td><button class="action-secondary" type="button" @onclick="() => LoadTradingPartner(link)">Edit</button></td></tr> }</tbody></table></div> }
+            }
+            @if (ConsolidatedBalance is not null)
+            {
+                <h3>@ConsolidatedBalance.GroupName translated balance — @ConsolidatedBalance.PeriodStart to @ConsolidatedBalance.AsOf</h3>
+                @if (ConsolidatedBalance.Warnings.Count > 0) { <ul class="feature-list">@foreach (var warning in ConsolidatedBalance.Warnings) { <li>@warning</li> }</ul> }
+                <table class="data-table"><thead><tr><th>Account</th><th>Type</th><th>Translation</th><th>Balance (@ConsolidatedBalance.ReportingCurrency)</th></tr></thead><tbody>@foreach (var account in ConsolidatedBalance.Accounts) { <tr><td>@account.AccountNumber · @account.AccountName</td><td>@account.AccountType</td><td>@account.TranslationMethod</td><td>@account.ConvertedBalance.ToString("N2")</td></tr> }</tbody></table>
+            }
+        </section>
+
+        <section class="panel">
+            <h2>Integration catalog</h2>
+            <p class="page-intro">QuickBooks uses Intuit’s authorization page; its client secret is deployment configuration and its rotating tokens are protected at rest. BrassLedger never asks an operator to paste QuickBooks credentials into JSON.</p>
+            <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageUsers" Context="integrationAuthorization">
+                <Authorized>
+                    @if (QuickBooksAvailability is not null)
+                    {
+                        <div class="notice-panel"><strong>QuickBooks Online</strong><p>@QuickBooksAvailability.Message</p></div>
+                        <EditForm Model="QuickBooksForm" OnValidSubmit="ConnectQuickBooksAsync">
+                            <div class="content-grid">
+                                <div class="field-group"><label class="field-label">Connection name</label><InputText aria-label="QuickBooks connection name" class="field-input" @bind-Value="QuickBooksForm.ConnectionName" /></div>
+                                <div class="field-group"><label class="field-label">Intuit environment</label><input aria-label="QuickBooks environment" class="field-input" value="@QuickBooksAvailability.Environment" disabled /></div>
+                            </div>
+                            <button class="action-primary" type="submit" disabled="@(!QuickBooksAvailability.Configured)">Connect through Intuit</button>
+                        </EditForm>
+                    }
+                    @{ var quickBooksConnections = Connections.Where(connection => connection.ProviderCode == "quickbooks-online").ToArray(); }
+                    <div class="field-group"><label class="field-label">QuickBooks data to import</label><InputSelect aria-label="QuickBooks API sync entity" class="field-input" @bind-Value="QuickBooksSyncEntity"><option value="accounts">Chart of accounts</option><option value="customers">Customers</option><option value="vendors">Vendors</option></InputSelect><small>Preview fetches and compares data without changing accounting records. Import is enabled only for the exact snapshot you previewed during this session.</small></div>
+                    @if (quickBooksConnections.Length == 0)
+                    {
+                        <p class="muted-copy">No QuickBooks company is connected. Reviewed CSV interchange remains available from the Ledger page.</p>
+                    }
+                    else
+                    {
+                        <div class="table-scroll">
+                            <table class="data-table">
+                                <thead><tr><th>Name</th><th>Company</th><th>Status</th><th>Last validated</th><th>Actions</th></tr></thead>
+                                <tbody>
+                                @foreach (var connection in quickBooksConnections)
+                                {
+                                    <tr>
+                                        <td>@connection.Name</td>
+                                        <td>@DescribeQuickBooksConnection(connection)</td>
+                                        <td>@connection.Status</td>
+                                        <td>@(connection.LastValidatedAtUtc?.LocalDateTime.ToString("g") ?? "Not validated")</td>
+                                        <td>
+                                            @if (connection.Status is "Connected" or "ValidationFailed") { <button class="action-secondary" type="button" @onclick="() => ValidateQuickBooksAsync(connection.Id)">Validate</button> }
+                                            @if (connection.Status == "Connected")
+                                            {
+                                                <button class="action-secondary" type="button" @onclick="() => RunQuickBooksSyncAsync(connection.Id, true)">Preview import</button>
+                                                <button class="action-primary" type="button" disabled="@(!HasCurrentQuickBooksPreview(connection.Id))" @onclick="() => RunQuickBooksSyncAsync(connection.Id, false)">Import previewed snapshot</button>
+                                                <button class="action-secondary" type="button" @onclick="() => PreviewQuickBooksMappingsAsync(connection.Id)">Review mappings</button>
+                                            }
+                                            <button class="action-secondary" type="button" @onclick="() => ReconnectQuickBooksAsync(connection)">Reconnect</button>
+                                            @if (HasQuickBooksAuthorization(connection))
+                                            {
+                                                @if (PendingQuickBooksDisconnectId == connection.Id)
+                                                {
+                                                    <button class="action-danger" type="button" @onclick="() => DisconnectQuickBooksAsync(connection.Id)">Confirm disconnect</button>
+                                                    <button class="action-secondary" type="button" @onclick="CancelQuickBooksDisconnect">Cancel</button>
+                                                }
+                                                else
+                                                {
+                                                    <button class="action-secondary" type="button" @onclick="() => PendingQuickBooksDisconnectId = connection.Id">Disconnect</button>
+                                                }
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+
+                    @if (LatestQuickBooksSync is not null)
+                    {
+                        <div class="notice-panel" role="status">
+                            <strong>@(LatestQuickBooksSync.DryRun ? "QuickBooks import preview" : "QuickBooks import result")</strong>
+                            <p>Fetched @LatestQuickBooksSync.FetchedCount; create @LatestQuickBooksSync.CreatedCount; update @LatestQuickBooksSync.UpdatedCount; unchanged @LatestQuickBooksSync.UnchangedCount; conflicts @LatestQuickBooksSync.ConflictCount; rejected @LatestQuickBooksSync.RejectedCount.</p>
+                            @if (LatestQuickBooksSync.Issues.Count > 0) { <ul class="warning-list">@foreach (var issue in LatestQuickBooksSync.Issues) { <li>@issue.Code — @issue.Message @if (!string.IsNullOrWhiteSpace(issue.ProviderEntityId)) { <span>(QuickBooks ID @issue.ProviderEntityId)</span> }</li> }</ul> }
+                        </div>
+                    }
+                    @if (QuickBooksMappingWorkspace is { Succeeded: true } mappingWorkspace && mappingWorkspace.EntityType == QuickBooksSyncEntity)
+                    {
+                        <section class="notice-panel" aria-labelledby="quickBooksMappingHeading">
+                            <h3 id="quickBooksMappingHeading">QuickBooks @DescribeEntityType(mappingWorkspace.EntityType) mappings</h3>
+                            <p>Mapping links existing records without changing or deleting either record. Each save rechecks the exact QuickBooks snapshot and mapping state shown here. Import again after resolving conflicts.</p>
+                            @if (mappingWorkspace.RemoteCandidates.Count == 0)
+                            {
+                                <p class="muted-copy">QuickBooks returned no @DescribeEntityType(mappingWorkspace.EntityType) records to map.</p>
+                            }
+                            else
+                            {
+                                <div class="table-scroll">
+                                    <table class="data-table">
+                                        <thead><tr><th>QuickBooks record</th><th>Class</th><th>Current mapping</th><th>BrassLedger target</th><th>Actions</th></tr></thead>
+                                        <tbody>
+                                        @foreach (var remote in mappingWorkspace.RemoteCandidates)
+                                        {
+                                            <tr>
+                                                <td><strong>@remote.Name</strong><br /><small>@remote.Number · ID @remote.ProviderEntityId</small>@if (!remote.Eligible) { <div class="auth-error" role="alert">@remote.EligibilityMessage</div> }</td>
+                                                <td>@remote.Classification@(remote.IsControlAccount ? $" · {DescribeControlPurpose(remote.ControlAccountPurpose)}" : string.Empty)</td>
+                                                <td>@DescribeCurrentMapping(remote)</td>
+                                                <td>
+                                                    <select class="field-input" aria-label="@($"BrassLedger target for {remote.Name}")" value="@QuickBooksMappingSelections.GetValueOrDefault(remote.ProviderEntityId)" @onchange="args => SelectQuickBooksMapping(remote.ProviderEntityId, args.Value)" disabled="@(!remote.Eligible)">
+                                                        <option value="@Guid.Empty">Select a local record</option>
+                                                        @foreach (var local in EligibleQuickBooksTargets(remote))
+                                                        {
+                                                            <option value="@local.LocalEntityId">@local.Number — @local.Name@(local.IsControlAccount ? $" ({DescribeControlPurpose(local.ControlAccountPurpose)})" : string.Empty)</option>
+                                                        }
+                                                    </select>
+                                                </td>
+                                                <td>
+                                                    @if (PendingQuickBooksMappingReplacementId == remote.ProviderEntityId)
+                                                    {
+                                                        <button class="action-danger" type="button" @onclick="() => SaveQuickBooksMappingAsync(remote, true)">Confirm replacement</button>
+                                                        <button class="action-secondary" type="button" @onclick="CancelQuickBooksMappingAction">Cancel</button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button class="action-primary" type="button" disabled="@(!remote.Eligible || QuickBooksMappingSelections.GetValueOrDefault(remote.ProviderEntityId) == Guid.Empty || remote.MappedLocalEntityId == QuickBooksMappingSelections.GetValueOrDefault(remote.ProviderEntityId))" @onclick="() => SaveQuickBooksMappingAsync(remote, false)">@(remote.MappedLocalEntityId.HasValue ? "Replace mapping" : "Save mapping")</button>
+                                                    }
+                                                    @if (remote.MappedLocalEntityId.HasValue)
+                                                    {
+                                                        @if (PendingQuickBooksMappingRemovalId == remote.ProviderEntityId)
+                                                        {
+                                                            <button class="action-danger" type="button" @onclick="() => RemoveQuickBooksMappingAsync(remote, true)">Confirm removal</button>
+                                                            <button class="action-secondary" type="button" @onclick="CancelQuickBooksMappingAction">Cancel</button>
+                                                        }
+                                                        else
+                                                        {
+                                                            <button class="action-secondary" type="button" @onclick="() => RemoveQuickBooksMappingAsync(remote, false)">Remove mapping</button>
+                                                        }
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </section>
+                    }
+                    @if (QuickBooksSyncRuns.Count > 0)
+                    {
+                        <h3>Recent QuickBooks API synchronization runs</h3>
+                        <div class="table-scroll"><table class="data-table"><thead><tr><th>Completed</th><th>Entity</th><th>Mode</th><th>Status</th><th>Counts</th><th>Operator</th></tr></thead><tbody>@foreach (var run in QuickBooksSyncRuns) { <tr><td>@run.CompletedAtUtc.LocalDateTime</td><td>@run.EntityType</td><td>@DescribeQuickBooksRun(run)</td><td>@run.Status</td><td>@run.CreatedCount create · @run.UpdatedCount update · @run.ConflictCount conflict · @run.RejectedCount rejected</td><td>@(run.InitiatedBy ?? "Unknown")</td></tr> }</tbody></table></div>
+                    }
+
+                    <details>
+                        <summary>Other provider connection profiles</summary>
+                        <p class="page-intro">These entries store protected configuration only. They do not claim a working connection or synchronization adapter.</p>
+                        <EditForm Model="IntegrationForm" OnValidSubmit="SaveIntegrationConnectionAsync"><div class="content-grid"><div class="field-group"><label class="field-label">Provider</label><InputSelect aria-label="Integration provider" class="field-input" @bind-Value="IntegrationForm.ProviderCode"><option value="">Select provider</option>@foreach (var provider in Providers.Where(provider => provider.Code != "quickbooks-online")) { <option value="@provider.Code">@provider.Name — @provider.ImplementationStatus</option> }</InputSelect></div><div class="field-group"><label class="field-label">Profile name</label><InputText aria-label="Integration connection name" class="field-input" @bind-Value="IntegrationForm.Name" /></div><div class="field-group"><label class="field-label">Settings JSON</label><InputTextArea aria-label="Integration settings JSON" class="field-input" @bind-Value="IntegrationForm.SettingsJson" /></div><div class="field-group"><label class="field-label">Credentials JSON</label><InputTextArea aria-label="Integration credentials JSON" class="field-input" autocomplete="off" @bind-Value="IntegrationForm.CredentialsJson" /></div><div class="field-group"><label><InputCheckbox aria-label="Enable integration connection" @bind-Value="IntegrationForm.Enable" /> Mark profile active (does not connect)</label></div></div><button class="action-secondary" type="submit">Save connection profile</button></EditForm>
+                    </details>
+                </Authorized>
+                <NotAuthorized><p class="muted-copy">User-administration permission is required to manage external accounting authorizations.</p></NotAuthorized>
+            </AuthorizeView>
+            <div class="table-scroll"><table class="data-table">
+                <thead><tr><th>Provider</th><th>Implementation</th><th>Supported now</th><th>Profile status</th></tr></thead>
+                <tbody>@foreach (var provider in Providers) { var connections = Connections.Where(connection => connection.ProviderCode == provider.Code).ToArray(); <tr><td>@provider.Name<br /><small>@provider.Category</small></td><td>@provider.ImplementationStatus<br /><small>@provider.Description</small></td><td>@provider.SupportedCapabilities<br /><small>Live sync: @(provider.LiveSynchronizationAvailable ? "available" : "not implemented")</small></td><td>@(connections.Length == 0 ? "No stored profile" : string.Join(", ", connections.Select(connection => $"{connection.Name}: {connection.Status}"))) @foreach (var connection in connections.Where(connection => connection.ProviderCode != "quickbooks-online" && connection.Status != "Disabled")) { <button class="action-secondary" type="button" @onclick="() => DisableIntegrationConnectionAsync(connection)">Disable @connection.Name</button> }</td></tr> }</tbody>
+            </table></div>
         </section>
     </section>
 }
@@ -167,17 +525,68 @@ else
     private string? StatusMessage;
     private CreateRoleForm RoleForm { get; set; } = new();
     private CreateOperatorForm OperatorForm { get; set; } = new();
+    private AdministratorMfaRecoveryForm MfaRecoveryForm { get; set; } = new();
     private Dictionary<string, string> PermissionLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<IntegrationProviderSnapshot> Providers { get; set; } = [];
+    private IReadOnlyList<IntegrationConnectionSnapshot> Connections { get; set; } = [];
+    private IReadOnlyList<CompanyMembershipSnapshot> Companies { get; set; } = [];
+    private CreateCompanyForm CompanyForm { get; set; } = new();
+    private ExchangeRateEditor ExchangeRateForm { get; set; } = new();
+    private IReadOnlyList<ExchangeRateSnapshot> ExchangeRates { get; set; } = [];
+    private ConsolidationGroupEditor ConsolidationForm { get; set; } = new();
+    private ConsolidationOwnershipEditor OwnershipForm { get; set; } = new();
+    private ConsolidationAccountMappingWorkspace? AccountMappingWorkspace { get; set; }
+    private ConsolidationAccountMappingEditor AccountMappingForm { get; set; } = new();
+    private ConsolidationStatementPresentationWorkspace? StatementPresentationWorkspace { get; set; }
+    private ConsolidationStatementPresentationEditor StatementPresentationForm { get; set; } = new();
+    private ConsolidationTradingPartnerWorkspace? TradingPartnerWorkspace { get; set; }
+    private ConsolidationTradingPartnerEditor TradingPartnerForm { get; set; } = new();
+    private IReadOnlyList<ConsolidationGroupSnapshot> ConsolidationGroups { get; set; } = [];
+    private ConsolidatedBalanceReport? ConsolidatedBalance { get; set; }
+    private ConsolidationReportEditor ConsolidationReportForm { get; set; } = new();
+    private AccountingControlsSnapshot AccountingControls { get; set; } = new([], []);
+    private AccountingAccountRoleWorkspace AccountingAccountRoles { get; set; } = new(false, [], []);
+    private Dictionary<string, Guid> OperationalAccountSelections { get; } = new(StringComparer.Ordinal);
+    private string? PendingOperationalAccountRole { get; set; }
+    private AccountingPeriodEditor AccountingPeriodForm { get; set; } = new();
+    private IntegrationConnectionEditor IntegrationForm { get; set; } = new();
+    private QuickBooksConnectionEditor QuickBooksForm { get; set; } = new();
+    private QuickBooksOnlineAvailability? QuickBooksAvailability { get; set; }
+    private Guid? PendingQuickBooksDisconnectId { get; set; }
+    private string QuickBooksSyncEntity { get; set; } = "accounts";
+    private QuickBooksSyncResult? LatestQuickBooksSync { get; set; }
+    private IReadOnlyList<QuickBooksSyncRunSnapshot> QuickBooksSyncRuns { get; set; } = [];
+    private Dictionary<string, string> QuickBooksPreviewSnapshots { get; } = new(StringComparer.Ordinal);
+    private QuickBooksMappingWorkspace? QuickBooksMappingWorkspace { get; set; }
+    private Dictionary<string, Guid> QuickBooksMappingSelections { get; } = new(StringComparer.Ordinal);
+    private string? PendingQuickBooksMappingReplacementId { get; set; }
+    private string? PendingQuickBooksMappingRemovalId { get; set; }
+    private BackupResult? LatestBackup { get; set; }
+    private BackupVerificationResult? BackupVerification { get; set; }
+    private BackupRecoveryRehearsalResult? RecoveryRehearsal { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
         await ReloadSnapshotAsync();
+        if (string.Equals(QuickBooksCallbackStatus, "connected", StringComparison.OrdinalIgnoreCase))
+            StatusMessage = $"Connected and validated {QuickBooksCallbackCompany ?? "the selected QuickBooks company"}.";
+        else if (string.Equals(QuickBooksCallbackStatus, "error", StringComparison.OrdinalIgnoreCase))
+            StatusMessage = string.IsNullOrWhiteSpace(QuickBooksCallbackMessage) ? "QuickBooks authorization did not complete." : QuickBooksCallbackMessage;
     }
+
+    [SupplyParameterFromQuery(Name = "quickbooks")]
+    public string? QuickBooksCallbackStatus { get; set; }
+
+    [SupplyParameterFromQuery(Name = "company")]
+    public string? QuickBooksCallbackCompany { get; set; }
+
+    [SupplyParameterFromQuery(Name = "message")]
+    public string? QuickBooksCallbackMessage { get; set; }
 
     private async Task CreateRoleAsync(EditContext _)
     {
         var result = await SecurityAdministrationService.CreateRoleAsync(
-            new CreateAccessRoleRequest(RoleForm.Name, RoleForm.Description, RoleForm.Permissions.ToArray()));
+            new CreateAccessRoleRequest(RoleForm.Name, RoleForm.Description, RoleForm.Permissions.ToArray(), RoleForm.RequiresMfa));
 
         StatusMessage = result.Succeeded ? "Custom role saved." : result.ErrorMessage;
         if (result.Succeeded)
@@ -187,23 +596,461 @@ else
         }
     }
 
-    private async Task CreateOperatorAsync(EditContext _)
+    private async Task SetRoleMfaRequirementAsync(AccessRoleSnapshot role)
     {
-        var result = await SecurityAdministrationService.CreateOperatorAsync(
-            new CreateOperatorRequest(
+        var result = await SecurityAdministrationService.SetRoleMfaRequirementAsync(role.Name, !role.RequiresMfa);
+        StatusMessage = result.Succeeded
+            ? $"{role.Name} now {(role.RequiresMfa ? "allows password-only access" : "requires MFA")}. Assigned operators must sign in again."
+            : result.ErrorMessage;
+        if (result.Succeeded) await ReloadSnapshotAsync();
+    }
+
+    private async Task InviteOperatorAsync(EditContext _)
+    {
+        var result = await SecurityAdministrationService.InviteOperatorAsync(
+            new CreateOperatorInvitationRequest(
                 OperatorForm.UserName,
                 OperatorForm.DisplayName,
                 OperatorForm.Email,
-                OperatorForm.Password,
-                OperatorForm.ConfirmPassword,
                 OperatorForm.RoleName));
 
-        StatusMessage = result.Succeeded ? "Operator account created." : result.ErrorMessage;
+        StatusMessage = result.Succeeded ? "The inactive operator account was created and its one-time invitation was queued for delivery." : result.ErrorMessage;
         if (result.Succeeded)
         {
             OperatorForm = new CreateOperatorForm();
             await ReloadSnapshotAsync();
         }
+    }
+
+    private async Task RetrySecurityEmailAsync(Guid messageId)
+    {
+        var result = await SecurityAdministrationService.RetrySecurityEmailAsync(messageId);
+        StatusMessage = result.Succeeded ? "The security-email delivery was queued for another bounded attempt." : result.ErrorMessage;
+        await ReloadSnapshotAsync();
+    }
+
+    private async Task ResetOperatorMfaAsync()
+    {
+        var result = await SecurityAdministrationService.ResetOperatorMfaAsync(new AdministratorMfaRecoveryRequest(
+            MfaRecoveryForm.TargetUserId,
+            MfaRecoveryForm.ConfirmUserName,
+            MfaRecoveryForm.CurrentAdministratorPassword,
+            MfaRecoveryForm.VerificationMethod,
+            MfaRecoveryForm.CaseReference));
+        StatusMessage = result.Succeeded
+            ? Snapshot?.SecurityEmailDeliveryConfigured == true
+                ? "MFA recovery completed, all target sessions were revoked, and a security notice was queued to the registered email address."
+                : "MFA recovery completed and all target sessions were revoked. Notify the operator through the company’s verified out-of-band procedure."
+            : result.ErrorMessage;
+        if (result.Succeeded) MfaRecoveryForm = new AdministratorMfaRecoveryForm();
+        await ReloadSnapshotAsync();
+    }
+
+    private async Task CreateCompanyAsync()
+    {
+        var result = await CompanyManagementService.CreateCompanyAsync(new CreateCompanyRequest(CompanyForm.Name, CompanyForm.LegalName, CompanyForm.TaxId, CompanyForm.BaseCurrency, CompanyForm.FiscalYearStartMonth));
+        StatusMessage = result.Succeeded ? "Company created. Switch the active company session to begin working in its separate books." : result.ErrorMessage;
+        if (result.Succeeded) { CompanyForm = new CreateCompanyForm(); Companies = await CompanyManagementService.GetMyCompaniesAsync(); }
+    }
+
+    private async Task SaveExchangeRateAsync()
+    {
+        var result = await ConsolidationService.SaveExchangeRateAsync(new SaveExchangeRateRequest(ExchangeRateForm.BaseCurrency, ExchangeRateForm.QuoteCurrency, ExchangeRateForm.Rate, ExchangeRateForm.EffectiveOn, ExchangeRateForm.Source, ExchangeRateForm.Id, ExchangeRateForm.RateType, ExchangeRateForm.RateType == "Average" ? ExchangeRateForm.PeriodStartOn : null, ExchangeRateForm.SourceReference, ExchangeRateForm.RetrievedOn, ExchangeRateForm.IsActive, ExchangeRateForm.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Exchange rate saved." : result.ErrorMessage;
+        if (result.Succeeded) { ExchangeRateForm = new(); ExchangeRates = await ConsolidationService.GetExchangeRatesAsync(); }
+    }
+
+    private void LoadExchangeRate(ExchangeRateSnapshot rate) => ExchangeRateForm = new() { Id = rate.Id, BaseCurrency = rate.BaseCurrency, QuoteCurrency = rate.QuoteCurrency, Rate = rate.Rate, RateType = rate.RateType, PeriodStartOn = rate.PeriodStartOn ?? rate.EffectiveOn, EffectiveOn = rate.EffectiveOn, Source = rate.Source, SourceReference = rate.SourceReference, RetrievedOn = rate.RetrievedOn, IsActive = rate.IsActive, ConcurrencyToken = rate.ConcurrencyToken };
+    private void CancelExchangeRateEdit() { ExchangeRateForm = new(); StatusMessage = "Exchange-rate edit cancelled."; }
+
+    private async Task SaveIntegrationConnectionAsync()
+    {
+        var result = await IntegrationService.SaveConnectionAsync(new SaveIntegrationConnectionRequest(null, IntegrationForm.ProviderCode, IntegrationForm.Name, IntegrationForm.SettingsJson, IntegrationForm.CredentialsJson, IntegrationForm.Enable));
+        StatusMessage = result.Succeeded ? "Integration connection profile saved. Credentials are not displayed after saving." : result.ErrorMessage;
+        if (result.Succeeded) { IntegrationForm = new IntegrationConnectionEditor(); Connections = await IntegrationService.GetConnectionsAsync(); }
+    }
+
+    private async Task ConnectQuickBooksAsync()
+    {
+        if (QuickBooksAvailability is null) return;
+        var result = await QuickBooksOnlineConnectionService.BeginAuthorizationAsync(new(null, QuickBooksForm.ConnectionName, QuickBooksAvailability.Environment));
+        StatusMessage = result.ErrorMessage;
+        if (result.Succeeded && !string.IsNullOrWhiteSpace(result.AuthorizationUrl))
+            NavigationManager.NavigateTo(result.AuthorizationUrl, forceLoad: true);
+    }
+
+    private async Task ReconnectQuickBooksAsync(IntegrationConnectionSnapshot connection)
+    {
+        if (QuickBooksAvailability is null) return;
+        var result = await QuickBooksOnlineConnectionService.BeginAuthorizationAsync(new(connection.Id, connection.Name, QuickBooksAvailability.Environment));
+        StatusMessage = result.ErrorMessage;
+        if (result.Succeeded && !string.IsNullOrWhiteSpace(result.AuthorizationUrl))
+            NavigationManager.NavigateTo(result.AuthorizationUrl, forceLoad: true);
+    }
+
+    private async Task ValidateQuickBooksAsync(Guid connectionId)
+    {
+        var result = await QuickBooksOnlineConnectionService.ValidateConnectionAsync(connectionId);
+        StatusMessage = result.Succeeded ? "The QuickBooks company and authorization were validated." : result.ErrorMessage;
+        Connections = await IntegrationService.GetConnectionsAsync();
+    }
+
+    private async Task RunQuickBooksSyncAsync(Guid connectionId, bool dryRun)
+    {
+        var key = QuickBooksPreviewKey(connectionId);
+        var expectedSnapshot = dryRun ? string.Empty : QuickBooksPreviewSnapshots.GetValueOrDefault(key, string.Empty);
+        if (!dryRun && string.IsNullOrWhiteSpace(expectedSnapshot))
+        {
+            StatusMessage = "Preview this QuickBooks data type before importing it.";
+            return;
+        }
+        LatestQuickBooksSync = await QuickBooksOnlineSyncService.ImportAsync(new(connectionId, QuickBooksSyncEntity, dryRun, expectedSnapshot));
+        StatusMessage = LatestQuickBooksSync.Succeeded
+            ? dryRun ? "Preview complete. Review the counts and issues before importing this exact snapshot." : "The previewed QuickBooks snapshot was imported through controlled entity links."
+            : LatestQuickBooksSync.ErrorMessage;
+        if (dryRun && LatestQuickBooksSync.Succeeded) QuickBooksPreviewSnapshots[key] = LatestQuickBooksSync.SnapshotSha256;
+        if (!dryRun || !LatestQuickBooksSync.Succeeded) QuickBooksPreviewSnapshots.Remove(key);
+        QuickBooksSyncRuns = await QuickBooksOnlineSyncService.GetRecentRunsAsync(limit: 20);
+        if (!dryRun && LatestQuickBooksSync.Succeeded) Connections = await IntegrationService.GetConnectionsAsync();
+    }
+
+    private bool HasCurrentQuickBooksPreview(Guid connectionId) => QuickBooksPreviewSnapshots.ContainsKey(QuickBooksPreviewKey(connectionId));
+    private string QuickBooksPreviewKey(Guid connectionId) => $"{connectionId:N}:{QuickBooksSyncEntity}";
+    private static bool HasQuickBooksAuthorization(IntegrationConnectionSnapshot connection) => connection.Status is "Connected" or "ValidationFailed" or "ReauthorizationRequired" or "DisconnectPending";
+
+    private async Task PreviewQuickBooksMappingsAsync(Guid connectionId)
+    {
+        QuickBooksMappingWorkspace = await QuickBooksOnlineSyncService.PreviewMappingsAsync(connectionId, QuickBooksSyncEntity);
+        QuickBooksMappingSelections.Clear();
+        PendingQuickBooksMappingReplacementId = null;
+        PendingQuickBooksMappingRemovalId = null;
+        if (!QuickBooksMappingWorkspace.Succeeded)
+        {
+            StatusMessage = QuickBooksMappingWorkspace.ErrorMessage;
+            return;
+        }
+        foreach (var remote in QuickBooksMappingWorkspace.RemoteCandidates)
+            QuickBooksMappingSelections[remote.ProviderEntityId] = remote.MappedLocalEntityId ?? Guid.Empty;
+        StatusMessage = "Mapping review loaded. Saving a link will not change or delete either QuickBooks or BrassLedger records.";
+        QuickBooksSyncRuns = await QuickBooksOnlineSyncService.GetRecentRunsAsync(limit: 20);
+    }
+
+    private void SelectQuickBooksMapping(string providerEntityId, object? value)
+    {
+        QuickBooksMappingSelections[providerEntityId] = Guid.TryParse(value?.ToString(), out var localEntityId) ? localEntityId : Guid.Empty;
+        PendingQuickBooksMappingReplacementId = null;
+        PendingQuickBooksMappingRemovalId = null;
+    }
+
+    private IReadOnlyList<QuickBooksLocalMappingCandidate> EligibleQuickBooksTargets(QuickBooksRemoteMappingCandidate remote)
+    {
+        if (QuickBooksMappingWorkspace is null) return [];
+        return QuickBooksMappingWorkspace.LocalCandidates.Where(local =>
+            (QuickBooksMappingWorkspace.EntityType != "accounts" || (local.Classification == remote.Classification && local.IsControlAccount == remote.IsControlAccount && (!remote.IsControlAccount || local.ControlAccountPurpose == remote.ControlAccountPurpose)))
+            && (string.IsNullOrWhiteSpace(local.MappedProviderEntityId) || local.MappedProviderEntityId == remote.ProviderEntityId)).ToArray();
+    }
+
+    private string DescribeCurrentMapping(QuickBooksRemoteMappingCandidate remote)
+    {
+        if (!remote.MappedLocalEntityId.HasValue || QuickBooksMappingWorkspace is null) return "Not mapped";
+        var local = QuickBooksMappingWorkspace.LocalCandidates.FirstOrDefault(candidate => candidate.LocalEntityId == remote.MappedLocalEntityId.Value);
+        return local is null ? "Mapped local record is missing" : $"{local.Number} — {local.Name}";
+    }
+
+    private async Task SaveQuickBooksMappingAsync(QuickBooksRemoteMappingCandidate remote, bool confirmed)
+    {
+        if (QuickBooksMappingWorkspace is null || !QuickBooksMappingWorkspace.PreviewRunId.HasValue) return;
+        var localEntityId = QuickBooksMappingSelections.GetValueOrDefault(remote.ProviderEntityId);
+        var target = QuickBooksMappingWorkspace.LocalCandidates.FirstOrDefault(candidate => candidate.LocalEntityId == localEntityId);
+        if (target is null)
+        {
+            StatusMessage = "Select a compatible BrassLedger record before saving the mapping.";
+            return;
+        }
+        if (remote.MappedLocalEntityId.HasValue && remote.MappedLocalEntityId != localEntityId && !confirmed)
+        {
+            PendingQuickBooksMappingReplacementId = remote.ProviderEntityId;
+            PendingQuickBooksMappingRemovalId = null;
+            StatusMessage = "Confirm replacing this mapping. Neither the old nor new local record will be deleted or changed.";
+            return;
+        }
+        var result = await QuickBooksOnlineSyncService.SaveMappingAsync(new(
+            QuickBooksMappingWorkspace.ConnectionId, QuickBooksMappingWorkspace.EntityType, QuickBooksMappingWorkspace.PreviewRunId.Value,
+            QuickBooksMappingWorkspace.SnapshotSha256, remote.ProviderEntityId, localEntityId, remote.MappedLocalEntityId,
+            target.MappedProviderEntityId ?? string.Empty, confirmed));
+        if (!result.Succeeded)
+        {
+            StatusMessage = result.ErrorMessage;
+            return;
+        }
+        var completionMessage = remote.MappedLocalEntityId.HasValue ? "QuickBooks mapping replaced. No business record was changed or deleted." : "QuickBooks mapping saved. No business record was changed.";
+        await PreviewQuickBooksMappingsAsync(QuickBooksMappingWorkspace.ConnectionId);
+        StatusMessage = completionMessage;
+    }
+
+    private async Task RemoveQuickBooksMappingAsync(QuickBooksRemoteMappingCandidate remote, bool confirmed)
+    {
+        if (QuickBooksMappingWorkspace is null || !remote.MappedLocalEntityId.HasValue) return;
+        if (!confirmed)
+        {
+            PendingQuickBooksMappingRemovalId = remote.ProviderEntityId;
+            PendingQuickBooksMappingReplacementId = null;
+            StatusMessage = "Confirm removing only the link. Neither the QuickBooks nor BrassLedger record will be deleted.";
+            return;
+        }
+        var connectionId = QuickBooksMappingWorkspace.ConnectionId;
+        var result = await QuickBooksOnlineSyncService.RemoveMappingAsync(new(connectionId, QuickBooksMappingWorkspace.EntityType, remote.ProviderEntityId, remote.MappedLocalEntityId.Value, true));
+        if (!result.Succeeded)
+        {
+            StatusMessage = result.ErrorMessage;
+            return;
+        }
+        await PreviewQuickBooksMappingsAsync(connectionId);
+        StatusMessage = "QuickBooks mapping removed. Neither business record was deleted or changed.";
+    }
+
+    private void CancelQuickBooksMappingAction()
+    {
+        PendingQuickBooksMappingReplacementId = null;
+        PendingQuickBooksMappingRemovalId = null;
+        StatusMessage = "Mapping change cancelled.";
+    }
+
+    private static string DescribeEntityType(string entityType) => entityType switch { "accounts" => "account", "customers" => "customer", "vendors" => "vendor", _ => "record" };
+    private static string DescribeControlPurpose(string purpose) => purpose switch { "AccountsReceivable" => "A/R control", "RetainageReceivable" => "retainage A/R control", "ContractAsset" => "project contract-asset control", "ContractLiability" => "project contract-liability control", "AccountsPayable" => "A/P control", _ => "other control" };
+    private static string DescribeQuickBooksRun(QuickBooksSyncRunSnapshot run) => run.Direction == "Mapping" ? run.IsDryRun ? "Mapping review" : "Mapping change" : run.IsDryRun ? "Import preview" : "Import";
+
+    private async Task DisconnectQuickBooksAsync(Guid connectionId)
+    {
+        var result = await QuickBooksOnlineConnectionService.DisconnectAsync(connectionId);
+        StatusMessage = result.Succeeded ? "The QuickBooks authorization was revoked and protected tokens were removed." : result.ErrorMessage;
+        PendingQuickBooksDisconnectId = null;
+        Connections = await IntegrationService.GetConnectionsAsync();
+    }
+
+    private void CancelQuickBooksDisconnect() => PendingQuickBooksDisconnectId = null;
+
+    private static string DescribeQuickBooksConnection(IntegrationConnectionSnapshot connection)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(connection.SettingsJson);
+            var root = document.RootElement;
+            var companyName = root.TryGetProperty("CompanyName", out var company) ? company.GetString() : null;
+            var environment = root.TryGetProperty("Environment", out var environmentValue) ? environmentValue.GetString() : null;
+            return string.IsNullOrWhiteSpace(companyName) ? environment ?? "Not linked" : $"{companyName} ({environment})";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return "Connection metadata unavailable";
+        }
+    }
+
+    private async Task CreateBackupAsync()
+    {
+        LatestBackup = await BackupService.CreateBackupAsync();
+        BackupVerification = null; RecoveryRehearsal = null;
+        StatusMessage = LatestBackup.Succeeded ? "Backup created. Verify it, then run a restore rehearsal before relying on it operationally." : LatestBackup.ErrorMessage;
+    }
+
+    private async Task VerifyBackupAsync()
+    {
+        if (LatestBackup?.BackupId is null) return;
+        BackupVerification = await BackupService.VerifyBackupAsync(LatestBackup.BackupId);
+        StatusMessage = BackupVerification.Succeeded ? "Backup integrity verification passed." : BackupVerification.ErrorMessage;
+    }
+
+    private async Task RehearseRestoreAsync()
+    {
+        if (LatestBackup?.BackupId is null) return;
+        RecoveryRehearsal = await BackupService.RehearseRestoreAsync(LatestBackup.BackupId);
+        StatusMessage = RecoveryRehearsal.Succeeded ? "Isolated restore rehearsal passed; live data was not changed." : RecoveryRehearsal.ErrorMessage;
+    }
+
+    private async Task DisableIntegrationConnectionAsync(IntegrationConnectionSnapshot connection)
+    {
+        var result = await IntegrationService.SaveConnectionAsync(new SaveIntegrationConnectionRequest(connection.Id, connection.ProviderCode, connection.Name, connection.SettingsJson, string.Empty, false));
+        StatusMessage = result.Succeeded ? $"{connection.Name} was disabled; its credentials were retained securely for a future authorized re-enable." : result.ErrorMessage;
+        if (result.Succeeded) Connections = await IntegrationService.GetConnectionsAsync();
+    }
+
+    private async Task SaveAccountingPeriodAsync()
+    {
+        var result = await AccountingPeriodService.SavePeriodAsync(new SaveAccountingPeriodRequest(null, AccountingPeriodForm.StartsOn, AccountingPeriodForm.EndsOn, AccountingPeriodForm.Notes));
+        StatusMessage = result.Succeeded ? "Accounting period saved." : result.ErrorMessage;
+        if (result.Succeeded) { AccountingPeriodForm = new AccountingPeriodEditor(); AccountingControls = await AccountingPeriodService.GetSnapshotAsync(); }
+    }
+
+    private async Task SetPeriodStatusAsync(Guid periodId, bool close)
+    {
+        var result = await AccountingPeriodService.SetPeriodStatusAsync(periodId, close, close ? "Closed from administration." : "Reopened from administration.");
+        StatusMessage = result.Succeeded ? (close ? "Accounting period closed." : "Accounting period reopened.") : result.ErrorMessage;
+        if (result.Succeeded) AccountingControls = await AccountingPeriodService.GetSnapshotAsync();
+    }
+
+    private Task TogglePeriodStatusAsync(AccountingPeriodSnapshot period) => SetPeriodStatusAsync(period.Id, period.Status != "Closed");
+
+    private IReadOnlyList<AccountingAccountRoleCandidate> EligibleOperationalAccounts(AccountingAccountRoleSnapshot role) =>
+        AccountingAccountRoles.Accounts.Where(account =>
+            account.AccountType == role.RequiredAccountType
+            && account.IsControlAccount == role.RequiresControlAccount
+            && (string.IsNullOrWhiteSpace(account.AssignedRole) || account.AssignedRole == role.Code)).ToArray();
+
+    private void SelectOperationalAccount(string roleCode, object? value)
+    {
+        OperationalAccountSelections[roleCode] = Guid.TryParse(value?.ToString(), out var accountId) ? accountId : Guid.Empty;
+        PendingOperationalAccountRole = null;
+    }
+
+    private async Task AssignOperationalAccountAsync(AccountingAccountRoleSnapshot role, bool confirmed)
+    {
+        var accountId = OperationalAccountSelections.GetValueOrDefault(role.Code);
+        if (accountId == Guid.Empty) return;
+        if (!confirmed)
+        {
+            PendingOperationalAccountRole = role.Code;
+            StatusMessage = $"Confirm changing {role.Name}. Future workflow postings will use the selected account; existing journal entries are not rewritten.";
+            return;
+        }
+
+        var result = await AccountingAccountRoleService.AssignAsync(new(role.Code, accountId, role.AccountId, true));
+        StatusMessage = result.Succeeded ? $"{role.Name} routing changed. Existing journal entries were not modified." : result.ErrorMessage;
+        PendingOperationalAccountRole = null;
+        if (result.Succeeded) await ReloadOperationalAccountRolesAsync();
+    }
+
+    private void CancelOperationalAccountAssignment()
+    {
+        PendingOperationalAccountRole = null;
+        StatusMessage = "Operational account change cancelled.";
+    }
+
+    private async Task SaveConsolidationGroupAsync()
+    {
+        var members = ConsolidationForm.MemberCompanyIds.Select(companyId => new ConsolidationMemberRequest(companyId, ConsolidationForm.OwnershipPercentages.GetValueOrDefault(companyId, 1m), ConsolidationForm.EffectiveFrom, ConsolidationForm.EffectiveThrough, ConsolidationForm.ConsolidationBases.GetValueOrDefault(companyId, "CombinedAffiliate"), ConsolidationForm.BasisRationales.GetValueOrDefault(companyId, string.Empty), ConsolidationForm.BasisReviewedOn)).ToArray();
+        var result = await ConsolidationService.SaveGroupAsync(new SaveConsolidationGroupRequest(ConsolidationForm.Id, ConsolidationForm.Name, ConsolidationForm.ReportingCurrency, members, ConsolidationForm.IsActive, ConsolidationForm.ConcurrencyToken, ConsolidationForm.CtaAccountNumber, ConsolidationForm.CtaAccountName, ConsolidationForm.NciAccountNumber, ConsolidationForm.NciAccountName));
+        StatusMessage = result.Succeeded ? "Consolidation group saved." : result.ErrorMessage;
+        if (result.Succeeded) { ConsolidationForm = new ConsolidationGroupEditor(); await ReloadSnapshotAsync(); }
+    }
+
+    private void LoadConsolidationGroup(ConsolidationGroupSnapshot group) => ConsolidationForm = new() { Id = group.Id, Name = group.Name, ReportingCurrency = group.ReportingCurrency, CtaAccountNumber = group.CtaAccountNumber, CtaAccountName = group.CtaAccountName, NciAccountNumber = group.NciAccountNumber, NciAccountName = group.NciAccountName, IsActive = group.IsActive, ConcurrencyToken = group.ConcurrencyToken };
+    private void CancelConsolidationEdit() { ConsolidationForm = new(); StatusMessage = "Consolidation-policy edit cancelled."; }
+
+    private async Task SaveOwnershipPeriodAsync()
+    {
+        var result = await ConsolidationService.SaveOwnershipPeriodAsync(new SaveConsolidationOwnershipPeriodRequest(OwnershipForm.Id, OwnershipForm.ConsolidationGroupId, OwnershipForm.MemberCompanyId, OwnershipForm.OwnershipPercentage, OwnershipForm.EffectiveFrom, OwnershipForm.EffectiveThrough, OwnershipForm.ConcurrencyToken, OwnershipForm.ConsolidationBasis, OwnershipForm.BasisRationale, OwnershipForm.BasisReviewedOn));
+        StatusMessage = result.Succeeded ? "Ownership period saved with retained effective-date history." : result.ErrorMessage;
+        if (result.Succeeded) { OwnershipForm = new(); await ReloadSnapshotAsync(); }
+    }
+
+    private void LoadOwnershipPeriod(Guid groupId, ConsolidationGroupMemberSnapshot member)
+    {
+        OwnershipForm = new ConsolidationOwnershipEditor { Id = member.Id, ConsolidationGroupId = groupId, MemberCompanyId = member.CompanyId, OwnershipPercentage = member.OwnershipPercentage, ConsolidationBasis = member.ConsolidationBasis, BasisRationale = member.BasisRationale, BasisReviewedOn = member.BasisReviewedOn, EffectiveFrom = member.EffectiveFrom, EffectiveThrough = member.EffectiveThrough, ConcurrencyToken = member.ConcurrencyToken };
+        StatusMessage = "Review the retained ownership period. Change its end date before adding a non-overlapping successor period.";
+    }
+
+    private void CancelOwnershipEdit() { OwnershipForm = new(); StatusMessage = "Ownership-period edit cancelled."; }
+
+    private async Task LoadAccountMappingsAsync(Guid groupId)
+    {
+        AccountMappingWorkspace = await ConsolidationService.GetAccountMappingWorkspaceAsync(groupId);
+        AccountMappingForm = new() { ConsolidationGroupId = groupId };
+        StatusMessage = AccountMappingWorkspace is null ? "Account mappings are unavailable because every member company must remain owned by this operator." : null;
+    }
+
+    private void SelectMappingSource(ChangeEventArgs args)
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out var accountId) || AccountMappingWorkspace is null) return;
+        var source = AccountMappingWorkspace.SourceAccounts.Single(account => account.AccountId == accountId);
+        AccountMappingForm.MemberAccountId = source.AccountId; AccountMappingForm.MemberCompanyId = source.CompanyId; AccountMappingForm.ReportingAccountNumber = source.AccountNumber; AccountMappingForm.ReportingAccountName = source.AccountName;
+    }
+
+    private async Task SaveAccountMappingAsync()
+    {
+        var result = await ConsolidationService.SaveAccountMappingAsync(new SaveConsolidationAccountMappingRequest(AccountMappingForm.Id, AccountMappingForm.ConsolidationGroupId, AccountMappingForm.MemberCompanyId, AccountMappingForm.MemberAccountId, AccountMappingForm.ReportingAccountNumber, AccountMappingForm.ReportingAccountName, AccountMappingForm.EffectiveFrom, AccountMappingForm.EffectiveThrough, AccountMappingForm.IsActive, AccountMappingForm.ConcurrencyToken, AccountMappingForm.TranslationMethod, AccountMappingForm.CashFlowActivity, AccountMappingForm.CashFlowRationale, AccountMappingForm.CashFlowReviewedOn));
+        StatusMessage = result.Succeeded ? "Account mapping saved with retained effective-date history." : result.ErrorMessage;
+        if (result.Succeeded) await LoadAccountMappingsAsync(AccountMappingForm.ConsolidationGroupId);
+    }
+
+    private void LoadAccountMapping(ConsolidationAccountMappingSnapshot mapping) => AccountMappingForm = new() { Id = mapping.Id, ConsolidationGroupId = AccountMappingWorkspace!.GroupId, MemberCompanyId = mapping.CompanyId, MemberAccountId = mapping.AccountId, ReportingAccountNumber = mapping.ReportingAccountNumber, ReportingAccountName = mapping.ReportingAccountName, TranslationMethod = mapping.TranslationMethod, CashFlowActivity = mapping.CashFlowActivity, CashFlowRationale = mapping.CashFlowRationale, CashFlowReviewedOn = mapping.CashFlowReviewedOn, EffectiveFrom = mapping.EffectiveFrom, EffectiveThrough = mapping.EffectiveThrough, IsActive = mapping.IsActive, ConcurrencyToken = mapping.ConcurrencyToken };
+    private void CancelMappingEdit() { var groupId = AccountMappingForm.ConsolidationGroupId; AccountMappingForm = new() { ConsolidationGroupId = groupId }; StatusMessage = "Account-mapping edit cancelled."; }
+
+    private async Task LoadStatementPresentationsAsync(Guid groupId)
+    {
+        StatementPresentationWorkspace = await ConsolidationService.GetStatementPresentationWorkspaceAsync(groupId);
+        StatementPresentationForm = new() { ConsolidationGroupId = groupId };
+        StatusMessage = StatementPresentationWorkspace is null ? "Statement presentation is unavailable because this operator needs ownership of every retained member company." : null;
+    }
+
+    private void SelectStatementPresentationAccount(ChangeEventArgs args)
+    {
+        if (!int.TryParse(args.Value?.ToString(), out var index) || StatementPresentationWorkspace is null || index < 0 || index >= StatementPresentationWorkspace.Candidates.Count) return;
+        var candidate = StatementPresentationWorkspace.Candidates[index];
+        StatementPresentationForm.CandidateIndex = index; StatementPresentationForm.StatementCode = candidate.StatementCode; StatementPresentationForm.ReportingAccountNumber = candidate.ReportingAccountNumber; StatementPresentationForm.ReportingAccountName = candidate.ReportingAccountName; StatementPresentationForm.ReportingAccountType = candidate.ReportingAccountType; StatementPresentationForm.LineCaption = candidate.ReportingAccountName;
+        (StatementPresentationForm.SectionCode, StatementPresentationForm.SectionName, StatementPresentationForm.SectionSortOrder) = candidate.ReportingAccountType switch { "Asset" => ("CURRENT-ASSETS", "Current assets", 100), "Liability" => ("CURRENT-LIABILITIES", "Current liabilities", 200), "Equity" => ("EQUITY", "Equity", 300), "Revenue" => ("REVENUE", "Revenue", 100), _ => ("OPERATING-EXPENSES", "Operating expenses", 200) };
+    }
+
+    private async Task SaveStatementPresentationAsync()
+    {
+        var form = StatementPresentationForm;
+        var result = await ConsolidationService.SaveStatementPresentationAsync(new(form.Id, form.ConsolidationGroupId, form.StatementCode, form.ReportingAccountNumber, form.ReportingAccountName, form.ReportingAccountType, form.SectionCode, form.SectionName, form.SectionSortOrder, form.LineCaption, form.LineSortOrder, form.Rationale, form.ReviewedOn, form.EffectiveFrom, form.EffectiveThrough, form.IsActive, form.ConcurrencyToken));
+        StatusMessage = result.Succeeded ? "Statement-presentation policy saved with retained effective-date history." : result.ErrorMessage;
+        if (result.Succeeded) await LoadStatementPresentationsAsync(form.ConsolidationGroupId);
+    }
+
+    private void LoadStatementPresentation(ConsolidationStatementPresentationSnapshot item) => StatementPresentationForm = new() { Id = item.Id, ConsolidationGroupId = StatementPresentationWorkspace!.GroupId, StatementCode = item.StatementCode, ReportingAccountNumber = item.ReportingAccountNumber, ReportingAccountName = item.ReportingAccountName, ReportingAccountType = item.ReportingAccountType, SectionCode = item.SectionCode, SectionName = item.SectionName, SectionSortOrder = item.SectionSortOrder, LineCaption = item.LineCaption, LineSortOrder = item.LineSortOrder, Rationale = item.Rationale, ReviewedOn = item.ReviewedOn, EffectiveFrom = item.EffectiveFrom, EffectiveThrough = item.EffectiveThrough, IsActive = item.IsActive, ConcurrencyToken = item.ConcurrencyToken };
+    private void CancelStatementPresentationEdit() { var groupId = StatementPresentationForm.ConsolidationGroupId; StatementPresentationForm = new() { ConsolidationGroupId = groupId }; StatusMessage = "Statement-presentation edit cancelled."; }
+
+    private async Task LoadTradingPartnersAsync(Guid groupId)
+    {
+        TradingPartnerWorkspace = await ConsolidationService.GetTradingPartnerWorkspaceAsync(groupId);
+        TradingPartnerForm = new() { ConsolidationGroupId = groupId };
+        StatusMessage = TradingPartnerWorkspace is null ? "Trading partners are unavailable because this operator needs access to every retained member company." : null;
+    }
+
+    private static string TradingPartnerRecordKey(ConsolidationTradingPartnerCandidateSnapshot candidate) => $"{candidate.Kind}|{candidate.CounterpartyRecordId:N}";
+    private void SelectTradingPartnerRecord(ChangeEventArgs args)
+    {
+        var key = args.Value?.ToString() ?? string.Empty; var separator = key.IndexOf('|');
+        if (separator < 1 || !Guid.TryParse(key[(separator + 1)..], out var recordId) || TradingPartnerWorkspace is null) return;
+        var kind = key[..separator]; var candidate = TradingPartnerWorkspace.Candidates.Single(item => item.Kind == kind && item.CounterpartyRecordId == recordId);
+        TradingPartnerForm.RecordKey = key; TradingPartnerForm.Kind = candidate.Kind; TradingPartnerForm.RecordId = candidate.CounterpartyRecordId; TradingPartnerForm.MemberCompanyId = candidate.CompanyId;
+        if (TradingPartnerForm.CounterpartyCompanyId == candidate.CompanyId) TradingPartnerForm.CounterpartyCompanyId = Guid.Empty;
+    }
+
+    private async Task SaveTradingPartnerAsync()
+    {
+        var result = await ConsolidationService.SaveTradingPartnerAsync(new(TradingPartnerForm.Id, TradingPartnerForm.ConsolidationGroupId, TradingPartnerForm.MemberCompanyId, TradingPartnerForm.CounterpartyCompanyId, TradingPartnerForm.Kind == "Customer" ? TradingPartnerForm.RecordId : null, TradingPartnerForm.Kind == "Vendor" ? TradingPartnerForm.RecordId : null, TradingPartnerForm.EffectiveFrom, TradingPartnerForm.EffectiveThrough, TradingPartnerForm.IsActive, TradingPartnerForm.ConcurrencyToken));
+        if (result.Succeeded) { await LoadTradingPartnersAsync(TradingPartnerForm.ConsolidationGroupId); StatusMessage = "Trading-partner link saved with retained effective-date history."; }
+        else StatusMessage = result.ErrorMessage;
+    }
+
+    private void LoadTradingPartner(ConsolidationTradingPartnerSnapshot link) => TradingPartnerForm = new() { Id = link.Id, ConsolidationGroupId = TradingPartnerWorkspace!.GroupId, MemberCompanyId = link.MemberCompanyId, CounterpartyCompanyId = link.CounterpartyCompanyId, Kind = link.Kind, RecordId = link.CounterpartyRecordId, RecordKey = $"{link.Kind}|{link.CounterpartyRecordId:N}", EffectiveFrom = link.EffectiveFrom, EffectiveThrough = link.EffectiveThrough, IsActive = link.IsActive, ConcurrencyToken = link.ConcurrencyToken };
+    private void CancelTradingPartnerEdit() { var groupId = TradingPartnerForm.ConsolidationGroupId; TradingPartnerForm = new() { ConsolidationGroupId = groupId }; StatusMessage = "Trading-partner edit cancelled."; }
+
+    private void ToggleConsolidationMember(Guid companyId, object? value)
+    {
+        var selected = value is bool boolValue ? boolValue : string.Equals(value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        if (selected) { ConsolidationForm.MemberCompanyIds.Add(companyId); ConsolidationForm.OwnershipPercentages.TryAdd(companyId, 1m); ConsolidationForm.ConsolidationBases.TryAdd(companyId, "CombinedAffiliate"); }
+        else { ConsolidationForm.MemberCompanyIds.Remove(companyId); ConsolidationForm.OwnershipPercentages.Remove(companyId); ConsolidationForm.ConsolidationBases.Remove(companyId); ConsolidationForm.BasisRationales.Remove(companyId); }
+    }
+
+    private void SetConsolidationOwnership(Guid companyId, object? value)
+    {
+        if (decimal.TryParse(value?.ToString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var ownership))
+        {
+            ConsolidationForm.OwnershipPercentages[companyId] = ownership;
+        }
+    }
+
+    private void SetConsolidationBasis(Guid companyId, object? value) => ConsolidationForm.ConsolidationBases[companyId] = value?.ToString() ?? "CombinedAffiliate";
+    private void SetConsolidationBasisRationale(Guid companyId, object? value) => ConsolidationForm.BasisRationales[companyId] = value?.ToString() ?? string.Empty;
+    private static string DisplayConsolidationBasis(string value) => value switch { "ReportingParent" => "Reporting parent", "ControlledSubsidiary" => "Controlled subsidiary", "CombinedAffiliate" => "Combined affiliate", "ProportionateInterest" => "Proportionate interest", _ => value };
+
+    private async Task LoadConsolidatedBalanceAsync(Guid groupId)
+    {
+        ConsolidatedBalance = await ConsolidationService.GetBalanceReportAsync(groupId, ConsolidationReportForm.PeriodStart, ConsolidationReportForm.AsOf);
+        StatusMessage = ConsolidatedBalance is null ? "The consolidation report is unavailable to this session." : null;
     }
 
     private void TogglePermission(string permissionCode, object? value)
@@ -227,7 +1074,23 @@ else
     private async Task ReloadSnapshotAsync()
     {
         Snapshot = await SecurityAdministrationService.GetSnapshotAsync();
+        Providers = await IntegrationService.GetCatalogAsync();
+        Connections = await IntegrationService.GetConnectionsAsync();
+        QuickBooksAvailability = await QuickBooksOnlineConnectionService.GetAvailabilityAsync();
+        QuickBooksSyncRuns = await QuickBooksOnlineSyncService.GetRecentRunsAsync(limit: 20);
+        Companies = await CompanyManagementService.GetMyCompaniesAsync();
+        ConsolidationGroups = await ConsolidationService.GetGroupsAsync();
+        ExchangeRates = await ConsolidationService.GetExchangeRatesAsync();
+        AccountingControls = await AccountingPeriodService.GetSnapshotAsync();
+        await ReloadOperationalAccountRolesAsync();
         PermissionLabels = Snapshot.Permissions.ToDictionary(permission => permission.Code, permission => permission.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task ReloadOperationalAccountRolesAsync()
+    {
+        AccountingAccountRoles = await AccountingAccountRoleService.GetWorkspaceAsync();
+        OperationalAccountSelections.Clear();
+        foreach (var role in AccountingAccountRoles.Roles) OperationalAccountSelections[role.Code] = role.AccountId ?? Guid.Empty;
     }
 
     private sealed class CreateRoleForm
@@ -235,6 +1098,7 @@ else
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public HashSet<string> Permissions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public bool RequiresMfa { get; set; }
     }
 
     private sealed class CreateOperatorForm
@@ -243,7 +1107,24 @@ else
         public string DisplayName { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string RoleName { get; set; } = string.Empty;
-        public string Password { get; set; } = string.Empty;
-        public string ConfirmPassword { get; set; } = string.Empty;
     }
+    private sealed class AdministratorMfaRecoveryForm
+    {
+        public Guid TargetUserId { get; set; }
+        public string ConfirmUserName { get; set; } = string.Empty;
+        public string CurrentAdministratorPassword { get; set; } = string.Empty;
+        public string VerificationMethod { get; set; } = string.Empty;
+        public string CaseReference { get; set; } = string.Empty;
+    }
+    private sealed class CreateCompanyForm { public string Name { get; set; } = string.Empty; public string LegalName { get; set; } = string.Empty; public string TaxId { get; set; } = string.Empty; public string BaseCurrency { get; set; } = "USD"; public int FiscalYearStartMonth { get; set; } = 1; }
+    private sealed class ExchangeRateEditor { public Guid? Id { get; set; } public string BaseCurrency { get; set; } = "USD"; public string QuoteCurrency { get; set; } = "CAD"; public decimal Rate { get; set; } = 1m; public string RateType { get; set; } = "Closing"; public DateOnly PeriodStartOn { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly EffectiveOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public string Source { get; set; } = string.Empty; public string SourceReference { get; set; } = string.Empty; public DateOnly? RetrievedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class ConsolidationGroupEditor { public Guid? Id { get; set; } public string Name { get; set; } = string.Empty; public string ReportingCurrency { get; set; } = "USD"; public string CtaAccountNumber { get; set; } = string.Empty; public string CtaAccountName { get; set; } = string.Empty; public string NciAccountNumber { get; set; } = string.Empty; public string NciAccountName { get; set; } = string.Empty; public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; public DateOnly EffectiveFrom { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly? EffectiveThrough { get; set; } public DateOnly? BasisReviewedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public HashSet<Guid> MemberCompanyIds { get; } = []; public Dictionary<Guid, decimal> OwnershipPercentages { get; } = []; public Dictionary<Guid, string> ConsolidationBases { get; } = []; public Dictionary<Guid, string> BasisRationales { get; } = []; }
+    private sealed class ConsolidationOwnershipEditor { public Guid? Id { get; set; } public Guid ConsolidationGroupId { get; set; } public Guid MemberCompanyId { get; set; } public decimal OwnershipPercentage { get; set; } = 1m; public string ConsolidationBasis { get; set; } = "CombinedAffiliate"; public string BasisRationale { get; set; } = string.Empty; public DateOnly? BasisReviewedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly EffectiveFrom { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly? EffectiveThrough { get; set; } public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class ConsolidationAccountMappingEditor { public Guid? Id { get; set; } public Guid ConsolidationGroupId { get; set; } public Guid MemberCompanyId { get; set; } public Guid MemberAccountId { get; set; } public string ReportingAccountNumber { get; set; } = string.Empty; public string ReportingAccountName { get; set; } = string.Empty; public string TranslationMethod { get; set; } = string.Empty; public string CashFlowActivity { get; set; } = "Unclassified"; public string CashFlowRationale { get; set; } = string.Empty; public DateOnly? CashFlowReviewedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly EffectiveFrom { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly? EffectiveThrough { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class ConsolidationStatementPresentationEditor { public Guid? Id { get; set; } public Guid ConsolidationGroupId { get; set; } public int CandidateIndex { get; set; } = -1; public string StatementCode { get; set; } = string.Empty; public string ReportingAccountNumber { get; set; } = string.Empty; public string ReportingAccountName { get; set; } = string.Empty; public string ReportingAccountType { get; set; } = string.Empty; public string SectionCode { get; set; } = string.Empty; public string SectionName { get; set; } = string.Empty; public int SectionSortOrder { get; set; } = 100; public string LineCaption { get; set; } = string.Empty; public int LineSortOrder { get; set; } = 100; public string Rationale { get; set; } = string.Empty; public DateOnly ReviewedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly EffectiveFrom { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly? EffectiveThrough { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class ConsolidationTradingPartnerEditor { public Guid? Id { get; set; } public Guid ConsolidationGroupId { get; set; } public Guid MemberCompanyId { get; set; } public Guid CounterpartyCompanyId { get; set; } public string Kind { get; set; } = string.Empty; public Guid? RecordId { get; set; } public string RecordKey { get; set; } = string.Empty; public DateOnly EffectiveFrom { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly? EffectiveThrough { get; set; } public bool IsActive { get; set; } = true; public string ConcurrencyToken { get; set; } = string.Empty; }
+    private sealed class ConsolidationReportEditor { public DateOnly PeriodStart { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly AsOf { get; set; } = DateOnly.FromDateTime(DateTime.Today); }
+    private sealed class AccountingPeriodEditor { public DateOnly StartsOn { get; set; } = new(DateTime.Today.Year, 1, 1); public DateOnly EndsOn { get; set; } = new(DateTime.Today.Year, 12, 31); public string Notes { get; set; } = string.Empty; }
+    private sealed class IntegrationConnectionEditor { public string ProviderCode { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public string SettingsJson { get; set; } = "{}"; public string CredentialsJson { get; set; } = "{}"; public bool Enable { get; set; } }
+    private sealed class QuickBooksConnectionEditor { public string ConnectionName { get; set; } = "Primary QuickBooks company"; }
 }

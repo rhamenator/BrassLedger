@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ne",
+  "capturedAtUtc": "2026-08-25T13:30:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://revenue.nebraska.gov/sites/revenue.nebraska.gov/files/doc/business/Cir_En_2025/2026cir_en_whole.pdf", "title": "2026 Nebraska Circular EN", "revision": "8-429-1998 Rev. 11-2025", "mediaType": "application/pdf", "sha256": "b6a3985ee03873aa1d16c1e9267c6de0acd8598a6e59db6b388dce649c1f3991", "bytes": 519436 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "Federal Form W-4 before 2020 or Nebraska Form W-4N", "dataType": "enum", "values": ["SingleOrHeadOfHousehold", "MarriedOrQualifyingSurvivingSpouse"] },
+    { "code": "allowances", "source": "Federal Form W-4 before 2020 or Nebraska Form W-4N", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Form W-4N", "dataType": "money", "minimum": 0 },
+    { "code": "nebraskaAllocationPercentage", "source": "Form 9N", "dataType": "decimal", "minimum": 0, "maximum": 1 },
+    { "code": "nebraskaEmploymentDutyDaysYearToDate", "dataType": "integer", "minimum": 0 },
+    { "code": "nebraskaConferenceOrTrainingWagesYearToDate", "dataType": "money", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" }
+  ],
+  "calculation": {
+    "methods": ["Percentage", "WageBracket", "FederalCompatibleAlternative"],
+    "allowanceValues": { "DailyOrMiscellaneous": 9.38, "Weekly": 46.92, "Biweekly": 93.85, "Semimonthly": 101.67, "Monthly": 203.33, "Quarterly": 610, "Semiannual": 1220, "Annual": 2440 },
+    "steps": [
+      "Subtract the payroll-period allowance value multiplied by allowances from Nebraska taxable wages.",
+      "Apply the appropriate filing-status and payroll-period percentage schedule.",
+      "Apply the special minimum-withholding procedure when the employer has more than 24 employees, unless adequate employee documentation supports a lower amount.",
+      "Add requested additional withholding and, for a qualifying nonresident, multiply withholding calculated on total wages by the Form 9N Nebraska allocation percentage."
+    ],
+    "annualSchedules": {
+      "SingleOrHeadOfHousehold": [
+        { "over": 0, "through": 3430, "baseTax": 0, "rate": 0 }, { "over": 3430, "through": 6710, "baseTax": 0, "rate": 0.0226 }, { "over": 6710, "through": 21810, "baseTax": 74.13, "rate": 0.0322 }, { "over": 21810, "through": 31610, "baseTax": 560.35, "rate": 0.0421 }, { "over": 31610, "through": 40130, "baseTax": 972.93, "rate": 0.0435 }, { "over": 40130, "through": 75370, "baseTax": 1343.55, "rate": 0.0448 }, { "over": 75370, "baseTax": 2922.30, "rate": 0.046 }
+      ],
+      "MarriedOrQualifyingSurvivingSpouse": [
+        { "over": 0, "through": 8190, "baseTax": 0, "rate": 0 }, { "over": 8190, "through": 13010, "baseTax": 0, "rate": 0.0226 }, { "over": 13010, "through": 32400, "baseTax": 108.93, "rate": 0.0322 }, { "over": 32400, "through": 50400, "baseTax": 733.29, "rate": 0.0421 }, { "over": 50400, "through": 62530, "baseTax": 1491.09, "rate": 0.0435 }, { "over": 62530, "through": 82920, "baseTax": 2018.75, "rate": 0.0448 }, { "over": 82920, "baseTax": 2932.22, "rate": 0.046 }
+      ]
+    },
+    "specialMinimumWithholding": {
+      "employerEmployeeCountMoreThan": 24,
+      "nominalMinimumRate": 0.015,
+      "test": "If ordinary withholding is less than 1.5% of taxable wages, increase it to at least 50% of the withholding for a single employee with one allowance or a married employee with two allowances.",
+      "lowerAmountAllowedWithDocumentation": true,
+      "documentationExamples": ["Children or dependents", "Marital status", "Itemized deductions"],
+      "mayOverrideAnnualExemption": true
+    },
+    "missingStateCertificate": { "condition": "Federal Form W-4 completed on or after January 1, 2020 without Form W-4N", "filingStatus": "SingleOrHeadOfHousehold", "allowances": 0 },
+    "annualExemptionRenewalDue": "February 15",
+    "supplementalWages": { "combined": "Treat regular and supplemental wages as one payment.", "separatelyPaidMethods": ["Aggregate with current regular wages", "Aggregate with last preceding regular wages in the same year", "Withhold a flat 3.5%"], "flatRate": 0.035 }
+  },
+  "residencyAndWorkRules": {
+    "generalRule": "Withhold for services performed in Nebraska; a multistate nonresident may provide Form 9N and withholding calculated on total wages is multiplied by its Nebraska percentage.",
+    "conferenceOrTrainingExemption": { "maximumNebraskaDutyDays": 7, "maximumNebraskaWages": 5000, "requiresWorkInMoreThanOneState": true, "partialDaysCountAsFull": true },
+    "convenienceRule": { "appliesTo": "Nonresident wages for work outside Nebraska for the employee's convenience that could have been performed for the Nebraska business in Nebraska", "sevenDaysOrLess": "Both convenience wages and up to seven physical Nebraska workdays are exempt.", "moreThanSevenDays": "Withhold only on wages for all physical Nebraska workdays; the threshold is retroactive to the first Nebraska day." },
+    "nonresidentBoardMemberExemption": true,
+    "militarySpouseElection": "A qualifying nonresident servicemember spouse uses Form 9N for zero Nebraska allocation.",
+    "reciprocalStates": [],
+    "multiStateWorkLocationRequired": true,
+    "officialSpecialRuleExample": { "conferenceOrTrainingDays": 5, "additionalNebraskaDutyDays": 10, "homeWorkState": "IA", "result": "More than seven total Nebraska duty days; withhold on all 15 Nebraska days." }
+  },
+  "filing": {
+    "quarterlyReturn": { "form": "941N", "due": "Last day of month after quarter", "zeroReturnsRequired": true },
+    "monthlyDeposits": { "form": "501N when paid by check", "trigger": "More than $500 withheld in the first month, or more than $500 in either the first or second month", "due": "15th of following month", "quarterEndMonthDeposit": false },
+    "annualFiler": { "requiresLicense": true, "form": "941N", "due": "January 31" },
+    "annualReconciliation": { "form": "W-3N", "due": "January 31" },
+    "electronicPaymentTrigger": "Total withholding payments in any prior year exceeded $5,000; mandate begins July 1 of the following year and continues.",
+    "electronicInformationReturnTrigger": "More than 50 wage and tax statements"
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The special minimum rule is not simply max(ordinary tax, 1.5% of wages); the guide describes a 50%-of-reference-withholding alternative and allows documented lower withholding.",
+    "The seven-day convenience-rule transition is retroactive and therefore requires year-to-date day and wage state plus adjustment handling.",
+    "The complete wage-bracket matrices are retained in the checksummed official guide but are not transcribed."
+  ],
+  "review": { "allowancesAndAnnualSchedulesTranscribed": true, "specialMinimumProcedureTranscribed": true, "supplementalMethodTranscribed": true, "nonresidentSpecialRulesTranscribed": true, "officialExamplesTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "completeWageBracketTablesTranscribed": false, "minimumRuleIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Implement the documented-minimum exception and retroactive seven-day state, import wage tables, independently verify minimum-rule boundaries, and add formula, allocation, and transition regressions." }
+}

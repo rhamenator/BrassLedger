@@ -12,6 +12,28 @@
     --shadow-soft: 0 20px 50px rgba(18, 57, 64, 0.1);
 }
 
+.panel > details {
+    margin: 0.8rem 0 1rem;
+    border: 1px solid var(--border, #d9ded8);
+    border-radius: 0.65rem;
+    background: rgba(255, 255, 255, 0.45);
+}
+
+.panel > details > summary {
+    padding: 0.75rem 0.9rem;
+    font-weight: 700;
+    color: var(--ink, #183f3a);
+}
+
+.panel > details[open] > summary {
+    border-bottom: 1px solid var(--border, #d9ded8);
+}
+
+.panel > details > form,
+.panel > details > .table-scroll {
+    padding: 0.9rem;
+}
+
 html,
 body {
     margin: 0;
@@ -84,7 +106,8 @@ h1:focus {
 }
 
 .action-primary,
-.action-secondary {
+.action-secondary,
+.action-danger {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -104,6 +127,33 @@ h1:focus {
     background: rgba(255, 255, 255, 0.12);
     color: #fffbf3;
     border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.action-danger {
+    background: #8f2d2d;
+    color: #fff;
+    border: 1px solid #721f1f;
+}
+
+.action-danger:hover,
+.action-danger:focus-visible {
+    background: #721f1f;
+    color: #fff;
+}
+
+.panel .action-secondary,
+.auth-card .action-secondary {
+    background: rgba(24, 82, 78, 0.08);
+    color: var(--ink-strong);
+    border: 1px solid rgba(24, 82, 78, 0.24);
+}
+
+.panel .action-secondary:hover,
+.panel .action-secondary:focus-visible,
+.auth-card .action-secondary:hover,
+.auth-card .action-secondary:focus-visible {
+    background: rgba(24, 82, 78, 0.16);
+    color: var(--ink-strong);
 }
 
 .hero-badges {
@@ -208,6 +258,11 @@ h1:focus {
 
 .content-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.content-grid > .panel {
+    min-width: 0;
+    overflow-x: auto;
 }
 
 .module-grid {
@@ -357,6 +412,135 @@ h1:focus {
     font-size: 0.82rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
+}
+
+.table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.table-link {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ink-strong);
+    font: inherit;
+    font-weight: 700;
+    text-align: left;
+    text-decoration: underline;
+    text-decoration-thickness: 0.08em;
+    text-underline-offset: 0.16em;
+    cursor: pointer;
+}
+
+.table-link:hover,
+.table-link:focus-visible {
+    color: var(--brand-teal);
+}
+
+.project-portfolio-table {
+    min-width: 82rem;
+}
+
+.project-portfolio-table th:first-child,
+.project-portfolio-table td:first-child {
+    min-width: 13rem;
+}
+
+.project-portfolio-table th:nth-child(2),
+.project-portfolio-table td:nth-child(2) {
+    min-width: 10rem;
+}
+
+.payroll-employee-picker {
+    max-width: 28rem;
+    margin: 1rem 0;
+}
+
+.payroll-setup-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.payroll-setup-group {
+    min-width: 0;
+    margin: 0;
+    padding: 1rem;
+    border: 1px solid rgba(23, 60, 67, 0.14);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.5);
+    display: grid;
+    align-content: start;
+    gap: 0.75rem;
+}
+
+.payroll-setup-group legend {
+    padding: 0 0.35rem;
+    color: var(--ink-strong);
+    font-weight: 700;
+}
+
+.payroll-w4-group {
+    grid-column: span 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.payroll-w4-group legend,
+.payroll-w4-group .check-field {
+    grid-column: 1 / -1;
+}
+
+.check-field {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--ink-strong);
+}
+
+.time-entry-card {
+    min-width: 0;
+    margin: 1rem 0;
+    padding: 1rem;
+    border: 1px solid rgba(23, 60, 67, 0.14);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.5);
+}
+
+.time-entry-card legend {
+    padding: 0 0.35rem;
+    color: var(--ink-strong);
+    font-weight: 700;
+}
+
+.time-entry-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.timecard-void-reason {
+    max-width: 32rem;
+    margin-top: 1rem;
+}
+
+.liability-selection-list {
+    display: grid;
+    gap: 0.55rem;
+    margin: 0.85rem 0;
+}
+
+.liability-selection-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(8rem, 12rem);
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: 0.65rem;
+    background: rgba(255, 255, 255, 0.45);
 }
 
 pre {
@@ -587,6 +771,20 @@ main {
     .tax-checkbox-grid {
         grid-template-columns: 1fr;
     }
+
+    .payroll-setup-grid,
+    .payroll-w4-group,
+    .time-entry-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .payroll-w4-group {
+        grid-column: auto;
+    }
+
+    .liability-selection-row {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 640px) {
@@ -672,6 +870,12 @@ main {
     color: var(--ink-strong);
 }
 
+.field-help {
+    color: var(--ink-body);
+    font-size: 0.82rem;
+    line-height: 1.4;
+}
+
 .field-input {
     min-height: 3rem;
     padding: 0.7rem 0.9rem;
@@ -692,6 +896,41 @@ main {
     background: rgba(204, 107, 73, 0.12);
     color: #873f28;
     border: 1px solid rgba(204, 107, 73, 0.24);
+}
+
+.status-banner {
+    margin-top: 1rem;
+    padding: 0.8rem 0.95rem;
+    border-radius: 18px;
+    background: rgba(20, 134, 91, 0.1);
+    color: #145b42;
+    border: 1px solid rgba(20, 134, 91, 0.24);
+}
+
+.security-secret {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid rgba(23, 60, 67, 0.18);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.78);
+    user-select: all;
+}
+
+.recovery-code-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+    gap: 0.55rem;
+}
+
+.recovery-code-grid code {
+    padding: 0.65rem 0.8rem;
+    border: 1px solid rgba(23, 60, 67, 0.14);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.72);
+    user-select: all;
 }
 
 .auth-note {
@@ -729,7 +968,8 @@ main {
 }
 
 button.action-primary,
-button.action-secondary {
+button.action-secondary,
+button.action-danger {
     border: none;
     cursor: pointer;
 }
@@ -812,4 +1052,42 @@ button.action-secondary {
 
 .step-list li {
     margin-bottom: 0.8rem;
+}
+
+.checkbox-list {
+    display: grid;
+    gap: 0.55rem;
+    max-height: 13rem;
+    overflow: auto;
+    padding: 0.75rem;
+    border: 1px solid rgba(23, 60, 67, 0.14);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.58);
+}
+
+.checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    color: var(--ink-strong);
+    cursor: pointer;
+}
+
+.checkbox-row input {
+    margin-top: 0.25rem;
+    accent-color: var(--teal);
+}
+
+.muted-copy {
+    margin: 0;
+    color: #5d6d71;
+}
+
+.interchange-import {
+    align-items: end;
+    margin-top: 1rem;
+}
+
+.import-action {
+    align-self: end;
 }

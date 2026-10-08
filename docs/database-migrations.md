@@ -1,0 +1,104 @@
+# Database migrations
+
+BrassLedger supports SQLite and PostgreSQL through separate EF Core migration assemblies. This keeps each provider's generated column types, defaults, indexes, and annotations native and independently reviewable.
+
+## Adding a model change
+
+Install the repository-compatible EF tool in a disposable location if it is not already available:
+
+```bash
+dotnet tool install --tool-path /home/rich/temp/dotnet-tools dotnet-ef --version 8.0.30
+```
+
+After changing the domain model and `BrassLedgerDbContext`, generate the same semantic migration for both providers:
+
+```bash
+TMPDIR=/home/rich/temp DOTNET_ROOT=/home/rich/.dotnet-10.0.104 /home/rich/temp/dotnet-tools/dotnet-ef migrations add <MigrationName> \
+  --project BrassLedger.Migrations.Sqlite/BrassLedger.Migrations.Sqlite.csproj \
+  --startup-project BrassLedger.Migrations.Sqlite/BrassLedger.Migrations.Sqlite.csproj \
+  --context BrassLedgerDbContext --output-dir Migrations
+
+TMPDIR=/home/rich/temp DOTNET_ROOT=/home/rich/.dotnet-10.0.104 /home/rich/temp/dotnet-tools/dotnet-ef migrations add <MigrationName> \
+  --project BrassLedger.Migrations.PostgreSql/BrassLedger.Migrations.PostgreSql.csproj \
+  --startup-project BrassLedger.Migrations.PostgreSql/BrassLedger.Migrations.PostgreSql.csproj \
+  --context BrassLedgerDbContext --output-dir Migrations
+```
+
+`DOTNET_ROOT` is installation-specific; use the root shown by `dotnet --info` on another development machine. The tool and its scratch database belong under `~/temp`, not in the repository.
+
+## Review requirements
+
+Review both generated migrations before committing. Confirm that they:
+
+- express the same business schema and constraints for both providers;
+- preserve existing rows or perform an explicit, tested transformation;
+- use safe null/default staging when adding required columns;
+- create company-scoped uniqueness and foreign keys where required;
+- do not silently drop, truncate, rename, or reinterpret business data;
+- have a workable rollback where rollback is safe, and fail explicitly where it is not; and
+- leave both model snapshots with no pending model changes.
+
+Never edit `__EFMigrationsHistory` or record a migration that has not actually been applied. The only automatic history adoption is the fixed initial baseline used for databases that already passed the legacy compatibility bridge.
+
+`AddControlledPurchaseInvoiceMatching` is intentionally non-reversible. The older schema permits only one bill per receipt and cannot preserve partial-match, variance, or supplier-return provenance. Restore a verified backup taken before the upgrade instead of attempting to migrate a used database backward across that boundary.
+
+`ScopeVendorBillNumbersByVendor` is also intentionally non-reversible after use. Its predecessor required bill numbers to be unique across an entire company; the corrected model allows different vendors to issue the same number. Restoring the former constraint could delete, misassociate, or reject valid bills, so a pre-upgrade backup is required instead.
+
+`ScopeSubledgerVendorBillNumbersByVendor` carries that same identity rule into invoice and bill drafts, recurring templates, and generated drafts. The migration derives each historical vendor scope from its retained JSON request, keeps invoice numbering company-scoped, and isolates an unexpectedly malformed historical vendor payload under a legacy scope rather than guessing. It cannot safely downgrade after two vendors have used the same number through the approval workflow; restore a pre-upgrade backup instead.
+
+`AddSubledgerRejectionWorkflow` adds the reviewer identity, rejection time, and reason retained by invoice and vendor-bill workflows. Existing rows receive an empty reason and remain otherwise unchanged. Lost-history adoption requires all three columns before recording the migration as present. Downgrade is prohibited because removing them could delete review decisions and their audit provenance; restore a verified pre-upgrade backup instead.
+
+`AddControlledPayrollReview` adds payroll rejection evidence and an encrypted, numbered revision table that preserves every corrected calculation. Existing payroll runs receive an empty rejection reason and otherwise remain unchanged. Lost-history adoption requires all rejection columns, the revision table, its encrypted payload column, and its unique run/revision index. Downgrade is prohibited because it could delete reviewer decisions and historical employee calculations; restore a verified pre-upgrade backup instead.
+
+`AddProjectLedgerDimensions` expands the project master record and adds optional project foreign keys to journal, sales, purchasing, receivables, payables, and payroll earning lines. It maps legacy `Open` and `Billing` projects to `Active`, assigns the time-and-materials billing label where none existed, and links a legacy project to a same-company customer only when its retained customer name identifies that customer. Lost-history adoption requires the project lifecycle columns, representative source and ledger dimensions, and the journal project index. Downgrade is prohibited because removing these columns could delete project attribution and lifecycle evidence; restore a verified pre-upgrade backup instead.
+
+`AddControlledProjectBilling` adds effective-dated rates, source-derived proposals and lines, retainage-release provenance, prepared-project concurrency evidence, and reusable source reservations linked one-to-one with controlled receivables drafts. Lost-history adoption requires all four tables, the proposal fingerprint and prepared-project token, workflow link, and unique company/source reservation index. Downgrade is prohibited because it could delete billing derivation, retainage, rate, reservation, and invoice-workflow evidence; restore a verified pre-upgrade backup instead.
+
+`AddProjectWipRevenueRecognition` adds the effective project recognition method and controlled cumulative WIP schedules with retained cost, contract, completion, earned-revenue, billing, contract-position, fingerprint, actor, decision, posting, and reversal evidence. Existing projects are backfilled to `AsBilled`. New standard charts add separate contract-asset and contract-liability controls during minimum setup. Downgrade is prohibited after use because it could delete period-end accounting conclusions and journal provenance; restore a verified pre-upgrade backup instead.
+
+`AddProjectPhaseCostCodeBudgets` adds project phase/task hierarchies, reusable company cost codes, and effective-period budget and forecast allocations. Lost-history adoption requires all three tables, concurrency fields, hierarchy and company foreign keys, and the uniqueness indexes that protect codes and allocation identity. Downgrade is prohibited because it could delete retained planning, hierarchy, and audit relationships.
+
+`AddProjectPhaseCostCodeLineDimensions` extends journal, invoice, bill, quote, sales-order, requisition, purchase-order, payroll-time, and payroll-earning lines with optional phase and cost-code attribution. Both providers add restrictive foreign keys and lookup indexes without rewriting existing project history. Lost-history adoption verifies representative columns and indexes before recording the migration. Downgrade is prohibited because it could delete retained accounting attribution.
+
+`AddProjectBillingLineDimensions` retains the source phase and cost code on controlled project-billing derivation lines so preview, approval revalidation, invoice creation, corrections, and historical display use the same attribution. Downgrade is prohibited because it could delete retained billing attribution.
+
+`AddTrackingDimensions` adds the company-scoped, hierarchical, effective-dated tracking-value master and optional Department and Class references on journal lines. Codes are unique by company and dimension type; parent relationships remain within the company and type. Lost-history adoption requires the master table, lifecycle and concurrency columns, journal references, and protective indexes before recording the migration. Downgrade is prohibited because it could delete the controlled classifications and retained journal attribution.
+
+`AddTrackingDimensionsToSourceLines` extends invoice, bill, quote, sales-order, requisition, purchase-order, payroll-time, payroll-earning, and project-billing lines with optional Department and Class references. Both providers add restrictive foreign keys and lookup indexes without rewriting existing records. Lost-history adoption verifies both columns and both indexes on every affected source table. Downgrade is prohibited because removing these columns could delete accounting classifications needed to reproduce source-to-ledger posting and historical reversals.
+
+`AddEffectiveDatedConsolidationOwnership` converts consolidation membership from one replaceable company percentage into retained ownership periods. Existing memberships begin at the minimum supported date, both group and period rows receive nonblank concurrency tokens, and the uniqueness constraint moves to group/company/effective-from. Lost-history adoption requires both effective-date columns, both concurrency columns, and the provider-specific ownership index. Downgrade is prohibited because restoring one membership row per company could delete later ownership periods and concurrency evidence.
+
+`AddConsolidationAccountMappings` adds retained effective-dated mappings from each member-company account to an explicit reporting number, name, and type. Restrictive foreign keys preserve the group, company, and source-account provenance. Lost-history adoption requires the mapping table, reporting identity, lifecycle and concurrency columns, and provider-specific source mapping index. Downgrade is prohibited because it would delete the classification evidence used to reproduce consolidated reports.
+
+`AddControlledConsolidationTranslation` separates closing, period-average, and historical exchange-rate evidence; adds source reference, retrieval, approval, and concurrency controls; retains each account mapping's translation policy; and adds the consolidation group's dedicated CTA reporting identity. Existing rates are preserved as active closing rates with nonblank concurrency tokens. Existing asset and liability mappings remain closing, revenue and expense mappings become average, and equity mappings become historical. Lost-history adoption requires the rate-policy and provenance columns, CTA identity, mapping method, and provider-specific typed-rate index. Downgrade is prohibited because it could delete the policy evidence needed to reproduce translated balances.
+
+`AddControlledConsolidationAdjustments` adds the separate reporting ledger for exact-period manual adjustments and explicit intercompany eliminations. Batches retain preparation, independent decision, posting, rejection, concurrency, match, and reversal evidence; lines retain reporting identity and optional source/counterparty member provenance. Restrictive group/company relationships and unique batch/sequence indexes protect attribution. Lost-history adoption requires both tables, lifecycle and reversal columns, company-pair provenance, and both provider-specific control indexes. Downgrade is prohibited because it could delete posted consolidation history and review evidence.
+
+`AddReviewedIntercompanyMatching` adds retained effective-dated customer/vendor-to-member links and persisted exact invoice/bill suggestions. Restrictive company, group, document, and adjustment relationships preserve provenance; unique per-group invoice and bill indexes prevent one document from being silently paired twice. Lost-history adoption requires both tables, every material effective-date, document, review, adjustment-link, and concurrency column, plus all four provider-specific identity indexes. `ConstrainIntercompanyMatchMetadata` records the reviewed metadata-size contract (and applies bounded PostgreSQL column types). Downgrade is prohibited because it could remove link history, review decisions, or the schema contract used to validate retained matching evidence.
+
+`AddExplicitConsolidationBasisAndNci` adds the effective membership's explicit consolidation basis, rationale, and review date; separate group-level NCI account identity; and adjustment subject/control identity. Existing membership rows are deliberately backfilled as enum value `3` (**ProportionateInterest**) so an upgrade never invents a reporting-parent or control conclusion. The unique control-key index serializes one retained NCI batch per group, exact period, and controlled subsidiary, while the restrictive subject-company relationship preserves provenance. Lost-history adoption requires every policy and review column plus the subject/control indexes. Downgrade is prohibited because removing these fields could delete accounting conclusions, NCI presentation, and retained duplicate-prevention evidence.
+
+`AddConsolidatedCashFlowClassification` adds effective mapping-level Operating, Investing, Financing, or Unclassified policy plus rationale and review date. Existing mappings remain Unclassified so an upgrade never invents a cash-flow conclusion. Lost-history adoption requires all three policy/evidence columns. Downgrade is prohibited because it could delete reviewed classifications needed to reproduce a statement of cash flows.
+
+`AddConsolidatedStatementPresentation` adds a separate effective-dated presentation-policy table rather than coupling current/noncurrent sections, captions, or ordering to source mappings. Each row retains statement and reporting-account identity, free-form section identity, section/line ordering, reviewed rationale, lifecycle, and concurrency evidence. Unique provider indexes prevent duplicate same-date account policies and support section resolution; runtime validation rejects overlapping periods and inconsistent section captions/orders. Lost-history adoption requires the table, every policy/evidence column, and both provider-specific indexes. Downgrade is prohibited because it could delete reviewed presentation history.
+
+`AddConsolidationDisclosurePackages` adds exact-period, framework-specific, versioned JSON disclosure documents with preparation, independent approval/rejection, content identity, and concurrency evidence. Extension objects keep unforeseen standard or industry fields out of the relational schema while the application validates each supported document version before use. Lost-history adoption requires the table, control columns, retained JSON, and unique period/framework index. Downgrade is prohibited because it could delete approved financial-statement evidence.
+
+`AddConsolidationOwnershipEvents` adds the controlled acquisition, step-acquisition, ownership-change, loss-of-control, and profit/OCI-attribution schedule ledger. Each event retains typed versioned JSON, framework/source evidence, preparation/review/posting identities, immutable reversal links, and concurrency state; restrictive company, group, subject-company, and self relationships preserve provenance. Lost-history adoption requires every retained-document and lifecycle column plus the group/reference, group/date, and one-reversal indexes. Downgrade is prohibited because it could delete posted consolidation accounting and the evidence needed to reproduce it.
+
+Ownership-event schema 2 adds purchase-price-allocation line items inside the existing retained JSON document. It intentionally requires no relational migration: consideration types, identifiable asset/liability and deferred-tax detail, measurement-period changes, and extension fields can evolve without adding state-specific or framework-specific table columns. The service accepts posted legacy schema-1 acquisitions for reporting and reversal, while new or corrected acquisitions must use schema 2.
+
+`AddTransactionCurrencyDocuments` adds transaction-currency totals and balances, frozen closing-rate identity/factor/effective date/source provenance, and realized settlement gain/loss to ordinary invoices, vendor bills, payments, applications, and source lines. Existing rows are explicitly backfilled from each company's base currency and existing base amounts; they are not reinterpreted as foreign transactions. Restrictive rate relationships preserve source identity, while each posted document also retains the exact factor and source text used so later rate-master corrections cannot rewrite historical accounting. Lost-history adoption requires all material header, line, payment, application, and rate indexes. Downgrade is prohibited because it could delete transaction amounts, conversion evidence, and realized-gain/loss history.
+
+`AddForeignCurrencyRemeasurements` adds a controlled period-end batch and its immutable document calculations. Each line retains transaction and base carrying balances, the selected direct-or-inverse closing-rate identity and factor, effective date, source provenance, remeasured balance, and adjustment. Batch lifecycle fields retain preparation, independent approval or rejection, separate posting, exact reversal, the reversal accounting date even for a zero-adjustment batch, journal links, reasons, actor/time evidence, and optimistic concurrency. A filtered company/date index permits only one active conclusion while allowing a rejected or reversed batch to be replaced. Lost-history adoption requires every material column and control index, including PostgreSQL's truncated long index name. Downgrade is prohibited because it could delete period-end calculations, review decisions, and posted journal provenance.
+
+## Verification
+
+At minimum, run:
+
+```bash
+TMPDIR=/home/rich/temp dotnet build BrassLedger.slnx -c Release
+TMPDIR=/home/rich/temp dotnet test BrassLedger.Infrastructure.Tests/BrassLedger.Infrastructure.Tests.csproj -c Release
+```
+
+Also run the PostgreSQL infrastructure suite with `BRASSLEDGER_TEST_POSTGRES` pointed to a disposable database whose name contains `brassledger_test`. Before release, verify a copy of the oldest supported real database, reconcile record counts and control balances, and complete the documented backup/restore rehearsal.

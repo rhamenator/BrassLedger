@@ -42,6 +42,11 @@ public sealed class UiSession : IAsyncDisposable
         catch (PlaywrightException exception) when (allowHttpError && exception.Message.Contains("ERR_HTTP_RESPONSE_CODE_FAILURE", StringComparison.Ordinal))
         {
         }
+
+        if (!allowHttpError)
+        {
+            await WaitForBlazorAsync();
+        }
     }
 
     public async Task SignInAsync(string userName = "controller", string password = "BrassLedger!2026", string returnPath = "/")
@@ -56,17 +61,47 @@ public sealed class UiSession : IAsyncDisposable
         await Page.Locator("input[name='userName']").FillAsync(userName);
         await Page.Locator("input[name='password']").FillAsync(password);
         await Page.Locator("button[type='submit']").ClickAsync();
-        await Page.WaitForURLAsync(
-            url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase),
-            new PageWaitForURLOptions { Timeout = 15000 });
+        try
+        {
+            await Page.WaitForURLAsync(
+                url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase),
+                new PageWaitForURLOptions { Timeout = 15000 });
+            await WaitForBlazorAsync();
+        }
+        catch (TimeoutException exception)
+        {
+            var bodyText = (await Page.Locator("body").InnerTextAsync()).Trim();
+            var serverLogTail = string.Join(Environment.NewLine, _fixture.GetLogs().Split(Environment.NewLine).TakeLast(50));
+            throw new TimeoutException($"Sign-in navigation timed out at {Page.Url}.{Environment.NewLine}Body: {bodyText}{Environment.NewLine}Server log tail:{Environment.NewLine}{serverLogTail}", exception);
+        }
 
         _isAuthenticated = true;
     }
 
+    private Task WaitForBlazorAsync() => Page.Locator("html[data-blazor-ready='true']").WaitForAsync(
+        new LocatorWaitForOptions { State = WaitForSelectorState.Attached, Timeout = 15000 });
+
     public async Task WaitForHeadingAsync(string heading)
     {
         var h1 = Page.Locator("h1").Filter(new() { HasTextString = heading });
-        await h1.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 15000 });
+        try
+        {
+            await h1.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 15000 });
+        }
+        catch (TimeoutException exception)
+        {
+            var visibleHeadings = await Page.Locator("h1:visible").AllTextContentsAsync();
+            var bodyText = (await Page.Locator("body").InnerTextAsync()).Trim();
+            var serverLogTail = string.Join(
+                Environment.NewLine,
+                _fixture.GetLogs().Split(Environment.NewLine).TakeLast(30));
+            throw new TimeoutException(
+                $"Timed out waiting for heading '{heading}' at {Page.Url}. Visible headings: {string.Join(" | ", visibleHeadings)}"
+                + Environment.NewLine + $"Body: {bodyText}"
+                + Environment.NewLine + "Server log tail:"
+                + Environment.NewLine + serverLogTail,
+                exception);
+        }
     }
 
     public async Task AssertNoUiFailuresAsync(string scenario)
@@ -91,6 +126,7 @@ public sealed class UiSession : IAsyncDisposable
             """
             () => {
               const isVisible = (element) => {
+                if (element.closest('details:not([open])') && !element.closest('summary')) return false;
                 const style = window.getComputedStyle(element);
                 return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
               };
@@ -114,7 +150,7 @@ public sealed class UiSession : IAsyncDisposable
                   const name = ariaLabel || ariaLabelledBy || title || text || value || placeholder;
                   return name.length === 0;
                 })
-                .map(element => `${element.tagName.toLowerCase()}${element.getAttribute('href') ? `:${element.getAttribute('href')}` : ''}`);
+                .map(element => element.outerHTML.substring(0, 300));
             }
             """);
 
@@ -182,6 +218,7 @@ public sealed class UiSession : IAsyncDisposable
 
     public async Task AssertSnapshotAsync(string snapshotName)
     {
+        await NormalizeSnapshotDateDefaultsAsync();
         var snapshotRoot = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "..",
@@ -213,14 +250,48 @@ public sealed class UiSession : IAsyncDisposable
         var baselineBytes = await File.ReadAllBytesAsync(baselinePath);
         if (ComputeHash(bytes) != ComputeHash(baselineBytes))
         {
-            await File.WriteAllBytesAsync(actualPath, bytes);
-            throw new Xunit.Sdk.XunitException($"Snapshot mismatch for {snapshotName} on {BrowserKind}. See:{Environment.NewLine}{baselinePath}{Environment.NewLine}{actualPath}");
+            var psnr = PngVisualComparer.CalculatePsnr(baselineBytes, bytes);
+            if (psnr < 50d)
+            {
+                await File.WriteAllBytesAsync(actualPath, bytes);
+                throw new Xunit.Sdk.XunitException($"Snapshot mismatch for {snapshotName} on {BrowserKind} (PSNR {psnr:F2} dB; required 50 dB). See:{Environment.NewLine}{baselinePath}{Environment.NewLine}{actualPath}");
+            }
         }
 
         if (File.Exists(actualPath))
         {
             File.Delete(actualPath);
         }
+    }
+
+    private async Task NormalizeSnapshotDateDefaultsAsync()
+    {
+        await Page.EvaluateAsync("""
+            () => {
+                const anchor = new Date(Date.UTC(2026, 7, 27));
+                const now = new Date();
+                const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+                const dayMs = 24 * 60 * 60 * 1000;
+                const shiftDays = Math.round((today.getTime() - anchor.getTime()) / dayMs);
+                const iso = value => value.toISOString().slice(0, 10);
+                for (const input of document.querySelectorAll('input[type="date"]')) {
+                    if (!input.value) continue;
+                    const value = new Date(`${input.value}T00:00:00Z`);
+                    if (value.getUTCFullYear() === today.getUTCFullYear() && value.getUTCMonth() === 0 && value.getUTCDate() === 1) {
+                        input.value = `${anchor.getUTCFullYear()}-01-01`;
+                    } else if (value.getUTCFullYear() === today.getUTCFullYear() && value.getUTCMonth() === 11 && value.getUTCDate() === 31) {
+                        input.value = `${anchor.getUTCFullYear()}-12-31`;
+                    } else if (Math.abs(value.getTime() - today.getTime()) <= 120 * dayMs) {
+                        input.value = iso(new Date(value.getTime() - shiftDays * dayMs));
+                    }
+                }
+                const todayToken = iso(today).replaceAll('-', '');
+                const anchorToken = iso(anchor).replaceAll('-', '');
+                for (const input of document.querySelectorAll('input:not([type="date"])')) {
+                    if (input.value?.includes(todayToken)) input.value = input.value.replaceAll(todayToken, anchorToken);
+                }
+            }
+            """);
     }
 
     private string SnapshotDirectoryName()

@@ -2,7 +2,7 @@ using BrassLedger.Web.E2E.Tests.Pages;
 
 namespace BrassLedger.Web.E2E.Tests;
 
-[Collection("Playwright E2E")]
+[Collection("Playwright E2E Visual")]
 public sealed class VisualRegressionTests
 {
     private readonly PlaywrightWebAppFixture _fixture;
@@ -34,6 +34,30 @@ public sealed class VisualRegressionTests
 
         await ledger.OpenAsync();
         await session.AssertSnapshotAsync("ledger");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.SnapshotBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task ProjectsSnapshot_MatchesBaseline(BrowserKind browserKind)
+    {
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync();
+        await session.GotoAsync("/projects");
+        await session.WaitForHeadingAsync("Control project scope, cost, billing, and revenue.");
+        await session.AssertNoUiFailuresAsync("projects visual snapshot");
+        await session.AssertSnapshotAsync("projects");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.SnapshotBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task PayrollSnapshot_MatchesBaseline(BrowserKind browserKind)
+    {
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync("payroll");
+        await session.GotoAsync("/payroll");
+        await session.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
+        await session.AssertNoUiFailuresAsync("payroll snapshot");
+        await session.AssertSnapshotAsync("payroll");
     }
 
     [Theory]

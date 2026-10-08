@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brassledger.local/schemas/jurisdiction-catalog-v1.schema.json",
+  "title": "BrassLedger Effective-Dated Jurisdiction Catalog",
+  "type": "object",
+  "required": ["schemaVersion", "datasetCode", "version", "effectiveOn", "sources", "jurisdictions"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "datasetCode": { "type": "string" },
+    "version": { "type": "string" },
+    "effectiveOn": { "type": "string", "format": "date" },
+    "capturedAtUtc": { "type": "string", "format": "date-time" },
+    "sources": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["url", "sha256"], "additionalProperties": true } },
+    "jurisdictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "code", "name", "type", "lifecycle", "relationships"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "code": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "enum": ["Country", "FederalDistrict", "State", "Territory", "County", "Parish", "Borough", "City", "Town", "Township", "Village", "SchoolDistrict", "SpecialDistrict", "Tribal", "Other"] },
+          "lifecycle": { "type": "object", "required": ["status", "validFrom"], "additionalProperties": true },
+          "relationships": { "type": "array", "items": { "type": "object", "required": ["type", "targetJurisdictionId", "validFrom"], "additionalProperties": true } },
+          "pit": { "type": "object", "additionalProperties": true },
+          "suta": { "type": "object", "additionalProperties": true },
+          "formulaCoverage": { "enum": ["NotCaptured", "OfficialSourceCaptured", "DraftCaptured", "Approved", "NotApplicableForPIT"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

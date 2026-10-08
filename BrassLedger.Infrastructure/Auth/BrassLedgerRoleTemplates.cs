@@ -4,51 +4,201 @@ public static class BrassLedgerRoleTemplates
 {
     public static IReadOnlyList<RoleTemplateDefinition> BuiltIn { get; } =
     [
-        new("administrator", "Administrator", "Full access to every module plus role and user administration.", true, BrassLedgerPermissions.All.ToArray()),
-        new("owner-ceo", "Owner/CEO", "Executive-level access to every module so the business is never blocked by one operator account.", true, BrassLedgerPermissions.All.ToArray()),
-        new("controller", "Controller", "Broad accounting oversight without user or role administration.", false,
+        new("administrator", "Administrator", "Full access to every module plus role and user administration.", true, true, BrassLedgerPermissions.All.ToArray()),
+        new("owner-ceo", "Owner/CEO", "Executive-level access to every module so the business is never blocked by one operator account.", true, true, BrassLedgerPermissions.All.ToArray()),
+        new("controller", "Controller", "Broad accounting oversight without user or role administration.", false, false,
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.LedgerManage,
+            BrassLedgerPermissions.AccountingDimensionsManage,
+            BrassLedgerPermissions.JournalPrepare,
+            BrassLedgerPermissions.JournalApprove,
+            BrassLedgerPermissions.JournalPost,
+            BrassLedgerPermissions.JournalReverse,
             BrassLedgerPermissions.ReceivablesManage,
             BrassLedgerPermissions.PayablesManage,
+            BrassLedgerPermissions.PaymentReverse,
+            BrassLedgerPermissions.SubledgerPrepare,
+            BrassLedgerPermissions.SubledgerApprove,
+            BrassLedgerPermissions.SubledgerPost,
             BrassLedgerPermissions.ReportingManage,
             BrassLedgerPermissions.TaxManage,
             BrassLedgerPermissions.PublishManage,
-            BrassLedgerPermissions.ProjectsManage
+            BrassLedgerPermissions.ProjectsManage,
+            BrassLedgerPermissions.ProjectChangeOrderPrepare,
+            BrassLedgerPermissions.ProjectChangeOrderApprove,
+            BrassLedgerPermissions.ProjectBillingPrepare,
+            BrassLedgerPermissions.ProjectWipPrepare,
+            BrassLedgerPermissions.ProjectWipApprove,
+            BrassLedgerPermissions.ProjectWipPost,
+            BrassLedgerPermissions.ProjectWipReverse
         ]),
-        new("requisitioning", "Requisitioning Clerk", "Can prepare requisitions without approving purchasing or writing checks.", false,
+        new("project-change-order-preparer", "Project Change Order Preparer", "Prepares and submits project change orders without approval authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ProjectChangeOrderPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("project-change-order-approver", "Project Change Order Approver", "Reviews project change orders without preparation authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ProjectChangeOrderApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("project-billing-preparer", "Project Billing Preparer", "Maintains project billing rates and prepares source-derived customer invoice drafts without approval or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ReceivablesManage,
+            BrassLedgerPermissions.SubledgerPrepare,
+            BrassLedgerPermissions.ProjectBillingPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("project-wip-preparer", "Project WIP Preparer", "Prepares cumulative project WIP schedules without approval or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ProjectWipPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("project-wip-approver", "Project WIP Approver", "Reviews project WIP schedules without preparation or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ProjectWipApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("project-wip-poster", "Project WIP Poster", "Posts and reverses approved project WIP schedules without preparing or approving them.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ProjectWipPost,
+            BrassLedgerPermissions.ProjectWipReverse,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("receivables-preparer", "Receivables Preparer", "Creates customer invoice and recurring invoice drafts without approval or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ReceivablesManage,
+            BrassLedgerPermissions.SubledgerPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("receivables-approver", "Receivables Approver", "Reviews customer invoice drafts without preparation or posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ReceivablesManage,
+            BrassLedgerPermissions.SubledgerApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("receivables-poster", "Receivables Poster", "Posts approved customer invoices without preparing or approving them.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.ReceivablesManage,
+            BrassLedgerPermissions.SubledgerPost,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payables-preparer", "Payables Preparer", "Creates vendor bill and recurring bill drafts without approval, posting, or payment authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayablesManage,
+            BrassLedgerPermissions.SubledgerPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payables-approver", "Payables Approver", "Reviews vendor bill drafts without preparation, posting, or payment authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayablesManage,
+            BrassLedgerPermissions.SubledgerApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payables-poster", "Payables Poster", "Posts approved vendor bills without preparing, approving, or paying them.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayablesManage,
+            BrassLedgerPermissions.SubledgerPost,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("journal-preparer", "Journal Preparer", "Creates journal drafts without authority to approve, post, or reverse them.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.LedgerManage,
+            BrassLedgerPermissions.JournalPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("journal-approver", "Journal Approver", "Reviews and approves journal drafts without authority to prepare, post, or reverse them.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.LedgerManage,
+            BrassLedgerPermissions.JournalApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("journal-poster", "Journal Poster", "Posts approved journals and creates controlled reversals without editing their preparation.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.LedgerManage,
+            BrassLedgerPermissions.JournalPost,
+            BrassLedgerPermissions.JournalReverse,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("requisitioning", "Requisitioning Clerk", "Can prepare requisitions without approving purchasing or writing checks.", false, false,
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.RequisitionManage,
             BrassLedgerPermissions.ReportingManage
         ]),
-        new("purchasing", "Purchasing Manager", "Approves and issues purchase orders without payment authority.", false,
+        new("purchasing", "Purchasing Manager", "Approves and issues purchase orders without payment authority.", false, false,
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.PurchasingManage,
             BrassLedgerPermissions.PayablesManage,
             BrassLedgerPermissions.ReportingManage
         ]),
-        new("cash-disbursements", "Cash Disbursements", "Handles payment preparation and checks separately from requisitioning and purchasing.", false,
+        new("sales", "Sales Clerk", "Prepares and approves quotes and sales orders without inventory-shipment or receivables posting authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.SalesManage,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("cash-disbursements", "Cash Disbursements", "Handles payment preparation and checks separately from requisitioning and purchasing.", false, false,
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.PayablesManage,
             BrassLedgerPermissions.CheckDisbursementManage,
             BrassLedgerPermissions.ReportingManage
         ]),
-        new("payroll-manager", "Payroll Manager", "Maintains payroll and employee-sensitive records.", false,
+        new("payroll-manager", "Payroll Manager", "Maintains payroll and employee-sensitive records.", false, false,
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.PayrollManage,
+            BrassLedgerPermissions.PayrollPrepare,
+            BrassLedgerPermissions.PayrollApprove,
+            BrassLedgerPermissions.PayrollPost,
+            BrassLedgerPermissions.PayrollReverse,
+            BrassLedgerPermissions.PayrollSensitiveData,
             BrassLedgerPermissions.ReportingManage,
             BrassLedgerPermissions.TaxManage
         ]),
-        new("warehouse", "Warehouse Operator", "Maintains inventory and operational activity without payment authority.", false,
+        new("payroll-preparer", "Payroll Preparer", "Prepares payroll drafts without approval, posting, reversal, or protected-record authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayrollPrepare,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payroll-approver", "Payroll Approver", "Reviews and approves payroll drafts without preparation, posting, reversal, or protected-record authority.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayrollApprove,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("payroll-poster", "Payroll Poster", "Posts approved payroll and performs controlled reversals without changing employee setup.", false, false,
+        [
+            BrassLedgerPermissions.WorkspaceView,
+            BrassLedgerPermissions.PayrollPost,
+            BrassLedgerPermissions.PayrollReverse,
+            BrassLedgerPermissions.ReportingManage
+        ]),
+        new("warehouse", "Warehouse Operator", "Maintains inventory and operational activity without payment authority.", false, false,
         [
             BrassLedgerPermissions.WorkspaceView,
             BrassLedgerPermissions.RequisitionManage,
             BrassLedgerPermissions.PurchasingManage,
+            BrassLedgerPermissions.FulfillmentManage,
             BrassLedgerPermissions.ReportingManage
         ])
     ];
@@ -78,4 +228,5 @@ public sealed record RoleTemplateDefinition(
     string Name,
     string Description,
     bool HasFullAccess,
+    bool RequiresMfa,
     IReadOnlyList<string> Permissions);

@@ -8,7 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BrassLedger.Infrastructure.Auth;
 
-public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbContext> dbContextFactory) : CookieAuthenticationEvents
+public sealed class BrassLedgerCookieEvents(
+    IDbContextFactory<BrassLedgerDbContext> dbContextFactory,
+    TimeProvider timeProvider) : CookieAuthenticationEvents
 {
     public override Task RedirectToLogin(RedirectContext<CookieAuthenticationOptions> context)
     {
@@ -26,8 +28,13 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
         var securityStamp = context.Principal?.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType);
         var companyIdValue = context.Principal?.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         var roleValue = context.Principal?.FindFirstValue(ClaimTypes.Role);
+        var authenticationMethod = context.Principal?.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType);
+        var sessionIdValue = context.Principal?.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType);
+        var enrollmentRequiredClaim = context.Principal?.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true") == true;
 
-        if (!Guid.TryParse(userIdValue, out var userId) || string.IsNullOrWhiteSpace(securityStamp))
+        if (!Guid.TryParse(userIdValue, out var userId)
+            || !Guid.TryParse(sessionIdValue, out var sessionId)
+            || string.IsNullOrWhiteSpace(securityStamp))
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(BrassLedgerAuthenticationDefaults.Scheme);
@@ -38,29 +45,74 @@ public sealed class BrassLedgerCookieEvents(IDbContextFactory<BrassLedgerDbConte
         var user = await dbContext.Users
             .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == userId, context.HttpContext.RequestAborted);
+        var session = await dbContext.UserSessions.AsNoTracking().SingleOrDefaultAsync(
+            candidate => candidate.Id == sessionId && candidate.UserId == userId,
+            context.HttpContext.RequestAborted);
+        var now = timeProvider.GetUtcNow();
+        var hasCompanyId = Guid.TryParse(companyIdValue, out var companyId);
+        var membership = user is null || !hasCompanyId
+            ? null
+            : await dbContext.CompanyMemberships.AsNoTracking().SingleOrDefaultAsync(
+                item => item.UserId == user.Id && item.CompanyId == companyId && item.IsActive,
+                context.HttpContext.RequestAborted);
+        var currentRole = membership is null
+            ? null
+            : await dbContext.AccessRoles.AsNoTracking().SingleOrDefaultAsync(
+                role => role.CompanyId == membership.CompanyId && role.IsActive && role.Name == membership.Role,
+                context.HttpContext.RequestAborted);
+        var claimedPermissions = context.Principal?.FindAll(BrassLedgerAuthenticationDefaults.PermissionClaimType).Select(claim => claim.Value).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+        var roleTemplate = BrassLedgerRoleTemplates.BuiltIn.FirstOrDefault(template => string.Equals(template.Name, membership?.Role, StringComparison.OrdinalIgnoreCase));
+        var roleRequiresMfa = currentRole?.RequiresMfa ?? roleTemplate?.RequiresMfa ?? false;
+        var enrollmentRequired = roleRequiresMfa && user is { MfaEnabled: false };
+        var currentPermissions = enrollmentRequired
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : currentRole is null
+                ? (roleTemplate?.Permissions ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : currentRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var isValid = user is not null
             && user.IsActive
-            && (user.LockoutEndUtc is null || user.LockoutEndUtc <= DateTimeOffset.UtcNow)
+            && (user.LockoutEndUtc is null || user.LockoutEndUtc <= now)
             && string.Equals(user.SecurityStamp, securityStamp, StringComparison.Ordinal)
-            && string.Equals(user.Role, roleValue, StringComparison.Ordinal)
-            && Guid.TryParse(companyIdValue, out var companyId)
-            && companyId == user.CompanyId;
+            && session is not null
+            && session.RevokedAtUtc is null
+            && session.ExpiresAtUtc > now
+            && string.Equals(session.SecurityStamp, securityStamp, StringComparison.Ordinal)
+            && membership is not null
+            && string.Equals(membership.Role, roleValue, StringComparison.Ordinal)
+            && (!user.MfaEnabled || string.Equals(authenticationMethod, "mfa", StringComparison.Ordinal))
+            && enrollmentRequiredClaim == enrollmentRequired
+            && claimedPermissions.SetEquals(currentPermissions);
 
         if (isValid)
         {
+            if (session!.LastSeenAtUtc <= now.AddMinutes(-5))
+            {
+                await dbContext.UserSessions
+                    .Where(candidate => candidate.Id == session.Id && candidate.RevokedAtUtc == null)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(candidate => candidate.LastSeenAtUtc, now)
+                        .SetProperty(candidate => candidate.ExpiresAtUtc, now.AddMinutes(BrassLedgerAuthenticationDefaults.SessionMinutes)),
+                        context.HttpContext.RequestAborted);
+            }
             return;
+        }
+
+        if (session is { RevokedAtUtc: null })
+        {
+            await dbContext.UserSessions.Where(candidate => candidate.Id == session.Id && candidate.RevokedAtUtc == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.RevokedAtUtc, now), context.HttpContext.RequestAborted);
         }
 
         dbContext.AuthenticationAuditEntries.Add(new AuthenticationAuditEntry
         {
             Id = Guid.NewGuid(),
             UserId = user?.Id,
-            CompanyId = user?.CompanyId,
+            CompanyId = membership?.CompanyId ?? user?.CompanyId,
             UserName = context.Principal?.Identity?.Name ?? string.Empty,
             EventType = "session_rejected",
             Succeeded = false,
-            OccurredUtc = DateTimeOffset.UtcNow,
+            OccurredUtc = now,
             IpAddress = context.HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
             UserAgent = context.HttpContext.Request.Headers.UserAgent.ToString(),
             Detail = "The session failed validation and was signed out."

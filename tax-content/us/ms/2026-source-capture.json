@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ms",
+  "capturedAtUtc": "2026-08-25T04:09:20Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    {
+      "url": "https://www.dor.ms.gov/sites/default/files/tax-forms/business/89700251revised1.13.2026.pdf",
+      "title": "Publication 89-700-25, Mississippi Income Tax Withholding",
+      "revision": "Revised January 13, 2026",
+      "rawCaptureStatus": "Indexed official publication was readable, but direct retrieval failed TLS verification on August 25, 2026: curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20); checksum pending"
+    },
+    {
+      "url": "https://www.dor.ms.gov/general-information",
+      "title": "Mississippi General Information — Tax Rates",
+      "rawCaptureStatus": "Official HTML verified through the agency page; raw checksum pending"
+    },
+    {
+      "url": "https://www.dor.ms.gov/business/business-tax-frequently-asked-questions",
+      "title": "Mississippi Business Tax Frequently Asked Questions",
+      "rawCaptureStatus": "Official HTML verified through the agency page; raw checksum pending"
+    }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "Form 89-350", "dataType": "enum", "values": ["Single", "HeadOfFamily", "MarriedSpouseEmployed", "MarriedSpouseNotEmployed"] },
+    { "code": "exemptionClaimed", "source": "Form 89-350 Line 6", "dataType": "money", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "Written employee-employer agreement", "dataType": "money", "minimum": 0 },
+    { "code": "mississippiEarnings", "dataType": "money", "minimum": 0 },
+    { "code": "totalEarnings", "dataType": "money", "minimum": 0 }
+  ],
+  "calculation": {
+    "method": "annualized-wages-standard-deduction-and-exemption",
+    "rate": 0.04,
+    "annualZeroRateAmount": 10000,
+    "standardDeductions": { "Single": 2300, "HeadOfFamily": 3400, "MarriedSpouseEmployed": 2300, "MarriedSpouseNotEmployed": 4600 },
+    "exemptionReferenceAmounts": { "SingleBase": 6000, "HeadOfFamilyIncludingOneDependent": 9500, "MarriedBase": 12000, "EachAdditionalDependentAgeOrBlindness": 1500 },
+    "payPeriodsPerYear": { "Annual": 1, "Monthly": 12, "Semimonthly": 24, "Biweekly": 26, "Weekly": 52, "DailyOrMiscellaneous": 260 },
+    "steps": [
+      "annualizedWages = periodicGrossWages * payPeriodsPerYear",
+      "taxableIncome = max(0, annualizedWages - exemptionClaimed - filingStatusStandardDeduction)",
+      "annualWithholding = max(0, taxableIncome - 10000) * 0.04",
+      "periodicWithholding = roundWholeDollar(annualWithholding / payPeriodsPerYear + additionalPeriodicWithholding)"
+    ],
+    "missingCertificate": { "filingStatus": "Single", "exemptionClaimed": 0 },
+    "tableFamilies": { "A": "Single", "B": "Head of Family", "C": "Married, spouse not employed", "D": "Married, both spouses employed" },
+    "publishedTableFrequencies": ["Daily", "Weekly", "Biweekly", "Semimonthly", "Monthly"],
+    "rounding": "Nearest whole dollar",
+    "derivedValidationCase": { "isOfficialExample": false, "filingStatus": "Single", "frequency": "Weekly", "wages": 500, "exemptionClaimed": 6000, "annualizedWages": 26000, "standardDeduction": 2300, "annualTaxableAboveZeroRateAmount": 7700, "annualTax": 308, "periodicBeforeRounding": 5.9230769231, "withholding": 6 },
+    "supplementalWages": {
+      "paidWithRegularWages": "Combine and treat as one regular-period payment.",
+      "separateWithoutRegularWithholding": "Add to regular wages for the current or preceding payroll period in the same calendar year and compute as one payment.",
+      "separateWithRegularWithholding": "Aggregate with current or preceding regular wages, calculate combined withholding, then subtract withholding already taken from regular wages.",
+      "substantialOverwithholdingAlternative": "Use the percentage corresponding to the highest bracket expected on the employee's annual Mississippi return."
+    }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Mississippi residents are taxable on all wages, including work outside Mississippi; when the work state requires withholding, the employer should withhold that state's tax rather than Mississippi tax and the resident may claim the allowed return credit.",
+    "nonresidentRule": "Withhold on wages for services performed in Mississippi, subject to the published annual standard-deduction de minimis.",
+    "nonresidentAnnualDeMinimis": "No withholding when expected annual Mississippi earnings are less than the standard deduction for the filing status.",
+    "partlyInsideAndOutsideAllocation": {
+      "formula": "fullMississippiTableWithholding * (mississippiEarnings / totalEarnings)",
+      "principalPlaceInMississippiException": "When the principal place of employment is in Mississippi and out-of-state services are occasional, withhold on total wages unless the other state requires withholding."
+    },
+    "multiStateAllocationRequired": true
+  },
+  "certificateAdministration": {
+    "submitToDepartmentWhen": "More than 10 allowances are claimed, or exempt is claimed and normal wages exceed $200 per week.",
+    "form": "89-350"
+  },
+  "filing": {
+    "monthly": "Average withholding liability of $300 or more per month, and transient or seasonal employers",
+    "quarterly": "Smaller liabilities unless the Department assigns another frequency",
+    "returnDue": "15th day of the month following the reporting period",
+    "electronicPaymentThreshold": 20000,
+    "informationReturnElectronicCountThreshold": 10,
+    "forms": ["89-105", "89-140", "W-2"]
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The official PDF server's certificate chain failed verification. The unsafe --insecure option was not used, so the raw PDF checksum and byte length are pending.",
+    "The Department's General Information prose describes 4.4% as a 2026 statement while the dated rate table and 2026 withholding publication prescribe 4%; the 4% withholding rule is captured and the conflict must be independently reviewed.",
+    "The complete wage-bracket matrices and official table examples remain in the official publication and have not been transcribed into machine-readable rows.",
+    "The derived validation case tests the transcribed formula but is not represented as an agency example."
+  ],
+  "review": {
+    "formulaTranscribed": true,
+    "supplementalMethodsTranscribed": true,
+    "residencyAndWorkRulesTranscribed": true,
+    "officialExamplesTranscribed": false,
+    "rawSourcesChecksummed": false,
+    "sourcePresentationConflictResolved": false,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Obtain the raw publication through a correctly validating official endpoint, checksum it, resolve the official rate wording conflict, transcribe boundary rows and official examples, and add executable engine tests before activation."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-ok",
+  "capturedAtUtc": "2026-08-25T05:00:46Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://oklahoma.gov/content/dam/ok/en/tax/documents/resources/publications/businesses/withholding-tables/WHTables-2026.pdf", "title": "2026 Packet OW-2 Oklahoma Income Tax Withholding Tables", "revision": "2026", "mediaType": "application/pdf", "sha256": "ec4327fe6153611ce6bf60f8e5914eb75c9b6132cf3122bbaaca0ed9dab478a7", "bytes": 429817 }
+  ],
+  "employeeInputs": [
+    { "code": "maritalRateSelection", "source": "OK-W-4", "dataType": "enum", "values": ["Single", "Married", "MarriedWithholdAtHigherSingleRate"] },
+    { "code": "withholdingAllowances", "source": "OK-W-4", "dataType": "integer", "minimum": 0 },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "oklahomaSourceQuarterlyWages", "dataType": "money", "minimum": 0 }
+  ],
+  "calculation": {
+    "methods": ["PercentageFormula", "PublishedWageBracketTables"],
+    "netPeriodicWages": "grossPeriodicWages - (withholdingAllowances * periodicAllowanceValue)",
+    "annualAllowanceValue": 1000,
+    "periodicAllowanceValues": { "Weekly": 19.23, "Biweekly": 38.46, "Semimonthly": 41.67, "Monthly": 83.33, "Quarterly": 250, "Semiannual": 500, "Annual": 1000, "DailyOrMiscellaneous": 3.85 },
+    "annualPercentageSchedules": {
+      "Single": [
+        { "over": 0, "through": 10100, "baseTax": 0, "rate": 0 },
+        { "over": 10100, "through": 11250, "baseTax": 0, "rate": 0.025 },
+        { "over": 11250, "through": 13550, "baseTax": 28.75, "rate": 0.035 },
+        { "over": 13550, "baseTax": 109.25, "rate": 0.045 }
+      ],
+      "Married": [
+        { "over": 0, "through": 20200, "baseTax": 0, "rate": 0 },
+        { "over": 20200, "through": 22500, "baseTax": 0, "rate": 0.025 },
+        { "over": 22500, "through": 27100, "baseTax": 57.50, "rate": 0.035 },
+        { "over": 27100, "baseTax": 218.50, "rate": 0.045 }
+      ]
+    },
+    "publishedPayrollPeriods": ["Weekly", "Biweekly", "Semimonthly", "Monthly", "Quarterly", "Semiannual", "Annual", "DailyOrMiscellaneous"],
+    "rounding": { "requiredForPercentageMethod": true, "method": "NearestWholeDollarHalfUp", "belowFiftyCents": "Drop", "fiftyCentsOrMore": "IncreaseToNextDollar" },
+    "marriedHigherSingleRate": "Use the Single schedule when the employee selects Married, but withhold at higher Single rate on OK-W-4.",
+    "supplementalWages": { "distinctMethodLocated": false, "capturedTreatment": "No separate supplemental-wage method appears in the 2026 OW-2; payments subject to withholding use the selected percentage formula or wage-bracket method." },
+    "officialExample": { "frequency": "Semimonthly", "maritalStatus": "Married", "grossWages": 1825, "allowances": 2, "periodicAllowanceValue": 41.67, "netWages": 1741.66, "bracketFloor": 1129, "baseTax": 9.10, "rate": 0.045, "unroundedWithholding": 36.67, "roundedWithholding": 37 }
+  },
+  "residencyAndWorkRules": {
+    "generalRule": "Withholding applies to compensation for services rendered in Oklahoma unless a statutory exclusion applies.",
+    "nonresidentQuarterlyDeMinimis": { "maximumCompensation": 300, "period": "CalendarQuarter", "effect": "Services performed in Oklahoma by a nonresident individual are excluded when quarterly income is not more than the threshold." },
+    "otherExclusions": ["Farm services when monthly pay is $900 or less", "Domestic services in a private home, local college, club, or local college fraternity or sorority chapter", "Services outside the employer's trade or business unless quarterly cash remuneration is $200 or more", "Qualifying minister or religious-order services"],
+    "residentOutsideOklahomaRuleLocated": false,
+    "reciprocalStates": [],
+    "multiStateWorkLocationRequired": true,
+    "productionLoanOutRule": "For services performed in Oklahoma, production companies or payroll providers must withhold at the highest statutory percentage rate on payments to loan-out companies and allocate withholding to the loan-out company's employees."
+  },
+  "filing": {
+    "quarterlyReturnRequired": true,
+    "returnData": ["Employees paid", "Quarterly wages", "Quarterly Oklahoma tax withheld"],
+    "remittanceSchedules": [
+      { "condition": "Quarterly withholding not over $500", "frequency": "Quarterly", "due": "20th day after quarter" },
+      { "condition": "Quarterly withholding over $500 but prior-year monthly amount under $5,000", "frequency": "Monthly", "due": "20th day of following month" },
+      { "condition": "Federal semiweekly depositor or average monthly taxes at least $10,000 in prior fiscal year", "frequency": "FederalSemiweekly", "due": "Same dates as federal semiweekly deposits" }
+    ],
+    "electronicRemittanceRequiredWhenPriorYearMonthlyWithholdingAtLeast": 5000,
+    "annualWageStatements": { "forms": ["W-2", "W-3"], "due": "January 31", "electronicSubmissionThrough": "OkTAP" }
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "The official example first says $12.19 plus 4.5 percent, but its table, arithmetic, and final result use the official $9.10 base; the capture preserves $9.10 and records the publication typo.",
+    "The complete wage-bracket matrices remain in the checksummed official publication rather than being duplicated here.",
+    "No distinct supplemental-wage method or resident-working-outside-Oklahoma rule was located in OW-2."
+  ],
+  "review": { "exact2026PublicationCaptured": true, "annualSchedulesTranscribed": true, "allowanceValuesTranscribed": true, "roundingTranscribed": true, "officialExampleTranscribed": true, "residencyAndWorkRulesComplete": false, "supplementalMethodIndependentlyVerified": false, "rawSourcesChecksummed": true, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Verify supplemental and resident out-of-state treatment from controlling law, import all direct tables, and add bracket, rounding, de-minimis, loan-out, and filing regressions." }
+}

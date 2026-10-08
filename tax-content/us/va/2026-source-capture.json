@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-va",
+  "capturedAtUtc": "2026-08-25T05:25:00Z",
+  "effectiveOn": "2026-01-01",
+  "effectiveThrough": "2026-12-31",
+  "sources": [
+    { "url": "https://www.tax.virginia.gov/sites/default/files/taxforms/withholding/any/employer-withholding-tables-july-2025-and-later-any.pdf", "title": "Virginia Employer Withholding Tables for Wages Paid after July 1, 2025", "revision": "July 2025 and later", "mediaType": "application/pdf", "sha256": "a9756739075a1118a5b41880e1b1f6c3c21bafa34d262a6e62e87fb8b4a411ab", "bytes": 938740 },
+    { "url": "https://www.tax.virginia.gov/sites/default/files/vatax-pdf/employer-withholding-instructions.pdf", "title": "Virginia Income Tax Withholding Guide for Employers", "revision": "05/25", "mediaType": "application/pdf", "sha256": "52203efabfc3d5314be57279712c01066d0fadf3b98c0f66a63189aba55097c5", "bytes": 1678640 }
+  ],
+  "employeeInputs": [
+    { "code": "personalAndDependentExemptions", "source": "VA-4 or VA-4P", "dataType": "integer", "minimum": 0 },
+    { "code": "age65AndBlindExemptions", "source": "VA-4 or VA-4P", "dataType": "integer", "minimum": 0 },
+    { "code": "additionalPeriodicWithholding", "source": "VA-4", "dataType": "money", "minimum": 0 },
+    { "code": "reciprocityOrExemptionCertificate", "source": "VA-4", "dataType": "boolean" },
+    { "code": "residenceJurisdictionId", "dataType": "jurisdiction-reference" },
+    { "code": "workJurisdictionId", "dataType": "jurisdiction-reference" }
+  ],
+  "calculation": {
+    "methods": ["ExactAnnualizedFormula", "ApproximatePublishedWageTables"],
+    "formulaEffectiveFor2026": "annualGrossPay - (8750 + personalAndDependentExemptions * 930 + age65AndBlindExemptions * 800)",
+    "annualWithholdingStandardDeduction": 8750,
+    "personalAndDependentExemptionValue": 930,
+    "age65AndBlindExemptionValue": 800,
+    "annualSchedule": [
+      { "taxableIncomeOver": 0, "taxableIncomeThrough": 3000, "baseTax": 0, "rate": 0.02 },
+      { "taxableIncomeOver": 3000, "taxableIncomeThrough": 5000, "baseTax": 60, "rate": 0.03 },
+      { "taxableIncomeOver": 5000, "taxableIncomeThrough": 17000, "baseTax": 120, "rate": 0.05 },
+      { "taxableIncomeOver": 17000, "baseTax": 720, "rate": 0.0575 }
+    ],
+    "periodDivisors": { "Annual": 1, "Semiannual": 2, "Quarterly": 4, "Monthly": 12, "Semimonthly": 24, "Biweekly": 26, "Weekly": 52, "Daily": 300 },
+    "rounding": { "publishedTables": "NearestWholeDollar", "exactFormula": "Official example retains cents; no separate formula-rounding sequence stated" },
+    "supplementalWages": { "paidWithRegularWages": "Aggregate and use table or formula", "paidSeparately": "Aggregate with current or last regular payroll, subtract regular-wage tax", "optionalFlatRateWhenRegularWagesHadWithholding": 0.0575 },
+    "nonperiodicPensionAndAnnuityRate": 0.04,
+    "officialExample": { "frequency": "Semimonthly", "grossWages": 2649, "periods": 24, "personalAndDependentExemptions": 5, "annualGrossWages": 63576, "annualTaxableIncome": 50176, "annualWithholding": 2628, "periodWithholding": 109.50 }
+  },
+  "residencyAndWorkRules": {
+    "residentRule": "Virginia withholding applies to Virginia residents performing services inside or outside Virginia unless a valid exemption or reciprocal-state arrangement applies.",
+    "nonresidentRule": "Wages for Virginia services are subject unless the nonresident satisfies a reciprocal agreement or another exclusion.",
+    "reciprocalJurisdictions": ["KY", "DC", "MD", "WV", "PA"],
+    "kentuckyAndDcCondition": "Employee must reside there and commute daily to a Virginia workplace.",
+    "marylandWestVirginiaPennsylvaniaConditions": ["Legal domicile in reciprocal state", "Lives in Virginia fewer than 183 days or not at all", "Only Virginia-source income is salary or wages", "Virginia wages are taxable by state of domicile"],
+    "certificateRequired": "VA-4",
+    "nonreciprocalNeighborExamples": ["NC", "TN"],
+    "multiStateWorkLocationRequired": true,
+    "mixedLocationAllocationMethodLocated": false,
+    "militarySpouseExemptionAvailable": true
+  },
+  "filing": {
+    "assignedByAverageMonthlyLiability": true,
+    "frequencies": [
+      { "averageMonthlyLiability": "Less than $100", "frequency": "Quarterly", "form": "VA-5", "due": "Last day of month after quarter" },
+      { "averageMonthlyLiability": "$100 through $999.99", "frequency": "Monthly", "form": "VA-5", "due": "25th day of following month" },
+      { "averageMonthlyLiability": "$1,000 or more", "frequency": "Semiweekly", "paymentTrigger": "More than $500 accumulated at federal deposit cutoff", "due": "Within three banking days", "quarterlyReconciliation": "VA-16" },
+      { "frequency": "Seasonal", "form": "VA-5", "due": "25th day following each designated active month" }
+    ],
+    "zeroReturnsRequiredWhileOpen": true,
+    "annualSummary": { "form": "VA-6", "due": "January 31" },
+    "electronicFilingAndPaymentRequired": true
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": ["The withholding formula uses $8,750 for all employees even though the publication separately discusses a $17,500 married-joint return-level standard deduction; the latter must not be substituted into payroll.", "The standard-deduction increase is scheduled to sunset after tax year 2026, so 2027 requires a new effective-dated version.", "The complete approximate wage-table matrices are checksummed but not transcribed.", "No mixed-location allocation formula was located."],
+  "review": { "currentOfficialPublicationApplicableTo2026": true, "formulaTranscribed": true, "supplementalMethodsTranscribed": true, "officialExampleTranscribed": true, "reciprocityConditionsTranscribed": true, "filingSchedulesTranscribed": true, "rawSourcesChecksummed": true, "mixedLocationAllocationVerified": false, "formulaRoundingIndependentlyVerified": false, "executableRegressionTests": false, "activationAllowed": false, "requiredNextStep": "Import direct tables and test formula boundaries, separate exemption classes, reciprocity conditions, supplemental choices, filing transitions, and the 2027 sunset before activation." }
+}

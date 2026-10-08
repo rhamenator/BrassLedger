@@ -1,0 +1,101 @@
+# BrassLedger tax content
+
+Tax content is maintained as versioned JSON and imported as an inactive draft. A package may be approved only after its official sources are captured, checksummed, independently reviewed, and its required regression examples pass in the current tax engine.
+
+## Jurisdictions
+
+Jurisdiction identity is separate from its name, code, type, country, and parent. Relationships are effective-dated, so annexation, dissolution, renaming, a county changing states, or a jurisdiction changing countries adds a new relationship interval without rewriting history. Proposed or disputed changes can coexist with the active relationship and do not affect payroll until approved and effective.
+
+Use `schema/jurisdiction-catalog-v1.schema.json` for catalogs and `schema/tax-content-package-v1.schema.json` for calculation packages. State, county, city, school-district, special-district, tribal, and other jurisdiction types use the same model.
+
+## Capture workflow
+
+1. Capture the official publication and raw bytes; record its URL, retrieval time, revision/effective date, and SHA-256.
+2. Create a new package version. Never overwrite an approved version.
+3. Transcribe applicability, employee inputs, calculation parameters, brackets/tables, filing rules, exceptions, and official examples.
+4. An LLM may prepare a draft, but its output must identify every source and remain inactive.
+5. Independently compare the draft with the official publication.
+6. Run required regression examples and boundary cases.
+7. Approve and activate the package for its effective interval.
+
+`us/state-reference-2026.json` is a coverage inventory. Its PIT classifications and SUTA wage bases are reference data, not withholding formulas. `formulaCoverage` explicitly distinguishes uncaptured, official-source-only, draft, approved, and non-applicable PIT coverage. The 2026 inventory now links every state/DC wage-withholding jurisdiction to an official-source capture; this means the publication was located, not that its rules are executable or approved. Every `OfficialSourceCaptured` entry must point to a source-capture JSON document with activation explicitly disabled. A source capture becomes an importable draft package only after its formula, inputs, applicability rules, and regression examples are complete enough for the engine to execute.
+
+Maryland's local capture is in `us/md/2026-local-source-capture.json`. It selects the local schedule from the employee's residence, represents all 23 counties and Baltimore City as stable jurisdictions, and preserves the income-tiered filing-status schedules used by Anne Arundel and Frederick rather than reducing local tax to a single flat-rate field. The combined Maryland state/local formula and its regression cases remain required before activation.
+
+Indiana's state-and-local capture is in `us/in/2026-source-capture.json`. It includes the state deduction formula, all 92 county rates, the January 1 residence-before-work selection rule, and the qualifying nonresident 30-day branch. The shared `us/state-withholding-sources-2026.json` file is the stable source index for states that do not yet have their own rule-level capture; its name describes its content rather than the order in which states happened to be researched.
+
+New York's local capture is in `us/ny/2026-local-source-capture.json`. New York City resident withholding, Yonkers resident surcharge withholding, and Yonkers nonresident earnings-tax withholding are separate rule branches because their applicability, methods, rates, allowances, and supplemental-wage treatment differ.
+
+Michigan's state-and-local capture is in `us/mi/2026-source-capture.json`. It transcribes the state formula and reciprocity rules, inventories all 24 taxing cities, and captures Detroit's resident, nonresident, exemption, predominant-workplace, and resident-credit rules. The other 23 cities still require their own current official publications, and Michigan's server rejected direct PDF-byte retrieval during capture, so the package remains inactive with checksums pending.
+
+Ohio's state-and-local capture is in `us/oh/2026-source-capture.json`. It preserves separate state withholding tables through July 31 and from August 1, 2026, and models residence-selected school-district withholding separately from work-location municipal withholding. Official school-district and municipal rate-and-boundary exports, examples, and executable day-allocation logic remain required before activation.
+
+Illinois's capture is in `us/il/2026-source-capture.json`. It preserves both allowance classes, the optional exact formula, table-versus-formula behavior, reciprocity, the nonlocalized 30-working-day allocation rule, disaster-response exclusions, and filing requirements. Rounding and the absence of a distinct supplemental method still require independent verification.
+
+Colorado's capture is in `us/co/2026-source-capture.json`. It models the DR 0004/W-4 precedence rules and the annualized DR 1098 calculation without reducing certificate fields to fixed allowances. The manually downloaded official calculator confirms full-precision intermediate calculation with whole-dollar displayed results, and the January 2026 guide supplies the filing schedules. Its table includes exactly $50,000 in both the monthly and weekly rows, so that filing-frequency boundary still requires agency clarification or an explicit Department assignment.
+
+North Carolina's capture is in `us/nc/2026-source-capture.json`. It includes percentage and annualized formulas, payroll-period deductions, whole-dollar rounding, supplemental-pay alternatives, residence/work allocation, filing thresholds, and the separate nonresident-alien low-wage cap. The full wage-bracket matrices remain in the checksummed official publication.
+
+Arizona's capture is in `us/az/2026-source-capture.json`. It preserves the employee-elected gross-wage percentages, missing and expired-certificate defaults, conditional 60-day nonresident rule, special-worker branches, filing schedules, and the unusual employer election to suspend withholding during December. Filing-page checksums, rounding, and executable effective-period behavior remain blockers.
+
+Idaho's capture is in `us/id/2026-source-capture.json`. It preserves both table versions used during 2026, whole-dollar rounding, supplemental methods, filing schedules, and multi-state applicability. The precise switchover payroll, the historic child-credit allowance, and a conflict between the current HTML example and the revised official PDF must be resolved before activation.
+
+Mississippi's capture is in `us/ms/2026-source-capture.json`. It preserves filing-status deductions, employee-entered exemption dollars, annualization, supplemental aggregation, multi-state wage allocation, certificate administration, and filing thresholds. The official server's invalid TLS chain prevented safe raw-byte capture, and the agency's own rate prose conflicts with its dated table; both remain explicit blockers.
+
+Alabama's capture is in `us/al/2026-source-capture.json`. It preserves income-sensitive standard deductions, federal-withholding and dependent deductions, separate married-joint brackets, supplemental withholding, the nonresident 30-day safe harbor, and filing schedules. Formula rounding and the 31st-day transition still require executable review.
+
+Arkansas's capture is in `us/ar/2026-source-capture.json`. It preserves the complete formula schedule—including the unusual high-income adjustment phase-in—midpoint normalization, personal credits, official example, work-day and sales-volume allocation, and the Texarkana border-city exemption. Wage tables remain in the checksummed official matrix while supplemental and address-boundary behavior remain inactive review gates.
+
+Delaware's capture is in `us/de/2026-source-capture.json`. It preserves the annualized progressive schedule, filing-status deductions, exemption credits, official examples, supplemental aggregation, nonresident rules, and quarterly/monthly/eighth-monthly filing thresholds. The current official schedule is labeled effective in 2025, so unchanged applicability through every 2026 payroll and current certificate compatibility must be confirmed before activation.
+
+The District of Columbia capture is in `us/dc/2026-source-capture.json`. It records current 2026 filing forms and deadlines but deliberately does not turn the last located 2016 FR-230 tables into current calculation rules. OTR also marks D-4 and D-4A as under review, so the capture remains an explicitly incomplete, non-executable record pending a current agency calculation publication.
+
+Georgia's capture is in `us/ga/2026-source-capture.json`. It separates the 5.19% rate through May 10 from the 4.99% rate beginning May 11, preserves the post-change periodic deductions and examples, nonresident dual threshold, and filing schedules. The archived pre-change deduction inputs and rounding must still be obtained before the first interval can be implemented.
+
+Hawaii's capture is in `us/hi/2026-source-capture.json`. It preserves the annualized brackets, allowance deductions, alternative-period allowance values, supplemental aggregation methods, official example, filing schedules, and conditional nonresident 60-day exemption with its construction-contractor exclusion. Periodic bracket matrices, rounding, and state-transition behavior remain activation blockers.
+
+Iowa's capture is in `us/ia/2026-source-capture.json`. It preserves the 2026 four-step 3.8% formula, separate modern and legacy IA W-4 interpretation, filing-status deductions, supplemental rate, reciprocity with Illinois, filing schedules, and official examples. Wage-bracket matrices and generalized rounding remain activation blockers.
+
+Kansas's capture is in `us/ks/2026-source-capture.json`. It preserves all eight single and married percentage schedules, exemption amounts, optional whole-dollar rounding, supplemental treatment, filing thresholds, and distinct resident-credit and multi-state allocation branches. The current guide is dated October 2024, so unchanged 2026 applicability and allocation-fraction rounding must be confirmed before activation.
+
+Kentucky's capture is in `us/ky/2026-source-capture.json`. It preserves the 2026 3.5% annualized formula, $3,360 standard deduction, conditional seven-state reciprocity, filing requirements, and the separate need for work- and residence-aware local occupational taxes. The agency's biweekly example contains an internal typo/inconsistency; rounding, supplemental wages, full tables, and local rules remain activation blockers.
+
+Louisiana's capture is in `us/la/2026-source-capture.json`. It corrects the shared index's rounded 3% rate to the official 3.09%, preserves all three 2026 L-4 standard-deduction choices, negative or positive periodic adjustments, regular treatment of supplemental wages, residency/work-state rules, and filing schedules. Current-publication applicability, rounding, and wage tables remain blockers.
+
+Maryland's state capture is in `us/md/2026-source-capture.json` and links the existing county capture. It preserves state brackets, periodic deductions, reciprocity, nonresident special tax, filing schedules, and the rule that payroll must use Maryland's official combined state/local schedules selected by residence. Those complete combined matrices and locality-boundary tests remain activation blockers.
+
+Massachusetts's capture is in `us/ma/2026-source-capture.json`. It preserves the 5%/9% annualized formula, 2026 surtax threshold, exemption and special-status reductions, the year-to-date retirement deduction cap, supplemental aggregation, nonresident workday allocation, and filing schedules. Mass.gov rejected direct raw-byte retrieval, so checksums, full wage tables, and rounding remain activation blockers.
+
+Minnesota's capture is in `us/mn/2026-source-capture.json`. It preserves both filing-status schedules, the $5,300 allowance, optional whole-dollar rounding, supplemental alternatives, Michigan and North Dakota reciprocity, resident other-state withholding credit, nonresident entertainer tax, and deposit schedules. Wage-bracket matrices and executable stateful multi-state tests remain activation blockers.
+
+Missouri's capture is in `us/mo/2026-source-capture.json`. It preserves all five certificate outcomes, the complete annual progressive schedule, required whole-dollar rounding, supplemental alternatives, source-wage allocation, resident other-state difference withholding, and filing schedules. Official materials conflict on the quarterly/annual filing threshold, and full wage tables remain activation blockers.
+
+Montana's capture is in `us/mt/2026-source-capture.json`. It preserves all three filing-status schedules, mandatory upward rounding, supplemental alternatives, North Dakota reciprocity, the conditional 30-day nonresident rule, reservation-source allocation, MEDIA loan-out withholding, and filing schedules. The direct period tables and stateful special-worker branches remain activation blockers.
+
+Nebraska's capture is in `us/ne/2026-source-capture.json`. It preserves the complete annual percentage schedules, allowance values, the unusual documented minimum-withholding procedure, supplemental methods, Form 9N allocation, and the retroactive seven-day conference and convenience rules. Wage tables and stateful threshold-transition tests remain activation blockers.
+
+New Jersey's capture is in `us/nj/2026-source-capture.json`. It preserves all five employee-selectable annual rate tables, allowance values, supplemental handling, Pennsylvania reciprocity and local-tax interaction, resident credits, and the effective-dated convenience-of-employer capability. Direct payroll-period and supplemental matrices, dynamic convenience-state verification, and rounding remain activation blockers.
+
+North Dakota's capture is in `us/nd/2026-source-capture.json`. It preserves separate pre-2020 and modern federal W-4 methods, all annual schedules, legacy allowances, supplemental alternatives, Minnesota and Montana reciprocity conditions, and filing schedules. Both wage-table families and executable generation-selection and renewal tests remain activation blockers.
+
+New Mexico's capture is in `us/nm/2026-source-capture.json`. It replaces the earlier 2025-source uncertainty with the exact 2026 publication and preserves all three annual schedules, the federal-method-dependent supplemental rule, resident and 15-day nonresident treatment, tribal and military exemptions, and 2026 electronic reporting requirements. Direct period tables, certificate defaults, transition behavior, and rounding remain activation blockers.
+
+New York's state capture is in `us/ny/2026-source-capture.json` and links the existing NYC/Yonkers local capture. The executable draft in `us/ny/2026-runtime-package.json` models New York State, New York City resident, Yonkers resident, and Yonkers nonresident as parented but independently additive obligations. Filing-status and income-specific alternatives share an `exclusiveGroup`, so exactly one calculation variant contributes to each obligation. It includes direct exact schedules, Method III whole-wage handling, and Yonkers' annualized nonresident exclusion; complete short-term and convenience-of-employer fact gathering remains an operational limitation.
+
+Oklahoma's capture is in `us/ok/2026-source-capture.json`. It preserves both calculation methods, annual schedules, every periodic allowance value, mandatory whole-dollar rounding, the nonresident quarterly threshold, loan-out-company withholding, filing schedules, and the official example. A typo in that example, full wage tables, supplemental treatment, and resident out-of-state behavior remain activation blockers.
+
+Oregon's capture is in `us/or/2026-source-capture.json`. It preserves both low- and high-wage formulas, federal-subtraction phase-outs, allowance phase-outs, optional rounding, supplemental and missing-certificate rates, exemption expiration, filing schedules, and examples. The publication conflicts with itself on the federal subtraction and first example, while multi-state applicability and high-wage boundaries still require verification.
+
+Pennsylvania's state-and-local structure is in `us/pa/2026-source-capture.json`. It preserves the 3.07% state formula, supplemental aggregation, six reciprocal states, multi-state sourcing, filing schedules, Act 32's greater-of EIT selection, and the stateful Local Services Tax rules. Production use requires an effective-dated import of the official PSD/EIT/LST register plus Philadelphia and Pittsburgh rules.
+
+Rhode Island's capture is in `us/ri/2026-source-capture.json`. It preserves the all-status percentage schedule, wage-sensitive exemption phase-out, supplemental alternatives, official example, nonresident work rule, and filing-frequency transitions. Direct tables, mixed-location allocation, rounding, and supplemental-method precedence remain activation blockers.
+
+South Carolina's capture is in `us/sc/2026-source-capture.json`. It preserves equivalent subtraction and addition formulas, allowance-dependent standard deduction, periodic constants, official example, resident no-tax-state branch, and filing schedules. Supplemental treatment, rounding, mixed-location allocation, and direct tables remain activation blockers.
+
+Vermont's capture is in `us/vt/2026-source-capture.json`. It preserves both annual schedules, allowances, federal-W-4 fallback, supplemental and deferred-compensation methods, hour-based nonresident allocation, resident other-state reduction, and the separate Child Care Contribution. Direct tables, rounding, and assigned-frequency thresholds remain activation blockers.
+
+Virginia's capture is in `us/va/2026-source-capture.json`. It preserves separate exemption classes, the exact annualized schedule, supplemental alternatives, reciprocal-state conditions, filing thresholds, and the official example. Direct tables, formula rounding, mixed-location allocation, and the scheduled 2027 standard-deduction sunset remain activation blockers.
+
+West Virginia's capture is in `us/wv/2026-source-capture.json`. It preserves the default multiple-job and optional one-job schedules, allowance values, five reciprocal states, the conditional retroactive 30-day mobile-worker exception, work-location evidence, and filing schedules. Direct tables, rounding cross-verification, supplemental treatment, and an absent official example remain activation blockers.
+
+Wisconsin's capture is in `us/wi/2026-source-capture.json`. It preserves the approved alternate formula, deduction phase-outs, supplemental flat-rate menu, reciprocity, resident and nonresident work rules, stateful $1,500 threshold, entertainer withholding, and filing schedules. Direct tables, rounding, and assigned-frequency thresholds remain activation blockers.

@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "1.0",
+  "taxYear": 2026,
+  "status": "OfficialSourceCaptured",
+  "jurisdictionId": "jurisdiction-us-id",
+  "capturedAtUtc": "2026-08-25T04:09:20Z",
+  "sources": [
+    { "url": "https://tax.idaho.gov/wp-content/uploads/pubs/EPB00744/EPB00744_04-28-2025.pdf", "title": "Idaho Percentage Computation Method, initial 2026 table", "revision": "04-28-2025", "sha256": "a521ba887dc78493c2b0d11dd4a7438710a30f0ab5cb684ecb84d61188e7b3be", "bytes": 163369 },
+    { "url": "https://tax.idaho.gov/wp-content/uploads/pubs/EPB00744/EPB00744_07-23-2026.pdf", "title": "Idaho Percentage Computation Method, revised 2026 table", "revision": "07-23-2026", "sha256": "c52b383684af433b12eb3b712fbb0de6b61326b5061562440b43464b332cb3d8", "bytes": 316188 },
+    { "url": "https://tax.idaho.gov/wp-content/uploads/pubs/EPB00745/EPB00745_04-28-2025.pdf", "title": "Idaho Wage Bracket Method, initial 2026 table", "revision": "04-28-2025", "sha256": "5b735661649da4a94fc242b0925dae8eefe6502c671ace7c3442a0772837561a", "bytes": 2158720 },
+    { "url": "https://tax.idaho.gov/wp-content/uploads/pubs/EPB00745/EPB00745_07-23-2026.pdf", "title": "Idaho Wage Bracket Method, revised 2026 table", "revision": "07-23-2026", "sha256": "a6a87e783dd351c6cb93c7913c86f54097b1e56240be2187efa4d89f87b0cf85", "bytes": 2822624 },
+    { "url": "https://tax.idaho.gov/taxes/income-tax/withholding/computing/", "title": "Computing Withholding", "retrievedAtUtc": "2026-08-25T04:09:20Z", "sha256": "dd6d6e51373aaa418b61fcec69dbb524e4524a6f29404ccf52522d91e62253cc", "bytes": 250447 },
+    { "url": "https://tax.idaho.gov/taxes/income-tax/withholding/withholding-filing/", "title": "Withholding Filing", "retrievedAtUtc": "2026-08-25T04:09:20Z", "sha256": "e28e6d08f118a55f394242010a56e4733965dcd3c140bf9d45e1f5479992bd7d", "bytes": 248067 }
+  ],
+  "employeeInputs": [
+    { "code": "filingStatus", "source": "Form ID W-4", "dataType": "enum", "values": ["SingleOrHeadOfHousehold", "Married"] },
+    { "code": "childTaxCreditAllowances", "source": "Form ID W-4", "dataType": "integer", "minimum": 0 },
+    { "code": "exempt", "source": "Form ID W-4 or qualifying exemption certificate", "dataType": "boolean" }
+  ],
+  "calculationVersions": [
+    {
+      "code": "INITIAL-2026",
+      "effectiveOn": "2026-01-01",
+      "effectiveThrough": "2026-07-30",
+      "boundaryStatus": "InferredPendingOfficialConfirmation",
+      "rate": 0.053,
+      "childTaxCreditAllowanceValue": null,
+      "childTaxCreditAllowanceStatus": "PendingOfficialHistoricICTCATCapture",
+      "percentageThresholds": {
+        "Annual": { "SingleOrHeadOfHousehold": 15000, "Married": 30000 },
+        "Monthly": { "SingleOrHeadOfHousehold": 1250, "Married": 2500 },
+        "Semimonthly": { "SingleOrHeadOfHousehold": 625, "Married": 1250 },
+        "Biweekly": { "SingleOrHeadOfHousehold": 577, "Married": 1154 },
+        "Weekly": { "SingleOrHeadOfHousehold": 288, "Married": 577 },
+        "Daily": { "SingleOrHeadOfHousehold": 58, "Married": 115 }
+      }
+    },
+    {
+      "code": "REVISED-2026",
+      "effectiveOn": "2026-07-31",
+      "effectiveThrough": "2026-12-31",
+      "boundaryStatus": "PublicationDateInferredFromGoingForwardInstruction",
+      "rate": 0.053,
+      "childTaxCreditAllowanceValue": 0,
+      "childTaxCreditAllowanceReason": "The Idaho Child Tax Credit sunsetted.",
+      "percentageThresholds": {
+        "Annual": { "SingleOrHeadOfHousehold": 16100, "Married": 32200 },
+        "Monthly": { "SingleOrHeadOfHousehold": 1342, "Married": 2683 },
+        "Semimonthly": { "SingleOrHeadOfHousehold": 671, "Married": 1342 },
+        "Biweekly": { "SingleOrHeadOfHousehold": 619, "Married": 1238 },
+        "Weekly": { "SingleOrHeadOfHousehold": 310, "Married": 619 },
+        "Daily": { "SingleOrHeadOfHousehold": 62, "Married": 124 }
+      }
+    }
+  ],
+  "calculation": {
+    "methods": ["PercentageComputation", "AnnualizedWage", "WageBracket"],
+    "percentageFormula": "roundWholeDollar(max(0, wages - (allowances * allowanceValue) - filingStatusThreshold) * 0.053)",
+    "annualizedFormula": "roundWholeDollar(max(0, annualizedWages - annualAllowances - annualFilingStatusThreshold) * 0.053 / payPeriodsPerYear)",
+    "rounding": "Nearest whole dollar",
+    "supplementalWages": { "aggregateMethod": true, "separatelyIssuedFlatRate": 0.053 },
+    "officialRevisedExample": { "filingStatus": "SingleOrHeadOfHousehold", "frequency": "Biweekly", "wages": 1212, "allowances": 4, "allowanceValue": 0, "threshold": 619, "withholding": 31 },
+    "officialAnnualizedExampleConflict": {
+      "htmlClaimsAnnualMarriedThreshold": 32000,
+      "htmlClaimsAnnualTax": 1060,
+      "revisedPdfAnnualMarriedThreshold": 32200,
+      "pdfFormulaAnnualTax": 1049.40,
+      "bothRoundToPeriodicWeeklyWithholding": 20,
+      "mayBeUsedAsVerifiedRegressionCase": false
+    }
+  },
+  "residencyAndWorkRules": {
+    "idahoWorkRule": "Idaho withholding generally applies to wages for services performed in Idaho, including nonresidents.",
+    "nonresidentAnnualWageDeMinimis": 1000,
+    "residentOutsideIdaho": "An Idaho resident working outside Idaho may request voluntary Idaho withholding; mandatory withholding depends on the work state.",
+    "specialBranches": ["Agricultural worker under $1,000", "Federal exemption", "Qualifying tribal member living and working on a reservation", "Annual exemption certificate", "Interstate motor and rail carrier", "Air-carrier employee", "Vessel employee", "Military spouse"],
+    "multiStateAllocationRequired": true
+  },
+  "filing": {
+    "frequencyRules": [
+      { "frequency": "Semimonthly", "condition": "$25,000 or more withheld in a month or $300,000 or more in the preceding 12 months" },
+      { "frequency": "Monthly", "condition": "Less than $25,000 per month and more than $750 per quarter, or one monthly payroll" },
+      { "frequency": "Quarterly", "condition": "$750 or less per quarter, or qualifying farmer required to withhold" },
+      { "frequency": "Annual", "condition": "Less than $750 per year, or qualifying farmer not required to withhold" }
+    ],
+    "paymentReturn": "Form 910",
+    "annualReconciliation": "Form 967",
+    "electronicPortal": "TAP"
+  },
+  "localWithholding": { "stateFormulaDependsOnLocalJurisdiction": false, "localIncomeTaxCaptureRequiredForThisStateFormula": false },
+  "captureWarnings": [
+    "Idaho issued revised tables partway through 2026 but states only to use a new table going forward; July 31 is inferred from publication timing and is not an independently confirmed first-payroll effective date.",
+    "The historic Idaho Child Tax Credit Allowance Table value used by the initial 2026 tables has not been captured and must not be treated as zero.",
+    "The current official HTML annualized example says $32,000 and $1,060 while the revised PDF says $32,200; it is retained as a source inconsistency, not a verified regression result.",
+    "The complete wage-bracket matrices remain in the checksummed official PDFs and are not duplicated here."
+  ],
+  "review": {
+    "formulaTranscribed": true,
+    "both2026TableVersionsCaptured": true,
+    "effectiveBoundaryIndependentlyVerified": false,
+    "historicAllowanceValueCaptured": false,
+    "officialSourceConflictResolved": false,
+    "rawSourcesChecksummed": true,
+    "residencyAndWorkRulesTranscribed": true,
+    "executableRegressionTests": false,
+    "activationAllowed": false,
+    "requiredNextStep": "Obtain the historic ICTCAT, confirm the exact first-payroll boundary for the revised tables, resolve the official example conflict, transcribe machine-readable wage brackets, and add executable boundary cases."
+  }
+}
