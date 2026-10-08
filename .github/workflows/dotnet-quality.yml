@@ -50,3 +50,25 @@ jobs:
           name: chromium-linux-snapshots
           path: BrassLedger.Web.E2E.Tests/Snapshots/chromium-linux
           if-no-files-found: warn
+
+  cross-platform:
+    name: build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore BrassLedger.slnx
+      - run: dotnet build BrassLedger.slnx --configuration Release --no-restore --nologo
+      - name: Test API, infrastructure and component suites
+        shell: pwsh
+        run: |
+          foreach ($project in 'BrassLedger.Api.Tests', 'BrassLedger.Infrastructure.Tests', 'BrassLedger.Web.Tests') {
+            dotnet test "$project/$project.csproj" --configuration Release --no-build --nologo
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddBrassLedgerOperations();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
@@ -15,6 +16,10 @@ builder.Services.AddBrassLedgerInfrastructure(builder.Configuration, builder.Env
 
 var app = builder.Build();
 await app.Services.InitializeBrassLedgerAsync();
+
+app.UseBrassLedgerCorrelationId();
+app.UseExceptionHandler();
+app.UseStatusCodePages();
 
 if (app.Environment.IsDevelopment())
 {
@@ -29,6 +34,7 @@ app.UseRateLimiter();
 app.UseAntiforgery();
 app.UseAuthorization();
 app.MapBrassLedgerAuthenticationEndpoints();
+app.MapBrassLedgerHealthChecks();
 
 var api = app.MapGroup("/api")
     .RequireAuthorization(BrassLedgerAuthorizationPolicies.ViewWorkspace)
@@ -54,29 +60,25 @@ api.MapGet("/assessment", (IProductCatalogService service) =>
 {
     return Results.Ok(service.GetCatalog());
 })
-.WithName("GetProductCatalog")
-.WithOpenApi();
+.WithName("GetProductCatalog");
 
 api.MapGet("/modules", (IProductCatalogService service) =>
 {
     return Results.Ok(service.GetCatalog().Modules);
 })
-.WithName("GetLegacyModules")
-.WithOpenApi();
+.WithName("GetLegacyModules");
 
 api.MapGet("/tax-sources", (IProductCatalogService service) =>
 {
     return Results.Ok(service.GetCatalog().TaxSources);
 })
-.WithName("GetTaxSources")
-.WithOpenApi();
+.WithName("GetTaxSources");
 
 api.MapGet("/workspace", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
 {
     return Results.Ok(await service.GetWorkspaceAsync(cancellationToken));
 })
 .WithName("GetBusinessWorkspace")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ViewWorkspace);
 
 api.MapGet("/dashboard", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
@@ -84,7 +86,6 @@ api.MapGet("/dashboard", async (IBusinessWorkspaceService service, CancellationT
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Dashboard);
 })
 .WithName("GetDashboard")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ViewWorkspace);
 
 api.MapGet("/general-ledger", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
@@ -92,7 +93,6 @@ api.MapGet("/general-ledger", async (IBusinessWorkspaceService service, Cancella
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).GeneralLedger);
 })
 .WithName("GetGeneralLedgerWorkspace")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 
 api.MapPost("/tracking-dimensions", async (SaveTrackingDimensionValueRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
@@ -114,7 +114,6 @@ api.MapGet("/receivables", async (IBusinessWorkspaceService service, Cancellatio
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Receivables);
 })
 .WithName("GetReceivablesWorkspace")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReceivables);
 
 api.MapGet("/payables", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
@@ -122,7 +121,6 @@ api.MapGet("/payables", async (IBusinessWorkspaceService service, CancellationTo
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Payables);
 })
 .WithName("GetPayablesWorkspace")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayables);
 
 api.MapGet("/operations", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
@@ -130,7 +128,6 @@ api.MapGet("/operations", async (IBusinessWorkspaceService service, Cancellation
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Operations);
 })
 .WithName("GetOperationsWorkspace")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageOperations);
 
 api.MapGet("/payroll", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
@@ -138,7 +135,6 @@ api.MapGet("/payroll", async (IBusinessWorkspaceService service, CancellationTok
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Payroll);
 })
 .WithName("GetPayrollWorkspace")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayroll);
 
 api.MapGet("/projects", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
@@ -146,7 +142,6 @@ api.MapGet("/projects", async (IBusinessWorkspaceService service, CancellationTo
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Projects);
 })
 .WithName("GetProjectsWorkspace")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.AccessProjects);
 
 api.MapPost("/projects", async (SaveProjectJobRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>
@@ -301,7 +296,6 @@ api.MapGet("/reporting-catalog", async (IBusinessWorkspaceService service, Cance
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Reporting);
 })
 .WithName("GetReportingWorkspace")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageReporting);
 
 api.MapGet("/tax-workspace", async (IBusinessWorkspaceService service, CancellationToken cancellationToken) =>
@@ -309,7 +303,6 @@ api.MapGet("/tax-workspace", async (IBusinessWorkspaceService service, Cancellat
     return Results.Ok((await service.GetWorkspaceAsync(cancellationToken)).Taxes);
 })
 .WithName("GetTaxWorkspace")
-.WithOpenApi()
 .RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageTaxes);
 
 api.MapPost("/journal-entry-drafts", async (SaveJournalEntryDraftRequest request, IAccountingTransactionService service, CancellationToken cancellationToken) =>

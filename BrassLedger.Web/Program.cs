@@ -20,11 +20,14 @@ if (desktopHostOptions.UseDynamicLoopbackBinding)
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddBrassLedgerOperations();
 builder.Services.AddBrassLedgerCookieAuthentication();
 builder.Services.AddBrassLedgerInfrastructure(builder.Configuration, builder.Environment.ContentRootPath, builder.Environment.IsDevelopment());
 
 var app = builder.Build();
 await app.Services.InitializeBrassLedgerAsync();
+
+app.UseBrassLedgerCorrelationId();
 
 if (!app.Environment.IsDevelopment())
 {
@@ -78,11 +81,13 @@ app.Use(async (context, next) =>
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
+app.MapStaticAssets();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.UseAntiforgery();
 app.MapBrassLedgerAuthenticationEndpoints();
+app.MapBrassLedgerHealthChecks();
 
 app.MapGet("/integrations/quickbooks-online/callback", async (
     string? state,
@@ -194,7 +199,8 @@ app.MapGet("/payroll/payment-files/{paymentFileId:guid}/download", async (Guid p
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .WithStaticAssets();
 
 if (desktopHostOptions.LaunchBrowserOnStartup)
 {
