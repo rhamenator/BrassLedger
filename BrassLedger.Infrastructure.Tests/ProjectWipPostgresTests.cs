@@ -26,7 +26,7 @@ public sealed class ProjectWipPostgresTests
         {
             await administration.OpenAsync(); await using var create = administration.CreateCommand(); create.CommandText = $"CREATE DATABASE {quotedDatabase}"; await create.ExecuteNonQueryAsync();
         }
-        var contentRoot = Path.Combine("/home/rich/temp", "BrassLedger.ProjectWip.Postgres.Tests", Guid.NewGuid().ToString("N"));
+        var contentRoot = Path.Combine(Path.GetTempPath(), "BrassLedger.ProjectWip.Postgres.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(contentRoot);
         try
         {

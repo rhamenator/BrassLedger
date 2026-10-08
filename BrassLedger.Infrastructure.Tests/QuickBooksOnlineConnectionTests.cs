@@ -19,7 +19,7 @@ namespace BrassLedger.Infrastructure.Tests;
 
 public sealed class QuickBooksOnlineConnectionTests : IDisposable
 {
-    private readonly string _contentRootPath = Path.Combine("/home/rich/temp", "BrassLedger.QuickBooks.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string _contentRootPath = Path.Combine(Path.GetTempPath(), "BrassLedger.QuickBooks.Tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
     public async Task OAuthLifecycle_BindsOneUseStateEncryptsRotatingTokensAndRequiresConfirmedRevocation()

@@ -12,7 +12,7 @@ namespace BrassLedger.Infrastructure.Tests;
 
 public sealed class AccountingScheduleTests : IDisposable
 {
-    private readonly string _contentRootPath = Path.Combine("/home/rich/temp", "BrassLedger.AccountingSchedules.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string _contentRootPath = Path.Combine(Path.GetTempPath(), "BrassLedger.AccountingSchedules.Tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
     public async Task FixedAssetSchedule_GeneratesBalancedDraftPostsAndReversesWithAudit()

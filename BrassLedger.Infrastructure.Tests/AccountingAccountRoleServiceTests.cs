@@ -12,7 +12,7 @@ namespace BrassLedger.Infrastructure.Tests;
 
 public sealed class AccountingAccountRoleServiceTests : IDisposable
 {
-    private readonly string _contentRootPath = Path.Combine("/home/rich/temp", "BrassLedger.AccountRoles.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string _contentRootPath = Path.Combine(Path.GetTempPath(), "BrassLedger.AccountRoles.Tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
     public async Task Assignment_RequiresAuthorityConfirmationAndSafeControlAccountState()
