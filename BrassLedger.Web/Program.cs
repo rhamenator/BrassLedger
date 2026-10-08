@@ -81,6 +81,7 @@ app.Use(async (context, next) =>
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
+app.MapStaticAssets();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
@@ -198,7 +199,8 @@ app.MapGet("/payroll/payment-files/{paymentFileId:guid}/download", async (Guid p
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManagePayrollSensitiveData);
 
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .WithStaticAssets();
 
 if (desktopHostOptions.LaunchBrowserOnStartup)
 {
