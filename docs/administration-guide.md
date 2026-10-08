@@ -140,6 +140,8 @@ Both the web app and the API expose anonymous health endpoints for load balancer
 
 Every response carries an `X-Correlation-ID` header. A well-formed caller-supplied value (letters, digits, `.`, `_`, `-`, up to 64 characters) is echoed; anything else is replaced with a generated ID. API errors are returned as RFC 9457 problem-details JSON that includes the same `correlationId`, and log entries for the request are scoped with it, so a user-reported ID can be traced through the logs.
 
+Traces and runtime/HTTP metrics are collected with OpenTelemetry but leave the machine only when an OTLP endpoint is configured (`OpenTelemetry:OtlpEndpoint` or the standard `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable). Nothing is exported by default.
+
 ## Publishing
 
 A clean publish process looks like this:

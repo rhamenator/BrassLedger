@@ -7,7 +7,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace BrassLedger.Infrastructure.Security;
 
@@ -21,8 +26,18 @@ public static class OperationsEndpointExtensions
 
     private static readonly Regex SafeCorrelationId = new("^[A-Za-z0-9._-]{1,64}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    public static IServiceCollection AddBrassLedgerOperations(this IServiceCollection services)
+    public static IServiceCollection AddBrassLedgerOperations(this IServiceCollection services, IConfiguration configuration)
     {
+        // Telemetry is collected in-process always; it leaves the machine only when an OTLP
+        // endpoint is configured (OTEL_EXPORTER_OTLP_ENDPOINT or OpenTelemetry:OtlpEndpoint).
+        var otlpConfigured = !string.IsNullOrWhiteSpace(configuration["OpenTelemetry:OtlpEndpoint"])
+            || !string.IsNullOrWhiteSpace(configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+        var telemetry = services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource.AddService("BrassLedger"))
+            .WithTracing(tracing => tracing.AddAspNetCoreInstrumentation().AddHttpClientInstrumentation())
+            .WithMetrics(metrics => metrics.AddAspNetCoreInstrumentation().AddHttpClientInstrumentation().AddRuntimeInstrumentation());
+        if (otlpConfigured) telemetry.UseOtlpExporter();
+
         services.AddProblemDetails(options => options.CustomizeProblemDetails = context =>
         {
             context.ProblemDetails.Extensions["correlationId"] = context.HttpContext.TraceIdentifier;
