@@ -2,7 +2,7 @@ using BrassLedger.Web.E2E.Tests.Pages;
 
 namespace BrassLedger.Web.E2E.Tests;
 
-[Collection("Playwright E2E")]
+[Collection("Playwright E2E Mutable")]
 public sealed class ReturnCreditSettlementWorkflowTests
 {
     private readonly PlaywrightWebAppFixture _fixture;
