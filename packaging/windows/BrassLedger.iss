@@ -26,18 +26,19 @@ SolidCompression=yes
 WizardStyle=modern
 OutputDir={#OutputDir}
 OutputBaseFilename=BrassLedger-setup-win-x64
-UninstallDisplayIcon={app}\BrassLedger.Web.exe
-SetupIconFile=..\..\BrassLedger.Web\Assets\brassledger.ico
+UninstallDisplayIcon={app}\app-icon.ico
+SetupIconFile=app-icon.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
+Source: "app-icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\BrassLedger"; Filename: "{app}\BrassLedger.Web.exe"
-Name: "{autodesktop}\BrassLedger"; Filename: "{app}\BrassLedger.Web.exe"; Tasks: desktopicon
+Name: "{autoprograms}\BrassLedger"; Filename: "{app}\BrassLedger.Web.exe"; IconFilename: "{app}\app-icon.ico"
+Name: "{autodesktop}\BrassLedger"; Filename: "{app}\BrassLedger.Web.exe"; Tasks: desktopicon; IconFilename: "{app}\app-icon.ico"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"

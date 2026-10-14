@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/logo.png" alt="BrassLedger logo" width="220">
+</p>
+
 # BrassLedger
 
 BrassLedger is an open-source cross-platform accounting and business management system for organizations that need general ledger, receivables, payables, payroll, projects, reporting, tax workflows, and printable business forms in one application.
