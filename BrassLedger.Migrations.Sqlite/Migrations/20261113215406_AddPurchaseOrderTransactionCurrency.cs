@@ -21,7 +21,7 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            throw new NotSupportedException("Purchase-order transaction currency cannot be removed without losing commercial terms. Restore a verified pre-upgrade backup instead.");
+            throw new NotSupportedException("Downgrade prohibited because it could delete purchase-order transaction currency and commercial terms. Restore a verified pre-upgrade backup instead.");
         }
     }
 }
