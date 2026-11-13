@@ -1482,6 +1482,7 @@ public sealed class PurchaseOrder
     public Guid? PurchaseRequisitionId { get; set; }
     public Guid VendorId { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
+    public string TransactionCurrency { get; set; } = string.Empty;
     public DateOnly OrderedOn { get; set; }
     public DateOnly? ExpectedOn { get; set; }
     public string Status { get; set; } = string.Empty;

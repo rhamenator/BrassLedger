@@ -689,6 +689,8 @@ public static class ServiceCollectionExtensions
         }
         if (migrationId.EndsWith("_AddSalesOrderTransactionCurrency", StringComparison.Ordinal))
             return await HasColumnAsync(dbContext, "SalesOrders", "TransactionCurrency", cancellationToken);
+        if (migrationId.EndsWith("_AddPurchaseOrderTransactionCurrency", StringComparison.Ordinal))
+            return await HasColumnAsync(dbContext, "PurchaseOrders", "TransactionCurrency", cancellationToken);
         return false;
     }
 

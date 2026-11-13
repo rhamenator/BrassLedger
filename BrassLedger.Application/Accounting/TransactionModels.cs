@@ -181,7 +181,7 @@ public sealed record DecidePurchaseRequisitionRequest(Guid PurchaseRequisitionId
 public sealed record CancelPurchaseRequisitionRequest(Guid PurchaseRequisitionId, string Reason, string ConcurrencyToken);
 public sealed record ConvertPurchaseRequisitionRequest(Guid PurchaseRequisitionId, Guid VendorId, string OrderNumber, DateOnly OrderedOn, DateOnly? ExpectedOn, string Notes, string ConcurrencyToken);
 public sealed record PurchaseOrderLineRequest(Guid InventoryItemId, string Description, decimal Quantity, decimal UnitCost, Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
-public sealed record SavePurchaseOrderRequest(Guid? Id, Guid VendorId, string OrderNumber, DateOnly OrderedOn, DateOnly? ExpectedOn, string Notes, IReadOnlyList<PurchaseOrderLineRequest> Lines, string ConcurrencyToken = "");
+public sealed record SavePurchaseOrderRequest(Guid? Id, Guid VendorId, string OrderNumber, DateOnly OrderedOn, DateOnly? ExpectedOn, string Notes, IReadOnlyList<PurchaseOrderLineRequest> Lines, string ConcurrencyToken = "", string Currency = "");
 public sealed record ApprovePurchaseOrderRequest(Guid PurchaseOrderId, string ConcurrencyToken);
 public sealed record ReceivePurchaseOrderLineRequest(Guid PurchaseOrderLineId, decimal Quantity);
 public sealed record ReceivePurchaseOrderRequest(Guid PurchaseOrderId, string ReceiptNumber, DateOnly ReceivedOn, IReadOnlyList<ReceivePurchaseOrderLineRequest> Lines, string ConcurrencyToken, Guid? WarehouseId = null, Guid? BinId = null);

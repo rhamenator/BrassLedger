@@ -1,4 +1,5 @@
 using Microsoft.Playwright;
+using BrassLedger.Web.E2E.Tests.Pages;
 
 namespace BrassLedger.Web.E2E.Tests;
 
@@ -16,7 +17,6 @@ public sealed class ForeignProjectBillingWorkflowTests(PlaywrightWebAppFixture f
         var invoiceNumber = $"FX-PB-{suffix}";
         await using var session = await fixture.CreateSessionAsync(browserKind);
         await session.SignInAsync("controller", returnPath: "/projects");
-        await session.GotoAsync("/projects");
         await session.WaitForHeadingAsync("Control project scope, cost, billing, and revenue.");
 
         await session.Page.GetByLabel("Project number", new() { Exact = true }).FillAsync(projectNumber);
@@ -26,7 +26,9 @@ public sealed class ForeignProjectBillingWorkflowTests(PlaywrightWebAppFixture f
         await session.Page.GetByLabel("Project contract amount", new() { Exact = true }).FillAsync("1000");
         await session.Page.GetByLabel("Project retainage percent", new() { Exact = true }).FillAsync("10");
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "Create project", Exact = true }).ClickAsync();
-        await session.Page.GetByRole(AriaRole.Status).Filter(new() { HasTextString = $"Project {projectNumber} saved." }).WaitForAsync();
+        var projectStatus = session.Page.GetByRole(AriaRole.Status);
+        await projectStatus.WaitForAsync();
+        Assert.Contains($"Project {projectNumber} saved.", await projectStatus.InnerTextAsync());
 
         await session.Page.GetByLabel("Project billing project", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = $"{projectNumber} — Foreign fixed-price billing (Fixed price)" });
         await session.Page.GetByLabel("Project billing invoice number", new() { Exact = true }).FillAsync(invoiceNumber);
@@ -51,13 +53,8 @@ public sealed class ForeignProjectBillingWorkflowTests(PlaywrightWebAppFixture f
         await using (var reviewer = await fixture.CreateSessionAsync(browserKind))
         {
             await reviewer.SignInAsync("e2e-ar-approver", returnPath: "/receivables");
-            await reviewer.GotoAsync("/receivables");
-            await reviewer.Page.GetByLabel("Invoice rejection reason", new() { Exact = true }).FillAsync("Clarify the project milestone");
-            await reviewer.Page.GetByLabel("Invoice rejection reason", new() { Exact = true }).PressAsync("Tab");
-            var reviewRow = reviewer.Page.Locator("table.data-table tbody tr").Filter(new() { HasTextString = invoiceNumber });
-            await reviewRow.GetByRole(AriaRole.Button, new() { Name = "Reject", Exact = true }).ClickAsync();
-            await reviewer.Page.GetByRole(AriaRole.Status).WaitForAsync();
-            Assert.Contains("Invoice draft rejected", await reviewer.Page.GetByRole(AriaRole.Status).InnerTextAsync());
+            var reviewerPage = new ReceivablesPage(reviewer);
+            await reviewerPage.RejectInvoiceAsync(invoiceNumber, "Clarify the project milestone");
             await reviewer.AssertNoUiFailuresAsync("foreign project invoice rejection");
         }
         await session.GotoAsync("/projects");
