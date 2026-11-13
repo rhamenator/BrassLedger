@@ -105,6 +105,7 @@ public sealed partial class AccountingTransactionService
             CompanyId = companyId,
             ProjectJobId = project.Id,
             CustomerId = project.CustomerId.Value,
+            RetainageReleaseOfProposalId = request.PreviewRequest.RetainageReleaseOfProposalId,
             InvoiceNumber = invoiceRequest.InvoiceNumber,
             BillingBasis = preview.BillingBasis,
             GrossAmount = preview.GrossAmount,
@@ -266,16 +267,57 @@ public sealed partial class AccountingTransactionService
         var blockedSources = await db.ProjectBillingSourceReservations.Where(x => x.CompanyId == companyId && x.ProjectJobId == project.Id && x.Status != "Released" && x.ProjectBillingProposalId != ignoredProposalId).Select(x => x.SourceKey).ToListAsync(cancellationToken);
         var blocked = blockedSources.ToHashSet(StringComparer.Ordinal);
         var lines = new List<ProjectBillingPreviewLine>();
+        decimal? releaseTransactionAmount = null;
         string basis;
         if (request.RetainageReleaseOfProposalId.HasValue)
         {
             basis = "RetainageRelease";
             var source = await db.ProjectBillingProposals.SingleOrDefaultAsync(x => x.Id == request.RetainageReleaseOfProposalId && x.CompanyId == companyId && x.ProjectJobId == project.Id && x.Status == "Posted" && x.BillingBasis != "RetainageRelease", cancellationToken);
             if (source is null) return ProjectBillingPreview.Failure("Retainage can be released only from a posted billing proposal for this project.");
-            var releasedAmounts = await db.ProjectBillingProposals.Where(x => x.RetainageReleaseOfProposalId == source.Id && x.Status != "Cancelled" && x.Status != "Voided" && x.Id != ignoredProposalId).Select(x => x.InvoiceAmount).ToListAsync(cancellationToken);
-            var available = source.RetainageAmount - releasedAmounts.Sum();
+            var priorReleases = await db.ProjectBillingProposals.Where(x => x.RetainageReleaseOfProposalId == source.Id && x.Status != "Cancelled" && x.Status != "Voided" && x.Id != ignoredProposalId).ToListAsync(cancellationToken);
+            var available = source.RetainageAmount - priorReleases.Sum(x => x.GrossAmount);
             var releaseAmount = RoundCurrency(request.RetainageReleaseAmount);
             if (releaseAmount <= 0m || releaseAmount > available) return ProjectBillingPreview.Failure($"Enter a positive retainage release no greater than the remaining {available:C}.");
+            var sourceWorkflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == source.SubledgerDocumentWorkflowId && x.CompanyId == companyId, cancellationToken);
+            if (!sourceWorkflow.PostedDocumentId.HasValue) return ProjectBillingPreview.Failure("The retained source invoice is unavailable.");
+            var sourceInvoice = await db.SalesInvoices.SingleOrDefaultAsync(x => x.Id == sourceWorkflow.PostedDocumentId && x.CompanyId == companyId, cancellationToken);
+            if (sourceInvoice is null) return ProjectBillingPreview.Failure("The retained source invoice is unavailable.");
+            var companyBaseCurrency = await db.Companies.Where(x => x.Id == companyId).Select(x => x.BaseCurrency).SingleAsync(cancellationToken);
+            var requestedCurrency = NormalizeTransactionCurrency(request.Currency, companyBaseCurrency);
+            if (requestedCurrency != sourceInvoice.TransactionCurrency) return ProjectBillingPreview.Failure($"Release retainage in its original {sourceInvoice.TransactionCurrency} currency.");
+            if (sourceInvoice.TransactionCurrency != companyBaseCurrency)
+            {
+                var retainedDiscounts = await db.SalesInvoiceLines.Where(x => x.SalesInvoiceId == sourceInvoice.Id).Select(x => x.DiscountAmount).ToListAsync(cancellationToken);
+                var originalTransactionRetainage = retainedDiscounts.Sum();
+                var priorWorkflowIds = priorReleases.Select(x => x.SubledgerDocumentWorkflowId).ToArray();
+                var priorWorkflows = await db.SubledgerDocumentWorkflows.Where(x => priorWorkflowIds.Contains(x.Id) && x.CompanyId == companyId).ToListAsync(cancellationToken);
+                if (priorWorkflows.Count != priorReleases.Count) return ProjectBillingPreview.Failure("A prior retainage release is missing its controlled invoice evidence.");
+                var priorTransactionReleases = 0m;
+                foreach (var priorWorkflow in priorWorkflows)
+                {
+                    CreateInvoiceRequest? priorInvoice;
+                    try { priorInvoice = JsonSerializer.Deserialize<CreateInvoiceRequest>(priorWorkflow.PayloadJson); }
+                    catch (JsonException) { return ProjectBillingPreview.Failure("A prior retainage release has invalid controlled invoice evidence."); }
+                    if (priorInvoice is null) return ProjectBillingPreview.Failure("A prior retainage release has invalid controlled invoice evidence.");
+                    if (string.Equals(priorInvoice.Currency, sourceInvoice.TransactionCurrency, StringComparison.OrdinalIgnoreCase))
+                        priorTransactionReleases += (priorInvoice.Lines ?? []).Sum(line => RoundCurrency(line.Quantity * line.UnitPrice - line.DiscountAmount));
+                    else if (string.IsNullOrWhiteSpace(priorInvoice.Currency) || string.Equals(priorInvoice.Currency, companyBaseCurrency, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Older releases could be issued in base currency. Allocate their carrying
+                        // release at the source invoice's retained rate; the final release takes the
+                        // exact remaining transaction amount after this rounded allocation.
+                        if (sourceInvoice.ExchangeRateToBase <= 0m) return ProjectBillingPreview.Failure("The source invoice is missing its retained exchange-rate factor.");
+                        var priorCarryingAmount = priorReleases.Single(x => x.SubledgerDocumentWorkflowId == priorWorkflow.Id).GrossAmount;
+                        priorTransactionReleases += RoundCurrency(priorCarryingAmount / sourceInvoice.ExchangeRateToBase);
+                    }
+                    else return ProjectBillingPreview.Failure("A prior retainage release used an unrelated currency and requires reconciliation before another foreign release.");
+                }
+                var remainingTransactionRetainage = originalTransactionRetainage - priorTransactionReleases;
+                if (remainingTransactionRetainage <= 0m) return ProjectBillingPreview.Failure("No transaction-currency retainage remains to release.");
+                releaseTransactionAmount = releaseAmount == available ? remainingTransactionRetainage : RoundCurrency(remainingTransactionRetainage * releaseAmount / available);
+                if (releaseTransactionAmount <= 0m) return ProjectBillingPreview.Failure("The requested release is too small in the original transaction currency.");
+                if (releaseAmount < available && releaseTransactionAmount >= remainingTransactionRetainage) return ProjectBillingPreview.Failure("The requested partial release would consume all remaining transaction-currency retainage. Release the full carrying balance instead.");
+            }
             lines.Add(new("RetainageRelease", source.Id, $"RETAINAGE:{source.Id:N}:{invoiceNumber}", $"Retainage release from {source.InvoiceNumber} — {description}", 1m, releaseAmount, 0m, 0m, releaseAmount, 0m, releaseAmount, revenueAccount));
         }
         else if (project.BillingMethod == "FixedPrice")
@@ -340,29 +382,43 @@ public sealed partial class AccountingTransactionService
         var baseRoundingDifference = 0m;
         if (transactionRate!.IsForeign)
         {
-            if (basis == "RetainageRelease") return ProjectBillingPreview.Failure("Retainage release currently requires the company base currency.");
-            // The foreign invoice is authoritative: translate each base line into the transaction
-            // currency, then derive the posted base amounts exactly as invoice posting does
-            // (ToBase of each transaction amount). Any rounding difference against the base-currency
-            // preview is retained and reported.
-            for (var index = 0; index < lines.Count; index++)
+            if (basis == "RetainageRelease")
             {
-                var line = lines[index];
-                var unitPrice = transactionRate.FromBase(line.UnitPrice);
-                var gross = RoundCurrency(line.Quantity * unitPrice);
-                var retainage = Math.Min(transactionRate.FromBase(line.RetainageAmount), gross);
-                var invoice = gross - retainage;
-                var baseRetainage = transactionRate.ToBase(retainage);
-                var baseInvoice = transactionRate.ToBase(invoice);
-                lines[index] = line with { GrossAmount = baseInvoice + baseRetainage, RetainageAmount = baseRetainage, InvoiceAmount = baseInvoice, TransactionUnitPrice = unitPrice, TransactionGrossAmount = gross, TransactionRetainageAmount = retainage, TransactionInvoiceAmount = invoice };
-                transactionTotals = (transactionTotals.Gross + gross, transactionTotals.Retainage + retainage, transactionTotals.Invoice + invoice);
+                if (!releaseTransactionAmount.HasValue) return ProjectBillingPreview.Failure("The source invoice has no foreign-currency retainage to release.");
+                var line = lines[0];
+                var postedInvoice = transactionRate.ToBase(releaseTransactionAmount.Value);
+                lines[0] = line with { InvoiceAmount = postedInvoice, TransactionUnitPrice = releaseTransactionAmount.Value, TransactionGrossAmount = releaseTransactionAmount.Value, TransactionInvoiceAmount = releaseTransactionAmount.Value };
+                transactionTotals = (releaseTransactionAmount.Value, 0m, releaseTransactionAmount.Value);
+                baseRoundingDifference = postedInvoice - invoiceTotal;
+                invoiceTotal = postedInvoice;
             }
-            var postedGross = lines.Sum(x => x.GrossAmount);
-            var postedRetainage = lines.Sum(x => x.RetainageAmount);
-            var postedInvoice = lines.Sum(x => x.InvoiceAmount);
-            if (transactionTotals.Invoice <= 0m || postedInvoice <= 0m) return ProjectBillingPreview.Failure("Retainage leaves no amount to invoice in the transaction currency.");
-            baseRoundingDifference = postedInvoice - invoiceTotal;
-            grossTotal = postedGross; retainageTotal = postedRetainage; invoiceTotal = postedInvoice;
+            else
+            {
+                // The foreign invoice is authoritative: translate each base line into the transaction
+                // currency, then derive the posted base amounts exactly as invoice posting does
+                // (ToBase of each transaction amount). Any rounding difference against the base-currency
+                // preview is retained and reported.
+                for (var index = 0; index < lines.Count; index++)
+                {
+                    var line = lines[index];
+                    var unitPrice = transactionRate.FromBase(line.UnitPrice);
+                    var gross = RoundCurrency(line.Quantity * unitPrice);
+                    var retainage = Math.Min(transactionRate.FromBase(line.RetainageAmount), gross);
+                    var invoice = gross - retainage;
+                    var baseRetainage = transactionRate.ToBase(retainage);
+                    var baseInvoice = transactionRate.ToBase(invoice);
+                    lines[index] = line with { GrossAmount = baseInvoice + baseRetainage, RetainageAmount = baseRetainage, InvoiceAmount = baseInvoice, TransactionUnitPrice = unitPrice, TransactionGrossAmount = gross, TransactionRetainageAmount = retainage, TransactionInvoiceAmount = invoice };
+                    transactionTotals = (transactionTotals.Gross + gross, transactionTotals.Retainage + retainage, transactionTotals.Invoice + invoice);
+                }
+                var postedGross = lines.Sum(x => x.GrossAmount);
+                var postedRetainage = lines.Sum(x => x.RetainageAmount);
+                var postedInvoice = lines.Sum(x => x.InvoiceAmount);
+                if (transactionTotals.Invoice <= 0m || postedInvoice <= 0m) return ProjectBillingPreview.Failure("Retainage leaves no amount to invoice in the transaction currency.");
+                if (project.ContractAmount > 0m && previousGross + postedGross > project.ContractAmount)
+                    return ProjectBillingPreview.Failure($"Foreign-currency rounding would bill {previousGross + postedGross:C} against the authorized {project.ContractAmount:C} contract. Reduce the billing or approve a change order first.");
+                baseRoundingDifference = postedInvoice - invoiceTotal;
+                grossTotal = postedGross; retainageTotal = postedRetainage; invoiceTotal = postedInvoice;
+            }
         }
         var fingerprintPayload = JsonSerializer.Serialize(new { Request = request, TransactionRate = new { transactionRate.TransactionCurrency, transactionRate.ExchangeRateId, transactionRate.FactorToBase }, project.Id, project.ConcurrencyToken, project.ContractAmount, project.RetainagePercent, previousGross, basis, Lines = lines.Select(x => new { x.SourceKey, x.ProjectPhaseId, x.ProjectCostCodeId, x.DepartmentId, x.ClassId, x.Quantity, x.UnitPrice, x.SourceCost, x.MarkupAmount, x.GrossAmount, x.RetainageAmount, x.InvoiceAmount, x.TransactionUnitPrice, x.TransactionGrossAmount, x.TransactionRetainageAmount }) });
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintPayload))).ToLowerInvariant();

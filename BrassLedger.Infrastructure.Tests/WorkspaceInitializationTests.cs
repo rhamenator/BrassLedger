@@ -6669,11 +6669,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
             claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()));
             accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) };
         }
-        var rateId = Guid.NewGuid(); var wrongPairRateId = Guid.NewGuid(); var futureRateId = Guid.NewGuid();
+        var rateId = Guid.NewGuid(); var releaseRateId = Guid.NewGuid(); var lossRateId = Guid.NewGuid(); var roundUpRateId = Guid.NewGuid(); var wrongPairRateId = Guid.NewGuid(); var futureRateId = Guid.NewGuid();
         await using (var db = await factory.CreateDbContextAsync())
         {
             db.CurrencyExchangeRates.AddRange(
                 new() { Id = rateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 1), Source = "Bank of Canada daily rate", SourceReference = "https://example.test/cad-usd/2026-08-01" },
+                new() { Id = roundUpRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .74m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 2), Source = "Rounding boundary", SourceReference = "https://example.test/cad-usd/rounding" },
+                new() { Id = releaseRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 26), Source = "Release-date rate", SourceReference = "https://example.test/cad-usd/release" },
+                new() { Id = lossRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .70m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 28), Source = "Loss-date rate", SourceReference = "https://example.test/cad-usd/loss" },
                 new() { Id = wrongPairRateId, CompanyId = companyId, BaseCurrency = "USD", QuoteCurrency = "EUR", Rate = .50m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 1), Source = "ECB inverse quotation", SourceReference = "https://example.test/usd-eur/2026-08-01" },
                 new() { Id = futureRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 9, 1), Source = "Future observation", SourceReference = "https://example.test/cad-usd/2026-09-01" });
             await db.SaveChangesAsync();
@@ -6693,9 +6696,24 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
 
         var baseRequest = new ProjectBillingPreviewRequest(projectId, "PB-FX-1", new DateOnly(2026, 8, 18), new DateOnly(2026, 8, 25), new DateOnly(2026, 9, 24), "4000", "August project time", IncludeCosts: false);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var project = await db.ProjectJobs.SingleAsync(x => x.Id == projectId);
+            project.ContractAmount = 200m;
+            await db.SaveChangesAsync();
+        }
         var basePreview = await transactions.PreviewProjectBillingAsync(baseRequest);
         Assert.True(basePreview.Succeeded, basePreview.ErrorMessage);
         Assert.Equal(180m, basePreview.InvoiceAmount);
+        var roundedOverContract = await transactions.PreviewProjectBillingAsync(baseRequest with { Currency = "CAD", ExchangeRateId = roundUpRateId });
+        Assert.False(roundedOverContract.Succeeded);
+        Assert.Contains("rounding would bill", roundedOverContract.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var project = await db.ProjectJobs.SingleAsync(x => x.Id == projectId);
+            project.ContractAmount = 1_000m;
+            await db.SaveChangesAsync();
+        }
 
         foreach (var (label, request) in new (string, ProjectBillingPreviewRequest)[]
         {
@@ -6725,6 +6743,61 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(199.99m, preview.GrossAmount);
         Assert.Equal(-0.01m, preview.BaseRoundingDifference);
 
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var rate = await db.CurrencyExchangeRates.SingleAsync(x => x.Id == rateId);
+            rate.Rate = .76m;
+            await db.SaveChangesAsync();
+        }
+        var staleRateSave = await transactions.SaveProjectBillingProposalAsync(new(null, foreignRequest, preview.Fingerprint, preview.ProjectConcurrencyToken));
+        Assert.False(staleRateSave.Succeeded);
+        Assert.Contains("changed after preview", staleRateSave.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var rate = await db.CurrencyExchangeRates.SingleAsync(x => x.Id == rateId);
+            rate.Rate = .75m;
+            await db.SaveChangesAsync();
+        }
+
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        Assert.False((await transactions.PreviewProjectBillingAsync(foreignRequest)).Succeeded);
+        Assert.False((await transactions.SaveProjectBillingProposalAsync(new(null, foreignRequest, preview.Fingerprint, preview.ProjectConcurrencyToken))).Succeeded);
+        var originalCompanyId = companyId;
+        var otherCompanyId = Guid.NewGuid();
+        var otherCompanyRateId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Companies.Add(new Company { Id = otherCompanyId, Name = "Other billing company", LegalName = "Other billing company", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            db.Accounts.Add(new GeneralLedgerAccount { Id = Guid.NewGuid(), CompanyId = otherCompanyId, Number = "4000", Name = "Revenue", Type = AccountType.Revenue, IsActive = true });
+            db.CurrencyExchangeRates.Add(new CurrencyExchangeRate { Id = otherCompanyRateId, CompanyId = otherCompanyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 1), Source = "Other company rate", SourceReference = "https://example.test/cad-usd/other-company" });
+            await db.SaveChangesAsync();
+        }
+        companyId = otherCompanyId;
+        SetUser(Guid.NewGuid(), BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var otherCompanyPreview = await transactions.PreviewProjectBillingAsync(foreignRequest);
+        Assert.False(otherCompanyPreview.Succeeded);
+        Assert.Contains("Project not found in this company", otherCompanyPreview.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False((await transactions.SaveProjectBillingProposalAsync(new(null, foreignRequest, preview.Fingerprint, preview.ProjectConcurrencyToken))).Succeeded);
+        companyId = originalCompanyId;
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var otherCompanyRatePreview = await transactions.PreviewProjectBillingAsync(foreignRequest with { ExchangeRateId = otherCompanyRateId });
+        Assert.False(otherCompanyRatePreview.Succeeded);
+
+        var closedPeriodId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.AccountingPeriods.Add(new AccountingPeriod { Id = closedPeriodId, CompanyId = companyId, StartsOn = foreignRequest.InvoiceDate, EndsOn = foreignRequest.InvoiceDate, Status = "Closed" });
+            await db.SaveChangesAsync();
+        }
+        var closedPeriodSave = await transactions.SaveProjectBillingProposalAsync(new(null, foreignRequest, preview.Fingerprint, preview.ProjectConcurrencyToken));
+        Assert.False(closedPeriodSave.Succeeded);
+        Assert.Contains("closed", closedPeriodSave.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.AccountingPeriods.Remove(await db.AccountingPeriods.SingleAsync(x => x.Id == closedPeriodId));
+            await db.SaveChangesAsync();
+        }
+
         var saved = await transactions.SaveProjectBillingProposalAsync(new(null, foreignRequest, preview.Fingerprint, preview.ProjectConcurrencyToken));
         Assert.True(saved.Succeeded, saved.ErrorMessage);
         ProjectBillingProposal proposal; SubledgerDocumentWorkflow workflow;
@@ -6736,6 +6809,36 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(preview.InvoiceAmount, proposal.InvoiceAmount);
         Assert.Equal(preview.RetainageAmount, proposal.RetainageAmount);
         Assert.Equal(preview.GrossAmount, proposal.GrossAmount);
+        var workspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var savedSnapshot = Assert.Single(workspace.Projects.BillingProposals!, x => x.Id == proposal.Id);
+        Assert.Equal("CAD", savedSnapshot.TransactionCurrency);
+        Assert.Equal(rateId, savedSnapshot.ExchangeRateId);
+
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        Assert.True((await transactions.RejectSubledgerDocumentAsync(new(workflow.Id, "Clarify the foreign billing description", workflow.ConcurrencyToken))).Succeeded);
+        var rejectedWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        var rejectedSnapshot = Assert.Single(rejectedWorkspace.Projects.BillingProposals!, x => x.Id == proposal.Id);
+        Assert.Equal("CAD", rejectedSnapshot.TransactionCurrency);
+        Assert.Equal(rateId, rejectedSnapshot.ExchangeRateId);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            proposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == saved.Id);
+            workflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == proposal.SubledgerDocumentWorkflowId);
+        }
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var correctionRequest = foreignRequest with { ExistingProposalId = proposal.Id, Description = "Clarified August project time" };
+        var correctionPreview = await transactions.PreviewProjectBillingAsync(correctionRequest);
+        Assert.True(correctionPreview.Succeeded, correctionPreview.ErrorMessage);
+        var corrected = await transactions.SaveProjectBillingProposalAsync(new(proposal.Id, correctionRequest, correctionPreview.Fingerprint, correctionPreview.ProjectConcurrencyToken, proposal.ConcurrencyToken));
+        Assert.True(corrected.Succeeded, corrected.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            proposal = await db.ProjectBillingProposals.SingleAsync(x => x.Id == saved.Id);
+            workflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == proposal.SubledgerDocumentWorkflowId);
+            var correctedInvoice = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceRequest>(workflow.PayloadJson)!;
+            Assert.Equal("CAD", correctedInvoice.Currency);
+            Assert.Equal(rateId, correctedInvoice.ExchangeRateId);
+        }
 
         SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
         Assert.True((await transactions.ApproveSubledgerDocumentAsync(workflow.Id)).Succeeded);
@@ -6759,8 +6862,100 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal("Posted", (await db.ProjectBillingProposals.SingleAsync(x => x.Id == proposal.Id)).Status);
         }
 
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var releaseRequest = foreignRequest with { InvoiceNumber = "PB-FX-RET-1", BillingThrough = new DateOnly(2026, 8, 27), InvoiceDate = new DateOnly(2026, 8, 27), DueDate = new DateOnly(2026, 9, 26), Description = "Release foreign retainage", RetainageReleaseOfProposalId = proposal.Id, RetainageReleaseAmount = 20m, ExchangeRateId = releaseRateId };
+        var wrongReleaseCurrency = await transactions.PreviewProjectBillingAsync(releaseRequest with { Currency = "USD", ExchangeRateId = null });
+        Assert.False(wrongReleaseCurrency.Succeeded);
+        Assert.Contains("original CAD currency", wrongReleaseCurrency.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var releasePreview = await transactions.PreviewProjectBillingAsync(releaseRequest);
+        Assert.True(releasePreview.Succeeded, releasePreview.ErrorMessage);
+        Assert.Equal("RetainageRelease", releasePreview.BillingBasis);
+        Assert.Equal(20m, releasePreview.GrossAmount);
+        Assert.Equal(26.67m, releasePreview.TransactionInvoiceAmount);
+        Assert.Equal(21.34m, releasePreview.InvoiceAmount);
+        var releaseSaved = await transactions.SaveProjectBillingProposalAsync(new(null, releaseRequest, releasePreview.Fingerprint, releasePreview.ProjectConcurrencyToken));
+        Assert.True(releaseSaved.Succeeded, releaseSaved.ErrorMessage);
+        Guid releaseWorkflowId;
+        await using (var db = await factory.CreateDbContextAsync()) releaseWorkflowId = await db.ProjectBillingProposals.Where(x => x.Id == releaseSaved.Id).Select(x => x.SubledgerDocumentWorkflowId).SingleAsync();
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(releaseWorkflowId)).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        var releasePosted = await transactions.PostApprovedSubledgerDocumentAsync(releaseWorkflowId);
+        Assert.True(releasePosted.Succeeded, releasePosted.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var releaseInvoice = await db.SalesInvoices.SingleAsync(x => x.Id == releasePosted.Id);
+            Assert.Equal("CAD", releaseInvoice.TransactionCurrency);
+            Assert.Equal(releaseRateId, releaseInvoice.ExchangeRateId);
+            Assert.Equal(26.67m, releaseInvoice.TransactionTotalAmount);
+            Assert.Equal(21.34m, releaseInvoice.TotalAmount);
+            var entryId = await db.JournalEntries.Where(x => x.SourceDocumentId == releaseInvoice.Id && x.SourceDocumentType == "SalesInvoice").Select(x => x.Id).SingleAsync();
+            var journal = await (from journalLine in db.JournalEntryLines join account in db.Accounts on journalLine.AccountId equals account.Id where journalLine.JournalEntryId == entryId select new { account.OperationalRole, journalLine.Debit, journalLine.Credit }).ToListAsync();
+            Assert.Contains(journal, x => x.OperationalRole == AccountingAccountRoles.RetainageReceivable && x.Credit == 20m);
+            Assert.Contains(journal, x => x.OperationalRole == AccountingAccountRoles.ForeignExchangeGain && x.Credit == 1.34m);
+            Assert.Equal(journal.Sum(x => x.Debit), journal.Sum(x => x.Credit));
+        }
+        var releasedWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        Assert.DoesNotContain(releasedWorkspace.Projects.RetainageAging!, x => x.ProposalId == proposal.Id);
         SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost, BrassLedgerPermissions.PaymentReverse);
-        var voided = await transactions.VoidInvoiceAsync(new VoidSubledgerDocumentRequest(posted.Id!.Value, new DateOnly(2026, 8, 26), "Foreign billing voided"));
+        Assert.True((await transactions.VoidInvoiceAsync(new VoidSubledgerDocumentRequest(releasePosted.Id!.Value, new DateOnly(2026, 8, 28), "Reverse foreign retainage release"))).Succeeded);
+
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var lossRequest = releaseRequest with { InvoiceNumber = "PB-FX-RET-LOSS", BillingThrough = new DateOnly(2026, 8, 29), InvoiceDate = new DateOnly(2026, 8, 29), DueDate = new DateOnly(2026, 9, 28), RetainageReleaseAmount = 10m, ExchangeRateId = lossRateId };
+        var lossPreview = await transactions.PreviewProjectBillingAsync(lossRequest);
+        Assert.True(lossPreview.Succeeded, lossPreview.ErrorMessage);
+        Assert.Equal(10m, lossPreview.GrossAmount);
+        Assert.Equal(13.34m, lossPreview.TransactionInvoiceAmount);
+        Assert.Equal(9.34m, lossPreview.InvoiceAmount);
+        var lossSaved = await transactions.SaveProjectBillingProposalAsync(new(null, lossRequest, lossPreview.Fingerprint, lossPreview.ProjectConcurrencyToken));
+        Assert.True(lossSaved.Succeeded, lossSaved.ErrorMessage);
+        Guid lossWorkflowId;
+        await using (var db = await factory.CreateDbContextAsync()) lossWorkflowId = await db.ProjectBillingProposals.Where(x => x.Id == lossSaved.Id).Select(x => x.SubledgerDocumentWorkflowId).SingleAsync();
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(lossWorkflowId)).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        var lossPosted = await transactions.PostApprovedSubledgerDocumentAsync(lossWorkflowId);
+        Assert.True(lossPosted.Succeeded, lossPosted.ErrorMessage);
+        var partiallyReleasedWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        Assert.Equal(10m, partiallyReleasedWorkspace.Projects.RetainageReceivable);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var entryId = await db.JournalEntries.Where(x => x.SourceDocumentId == lossPosted.Id && x.SourceDocumentType == "SalesInvoice").Select(x => x.Id).SingleAsync();
+            var journal = await (from journalLine in db.JournalEntryLines join account in db.Accounts on journalLine.AccountId equals account.Id where journalLine.JournalEntryId == entryId select new { account.OperationalRole, journalLine.Debit, journalLine.Credit }).ToListAsync();
+            Assert.Contains(journal, x => x.OperationalRole == AccountingAccountRoles.ForeignExchangeLoss && x.Debit == .66m);
+            Assert.Equal(journal.Sum(x => x.Debit), journal.Sum(x => x.Credit));
+        }
+        SetUser(preparerId, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var finalRequest = lossRequest with { InvoiceNumber = "PB-FX-RET-FINAL" };
+        var finalPreview = await transactions.PreviewProjectBillingAsync(finalRequest);
+        Assert.True(finalPreview.Succeeded, finalPreview.ErrorMessage);
+        Assert.Equal(10m, finalPreview.GrossAmount);
+        Assert.Equal(13.33m, finalPreview.TransactionInvoiceAmount);
+        Assert.Equal(9.33m, finalPreview.InvoiceAmount);
+        var finalSaved = await transactions.SaveProjectBillingProposalAsync(new(null, finalRequest, finalPreview.Fingerprint, finalPreview.ProjectConcurrencyToken));
+        Assert.True(finalSaved.Succeeded, finalSaved.ErrorMessage);
+        Guid finalWorkflowId;
+        await using (var db = await factory.CreateDbContextAsync()) finalWorkflowId = await db.ProjectBillingProposals.Where(x => x.Id == finalSaved.Id).Select(x => x.SubledgerDocumentWorkflowId).SingleAsync();
+        SetUser(reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+        Assert.True((await transactions.ApproveSubledgerDocumentAsync(finalWorkflowId)).Succeeded);
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+        var finalPosted = await transactions.PostApprovedSubledgerDocumentAsync(finalWorkflowId);
+        Assert.True(finalPosted.Succeeded, finalPosted.ErrorMessage);
+        var fullyReleasedWorkspace = await scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>().GetWorkspaceAsync();
+        Assert.DoesNotContain(fullyReleasedWorkspace.Projects.RetainageAging!, x => x.ProposalId == proposal.Id);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var entryId = await db.JournalEntries.Where(x => x.SourceDocumentId == finalPosted.Id && x.SourceDocumentType == "SalesInvoice").Select(x => x.Id).SingleAsync();
+            var journal = await (from journalLine in db.JournalEntryLines join account in db.Accounts on journalLine.AccountId equals account.Id where journalLine.JournalEntryId == entryId select new { account.OperationalRole, journalLine.Debit, journalLine.Credit }).ToListAsync();
+            Assert.Contains(journal, x => x.OperationalRole == AccountingAccountRoles.ForeignExchangeLoss && x.Debit == .67m);
+            Assert.Equal(journal.Sum(x => x.Debit), journal.Sum(x => x.Credit));
+        }
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost, BrassLedgerPermissions.PaymentReverse);
+        Assert.True((await transactions.VoidInvoiceAsync(new VoidSubledgerDocumentRequest(finalPosted.Id!.Value, new DateOnly(2026, 8, 30), "Reverse final foreign retainage release"))).Succeeded);
+        Assert.True((await transactions.VoidInvoiceAsync(new VoidSubledgerDocumentRequest(lossPosted.Id!.Value, new DateOnly(2026, 8, 30), "Reverse partial foreign retainage release"))).Succeeded);
+
+        SetUser(posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost, BrassLedgerPermissions.PaymentReverse);
+        var voided = await transactions.VoidInvoiceAsync(new VoidSubledgerDocumentRequest(posted.Id!.Value, new DateOnly(2026, 8, 31), "Foreign billing voided"));
         Assert.True(voided.Succeeded, voided.ErrorMessage);
         await using (var db = await factory.CreateDbContextAsync())
             Assert.Equal(openBalanceBefore, await db.Customers.Where(x => x.Id == customerId).Select(x => x.OpenBalance).SingleAsync());
@@ -6976,6 +7171,12 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var userId = Guid.NewGuid(); var reviewerId = Guid.NewGuid(); var posterId = Guid.NewGuid();
         void SetUser(Guid id, params string[] permissions) { var claims = permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)).ToList(); claims.Add(new(System.Security.Claims.ClaimTypes.NameIdentifier, id.ToString())); claims.Add(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString())); accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test")) }; }
         SetUser(userId, BrassLedgerPermissions.ProjectsManage, BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare);
+        var foreignRateId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.CurrencyExchangeRates.Add(new CurrencyExchangeRate { Id = foreignRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 1), Source = "Fixed and cost-plus billing test", SourceReference = "https://example.test/cad-usd/project-bases" });
+            await db.SaveChangesAsync();
+        }
 
         var fixedResult = await transactions.SaveProjectJobAsync(new(null, "JOB-FIXED-BILL", "Progress billing", customerId, new DateOnly(2026, 8, 1), null, "FixedPrice", 10_000m, 7_000m, 0.05m));
         Assert.True(fixedResult.Succeeded, fixedResult.ErrorMessage);
@@ -6984,6 +7185,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(fixedPreview.Succeeded, fixedPreview.ErrorMessage);
         Assert.Equal("FixedPriceProgress", fixedPreview.BillingBasis);
         Assert.Equal(2_500m, fixedPreview.GrossAmount); Assert.Equal(125m, fixedPreview.RetainageAmount); Assert.Equal(2_375m, fixedPreview.InvoiceAmount);
+        var foreignProgress = await transactions.PreviewProjectBillingAsync(fixedRequest with { Currency = "CAD", ExchangeRateId = foreignRateId });
+        Assert.True(foreignProgress.Succeeded, foreignProgress.ErrorMessage);
+        Assert.Equal("FixedPriceProgress", foreignProgress.BillingBasis);
+        Assert.True(foreignProgress.TransactionInvoiceAmount > 0m);
+        var foreignMilestone = await transactions.PreviewProjectBillingAsync(fixedRequest with { InvoiceNumber = "PB-FIXED-FX-MILESTONE", ProgressPercentToDate = 0m, MilestoneAmount = 1_000m, Currency = "CAD", ExchangeRateId = foreignRateId });
+        Assert.True(foreignMilestone.Succeeded, foreignMilestone.ErrorMessage);
+        Assert.Equal("FixedPriceMilestone", foreignMilestone.BillingBasis);
+        Assert.True(foreignMilestone.TransactionInvoiceAmount > 0m);
         var fixedSaved = await transactions.SaveProjectBillingProposalAsync(new(null, fixedRequest, fixedPreview.Fingerprint, fixedPreview.ProjectConcurrencyToken));
         Assert.True(fixedSaved.Succeeded, fixedSaved.ErrorMessage);
         var regressive = await transactions.PreviewProjectBillingAsync(fixedRequest with { InvoiceNumber = "PB-FIXED-2", ProgressPercentToDate = 0.20m });
@@ -7092,6 +7301,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(costPreview.Succeeded, costPreview.ErrorMessage);
         var costLine = Assert.Single(costPreview.Lines);
         Assert.Equal("PostedCost", costLine.SourceType); Assert.Equal(100m, costLine.SourceCost); Assert.Equal(20m, costLine.MarkupAmount); Assert.Equal(120m, costLine.GrossAmount);
+        var foreignCostPlus = await transactions.PreviewProjectBillingAsync(costRequest with { Currency = "CAD", ExchangeRateId = foreignRateId });
+        Assert.True(foreignCostPlus.Succeeded, foreignCostPlus.ErrorMessage);
+        Assert.Equal("CostPlus", foreignCostPlus.BillingBasis);
+        Assert.True(foreignCostPlus.TransactionInvoiceAmount > 0m);
         var costSaved = await transactions.SaveProjectBillingProposalAsync(new(null, costRequest, costPreview.Fingerprint, costPreview.ProjectConcurrencyToken));
         Assert.True(costSaved.Succeeded, costSaved.ErrorMessage);
         SetUser(userId, BrassLedgerPermissions.JournalReverse);

@@ -15,7 +15,12 @@ namespace BrassLedger.Infrastructure.Tests;
 public sealed class ProjectBillingPostgresTests
 {
     [PostgresFact]
-    public async Task PostgreSql_ConcurrentBillingOfSameSourceCreatesExactlyOneControlledDraft()
+    public Task PostgreSql_ConcurrentBillingOfSameSourceCreatesExactlyOneControlledDraft() => RunConcurrentBillingAsync(false);
+
+    [PostgresFact]
+    public Task PostgreSql_ConcurrentForeignBillingOfSameSourceCreatesExactlyOneControlledDraft() => RunConcurrentBillingAsync(true);
+
+    private static async Task RunConcurrentBillingAsync(bool foreign)
     {
         var baseConnectionString = Environment.GetEnvironmentVariable("BRASSLEDGER_TEST_POSTGRES")!;
         var databaseName = $"brassledger_test_project_billing_{Guid.NewGuid():N}";
@@ -33,7 +38,7 @@ public sealed class ProjectBillingPostgresTests
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Postgres"] = testBuilder.ConnectionString }).Build();
             var services = new ServiceCollection(); services.AddBrassLedgerInfrastructure(configuration, contentRoot, seedSampleData: true);
             using var provider = services.BuildServiceProvider(); await provider.InitializeBrassLedgerAsync();
-            Guid companyId; Guid projectId;
+            Guid companyId; Guid projectId; var exchangeRateId = Guid.NewGuid();
             using (var setupScope = provider.CreateScope())
             {
                 var factory = setupScope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); await using var db = await factory.CreateDbContextAsync();
@@ -41,13 +46,14 @@ public sealed class ProjectBillingPostgresTests
                 var project = new ProjectJob { Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customerId, JobNumber = "JOB-PG-BILL", Name = "PostgreSQL billing race", CustomerName = "Customer", Status = "Active", StartDate = new DateOnly(2026, 8, 1), BillingMethod = "TimeAndMaterials", ContractAmount = 10_000m, BudgetAmount = 5_000m, CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }; projectId = project.Id;
                 var card = new PayrollTimecard { Id = Guid.NewGuid(), CompanyId = companyId, EmployeeId = employeeId, PeriodStart = new DateOnly(2026, 8, 17), PeriodEnd = new DateOnly(2026, 8, 23), Status = "Approved", PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") };
                 db.ProjectJobs.Add(project); db.ProjectBillingRates.Add(new ProjectBillingRate { Id = Guid.NewGuid(), CompanyId = companyId, ProjectJobId = project.Id, EarningCode = "*", HourlyRate = 100m, EffectiveOn = new DateOnly(2026, 8, 1), IsActive = true, CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }); db.PayrollTimecards.Add(card);
+                if (foreign) db.CurrencyExchangeRates.Add(new CurrencyExchangeRate { Id = exchangeRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 1), Source = "Concurrent foreign billing test", SourceReference = "https://example.test/cad-usd/postgres-race" });
                 db.PayrollTimeEntries.Add(new PayrollTimeEntry { Id = Guid.NewGuid(), PayrollTimecardId = card.Id, Sequence = 1, WorkDate = new DateOnly(2026, 8, 20), EarningCode = "REGULAR", EarningType = "Regular", Hours = 2m, Rate = 30m, Amount = 60m, ProjectJobId = project.Id }); await db.SaveChangesAsync();
             }
 
             using var firstScope = provider.CreateScope(); using var secondScope = provider.CreateScope();
             SetContext(firstScope, companyId, Guid.NewGuid()); SetContext(secondScope, companyId, Guid.NewGuid());
             var firstService = firstScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>(); var secondService = secondScope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
-            var firstRequest = new ProjectBillingPreviewRequest(projectId, "PG-BILL-1", new DateOnly(2026, 8, 31), new DateOnly(2026, 8, 31), new DateOnly(2026, 9, 30), "4000", "Concurrent project billing", IncludeCosts: false);
+            var firstRequest = new ProjectBillingPreviewRequest(projectId, "PG-BILL-1", new DateOnly(2026, 8, 31), new DateOnly(2026, 8, 31), new DateOnly(2026, 9, 30), "4000", "Concurrent project billing", IncludeCosts: false, Currency: foreign ? "CAD" : "", ExchangeRateId: foreign ? exchangeRateId : null);
             var secondRequest = firstRequest with { InvoiceNumber = "PG-BILL-2" };
             var firstPreview = await firstService.PreviewProjectBillingAsync(firstRequest); var secondPreview = await secondService.PreviewProjectBillingAsync(secondRequest);
             Assert.True(firstPreview.Succeeded, firstPreview.ErrorMessage); Assert.True(secondPreview.Succeeded, secondPreview.ErrorMessage); Assert.Equal(firstPreview.ProjectConcurrencyToken, secondPreview.ProjectConcurrencyToken);
@@ -66,9 +72,82 @@ public sealed class ProjectBillingPostgresTests
         }
     }
 
-    private static void SetContext(IServiceScope scope, Guid companyId, Guid userId)
+    [PostgresFact]
+    public async Task PostgreSql_ForeignRetainageReleasePostsCarryingAmountAndRealizedGain()
     {
-        var permissions = new[] { BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare };
+        var baseConnectionString = Environment.GetEnvironmentVariable("BRASSLEDGER_TEST_POSTGRES")!;
+        var databaseName = $"brassledger_test_project_retainage_{Guid.NewGuid():N}";
+        var administrationBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString) { Database = "postgres", Pooling = false };
+        var testBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString) { Database = databaseName, Pooling = false };
+        var quotedDatabase = new NpgsqlCommandBuilder().QuoteIdentifier(databaseName);
+        await using (var administration = new NpgsqlConnection(administrationBuilder.ConnectionString))
+        {
+            await administration.OpenAsync(); await using var create = administration.CreateCommand(); create.CommandText = $"CREATE DATABASE {quotedDatabase}"; await create.ExecuteNonQueryAsync();
+        }
+        var contentRoot = Path.Combine(Path.GetTempPath(), "BrassLedger.ProjectRetainage.Postgres.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(contentRoot);
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Postgres"] = testBuilder.ConnectionString }).Build();
+            var services = new ServiceCollection(); services.AddBrassLedgerInfrastructure(configuration, contentRoot, seedSampleData: true);
+            using var provider = services.BuildServiceProvider(); await provider.InitializeBrassLedgerAsync();
+            using var scope = provider.CreateScope();
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+            Guid companyId; Guid projectId; var sourceRateId = Guid.NewGuid(); var releaseRateId = Guid.NewGuid();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                companyId = await db.Companies.Select(x => x.Id).SingleAsync();
+                var customerId = await db.Customers.OrderBy(x => x.CustomerNumber).Select(x => x.Id).FirstAsync();
+                projectId = Guid.NewGuid();
+                db.ProjectJobs.Add(new ProjectJob { Id = projectId, CompanyId = companyId, CustomerId = customerId, JobNumber = "JOB-PG-FX-RET", Name = "Foreign retainage", CustomerName = "Customer", Status = "Active", StartDate = new DateOnly(2026, 8, 1), BillingMethod = "FixedPrice", ContractAmount = 1_000m, BudgetAmount = 500m, RetainagePercent = .10m, CreatedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+                db.CurrencyExchangeRates.AddRange(
+                    new CurrencyExchangeRate { Id = sourceRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 1), Source = "Source", SourceReference = "https://example.test/pg/source" },
+                    new CurrencyExchangeRate { Id = releaseRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 26), Source = "Release", SourceReference = "https://example.test/pg/release" });
+                await db.SaveChangesAsync();
+            }
+            var preparerId = Guid.NewGuid(); var reviewerId = Guid.NewGuid(); var posterId = Guid.NewGuid();
+            SetContext(scope, companyId, preparerId);
+            var sourceRequest = new ProjectBillingPreviewRequest(projectId, "PG-FX-RET-SOURCE", new DateOnly(2026, 8, 25), new DateOnly(2026, 8, 25), new DateOnly(2026, 9, 24), "4000", "Foreign milestone", MilestoneAmount: 200m, Currency: "CAD", ExchangeRateId: sourceRateId);
+            var sourcePreview = await transactions.PreviewProjectBillingAsync(sourceRequest); Assert.True(sourcePreview.Succeeded, sourcePreview.ErrorMessage);
+            var sourceSaved = await transactions.SaveProjectBillingProposalAsync(new(null, sourceRequest, sourcePreview.Fingerprint, sourcePreview.ProjectConcurrencyToken)); Assert.True(sourceSaved.Succeeded, sourceSaved.ErrorMessage);
+            Guid sourceWorkflowId;
+            await using (var db = await factory.CreateDbContextAsync()) sourceWorkflowId = await db.ProjectBillingProposals.Where(x => x.Id == sourceSaved.Id).Select(x => x.SubledgerDocumentWorkflowId).SingleAsync();
+            SetContext(scope, companyId, reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+            Assert.True((await transactions.ApproveSubledgerDocumentAsync(sourceWorkflowId)).Succeeded);
+            SetContext(scope, companyId, posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+            Assert.True((await transactions.PostApprovedSubledgerDocumentAsync(sourceWorkflowId)).Succeeded);
+
+            SetContext(scope, companyId, preparerId);
+            var releaseRequest = sourceRequest with { InvoiceNumber = "PG-FX-RET-RELEASE", BillingThrough = new DateOnly(2026, 8, 27), InvoiceDate = new DateOnly(2026, 8, 27), DueDate = new DateOnly(2026, 9, 26), Description = "Release foreign retainage", MilestoneAmount = 0m, RetainageReleaseOfProposalId = sourceSaved.Id, RetainageReleaseAmount = 20m, ExchangeRateId = releaseRateId };
+            var releasePreview = await transactions.PreviewProjectBillingAsync(releaseRequest); Assert.True(releasePreview.Succeeded, releasePreview.ErrorMessage);
+            Assert.Equal(20m, releasePreview.GrossAmount); Assert.Equal(21.34m, releasePreview.InvoiceAmount);
+            var releaseSaved = await transactions.SaveProjectBillingProposalAsync(new(null, releaseRequest, releasePreview.Fingerprint, releasePreview.ProjectConcurrencyToken)); Assert.True(releaseSaved.Succeeded, releaseSaved.ErrorMessage);
+            Guid releaseWorkflowId;
+            await using (var db = await factory.CreateDbContextAsync()) releaseWorkflowId = await db.ProjectBillingProposals.Where(x => x.Id == releaseSaved.Id).Select(x => x.SubledgerDocumentWorkflowId).SingleAsync();
+            SetContext(scope, companyId, reviewerId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerApprove);
+            Assert.True((await transactions.ApproveSubledgerDocumentAsync(releaseWorkflowId)).Succeeded);
+            SetContext(scope, companyId, posterId, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPost);
+            var posted = await transactions.PostApprovedSubledgerDocumentAsync(releaseWorkflowId); Assert.True(posted.Succeeded, posted.ErrorMessage);
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var entryId = await db.JournalEntries.Where(x => x.SourceDocumentId == posted.Id && x.SourceDocumentType == "SalesInvoice").Select(x => x.Id).SingleAsync();
+                var journal = await (from journalLine in db.JournalEntryLines join account in db.Accounts on journalLine.AccountId equals account.Id where journalLine.JournalEntryId == entryId select new { account.OperationalRole, journalLine.Debit, journalLine.Credit }).ToListAsync();
+                Assert.Contains(journal, x => x.OperationalRole == AccountingAccountRoles.RetainageReceivable && x.Credit == 20m);
+                Assert.Contains(journal, x => x.OperationalRole == AccountingAccountRoles.ForeignExchangeGain && x.Credit == 1.34m);
+                Assert.Equal(journal.Sum(x => x.Debit), journal.Sum(x => x.Credit));
+            }
+        }
+        finally
+        {
+            NpgsqlConnection.ClearAllPools(); await using var administration = new NpgsqlConnection(administrationBuilder.ConnectionString); await administration.OpenAsync(); await using var drop = administration.CreateCommand(); drop.CommandText = $"DROP DATABASE IF EXISTS {quotedDatabase} WITH (FORCE)"; await drop.ExecuteNonQueryAsync();
+            try { Directory.Delete(contentRoot, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void SetContext(IServiceScope scope, Guid companyId, Guid userId, params string[] requestedPermissions)
+    {
+        string[] permissions = requestedPermissions.Length == 0 ? [BrassLedgerPermissions.ProjectBillingPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.SubledgerPrepare] : requestedPermissions;
         var claims = permissions.Select(permission => new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)).ToList(); claims.Add(new Claim(ClaimTypes.NameIdentifier, userId.ToString())); claims.Add(new Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()));
         scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "test")) };
     }
