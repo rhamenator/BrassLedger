@@ -35,7 +35,7 @@ public sealed class ItemizedDocumentWorkflowTests
         }
         await receivables.OpenAsync();
         await receivables.RecordAndReturnCustomerPaymentAsync(invoiceNumber, $"DEP-E2E-{browserKind}");
-        await receivables.RecordAndReverseCreditMemoAsync($"CM-E2E-{browserKind}");
+        await receivables.RecordAndReverseCreditMemoAsync(invoiceNumber, $"CM-E2E-{browserKind}");
         await session.AssertNoUiFailuresAsync("itemized invoice workflow");
 
         await payables.OpenAsync();
