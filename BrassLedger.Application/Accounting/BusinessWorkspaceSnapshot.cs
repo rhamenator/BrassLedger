@@ -238,7 +238,8 @@ public sealed record SalesOrderSnapshot(
     string Notes = "",
     string ConcurrencyToken = "",
     IReadOnlyList<SalesOrderLineSnapshot>? Lines = null,
-    Guid? SalesQuoteId = null);
+    Guid? SalesQuoteId = null,
+    string TransactionCurrency = "");
 
 public sealed record SalesOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal AllocatedQuantity, decimal ShippedQuantity, decimal CancelledQuantity, decimal ReturnedQuantity, decimal InvoicedQuantity, decimal UnitPrice, decimal DiscountAmount, decimal TaxAmount, decimal LineTotal, string RevenueAccountNumber, Guid? AllocationWarehouseId = null, Guid? AllocationBinId = null, string AllocationLocation = "", Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
 public sealed record InventoryShipmentSnapshot(Guid Id, Guid SalesOrderId, string SalesOrderNumber, string ShipmentNumber, DateOnly ShippedOn, string Status, decimal TotalCost, Guid? SalesInvoiceId, string ConcurrencyToken, IReadOnlyList<InventoryShipmentLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId, Guid? WarehouseId = null, Guid? BinId = null, string Location = "", Guid? InventoryPackingSlipId = null);

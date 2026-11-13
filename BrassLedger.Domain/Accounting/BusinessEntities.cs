@@ -1133,6 +1133,7 @@ public sealed class SalesOrder
     public Guid CustomerId { get; set; }
     public Guid? SalesQuoteId { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
+    public string TransactionCurrency { get; set; } = string.Empty;
     public DateOnly OrderedOn { get; set; }
     public DateOnly? RequestedShipOn { get; set; }
     public string Status { get; set; } = string.Empty;
