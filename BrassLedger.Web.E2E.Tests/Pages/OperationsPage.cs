@@ -110,10 +110,11 @@ public sealed class OperationsPage
         await _session.Page.GetByText($"Purchase-order draft {orderNumber} created from {requisitionNumber}.", new() { Exact = true }).WaitForAsync();
     }
 
-    public async Task PrepareAndApproveSalesOrderAsync(string orderNumber)
+    public async Task PrepareAndApproveSalesOrderAsync(string orderNumber, string currency = "")
     {
         await _session.Page.GetByLabel("Sales order customer").SelectOptionAsync(new SelectOptionValue { Index = 1 });
         await _session.Page.GetByLabel("Sales order number").FillAsync(orderNumber);
+        if (!string.IsNullOrWhiteSpace(currency)) await _session.Page.GetByLabel("Sales order currency").FillAsync(currency);
         await _session.Page.GetByLabel("Sales order line 1 item").SelectOptionAsync(new SelectOptionValue { Label = "RM-220 — Steel Fastener Pack" });
         await _session.Page.GetByLabel("Sales order line 1 description").FillAsync("Browser-tested customer shipment");
         await _session.Page.GetByLabel("Sales order line 1 quantity").FillAsync("2");
@@ -218,11 +219,18 @@ public sealed class OperationsPage
         await Assertions.Expect(packingRow).ToContainTextAsync("Shipped");
     }
 
-    public async Task InvoiceShipmentAsync(string shipmentNumber, string invoiceNumber)
+    public async Task InvoiceShipmentAsync(string shipmentNumber, string invoiceNumber, string? rateSource = null)
     {
         var row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber });
         await row.GetByRole(AriaRole.Button, new() { Name = "Create invoice" }).ClickAsync();
         await _session.Page.GetByLabel("Shipment invoice number").FillAsync(invoiceNumber);
+        if (!string.IsNullOrWhiteSpace(rateSource))
+        {
+            var rateSelect = _session.Page.GetByLabel("Shipment invoice exchange rate");
+            var rateValue = await rateSelect.Locator("option").Filter(new() { HasTextString = rateSource }).First.GetAttributeAsync("value");
+            Assert.False(string.IsNullOrWhiteSpace(rateValue));
+            await rateSelect.SelectOptionAsync(rateValue!);
+        }
         await _session.Page.GetByRole(AriaRole.Button, new() { Name = "Post shipment invoice" }).ClickAsync();
         await _session.Page.GetByText("Shipment invoice posted to receivables.", new() { Exact = true }).WaitForAsync();
         row = _session.Page.GetByRole(AriaRole.Table, new() { Name = "Customer shipments" }).Locator("tr").Filter(new() { HasTextString = shipmentNumber });

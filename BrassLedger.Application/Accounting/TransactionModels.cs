@@ -142,7 +142,7 @@ public sealed record SaveSalesQuoteRequest(Guid? Id, Guid CustomerId, string Quo
 public sealed record ApproveSalesQuoteRequest(Guid SalesQuoteId, string ConcurrencyToken);
 public sealed record WithdrawSalesQuoteRequest(Guid SalesQuoteId, string Reason, string ConcurrencyToken);
 public sealed record ConvertSalesQuoteRequest(Guid SalesQuoteId, string OrderNumber, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, string ConcurrencyToken);
-public sealed record SaveSalesOrderRequest(Guid? Id, Guid CustomerId, string OrderNumber, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken = "");
+public sealed record SaveSalesOrderRequest(Guid? Id, Guid CustomerId, string OrderNumber, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken = "", string Currency = "");
 public sealed record ApproveSalesOrderRequest(Guid SalesOrderId, string ConcurrencyToken);
 public sealed record AmendSalesOrderRequest(Guid SalesOrderId, DateOnly OrderedOn, DateOnly? RequestedShipOn, string Notes, string Reason, IReadOnlyList<SalesOrderLineRequest> Lines, string ConcurrencyToken);
 public sealed record CancelSalesOrderRequest(Guid SalesOrderId, string Reason, string ConcurrencyToken);
@@ -160,7 +160,7 @@ public sealed record PromiseSalesOrderBackorderRequest(Guid SalesOrderId, Guid S
 public sealed record CancelSalesOrderBackorderRequest(Guid SalesOrderBackorderPromiseId, string Reason, string ConcurrencyToken);
 public sealed record ShipSalesOrderLineRequest(Guid SalesOrderLineId, decimal Quantity);
 public sealed record ShipSalesOrderRequest(Guid SalesOrderId, string ShipmentNumber, DateOnly ShippedOn, IReadOnlyList<ShipSalesOrderLineRequest> Lines, string ConcurrencyToken, Guid? InventoryPackingSlipId = null, string PackingSlipConcurrencyToken = "");
-public sealed record InvoiceInventoryShipmentRequest(Guid InventoryShipmentId, string InvoiceNumber, DateOnly InvoiceDate, DateOnly DueDate, string Description, string ConcurrencyToken);
+public sealed record InvoiceInventoryShipmentRequest(Guid InventoryShipmentId, string InvoiceNumber, DateOnly InvoiceDate, DateOnly DueDate, string Description, string ConcurrencyToken, Guid? ExchangeRateId = null);
 public sealed record ReverseInventoryShipmentRequest(Guid InventoryShipmentId, DateOnly ReversalDate, string Reason, string ConcurrencyToken);
 public sealed record AuthorizeCustomerReturnLineRequest(Guid InventoryShipmentLineId, decimal Quantity);
 public sealed record AuthorizeCustomerReturnRequest(Guid InventoryShipmentId, string ReturnNumber, DateOnly AuthorizedOn, string Reason, IReadOnlyList<AuthorizeCustomerReturnLineRequest> Lines, string ShipmentConcurrencyToken);

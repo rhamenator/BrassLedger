@@ -379,7 +379,8 @@ public sealed class BusinessWorkspaceService(
                     x.Notes,
                     x.ConcurrencyToken,
                     salesOrderLineLookup[x.Id].Select(line => new SalesOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.AllocatedQuantity, line.ShippedQuantity, line.CancelledQuantity, line.ReturnedQuantity, line.InvoicedQuantity, line.UnitPrice, line.DiscountAmount, line.TaxAmount, line.LineTotal, accountNumbersById.GetValueOrDefault(line.RevenueAccountId, "Unavailable"), line.AllocationWarehouseId, line.AllocationBinId, InventoryLocationLabel(line.AllocationWarehouseId, line.AllocationBinId), line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, line.DepartmentId, line.ClassId)).ToArray(),
-                    x.SalesQuoteId)).ToArray(),
+                    x.SalesQuoteId,
+                    string.IsNullOrWhiteSpace(x.TransactionCurrency) ? company.BaseCurrency : x.TransactionCurrency)).ToArray(),
                 PurchaseOrders: purchaseOrders.Select(x => new PurchaseOrderSnapshot(
                     x.OrderNumber,
                     vendorNames.GetValueOrDefault(x.VendorId, "Unknown vendor"),

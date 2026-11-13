@@ -24,6 +24,9 @@ public sealed partial class AccountingTransactionService
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var baseCurrency = await db.Companies.Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        var currency = NormalizeTransactionCurrency(request.Currency, baseCurrency);
+        if (currency is null) return TransactionResult.Failure("Sales-order currency must be a three-letter ISO-style code.");
         if (!await db.Customers.AnyAsync(customer => customer.Id == request.CustomerId && customer.CompanyId == companyId, cancellationToken))
             return TransactionResult.Failure("Customer not found in the active company.");
         var itemIds = requestedLines.Select(line => line.InventoryItemId).ToArray();
@@ -59,6 +62,7 @@ public sealed partial class AccountingTransactionService
 
         order.CustomerId = request.CustomerId;
         order.OrderNumber = orderNumber;
+        order.TransactionCurrency = currency;
         order.OrderedOn = request.OrderedOn;
         order.RequestedShipOn = request.RequestedShipOn;
         order.Notes = request.Notes?.Trim() ?? string.Empty;
@@ -84,7 +88,7 @@ public sealed partial class AccountingTransactionService
             TaxAmount = RoundCurrency(line.TaxAmount),
             LineTotal = RoundCurrency((RoundQuantity(line.Quantity) * RoundCurrency(line.UnitPrice)) - RoundCurrency(line.DiscountAmount) + RoundCurrency(line.TaxAmount))
         }));
-        AddSalesFulfillmentAudit(db, companyId, "sales-order.draft.saved", nameof(SalesOrder), order.Id, new { order.OrderNumber, order.CustomerId, lineCount = requestedLines.Length, order.TotalAmount });
+        AddSalesFulfillmentAudit(db, companyId, "sales-order.draft.saved", nameof(SalesOrder), order.Id, new { order.OrderNumber, order.CustomerId, order.TransactionCurrency, lineCount = requestedLines.Length, order.TotalAmount });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The sales order changed while it was being saved. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The sales-order number or lines changed concurrently. Refresh and try again."); }
@@ -330,10 +334,15 @@ public sealed partial class AccountingTransactionService
             var net = RoundCurrency(line.Quantity * source.UnitPrice - discount);
             return new { ShipmentLine = line, Source = source, Discount = discount, Tax = tax, Net = net, Total = net + tax };
         }).ToArray();
-        var subtotal = invoiceAmounts.Sum(line => line.Net);
-        var taxAmount = invoiceAmounts.Sum(line => line.Tax);
+        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, order.TransactionCurrency, request.ExchangeRateId, request.InvoiceDate, cancellationToken);
+        if (transactionRateError is not null) return TransactionResult.Failure(transactionRateError);
+        var transactionSubtotal = invoiceAmounts.Sum(line => line.Net);
+        var transactionTaxAmount = invoiceAmounts.Sum(line => line.Tax);
+        var transactionTotal = transactionSubtotal + transactionTaxAmount;
+        var subtotal = invoiceAmounts.Sum(line => transactionRate!.ToBase(line.Net));
+        var taxAmount = invoiceAmounts.Sum(line => transactionRate!.ToBase(line.Tax));
         var total = subtotal + taxAmount;
-        if (total <= 0m) return TransactionResult.Failure("The shipment invoice total must be greater than zero.");
+        if (transactionTotal <= 0m || total <= 0m) return TransactionResult.Failure("The shipment invoice total must be greater than zero in both transaction and base currency.");
         if (customer.CreditLimit > 0m && customer.OpenBalance + total > customer.CreditLimit) return TransactionResult.Failure("Posting this shipment invoice would exceed the customer's credit limit.");
         var revenueAccountIds = invoiceAmounts.Select(line => line.Source.RevenueAccountId).Distinct().ToArray();
         var revenueAccountNumbers = await db.Accounts
@@ -341,27 +350,24 @@ public sealed partial class AccountingTransactionService
             .ToDictionaryAsync(account => account.Id, account => account.Number, cancellationToken);
         if (revenueAccountNumbers.Count != revenueAccountIds.Length) return TransactionResult.Failure("One or more shipment revenue accounts are unavailable in this company.");
         if (!await AreActiveTrackingDimensionsAsync(db, companyId, request.InvoiceDate, invoiceAmounts.Select(line => (line.Source.DepartmentId, line.Source.ClassId)), cancellationToken)) return TransactionResult.Failure("One or more shipment departments or classes are inactive, out of period, unavailable, or incorrectly typed for the invoice date.");
-        var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, string.Empty, null, request.InvoiceDate, cancellationToken);
-        if (transactionRateError is not null) return TransactionResult.Failure(transactionRateError);
-
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var invoiceId = Guid.NewGuid();
         var journalLines = new List<JournalLineRequest> { new(OperationalRoleReference(AccountingAccountRoles.AccountsReceivable), total, 0m, "Shipment invoice receivable") };
-        journalLines.AddRange(invoiceAmounts.GroupBy(line => new { line.Source.RevenueAccountId, line.Source.ProjectJobId, line.Source.ProjectPhaseId, line.Source.ProjectCostCodeId, line.Source.DepartmentId, line.Source.ClassId }).Select(group => new JournalLineRequest(revenueAccountNumbers[group.Key.RevenueAccountId], 0m, group.Sum(line => line.Net), "Shipment revenue", group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId, group.Key.DepartmentId, group.Key.ClassId)));
+        journalLines.AddRange(invoiceAmounts.GroupBy(line => new { line.Source.RevenueAccountId, line.Source.ProjectJobId, line.Source.ProjectPhaseId, line.Source.ProjectCostCodeId, line.Source.DepartmentId, line.Source.ClassId }).Select(group => new JournalLineRequest(revenueAccountNumbers[group.Key.RevenueAccountId], 0m, group.Sum(line => transactionRate!.ToBase(line.Net)), "Shipment revenue", group.Key.ProjectJobId, group.Key.ProjectPhaseId, group.Key.ProjectCostCodeId, group.Key.DepartmentId, group.Key.ClassId)));
         if (taxAmount > 0m) journalLines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.SalesTaxPayable), 0m, taxAmount, "Sales tax payable"));
         var posting = await PostAsync(db, companyId, request.InvoiceDate, "Accounts Receivable", invoiceNumber, request.Description.Trim(), journalLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: invoiceId, sourceDocumentType: "SalesInvoice", resolveOperationalRoles: true);
         if (!posting.Succeeded) return posting;
         var invoice = new SalesInvoice { Id = invoiceId, CompanyId = companyId, CustomerId = customer.Id, SalesOrderId = order.Id, InventoryShipmentId = shipment.Id, InvoiceNumber = invoiceNumber, InvoiceDate = request.InvoiceDate, DueDate = request.DueDate, Status = "Open", Subtotal = subtotal, TaxAmount = taxAmount, TotalAmount = total, BalanceDue = total,
-            TransactionCurrency = transactionRate!.TransactionCurrency, TransactionSubtotal = subtotal, TransactionTaxAmount = taxAmount, TransactionTotalAmount = total, TransactionBalanceDue = total, ExchangeRateToBase = 1m,
-            ExchangeRateEffectiveOn = request.InvoiceDate, ExchangeRateSource = transactionRate.Source, ConcurrencyToken = Guid.NewGuid().ToString("N") };
+            TransactionCurrency = transactionRate!.TransactionCurrency, TransactionSubtotal = transactionSubtotal, TransactionTaxAmount = transactionTaxAmount, TransactionTotalAmount = transactionTotal, TransactionBalanceDue = transactionTotal, ExchangeRateId = transactionRate.ExchangeRateId, ExchangeRateToBase = transactionRate.FactorToBase,
+            ExchangeRateEffectiveOn = transactionRate.EffectiveOn, ExchangeRateSource = transactionRate.Source, ExchangeRateSourceReference = transactionRate.SourceReference, ConcurrencyToken = Guid.NewGuid().ToString("N") };
         db.SalesInvoices.Add(invoice);
-        db.SalesInvoiceLines.AddRange(invoiceAmounts.Select((line, index) => new SalesInvoiceLine { Id = Guid.NewGuid(), SalesInvoiceId = invoice.Id, Sequence = index + 1, RevenueAccountId = line.Source.RevenueAccountId, ProjectJobId = line.Source.ProjectJobId, ProjectPhaseId = line.Source.ProjectPhaseId, ProjectCostCodeId = line.Source.ProjectCostCodeId, DepartmentId = line.Source.DepartmentId, ClassId = line.Source.ClassId, SalesOrderLineId = line.Source.Id, InventoryShipmentLineId = line.ShipmentLine.Id, InventoryItemId = line.Source.InventoryItemId, Description = line.Source.Description, Quantity = line.ShipmentLine.Quantity, UnitPrice = line.Source.UnitPrice, DiscountAmount = line.Discount, TaxAmount = line.Tax, LineTotal = line.Total, BaseTaxAmount = line.Tax, BaseLineTotal = line.Total }));
+        db.SalesInvoiceLines.AddRange(invoiceAmounts.Select((line, index) => new SalesInvoiceLine { Id = Guid.NewGuid(), SalesInvoiceId = invoice.Id, Sequence = index + 1, RevenueAccountId = line.Source.RevenueAccountId, ProjectJobId = line.Source.ProjectJobId, ProjectPhaseId = line.Source.ProjectPhaseId, ProjectCostCodeId = line.Source.ProjectCostCodeId, DepartmentId = line.Source.DepartmentId, ClassId = line.Source.ClassId, SalesOrderLineId = line.Source.Id, InventoryShipmentLineId = line.ShipmentLine.Id, InventoryItemId = line.Source.InventoryItemId, Description = line.Source.Description, Quantity = line.ShipmentLine.Quantity, UnitPrice = line.Source.UnitPrice, DiscountAmount = line.Discount, TaxAmount = line.Tax, LineTotal = line.Total, BaseTaxAmount = transactionRate!.ToBase(line.Tax), BaseLineTotal = transactionRate.ToBase(line.Net) + transactionRate.ToBase(line.Tax) }));
         foreach (var line in invoiceAmounts) line.Source.InvoicedQuantity += line.ShipmentLine.Quantity;
         shipment.SalesInvoiceId = invoice.Id;
         shipment.ConcurrencyToken = Guid.NewGuid().ToString("N");
         customer.OpenBalance += total;
         UpdateSalesOrderFulfillmentStatus(order, await db.SalesOrderLines.Where(line => line.SalesOrderId == order.Id).ToListAsync(cancellationToken));
-        AddSalesFulfillmentAudit(db, companyId, "inventory-shipment.invoiced", nameof(InventoryShipment), shipment.Id, new { shipment.ShipmentNumber, invoice.Id, invoice.InvoiceNumber, invoice.TotalAmount });
+        AddSalesFulfillmentAudit(db, companyId, "inventory-shipment.invoiced", nameof(InventoryShipment), shipment.Id, new { shipment.ShipmentNumber, invoice.Id, invoice.InvoiceNumber, invoice.TransactionCurrency, invoice.TransactionTotalAmount, invoice.TotalAmount, invoice.ExchangeRateId });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The shipment changed while it was being invoiced. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The shipment was invoiced concurrently or the invoice number already exists. Refresh and try again."); }
