@@ -1,0 +1,27 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace BrassLedger.Migrations.Sqlite.Migrations
+{
+    /// <inheritdoc />
+    public partial class AddPurchaseOrderTransactionCurrency : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AddColumn<string>(
+                name: "TransactionCurrency",
+                table: "PurchaseOrders",
+                type: "TEXT",
+                nullable: false,
+                defaultValue: "");
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            throw new NotSupportedException("Downgrade prohibited because it could delete purchase-order transaction currency and commercial terms. Restore a verified pre-upgrade backup instead.");
+        }
+    }
+}

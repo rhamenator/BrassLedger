@@ -7741,6 +7741,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("VendorId")
                         .HasColumnType("TEXT");
 

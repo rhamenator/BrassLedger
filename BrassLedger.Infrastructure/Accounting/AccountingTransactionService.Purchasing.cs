@@ -24,6 +24,9 @@ public sealed partial class AccountingTransactionService
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var baseCurrency = await db.Companies.Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        var currency = NormalizeTransactionCurrency(request.Currency, baseCurrency);
+        if (currency is null) return TransactionResult.Failure("Purchase-order currency must be a three-letter ISO-style code.");
         if (!await db.Vendors.AnyAsync(vendor => vendor.Id == request.VendorId && vendor.CompanyId == companyId, cancellationToken))
             return TransactionResult.Failure("Vendor not found in the active company.");
         var itemIds = requestedLines.Select(line => line.InventoryItemId).ToArray();
@@ -47,6 +50,12 @@ public sealed partial class AccountingTransactionService
             if (order.Status != "Draft") return TransactionResult.Failure("Only a draft purchase order can be edited.");
             if (!string.Equals(order.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))
                 return TransactionResult.Failure("The purchase order changed after it was opened. Refresh and review it again.");
+            if (order.PurchaseRequisitionId.HasValue && currency != baseCurrency)
+                return TransactionResult.Failure("A requisition-derived purchase order cannot reinterpret approved base-currency estimates as foreign amounts. Prepare a separate foreign purchase order.");
+            var storedCurrency = NormalizeTransactionCurrency(order.TransactionCurrency, baseCurrency);
+            if (storedCurrency is null) return TransactionResult.Failure("The purchase order has an invalid retained currency and cannot be edited.");
+            if (string.IsNullOrWhiteSpace(request.Currency)) currency = storedCurrency;
+            else if (currency != storedCurrency) return TransactionResult.Failure("The currency of an existing purchase order cannot be changed. Prepare a new order with the correct currency.");
             db.PurchaseOrderLines.RemoveRange(await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).ToListAsync(cancellationToken));
         }
         else
@@ -64,6 +73,7 @@ public sealed partial class AccountingTransactionService
 
         order.VendorId = request.VendorId;
         order.OrderNumber = number;
+        order.TransactionCurrency = currency;
         order.OrderedOn = request.OrderedOn;
         order.ExpectedOn = request.ExpectedOn;
         order.Notes = request.Notes?.Trim() ?? string.Empty;
@@ -85,7 +95,7 @@ public sealed partial class AccountingTransactionService
             UnitCost = RoundCurrency(line.UnitCost),
             LineTotal = RoundCurrency(RoundQuantity(line.Quantity) * RoundCurrency(line.UnitCost))
         }));
-        AddPurchasingAudit(db, companyId, "purchase-order.draft.saved", nameof(PurchaseOrder), order.Id, new { order.OrderNumber, order.VendorId, lineCount = requestedLines.Length, order.TotalAmount });
+        AddPurchasingAudit(db, companyId, "purchase-order.draft.saved", nameof(PurchaseOrder), order.Id, new { order.OrderNumber, order.VendorId, order.TransactionCurrency, lineCount = requestedLines.Length, order.TotalAmount });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The purchase order changed while it was being saved. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The purchase-order number or lines changed concurrently. Refresh and try again."); }
@@ -110,7 +120,7 @@ public sealed partial class AccountingTransactionService
         order.ApprovedByUserId = ResolveUserId();
         order.ApprovedAtUtc = DateTimeOffset.UtcNow;
         order.ConcurrencyToken = Guid.NewGuid().ToString("N");
-        AddPurchasingAudit(db, companyId, "purchase-order.approved", nameof(PurchaseOrder), order.Id, new { order.OrderNumber, order.TotalAmount });
+        AddPurchasingAudit(db, companyId, "purchase-order.approved", nameof(PurchaseOrder), order.Id, new { order.OrderNumber, order.TransactionCurrency, order.TotalAmount });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The purchase order changed while it was being approved. Refresh and try again."); }
         return TransactionResult.Success(order.Id);
@@ -131,6 +141,9 @@ public sealed partial class AccountingTransactionService
         if (order is null) return TransactionResult.Failure("Purchase order not found.");
         if (order.Status is not ("Approved" or "PartiallyReceived")) return TransactionResult.Failure("Only an approved or partially received purchase order can be received.");
         if (!string.Equals(order.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal)) return TransactionResult.Failure("The purchase order changed after it was opened. Refresh and review it again.");
+        var companyBaseCurrency = await db.Companies.Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        var orderCurrency = NormalizeTransactionCurrency(order.TransactionCurrency, companyBaseCurrency);
+        if (orderCurrency is null || orderCurrency != companyBaseCurrency) return TransactionResult.Failure("Foreign-currency purchase receipts require dated base-currency inventory valuation and vendor-bill matching; this workflow is not yet available.");
         if (request.ReceivedOn < order.OrderedOn) return TransactionResult.Failure("The receipt date cannot precede the order date.");
         var receiptNumber = request.ReceiptNumber.Trim();
         if (await db.InventoryReceipts.AnyAsync(receipt => receipt.CompanyId == companyId && receipt.ReceiptNumber == receiptNumber, cancellationToken)) return TransactionResult.Failure("Receipt number already exists.");

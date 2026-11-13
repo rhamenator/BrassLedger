@@ -7,7 +7,7 @@ BrassLedger supports SQLite and PostgreSQL through separate EF Core migration as
 Install the repository-compatible EF tool in a disposable location if it is not already available:
 
 ```bash
-dotnet tool install --tool-path /home/rich/temp/dotnet-tools dotnet-ef --version 8.0.30
+dotnet tool install --tool-path /home/rich/temp/dotnet-tools dotnet-ef --version 10.0.15
 ```
 
 After changing the domain model and `BrassLedgerDbContext`, generate the same semantic migration for both providers:
@@ -41,6 +41,8 @@ Review both generated migrations before committing. Confirm that they:
 Never edit `__EFMigrationsHistory` or record a migration that has not actually been applied. The only automatic history adoption is the fixed initial baseline used for databases that already passed the legacy compatibility bridge.
 
 `AddControlledPurchaseInvoiceMatching` is intentionally non-reversible. The older schema permits only one bill per receipt and cannot preserve partial-match, variance, or supplier-return provenance. Restore a verified backup taken before the upgrade instead of attempting to migrate a used database backward across that boundary.
+
+`AddPurchaseOrderTransactionCurrency` is also non-reversible. Dropping its column would discard the currency of foreign commercial commitments. Restore a verified pre-upgrade backup instead.
 
 `ScopeVendorBillNumbersByVendor` is also intentionally non-reversible after use. Its predecessor required bill numbers to be unique across an entire company; the corrected model allows different vendors to issue the same number. Restoring the former constraint could delete, misassociate, or reject valid bills, so a pre-upgrade backup is required instead.
 

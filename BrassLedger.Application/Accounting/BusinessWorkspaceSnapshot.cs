@@ -277,7 +277,8 @@ public sealed record PurchaseOrderSnapshot(
     DateOnly? ExpectedOn = null,
     string Notes = "",
     string ConcurrencyToken = "",
-    IReadOnlyList<PurchaseOrderLineSnapshot>? Lines = null);
+    IReadOnlyList<PurchaseOrderLineSnapshot>? Lines = null,
+    string TransactionCurrency = "");
 
 public sealed record PurchaseOrderLineSnapshot(Guid Id, int Sequence, Guid InventoryItemId, string Sku, string Description, decimal OrderedQuantity, decimal UnitCost, decimal ReceivedQuantity, decimal InvoicedQuantity, decimal LineTotal, decimal ReturnedQuantity = 0m, decimal CreditedQuantity = 0m, Guid? ProjectJobId = null, Guid? ProjectPhaseId = null, Guid? ProjectCostCodeId = null, Guid? DepartmentId = null, Guid? ClassId = null);
 public sealed record InventoryReceiptSnapshot(Guid Id, Guid PurchaseOrderId, string PurchaseOrderNumber, string ReceiptNumber, DateOnly ReceivedOn, string Status, decimal TotalAmount, Guid? VendorBillId, string ConcurrencyToken, IReadOnlyList<InventoryReceiptLineSnapshot> Lines, Guid JournalEntryId, Guid? ReversalJournalEntryId, Guid? WarehouseId = null, Guid? BinId = null, string Location = "", IReadOnlyList<MatchedVendorBillSnapshot>? VendorBills = null);

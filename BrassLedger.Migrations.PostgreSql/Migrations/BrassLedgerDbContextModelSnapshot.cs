@@ -7748,6 +7748,10 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<Guid>("VendorId")
                         .HasColumnType("uuid");
 

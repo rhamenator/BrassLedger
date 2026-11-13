@@ -392,7 +392,8 @@ public sealed class BusinessWorkspaceService(
                     x.ExpectedOn,
                     x.Notes,
                     x.ConcurrencyToken,
-                    purchaseOrderLineLookup[x.Id].Select(line => new PurchaseOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.UnitCost, line.ReceivedQuantity, line.InvoicedQuantity, line.LineTotal, line.ReturnedQuantity, line.CreditedQuantity, line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, line.DepartmentId, line.ClassId)).ToArray())).ToArray(),
+                    purchaseOrderLineLookup[x.Id].Select(line => new PurchaseOrderLineSnapshot(line.Id, line.Sequence, line.InventoryItemId, inventoryItemById.GetValueOrDefault(line.InventoryItemId)?.Sku ?? "Unavailable", line.Description, line.OrderedQuantity, line.UnitCost, line.ReceivedQuantity, line.InvoicedQuantity, line.LineTotal, line.ReturnedQuantity, line.CreditedQuantity, line.ProjectJobId, line.ProjectPhaseId, line.ProjectCostCodeId, line.DepartmentId, line.ClassId)).ToArray(),
+                    string.IsNullOrWhiteSpace(x.TransactionCurrency) ? company.BaseCurrency : x.TransactionCurrency)).ToArray(),
                 InventoryReceipts: inventoryReceipts.Select(receipt =>
                 {
                     var matchedBills = vendorBillsByReceiptId[receipt.Id].OrderByDescending(bill => bill.BillDate).ToArray();
