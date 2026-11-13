@@ -3746,12 +3746,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
-        Guid companyId; Guid customerId; Guid itemId; var rateId = Guid.NewGuid(); var futureRateId = Guid.NewGuid(); var wrongRateId = Guid.NewGuid();
+        Guid companyId; Guid customerId; Guid itemId; decimal startingQuantity; decimal startingCustomerBalance; var rateId = Guid.NewGuid(); var futureRateId = Guid.NewGuid(); var wrongRateId = Guid.NewGuid();
         await using (var db = await factory.CreateDbContextAsync())
         {
             companyId = await db.Companies.Select(company => company.Id).SingleAsync();
             customerId = await db.Customers.Select(customer => customer.Id).FirstAsync();
             itemId = await db.InventoryItems.Where(item => item.Sku == "FG-200").Select(item => item.Id).SingleAsync();
+            startingQuantity = await db.InventoryItems.Where(item => item.Id == itemId).Select(item => item.QuantityOnHand).SingleAsync();
+            startingCustomerBalance = await db.Customers.Where(customer => customer.Id == customerId).Select(customer => customer.OpenBalance).SingleAsync();
             db.CurrencyExchangeRates.AddRange(
                 new CurrencyExchangeRate { Id = rateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 8, 1), Source = "Sales shipment test", SourceReference = "https://example.test/rates/cad-usd" },
                 new CurrencyExchangeRate { Id = futureRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 9, 1), Source = "Future rate", SourceReference = "https://example.test/rates/future" },
@@ -3816,6 +3818,24 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var credit = await db.CustomerReturnCredits.SingleAsync(candidate => candidate.Id == creditedReturn.Id);
             Assert.Equal("CAD", credit.TransactionCurrency); Assert.Equal(51m, credit.TransactionTotalAmount); Assert.Equal(38.25m, credit.TotalAmount);
         }
+        string creditToken;
+        await using (var db = await factory.CreateDbContextAsync()) creditToken = await db.CustomerReturnCredits.Where(credit => credit.Id == creditedReturn.Id).Select(credit => credit.ConcurrencyToken).SingleAsync();
+        var prematureVoid = await transactions.VoidInvoiceAsync(new(posted.Id!.Value, new DateOnly(2026, 8, 26), "Invoice has an active return credit"));
+        Assert.False(prematureVoid.Succeeded);
+        var reverseCredit = await transactions.ReverseCustomerReturnCreditAsync(new(creditedReturn.Id!.Value, new DateOnly(2026, 8, 26), "Return credit cancelled", creditToken)); Assert.True(reverseCredit.Succeeded, reverseCredit.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) receiptToken = await db.CustomerReturnReceipts.Where(receipt => receipt.Id == receivedReturn.Id).Select(receipt => receipt.ConcurrencyToken).SingleAsync();
+        var reverseReturnReceipt = await transactions.ReverseCustomerReturnReceiptAsync(new(receivedReturn.Id.Value, new DateOnly(2026, 8, 26), "Goods returned to customer", receiptToken)); Assert.True(reverseReturnReceipt.Succeeded, reverseReturnReceipt.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) authorizationToken = await db.CustomerReturnAuthorizations.Where(authorization => authorization.Id == authorizedReturn.Id).Select(authorization => authorization.ConcurrencyToken).SingleAsync();
+        var cancelReturn = await transactions.CancelCustomerReturnAsync(new(authorizedReturn.Id!.Value, "Return cancelled", authorizationToken)); Assert.True(cancelReturn.Succeeded, cancelReturn.ErrorMessage);
+        var voidedInvoice = await transactions.VoidInvoiceAsync(new(posted.Id.Value, new DateOnly(2026, 8, 27), "Customer invoice cancelled")); Assert.True(voidedInvoice.Succeeded, voidedInvoice.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync()) shipmentToken = await db.InventoryShipments.Where(shipment => shipment.Id == shipped.Id).Select(shipment => shipment.ConcurrencyToken).SingleAsync();
+        var blockedShipmentReversal = await transactions.ReverseInventoryShipmentAsync(new(shipped.Id.Value, new DateOnly(2026, 8, 28), "Shipment cancelled", shipmentToken));
+        Assert.False(blockedShipmentReversal.Succeeded); Assert.Contains("valuation", blockedShipmentReversal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using var after = await factory.CreateDbContextAsync();
+        Assert.Equal(startingQuantity - 2m, await after.InventoryItems.Where(item => item.Id == itemId).Select(item => item.QuantityOnHand).SingleAsync());
+        Assert.Equal(startingCustomerBalance, await after.Customers.Where(customer => customer.Id == customerId).Select(customer => customer.OpenBalance).SingleAsync());
+        var finalInvoice = await after.SalesInvoices.SingleAsync(invoice => invoice.Id == posted.Id); Assert.Equal("Voided", finalInvoice.Status); Assert.Equal(0m, finalInvoice.BalanceDue); Assert.Equal(0m, finalInvoice.TransactionBalanceDue);
+        Assert.Equal("Posted", await after.InventoryShipments.Where(shipment => shipment.Id == shipped.Id).Select(shipment => shipment.Status).SingleAsync());
     }
 
     [Fact]
