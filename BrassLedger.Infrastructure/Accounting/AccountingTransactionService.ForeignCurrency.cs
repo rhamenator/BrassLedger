@@ -17,6 +17,8 @@ public sealed partial class AccountingTransactionService
     {
         public bool IsForeign => TransactionCurrency != BaseCurrency;
         public decimal ToBase(decimal amount) => RoundCurrency(amount * FactorToBase);
+        /// <summary>Translates a base-currency amount into this transaction currency (inverse of <see cref="ToBase"/>).</summary>
+        public decimal FromBase(decimal baseAmount) => RoundCurrency(baseAmount / FactorToBase);
     }
 
     private async Task<(TransactionRate? Rate, string? Error)> ResolveTransactionRateAsync(

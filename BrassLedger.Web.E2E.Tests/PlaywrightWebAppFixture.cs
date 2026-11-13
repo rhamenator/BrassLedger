@@ -157,6 +157,16 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
+    public async Task<string> GetInvoiceWorkflowPayloadAsync(string invoiceNumber)
+    {
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT \"PayloadJson\" FROM \"SubledgerDocumentWorkflows\" WHERE \"DocumentNumber\" = $invoiceNumber AND \"DocumentType\" = 'Invoice';";
+        command.Parameters.AddWithValue("$invoiceNumber", invoiceNumber);
+        return (string)(await command.ExecuteScalarAsync() ?? throw new InvalidOperationException($"Invoice workflow {invoiceNumber} was not found."));
+    }
+
     public async Task CreateConsolidationAdministratorAsync()
     {
         await CreateQuickBooksAdministratorAsync();

@@ -115,9 +115,9 @@ public sealed class ReceivablesPage
         await Assertions.Expect(_session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Customer payment recorded.");
     }
 
-    public async Task RecordAndReverseCreditMemoAsync(string adjustmentReference)
+    public async Task RecordAndReverseCreditMemoAsync(string invoiceNumber, string adjustmentReference)
     {
-        await _session.Page.GetByLabel("Adjustment invoice").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+        await SelectOptionContainingAsync("Adjustment invoice", invoiceNumber);
         await _session.Page.GetByLabel("Customer adjustment amount").FillAsync("5");
         await _session.Page.GetByLabel("Customer adjustment reference").FillAsync(adjustmentReference);
         await _session.Page.GetByLabel("Customer adjustment reason").FillAsync("E2E price allowance");

@@ -18,7 +18,7 @@ public sealed class ProjectChangeOrderWorkflowTests(PlaywrightWebAppFixture fixt
             await preparation.GotoAsync("/projects");
             await preparation.WaitForHeadingAsync("Control project scope, cost, billing, and revenue.");
             Assert.Empty(await preparation.Page.Locator("input[aria-label='Project number']").AllAsync());
-            await preparation.Page.Locator("select[aria-label='Change order project']").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+            await preparation.Page.Locator("select[aria-label='Change order project']").SelectOptionAsync(new SelectOptionValue { Label = "JOB-5007 — Red Mesa Expansion" });
             await preparation.Page.Locator("input[aria-label='Change order number']").FillAsync(number);
             await preparation.Page.Locator("input[aria-label='Change order description']").FillAsync("Additional field installation");
             await preparation.Page.Locator("input[aria-label='Change order reason']").FillAsync("Customer approved expanded field scope");

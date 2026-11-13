@@ -551,7 +551,6 @@ public sealed partial class AccountingTransactionService(
         if (customer is null) return TransactionResult.Failure("Customer not found.");
         var (transactionRate, transactionRateError) = await ResolveTransactionRateAsync(db, companyId, request.Currency, request.ExchangeRateId, request.InvoiceDate, cancellationToken, allowPendingForeignRate);
         if (transactionRateError is not null) return TransactionResult.Failure(transactionRateError);
-        if (projectBilling is not null && transactionRate!.IsForeign) return TransactionResult.Failure("Project-billing invoices currently require the company base currency; prepare an ordinary foreign-currency invoice instead.");
         if (await db.SalesInvoices.AnyAsync(x => x.CompanyId == companyId && x.InvoiceNumber == request.InvoiceNumber.Trim(), cancellationToken)) return TransactionResult.Failure("Invoice number already exists.");
         var revenueNumbers = (requestedLines.Length == 0 ? [request.RevenueAccountNumber] : requestedLines.Select(line => line.RevenueAccountNumber)).Select(number => number?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (revenueNumbers.Any(string.IsNullOrWhiteSpace)) return TransactionResult.Failure("Every invoice line requires a revenue account.");
@@ -575,19 +574,27 @@ public sealed partial class AccountingTransactionService(
         var taxAmount = requestedLines.Length == 0 ? transactionRate!.ToBase(transactionTaxAmount) : lineAmounts.Sum(line => line.BaseTaxAmount);
         var total = subtotal + taxAmount;
         if (transactionTotal <= 0 || total <= 0) return TransactionResult.Failure("Invoice total must be greater than zero in both transaction and base currency.");
-        var projectPayloadRetainage = projectBilling is null ? 0m : lineAmounts.Sum(line => RoundCurrency(line.Request.DiscountAmount));
+        var projectPayloadRetainage = projectBilling is null ? 0m : lineAmounts.Sum(line => transactionRate!.ToBase(RoundCurrency(line.Request.DiscountAmount)));
         var projectPayloadGross = subtotal + projectPayloadRetainage;
         if (projectBilling is not null
             && (projectBilling.CustomerId != customer.Id || projectBilling.InvoiceNumber != request.InvoiceNumber.Trim() || projectBilling.InvoiceAmount != subtotal || taxAmount != 0m
                 || (projectBilling.BillingBasis == "RetainageRelease"
-                    ? projectBilling.RetainageAmount != 0m || projectPayloadRetainage != 0m || projectBilling.GrossAmount != subtotal
+                    ? projectBilling.RetainageAmount != 0m || projectPayloadRetainage != 0m || projectBilling.GrossAmount <= 0m
                     : projectBilling.RetainageAmount != projectPayloadRetainage || projectBilling.GrossAmount != projectPayloadGross)))
             return TransactionResult.Failure("The project billing proposal no longer reconciles to its controlled invoice payload.");
+        if (projectBilling?.BillingBasis == "RetainageRelease")
+        {
+            var source = await db.ProjectBillingProposals.SingleOrDefaultAsync(x => x.Id == projectBilling.RetainageReleaseOfProposalId && x.CompanyId == companyId && x.Status == "Posted", cancellationToken);
+            if (source is null) return TransactionResult.Failure("The retained source billing is no longer posted.");
+            var sourceWorkflow = await db.SubledgerDocumentWorkflows.SingleAsync(x => x.Id == source.SubledgerDocumentWorkflowId && x.CompanyId == companyId, cancellationToken);
+            var sourceCurrency = await db.SalesInvoices.Where(x => x.Id == sourceWorkflow.PostedDocumentId && x.CompanyId == companyId).Select(x => x.TransactionCurrency).SingleOrDefaultAsync(cancellationToken);
+            if (!string.Equals(sourceCurrency, transactionRate!.TransactionCurrency, StringComparison.OrdinalIgnoreCase)) return TransactionResult.Failure("Retainage release must use the original invoice currency.");
+        }
         if (customer.CreditLimit > 0)
         {
             var existingRetainageExposure = await GetOutstandingCustomerRetainageAsync(db, companyId, customer.Id, cancellationToken);
             var newRetainageExposure = projectBilling is not null && projectBilling.BillingBasis != "RetainageRelease" ? projectBilling.RetainageAmount : 0m;
-            var releasedRetainageExposure = projectBilling?.BillingBasis == "RetainageRelease" ? subtotal : 0m;
+            var releasedRetainageExposure = projectBilling?.BillingBasis == "RetainageRelease" ? projectBilling.GrossAmount : 0m;
             if (customer.OpenBalance + existingRetainageExposure + total + newRetainageExposure - releasedRetainageExposure > customer.CreditLimit)
                 return TransactionResult.Failure("Posting this invoice would exceed the customer's credit limit, including outstanding retainage.");
         }
@@ -597,7 +604,11 @@ public sealed partial class AccountingTransactionService(
         };
         if (projectBilling?.BillingBasis == "RetainageRelease")
         {
-            lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.RetainageReceivable), 0m, subtotal, "Release project retainage", projectBilling.ProjectJobId));
+            var carryingAmount = projectBilling.GrossAmount;
+            lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.RetainageReceivable), 0m, carryingAmount, "Release project retainage", projectBilling.ProjectJobId));
+            var realizedGainLoss = subtotal - carryingAmount;
+            if (realizedGainLoss > 0m) lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeGain), 0m, realizedGainLoss, "Realized gain on project retainage release", projectBilling.ProjectJobId));
+            if (realizedGainLoss < 0m) lines.Add(new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.ForeignExchangeLoss), -realizedGainLoss, 0m, "Realized loss on project retainage release", projectBilling.ProjectJobId));
         }
         else
         {
@@ -634,7 +645,7 @@ public sealed partial class AccountingTransactionService(
         var sourceIds = sources.Select(source => source.Id).ToArray();
         var releases = await db.ProjectBillingProposals.AsNoTracking()
             .Where(proposal => proposal.CompanyId == companyId && proposal.Status == "Posted" && proposal.RetainageReleaseOfProposalId.HasValue && sourceIds.Contains(proposal.RetainageReleaseOfProposalId.Value))
-            .Select(proposal => proposal.InvoiceAmount)
+            .Select(proposal => proposal.GrossAmount)
             .ToListAsync(cancellationToken);
         return sources.Sum(source => source.RetainageAmount) - releases.Sum();
     }

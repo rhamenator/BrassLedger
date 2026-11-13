@@ -150,8 +150,8 @@ public sealed class AccountingAccountRoleService(
         var sources = await db.ProjectBillingProposals.AsNoTracking().Where(proposal => proposal.CompanyId == companyId && proposal.Status == "Posted" && proposal.BillingBasis != "RetainageRelease" && proposal.RetainageAmount > 0m).Select(proposal => new { proposal.Id, proposal.RetainageAmount }).ToListAsync(cancellationToken);
         if (sources.Count == 0) return false;
         var sourceIds = sources.Select(source => source.Id).ToArray();
-        var releases = await db.ProjectBillingProposals.AsNoTracking().Where(proposal => proposal.CompanyId == companyId && proposal.Status == "Posted" && proposal.RetainageReleaseOfProposalId.HasValue && sourceIds.Contains(proposal.RetainageReleaseOfProposalId.Value)).Select(proposal => new { SourceId = proposal.RetainageReleaseOfProposalId!.Value, proposal.InvoiceAmount }).ToListAsync(cancellationToken);
-        return sources.Any(source => source.RetainageAmount - releases.Where(release => release.SourceId == source.Id).Sum(release => release.InvoiceAmount) != 0m);
+        var releases = await db.ProjectBillingProposals.AsNoTracking().Where(proposal => proposal.CompanyId == companyId && proposal.Status == "Posted" && proposal.RetainageReleaseOfProposalId.HasValue && sourceIds.Contains(proposal.RetainageReleaseOfProposalId.Value)).Select(proposal => new { SourceId = proposal.RetainageReleaseOfProposalId!.Value, proposal.GrossAmount }).ToListAsync(cancellationToken);
+        return sources.Any(source => source.RetainageAmount - releases.Where(release => release.SourceId == source.Id).Sum(release => release.GrossAmount) != 0m);
     }
 
     private Actor? CurrentActor()
