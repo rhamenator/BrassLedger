@@ -42,7 +42,7 @@ public sealed partial class QuickBooksOnlineConnectionService(
 
     public async Task<QuickBooksAuthorizationStartResult> BeginAuthorizationAsync(BeginQuickBooksAuthorizationRequest request, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
+        var actor = await CurrentActorAsync(cancellationToken);
         if (actor is null || !CanManageConnections(actor.Principal))
             return QuickBooksAuthorizationStartResult.Failure("You are not authorized to manage accounting connections.");
         if (!_options.Enabled)
@@ -133,7 +133,7 @@ public sealed partial class QuickBooksOnlineConnectionService(
 
     public async Task<QuickBooksAuthorizationCompletionResult> CompleteAuthorizationAsync(CompleteQuickBooksAuthorizationRequest request, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
+        var actor = await CurrentActorAsync(cancellationToken);
         if (actor is null || !CanManageConnections(actor.Principal))
             return QuickBooksAuthorizationCompletionResult.Failure("Sign in as the same authorized operator who started the QuickBooks connection.");
         if (!_options.Enabled)
@@ -342,7 +342,7 @@ public sealed partial class QuickBooksOnlineConnectionService(
 
     public async Task<TransactionResult> ValidateConnectionAsync(Guid connectionId, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
+        var actor = await CurrentActorAsync(cancellationToken);
         if (actor is null || !CanManageConnections(actor.Principal)) return TransactionResult.Failure("You are not authorized to validate accounting connections.");
         var loaded = await LoadConnectionAsync(actor.CompanyId, connectionId, cancellationToken);
         if (loaded.Connection is null || loaded.Credentials is null) return TransactionResult.Failure(loaded.ErrorMessage);
@@ -422,7 +422,7 @@ public sealed partial class QuickBooksOnlineConnectionService(
 
     public async Task<TransactionResult> RefreshConnectionAsync(Guid connectionId, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
+        var actor = await CurrentActorAsync(cancellationToken);
         if (actor is null || !CanManageConnections(actor.Principal)) return TransactionResult.Failure("You are not authorized to refresh accounting connections.");
         var operationLock = CredentialOperationLocks.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
         await operationLock.WaitAsync(cancellationToken);
@@ -430,6 +430,9 @@ public sealed partial class QuickBooksOnlineConnectionService(
         var leaseCompleted = false;
         try
         {
+            actor = await CurrentActorAsync(cancellationToken);
+            if (actor is null || !CanManageConnections(actor.Principal))
+                return TransactionResult.Failure("You are not authorized to refresh accounting connections.");
             var lease = await TryAcquireCredentialOperationLeaseAsync(
                 actor,
                 connectionId,
@@ -517,7 +520,7 @@ public sealed partial class QuickBooksOnlineConnectionService(
         }
         finally
         {
-            if (leaseId is not null && !leaseCompleted)
+            if (leaseId is not null && !leaseCompleted && actor is not null)
                 await CompleteCredentialOperationLeaseAsync(actor, connectionId, leaseId, null, "integration.credential_operation_released", new { provider = ProviderCode, operation = "Refresh", completed = false }, CancellationToken.None);
             operationLock.Release();
         }
@@ -525,7 +528,7 @@ public sealed partial class QuickBooksOnlineConnectionService(
 
     public async Task<TransactionResult> DisconnectAsync(Guid connectionId, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
+        var actor = await CurrentActorAsync(cancellationToken);
         if (actor is null || !CanManageConnections(actor.Principal)) return TransactionResult.Failure("You are not authorized to disconnect accounting connections.");
         var operationLock = CredentialOperationLocks.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
         await operationLock.WaitAsync(cancellationToken);
@@ -533,6 +536,9 @@ public sealed partial class QuickBooksOnlineConnectionService(
         var leaseCompleted = false;
         try
         {
+            actor = await CurrentActorAsync(cancellationToken);
+            if (actor is null || !CanManageConnections(actor.Principal))
+                return TransactionResult.Failure("You are not authorized to disconnect accounting connections.");
             var lease = await TryAcquireCredentialOperationLeaseAsync(
                 actor,
                 connectionId,
@@ -592,7 +598,7 @@ public sealed partial class QuickBooksOnlineConnectionService(
         }
         finally
         {
-            if (leaseId is not null && !leaseCompleted)
+            if (leaseId is not null && !leaseCompleted && actor is not null)
                 await CompleteCredentialOperationLeaseAsync(actor, connectionId, leaseId, null, "integration.credential_operation_released", new { provider = ProviderCode, operation = "Disconnect", completed = false }, CancellationToken.None);
             operationLock.Release();
         }
@@ -789,14 +795,45 @@ public sealed partial class QuickBooksOnlineConnectionService(
         });
     }
 
-    private Actor? CurrentActor()
+    private async Task<Actor?> CurrentActorAsync(CancellationToken cancellationToken)
     {
         var principal = httpContextAccessor.HttpContext?.User;
         if (principal?.Identity?.IsAuthenticated != true
+            || principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
             || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId)
+            || string.IsNullOrWhiteSpace(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType))
             || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId))
             return null;
-        return new Actor(userId, companyId, principal, timeProvider.GetUtcNow());
+
+        var now = timeProvider.GetUtcNow();
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(item => item.Id == userId && item.IsActive, cancellationToken);
+        var session = await db.UserSessions.AsNoTracking().SingleOrDefaultAsync(
+            item => item.Id == sessionId && item.UserId == userId, cancellationToken);
+        var membership = await db.CompanyMemberships.AsNoTracking().SingleOrDefaultAsync(
+            item => item.UserId == userId && item.CompanyId == companyId && item.IsActive, cancellationToken);
+        var claimedStamp = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType);
+        var authenticationMethod = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType);
+        if (user is null || user.LockoutEndUtc > now || membership is null
+            || session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= now
+            || !string.Equals(user.SecurityStamp, claimedStamp, StringComparison.Ordinal)
+            || !string.Equals(session.SecurityStamp, claimedStamp, StringComparison.Ordinal)
+            || !string.Equals(session.AuthenticationMethod,
+                authenticationMethod == "mfa" ? "Password + MFA" : authenticationMethod == "pwd" ? "Password" : null,
+                StringComparison.Ordinal)
+            || !string.Equals(membership.Role, principal.FindFirstValue(ClaimTypes.Role), StringComparison.Ordinal)
+            || !await db.Companies.AsNoTracking().AnyAsync(company => company.Id == companyId, cancellationToken)) return null;
+        var role = await db.AccessRoles.AsNoTracking().SingleOrDefaultAsync(
+            item => item.CompanyId == companyId && item.Name == membership.Role && item.IsActive, cancellationToken);
+        if (role is null
+            || !(BrassLedgerRoleTemplates.IsMandatoryMfaRole(role.Name)
+                || role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Contains(BrassLedgerPermissions.UserManage, StringComparer.OrdinalIgnoreCase))
+            || ((role.RequiresMfa || BrassLedgerRoleTemplates.IsMandatoryMfaRole(role.Name)) && !user.MfaEnabled)
+            || (user.MfaEnabled && !string.Equals(authenticationMethod, "mfa", StringComparison.Ordinal))) return null;
+
+        return new Actor(userId, companyId, principal, now);
     }
 
     private static bool CanManageConnections(ClaimsPrincipal principal)

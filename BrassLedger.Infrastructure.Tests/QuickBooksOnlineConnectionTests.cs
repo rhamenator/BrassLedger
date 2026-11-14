@@ -131,6 +131,81 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
     }
 
     [Fact]
+    public async Task OAuthManagement_RejectsRevokedSessionAndSecurityStampDrift()
+    {
+        var provider = new FakeQuickBooksOnlineClient();
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+        var started = await service.BeginAuthorizationAsync(new(null, "Active session books", "Sandbox"));
+        Assert.True(started.Succeeded, started.ErrorMessage);
+        var state = QueryHelpers.ParseQuery(new Uri(started.AuthorizationUrl!).Query)["state"].ToString();
+
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var session = await db.UserSessions.SingleAsync(item => item.Id == actor.SessionId);
+            session.RevokedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        Assert.False((await service.BeginAuthorizationAsync(new(null, "Revoked session books", "Sandbox"))).Succeeded);
+        Assert.False((await service.CompleteAuthorizationAsync(new(state, "unused-code", "123456789", null, null))).Succeeded);
+        Assert.Contains("authorized", (await service.ValidateConnectionAsync(Guid.NewGuid())).ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("authorized", (await service.RefreshConnectionAsync(Guid.NewGuid())).ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("authorized", (await service.DisconnectAsync(Guid.NewGuid())).ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, provider.ExchangeCodeCount);
+
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "quickbooks-test");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var issued = await scope.ServiceProvider.GetRequiredService<IUserSessionService>().IssueAsync(signedIn.User!, "127.0.0.1", "quickbooks-test");
+        SetContext(scope.ServiceProvider, (issued.UserId, issued.CompanyId, issued.SessionId!.Value, issued.SecurityStamp), issued.CompanyId);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == issued.UserId);
+            user.SecurityStamp = Guid.NewGuid().ToString("N");
+            await db.SaveChangesAsync();
+        }
+        Assert.False((await service.BeginAuthorizationAsync(new(null, "Stale stamp books", "Sandbox"))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Single(await db.OAuthAuthorizationAttempts.ToListAsync());
+    }
+
+    [Fact]
+    public async Task OAuthManagement_EnforcesAdministratorMfaDespiteCorruptedRoleFlag()
+    {
+        var provider = new FakeQuickBooksOnlineClient();
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == actor.UserId);
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == user.Id && item.CompanyId == user.CompanyId);
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == user.CompanyId && item.Name == "Administrator");
+            user.Role = membership.Role = "Administrator";
+            role.RequiresMfa = false;
+            await db.SaveChangesAsync();
+        }
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var adminSignIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "quickbooks-test");
+        Assert.Equal(AuthenticationOutcome.Succeeded, adminSignIn.Outcome);
+        Assert.True(adminSignIn.User!.MfaEnrollmentRequired);
+        var issued = await scope.ServiceProvider.GetRequiredService<IUserSessionService>().IssueAsync(adminSignIn.User, "127.0.0.1", "quickbooks-test");
+        // Simulate a stale circuit principal that omits the enrollment claim.
+        SetContext(scope.ServiceProvider, (issued.UserId, issued.CompanyId, issued.SessionId!.Value, issued.SecurityStamp), issued.CompanyId, "Administrator");
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+        Assert.False((await service.BeginAuthorizationAsync(new(null, "MFA bypass books", "Sandbox"))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Empty(await db.OAuthAuthorizationAttempts.ToListAsync());
+    }
+
+    [Fact]
     public async Task CredentialOperationLease_BlocksConcurrentProviderCallsRecoversExpiryAndReleasesAfterFailure()
     {
         var provider = new FakeQuickBooksOnlineClient();
@@ -785,7 +860,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         return completion.ConnectionId!.Value;
     }
 
-    private static void SetContext(IServiceProvider services, (Guid UserId, Guid CompanyId, Guid SessionId, string SecurityStamp) actor, Guid companyId)
+    private static void SetContext(IServiceProvider services, (Guid UserId, Guid CompanyId, Guid SessionId, string SecurityStamp) actor, Guid companyId, string role = "Controller")
     {
         services.GetRequiredService<IHttpContextAccessor>().HttpContext = new DefaultHttpContext
         {
@@ -800,7 +875,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
                 new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.LedgerManage),
                 new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage),
                 new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage),
-                new Claim(ClaimTypes.Role, "Controller")
+                new Claim(ClaimTypes.Role, role)
             ], "test"))
         };
     }
