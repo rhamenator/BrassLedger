@@ -217,12 +217,20 @@ public sealed class SecurityAdministrationService(
     {
         if (!CanManage(BrassLedgerPermissions.UserManage)) return SecurityOperationResult.Failure("You are not authorized to manage operator accounts.");
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        Guid companyId;
-        try { companyId = await ResolveCompanyIdAsync(dbContext, BrassLedgerPermissions.UserManage, cancellationToken); }
+        SecurityAuthority authority;
+        try { authority = await ResolveAuthorityAsync(dbContext, cancellationToken); }
         catch (UnauthorizedAccessException) { return SecurityOperationResult.Failure("Current operator-management authority is required."); }
+        if (!authority.CanManageUsers) return SecurityOperationResult.Failure("Current operator-management authority is required.");
+        var targetRole = string.IsNullOrWhiteSpace(request.RoleName) ? null : await dbContext.AccessRoles.AsNoTracking().SingleOrDefaultAsync(
+            role => role.CompanyId == authority.CompanyId && role.IsActive && role.Name == request.RoleName.Trim(), cancellationToken);
+        if (targetRole is null) return SecurityOperationResult.Failure("Select a valid role.");
+        if (!authority.IsSystemAdministrator &&
+            (targetRole.Name is "Administrator" or "Owner/CEO"
+                || ParsePermissions(targetRole.Permissions).Except(authority.Permissions, StringComparer.OrdinalIgnoreCase).Any()))
+            return SecurityOperationResult.Failure("Only a system administrator can invite an operator to a role with privileges beyond their own.");
         var httpContext = httpContextAccessor.HttpContext;
         var result = await accountActionService.IssueInvitationAsync(new AccountInvitationRequest(
-            companyId,
+            authority.CompanyId,
             CurrentUserId(),
             request.UserName,
             request.DisplayName,
@@ -553,10 +561,12 @@ public sealed class SecurityAdministrationService(
             (isSystemAdministrator || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage))
                 && (isSystemAdministrator || permissions.Contains(BrassLedgerPermissions.RoleManage, StringComparer.OrdinalIgnoreCase)),
             (isSystemAdministrator || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage))
-                && (isSystemAdministrator || permissions.Contains(BrassLedgerPermissions.UserManage, StringComparer.OrdinalIgnoreCase)));
+                && (isSystemAdministrator || permissions.Contains(BrassLedgerPermissions.UserManage, StringComparer.OrdinalIgnoreCase)),
+            isSystemAdministrator,
+            permissions);
     }
 
-    private readonly record struct SecurityAuthority(Guid CompanyId, bool CanManageRoles, bool CanManageUsers);
+    private readonly record struct SecurityAuthority(Guid CompanyId, bool CanManageRoles, bool CanManageUsers, bool IsSystemAdministrator, IReadOnlyList<string> Permissions);
 
     private bool CanManage(string permission)
     {
