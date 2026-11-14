@@ -655,6 +655,15 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         Assert.False((await sync.ImportAsync(new(connectionId, "accounts", true))).Succeeded);
         Assert.False((await sync.PreviewMappingsAsync(connectionId, "accounts")).Succeeded);
         Assert.Equal(baselineQueries, provider.QueryCount);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.Users.SingleAsync(item => item.Id == actor.UserId)).SecurityStamp = Guid.NewGuid().ToString("N");
+            await db.SaveChangesAsync();
+        }
+        Assert.False((await sync.ImportAsync(new(connectionId, "accounts", true))).Succeeded);
+        Assert.Empty(await sync.GetRecentRunsAsync(connectionId));
+        Assert.Equal(baselineQueries, provider.QueryCount);
     }
 
     [Fact]
