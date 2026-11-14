@@ -185,7 +185,7 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
         && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && Path.GetFileName(name) == name;
     private static bool IsValidDataProtectionFileName(string? name) => IsValidFileName(name) && name!.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
         && ((name.Length == 44 && name.StartsWith("key-", StringComparison.OrdinalIgnoreCase) && Guid.TryParseExact(name.AsSpan(4, 36), "D", out _))
-            || (name.Length == 51 && name.StartsWith("revocation-", StringComparison.OrdinalIgnoreCase) && Guid.TryParseExact(name.AsSpan(11, 36), "D", out _)));
+            || (name.Length > 15 && name.StartsWith("revocation-", StringComparison.OrdinalIgnoreCase)));
     private static bool IsValidDataProtectionFile(string path, string name, bool allowSourceLink = false)
     {
         if (!IsValidDataProtectionFileName(name) || (!allowSourceLink && IsLink(path))) return false;

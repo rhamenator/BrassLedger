@@ -778,6 +778,12 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(withRevocation.Succeeded, withRevocation.ErrorMessage);
         Assert.True((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
         File.Delete(revocationPath);
+        var datedRevocationPath = Path.Combine(paths.KeysDirectory, "revocation-20261114T174500Z.xml");
+        await File.WriteAllTextAsync(datedRevocationPath, "<revocation version='1'><revocationDate>2026-11-14T17:45:00Z</revocationDate><key id='*' /></revocation>");
+        var withDatedRevocation = await backupService.CreateBackupAsync();
+        Assert.True(withDatedRevocation.Succeeded, withDatedRevocation.ErrorMessage);
+        Assert.True((await backupService.VerifyBackupAsync(withDatedRevocation.BackupId!)).Succeeded);
+        File.Delete(datedRevocationPath);
 
         var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
         var subsidiary = await companies.CreateCompanyAsync(new("Backup scope subsidiary", "Backup scope subsidiary", "BACKUP-TEST", "USD", 1));
