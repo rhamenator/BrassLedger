@@ -2,6 +2,9 @@ namespace BrassLedger.Infrastructure.Auth;
 
 public static class BrassLedgerRoleTemplates
 {
+    public static bool IsMandatoryMfaRole(string roleName) =>
+        BuiltIn.Any(template => template.RequiresMfa && string.Equals(template.Name, roleName, StringComparison.OrdinalIgnoreCase));
+
     public static IReadOnlyList<RoleTemplateDefinition> BuiltIn { get; } =
     [
         new("administrator", "Administrator", "Full access to every module plus role and user administration.", true, true, BrassLedgerPermissions.All.ToArray()),

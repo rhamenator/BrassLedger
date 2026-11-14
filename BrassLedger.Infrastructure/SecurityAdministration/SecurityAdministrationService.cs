@@ -188,6 +188,8 @@ public sealed class SecurityAdministrationService(
             candidate => candidate.CompanyId == companyId && candidate.IsActive && candidate.Name == roleName.Trim(),
             cancellationToken);
         if (role is null) return SecurityOperationResult.Failure("Select a valid role.");
+        if (!requiresMfa && BrassLedgerRoleTemplates.IsMandatoryMfaRole(role.Name))
+            return SecurityOperationResult.Failure("MFA is required for system administrator roles.");
         if (role.RequiresMfa == requiresMfa) return SecurityOperationResult.Success();
 
         role.RequiresMfa = requiresMfa;
@@ -462,6 +464,7 @@ public sealed class SecurityAdministrationService(
             .ToListAsync(cancellationToken);
 
         var hasChanges = false;
+        var raisedMfaFloorRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var template in BrassLedgerRoleTemplates.BuiltIn)
         {
             var existingRole = existingRoles.FirstOrDefault(role => string.Equals(role.Name, template.Name, StringComparison.OrdinalIgnoreCase));
@@ -486,19 +489,43 @@ public sealed class SecurityAdministrationService(
                 continue;
             }
 
+            var raisedMfaFloor = template.RequiresMfa && !existingRole.RequiresMfa;
             if (!existingRole.IsSystemRole
                 || !string.Equals(existingRole.TemplateCode, template.TemplateCode, StringComparison.Ordinal)
                 || !string.Equals(existingRole.Permissions, serializedPermissions, StringComparison.Ordinal)
                 || !string.Equals(existingRole.Description, template.Description, StringComparison.Ordinal)
-                || !existingRole.IsActive)
+                || !existingRole.IsActive
+                || raisedMfaFloor)
             {
                 existingRole.IsSystemRole = true;
                 existingRole.TemplateCode = template.TemplateCode;
                 existingRole.Description = template.Description;
                 existingRole.Permissions = serializedPermissions;
                 existingRole.IsActive = true;
+                if (raisedMfaFloor)
+                {
+                    existingRole.RequiresMfa = true;
+                    raisedMfaFloorRoles.Add(existingRole.Name);
+                }
                 hasChanges = true;
             }
+        }
+
+        if (raisedMfaFloorRoles.Count > 0)
+        {
+            var memberships = await dbContext.CompanyMemberships
+                .Where(membership => membership.CompanyId == companyId && membership.IsActive)
+                .Select(membership => new { membership.UserId, membership.Role })
+                .ToListAsync(cancellationToken);
+            var affectedUserIds = memberships
+                .Where(membership => raisedMfaFloorRoles.Contains(membership.Role))
+                .Select(membership => membership.UserId)
+                .ToHashSet();
+            var possibleUsers = await dbContext.Users
+                .Where(user => user.CompanyId == companyId || affectedUserIds.Contains(user.Id))
+                .ToListAsync(cancellationToken);
+            foreach (var user in possibleUsers.Where(user => affectedUserIds.Contains(user.Id) || raisedMfaFloorRoles.Contains(user.Role)))
+                user.SecurityStamp = Guid.NewGuid().ToString("N");
         }
 
         if (hasChanges)

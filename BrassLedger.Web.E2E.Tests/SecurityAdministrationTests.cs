@@ -17,6 +17,7 @@ public sealed class SecurityAdministrationTests(PlaywrightWebAppFixture fixture)
             await session.SignInAsync("integration-admin");
             await session.GotoAsync("/administration");
             await session.WaitForHeadingAsync("Define role templates, separate duties, and prepare replacement access before it becomes urgent.");
+            await Assertions.Expect(session.Page.GetByText("MFA is required for system administrators.")).ToHaveCountAsync(2);
 
             var roleName = $"E2E Security Role {browserKind}";
             await session.Page.GetByLabel("Role name").FillAsync(roleName);

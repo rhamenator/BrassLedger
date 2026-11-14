@@ -7433,7 +7433,56 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         var initialSnapshot = await administration.GetSnapshotAsync();
         Assert.True(initialSnapshot.Roles.Single(role => role.Name == "Administrator").RequiresMfa);
+        Assert.True(initialSnapshot.Roles.Single(role => role.Name == "Owner/CEO").RequiresMfa);
         Assert.False(initialSnapshot.Roles.Single(role => role.Name == "Controller").RequiresMfa);
+        string priorAdministratorStamp;
+        string priorLegacyStamp;
+        string priorCaseVariantStamp;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var administrator = await db.Users.SingleAsync(user => user.UserName == "sales");
+            priorAdministratorStamp = administrator.SecurityStamp;
+            var administratorMembership = await db.CompanyMemberships.SingleOrDefaultAsync(membership => membership.UserId == administrator.Id && membership.CompanyId == administrator.CompanyId);
+            if (administratorMembership is null)
+            {
+                administratorMembership = new CompanyMembership { Id = Guid.NewGuid(), UserId = administrator.Id, CompanyId = administrator.CompanyId, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow };
+                db.CompanyMemberships.Add(administratorMembership);
+            }
+            administratorMembership.Role = "Administrator";
+            var legacyAdministrator = await db.Users.SingleAsync(user => user.UserName == "requisition");
+            priorLegacyStamp = legacyAdministrator.SecurityStamp;
+            legacyAdministrator.Role = "Administrator";
+            var legacyMemberships = await db.CompanyMemberships.Where(membership => membership.UserId == legacyAdministrator.Id && membership.CompanyId == administrator.CompanyId).ToListAsync();
+            db.CompanyMemberships.RemoveRange(legacyMemberships);
+            var caseVariantAdministrator = await db.Users.SingleAsync(user => user.UserName == "warehouse");
+            priorCaseVariantStamp = caseVariantAdministrator.SecurityStamp;
+            var caseVariantMembership = await db.CompanyMemberships.SingleOrDefaultAsync(membership => membership.UserId == caseVariantAdministrator.Id && membership.CompanyId == administrator.CompanyId);
+            if (caseVariantMembership is null)
+            {
+                caseVariantMembership = new CompanyMembership { Id = Guid.NewGuid(), UserId = caseVariantAdministrator.Id, CompanyId = administrator.CompanyId, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow };
+                db.CompanyMemberships.Add(caseVariantMembership);
+            }
+            caseVariantMembership.Role = "administrator";
+            (await db.AccessRoles.SingleAsync(role => role.CompanyId == administrator.CompanyId && role.Name == "Administrator")).RequiresMfa = false;
+            (await db.AccessRoles.SingleAsync(role => role.CompanyId == administrator.CompanyId && role.Name == "Owner/CEO")).RequiresMfa = false;
+            await db.SaveChangesAsync();
+        }
+        var repairedSnapshot = await administration.GetSnapshotAsync();
+        Assert.True(repairedSnapshot.Roles.Single(role => role.Name == "Administrator").RequiresMfa);
+        Assert.True(repairedSnapshot.Roles.Single(role => role.Name == "Owner/CEO").RequiresMfa);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.NotEqual(priorAdministratorStamp, (await db.Users.SingleAsync(user => user.UserName == "sales")).SecurityStamp);
+            Assert.NotEqual(priorLegacyStamp, (await db.Users.SingleAsync(user => user.UserName == "requisition")).SecurityStamp);
+            Assert.NotEqual(priorCaseVariantStamp, (await db.Users.SingleAsync(user => user.UserName == "warehouse")).SecurityStamp);
+        }
+        foreach (var systemRoleName in new[] { "Administrator", "Owner/CEO" })
+        {
+            var downgrade = await administration.SetRoleMfaRequirementAsync(systemRoleName, false);
+            Assert.False(downgrade.Succeeded);
+            Assert.Contains("MFA is required", downgrade.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+            Assert.True((await administration.GetSnapshotAsync()).Roles.Single(role => role.Name == systemRoleName).RequiresMfa);
+        }
         var created = await administration.CreateRoleAsync(new BrassLedger.Application.Security.CreateAccessRoleRequest(
             "Protected reviewer", "Requires a second factor", [BrassLedgerPermissions.ReportingManage], true));
         Assert.True(created.Succeeded, created.ErrorMessage);
