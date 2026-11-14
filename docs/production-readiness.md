@@ -2,7 +2,7 @@
 
 BrassLedger is under active production-readiness development. A successful build or the presence of a screen does not by itself establish that a workflow is suitable for a real business. This report separates verified behavior from work that remains incomplete or requires external review.
 
-Accounting transactions and business workspace reads now require an explicit company claim when a database contains multiple companies. A missing HTTP context remains supported for the single-company local/testing path. This guard prevents background or test callers from silently choosing whichever company happens to be returned first by a database provider. Other service families and background entry points still need the company-isolation audit tracked in `work-remaining.md`.
+Accounting transactions and business workspace reads now require an explicit company claim when a database contains multiple companies. A missing HTTP context remains supported for the single-company local/testing path. This guard prevents background or test callers from silently choosing whichever company happens to be returned first by a database provider. An isolated Chromium test confirms that authenticated Projects reads and Purchasing draft creation still work after a second company appears. Other service families and background entry points still need the company-isolation audit tracked in `work-remaining.md`.
 
 ## Verified checkpoints
 

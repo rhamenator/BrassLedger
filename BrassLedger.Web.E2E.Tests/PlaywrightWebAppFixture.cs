@@ -93,6 +93,16 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         return new UiSession(this, browserKind, browser, page);
     }
 
+    public async Task AddUnrelatedCompanyForIsolationAsync()
+    {
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO \"Companies\" (\"Id\", \"Name\", \"LegalName\", \"TaxId\", \"BaseCurrency\", \"FiscalYearStartMonth\") VALUES ($id, 'Context isolation subsidiary', 'Context Isolation Subsidiary Ltd.', 'CONTEXT-ISO', 'USD', 1)";
+        command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString().ToUpperInvariant());
+        await command.ExecuteNonQueryAsync();
+    }
+
     public async Task CreateQuickBooksAdministratorAsync()
     {
         await using var connection = new SqliteConnection(_sqliteConnectionString);
