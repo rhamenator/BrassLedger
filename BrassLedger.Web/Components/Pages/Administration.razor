@@ -248,11 +248,11 @@ else
 
         <section class="panel">
             <h2>Backup and recovery rehearsal</h2>
-            <p class="page-intro">SQLite backups are consistent snapshots with the data-protection key ring. Verification checks integrity; the restore rehearsal opens an isolated copy and never writes over the live database.</p>
+            <p class="page-intro">SQLite backups are consistent snapshots with the data-protection key ring. Verification checks file integrity; the isolated rehearsal opens a copy without changing live data. Key decryption and recovery on another machine require a separate test, especially for Windows DPAPI-protected keys.</p>
             <div class="hero-actions"><button class="action-primary" type="button" @onclick="CreateBackupAsync">Create backup</button>@if (LatestBackup?.BackupId is { } backupId) { <button class="action-secondary" type="button" @onclick="VerifyBackupAsync">Verify backup</button><button class="action-secondary" type="button" @onclick="RehearseRestoreAsync">Rehearse restore</button> }</div>
             @if (LatestBackup is not null) { <p class="muted-copy">@(LatestBackup.Succeeded ? $"Latest backup: {LatestBackup.BackupId} at {LatestBackup.CreatedAtUtc:u}" : LatestBackup.ErrorMessage)</p> }
             @if (BackupVerification is not null) { <p class="muted-copy">@(BackupVerification.Succeeded ? $"Verified at {BackupVerification.VerifiedAtUtc:u}" : BackupVerification.ErrorMessage)</p> }
-            @if (RecoveryRehearsal is not null) { <p class="muted-copy">@(RecoveryRehearsal.Succeeded ? $"Restore rehearsal passed: {RecoveryRehearsal.CompanyCount} company(ies), {RecoveryRehearsal.JournalEntryCount} journals, {RecoveryRehearsal.PayrollRunCount} payroll runs, and {RecoveryRehearsal.DataProtectionKeyCount} key file(s)." : RecoveryRehearsal.ErrorMessage)</p> }
+            @if (RecoveryRehearsal is not null) { <p class="muted-copy">@(RecoveryRehearsal.Succeeded ? $"Local file restore check passed: {RecoveryRehearsal.CompanyCount} company(ies), {RecoveryRehearsal.JournalEntryCount} journals, {RecoveryRehearsal.PayrollRunCount} payroll runs, and {RecoveryRehearsal.DataProtectionKeyCount} protection file(s). Off-machine key recovery is not verified." : RecoveryRehearsal.ErrorMessage)</p> }
         </section>
 
         <section class="panel">
@@ -850,21 +850,21 @@ else
     {
         LatestBackup = await BackupService.CreateBackupAsync();
         BackupVerification = null; RecoveryRehearsal = null;
-        StatusMessage = LatestBackup.Succeeded ? "Backup created. Verify it, then run a restore rehearsal before relying on it operationally." : LatestBackup.ErrorMessage;
+        StatusMessage = LatestBackup.Succeeded ? "Local backup created. Verify it and complete an encrypted off-machine restore test before relying on it operationally." : LatestBackup.ErrorMessage;
     }
 
     private async Task VerifyBackupAsync()
     {
         if (LatestBackup?.BackupId is null) return;
         BackupVerification = await BackupService.VerifyBackupAsync(LatestBackup.BackupId);
-        StatusMessage = BackupVerification.Succeeded ? "Backup integrity verification passed." : BackupVerification.ErrorMessage;
+        StatusMessage = BackupVerification.Succeeded ? "Backup checksums and SQLite integrity passed; key decryption was not tested." : BackupVerification.ErrorMessage;
     }
 
     private async Task RehearseRestoreAsync()
     {
         if (LatestBackup?.BackupId is null) return;
         RecoveryRehearsal = await BackupService.RehearseRestoreAsync(LatestBackup.BackupId);
-        StatusMessage = RecoveryRehearsal.Succeeded ? "Isolated restore rehearsal passed; live data was not changed." : RecoveryRehearsal.ErrorMessage;
+        StatusMessage = RecoveryRehearsal.Succeeded ? "Isolated file restore check passed; off-machine key recovery remains unverified." : RecoveryRehearsal.ErrorMessage;
     }
 
     private async Task DisableIntegrationConnectionAsync(IntegrationConnectionSnapshot connection)
