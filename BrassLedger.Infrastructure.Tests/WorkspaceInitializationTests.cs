@@ -1174,6 +1174,87 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task CompanyManagement_RequiresActiveOwnerInSelectedCompany()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var userId = signedIn.User!.UserId;
+        var originalCompanyId = signedIn.User.CompanyId;
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+
+        void SelectCompany(Guid companyId, bool authenticated = true, bool enrollmentRequired = false)
+        {
+            var claims = new List<System.Security.Claims.Claim>
+            {
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString())
+            };
+            if (enrollmentRequired) claims.Add(new(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true"));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, authenticated ? "test" : null))
+            };
+        }
+        static CreateCompanyRequest NewCompany(string name) => new(name, name, "TEST-ONLY", "USD", 1);
+
+        SelectCompany(originalCompanyId, authenticated: false);
+        Assert.Empty(await companies.GetMyCompaniesAsync());
+        Assert.False((await companies.CreateCompanyAsync(NewCompany("Unauthenticated company"))).Succeeded);
+        SelectCompany(originalCompanyId, enrollmentRequired: true);
+        Assert.Empty(await companies.GetMyCompaniesAsync());
+        Assert.False((await companies.CreateCompanyAsync(NewCompany("Enrollment pending company"))).Succeeded);
+
+        SelectCompany(originalCompanyId);
+        var subsidiary = await companies.CreateCompanyAsync(NewCompany("Owner context subsidiary"));
+        Assert.True(subsidiary.Succeeded, subsidiary.ErrorMessage);
+        Assert.Equal(2, (await companies.GetMyCompaniesAsync()).Count);
+        var secondCompanyId = subsidiary.CompanyId!.Value;
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == userId && item.CompanyId == secondCompanyId);
+            membership.Role = "Controller";
+            membership.IsOwner = false;
+            await db.SaveChangesAsync();
+        }
+        SelectCompany(secondCompanyId);
+        Assert.Equal(2, (await companies.GetMyCompaniesAsync()).Count);
+        Assert.False((await companies.CreateCompanyAsync(NewCompany("Nonowner company"))).Succeeded);
+
+        SelectCompany(Guid.NewGuid());
+        Assert.Empty(await companies.GetMyCompaniesAsync());
+        Assert.False((await companies.CreateCompanyAsync(NewCompany("Unknown context company"))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == userId && item.CompanyId == secondCompanyId);
+            membership.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        SelectCompany(secondCompanyId);
+        Assert.Empty(await companies.GetMyCompaniesAsync());
+        Assert.False((await companies.CreateCompanyAsync(NewCompany("Revoked context company"))).Succeeded);
+
+        SelectCompany(originalCompanyId);
+        Assert.Single(await companies.GetMyCompaniesAsync());
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == userId);
+            user.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await companies.GetMyCompaniesAsync());
+        Assert.False((await companies.CreateCompanyAsync(NewCompany("Inactive user company"))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Equal(2, await db.Companies.CountAsync());
+    }
+
+    [Fact]
     public async Task IntegrationConnections_RequireCurrentMembershipAndManagementPermission()
     {
         using var services = CreateServiceProvider();
