@@ -103,7 +103,14 @@ else
                                 }
                             </ul>
                             <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageRoles" Context="roleMfaAuthorization">
-                                <button class="action-secondary" type="button" @onclick="() => SetRoleMfaRequirementAsync(role)">@(role.RequiresMfa ? "Make MFA optional" : "Require MFA")</button>
+                                @if (BrassLedgerRoleTemplates.IsMandatoryMfaRole(role.Name))
+                                {
+                                    <p class="muted-copy">MFA is required for system administrators.</p>
+                                }
+                                else
+                                {
+                                    <button class="action-secondary" type="button" @onclick="() => SetRoleMfaRequirementAsync(role)">@(role.RequiresMfa ? "Make MFA optional" : "Require MFA")</button>
+                                }
                             </AuthorizeView>
                         </article>
                     }

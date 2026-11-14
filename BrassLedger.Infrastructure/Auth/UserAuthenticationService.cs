@@ -831,7 +831,7 @@ public sealed class UserAuthenticationService(
 
         if (accessRole is not null)
         {
-            return new RoleAccess(ParsePermissions(accessRole.Permissions), accessRole.RequiresMfa);
+            return new RoleAccess(ParsePermissions(accessRole.Permissions), accessRole.RequiresMfa || BrassLedgerRoleTemplates.IsMandatoryMfaRole(accessRole.Name));
         }
 
         var template = BrassLedgerRoleTemplates.BuiltIn.FirstOrDefault(candidate => string.Equals(candidate.Name, role, StringComparison.OrdinalIgnoreCase));
@@ -840,11 +840,17 @@ public sealed class UserAuthenticationService(
 
     private sealed record RoleAccess(IReadOnlyList<string> Permissions, bool RequiresMfa);
 
-    private static Task<bool> HasRequiredMfaRoleAsync(
+    private static async Task<bool> HasRequiredMfaRoleAsync(
         BrassLedgerDbContext dbContext,
         Guid userId,
-        CancellationToken cancellationToken) =>
-        dbContext.CompanyMemberships
+        CancellationToken cancellationToken)
+    {
+        var memberships = await dbContext.CompanyMemberships
+            .Where(membership => membership.UserId == userId && membership.IsActive)
+            .Select(membership => new { membership.CompanyId, membership.Role })
+            .ToListAsync(cancellationToken);
+        if (memberships.Any(membership => BrassLedgerRoleTemplates.IsMandatoryMfaRole(membership.Role))) return true;
+        return await dbContext.CompanyMemberships
             .Where(membership => membership.UserId == userId && membership.IsActive)
             .Join(
                 dbContext.AccessRoles.Where(role => role.IsActive && role.RequiresMfa),
@@ -852,6 +858,7 @@ public sealed class UserAuthenticationService(
                 role => new { role.CompanyId, role.Name },
                 (_, _) => true)
             .AnyAsync(cancellationToken);
+    }
 
     private static async Task<CompanyMembership?> ResolveMembershipAsync(BrassLedgerDbContext dbContext, AppUser user, Guid companyId, CancellationToken cancellationToken)
     {
