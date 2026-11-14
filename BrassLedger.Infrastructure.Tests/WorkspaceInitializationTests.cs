@@ -4947,6 +4947,56 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task PayrollReporting_RequiresExplicitCompanyAndKeepsStatementsIsolated()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var reporting = scope.ServiceProvider.GetRequiredService<IPayrollReportingService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var runId = Guid.NewGuid();
+        Guid originalCompanyId; Guid employeeId; Guid secondCompanyId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            employeeId = await db.Employees.Where(employee => employee.CompanyId == originalCompanyId).Select(employee => employee.Id).FirstAsync();
+            var bankId = await db.BankAccounts.Where(bank => bank.CompanyId == originalCompanyId).Select(bank => bank.Id).FirstAsync();
+            db.PayrollRuns.Add(new PayrollRun { Id = runId, CompanyId = originalCompanyId, BankAccountId = bankId, Reference = "PAYROLL-ISOLATION", PayDate = new DateOnly(2026, 6, 5), PeriodStart = new DateOnly(2026, 5, 16), PeriodEnd = new DateOnly(2026, 5, 31) });
+            db.PayrollRunEmployeeLines.Add(new PayrollRunEmployeeLine { Id = Guid.NewGuid(), PayrollRunId = runId, EmployeeId = employeeId });
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Payroll isolation subsidiary", LegalName = "Payroll Isolation Subsidiary Ltd.", TaxId = "PAY-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            await db.SaveChangesAsync();
+        }
+
+        var registerError = await Assert.ThrowsAsync<InvalidOperationException>(() => reporting.GetRegisterAsync(runId));
+        Assert.Contains("explicit company context", registerError.Message, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => reporting.GetPayStatementAsync(runId, employeeId));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => reporting.ExportRegisterCsvAsync(runId));
+
+        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)], "test"))
+        };
+        ActAs(originalCompanyId);
+        var register = await reporting.GetRegisterAsync(runId);
+        Assert.Equal("PAYROLL-ISOLATION", register?.PayrollReference);
+        Assert.NotNull(await reporting.GetPayStatementAsync(runId, employeeId));
+        Assert.Contains("\"TOTAL\"", await reporting.ExportRegisterCsvAsync(runId));
+
+        ActAs(secondCompanyId);
+        Assert.Null(await reporting.GetRegisterAsync(runId));
+        Assert.Null(await reporting.GetPayStatementAsync(runId, employeeId));
+        Assert.Null(await reporting.ExportRegisterCsvAsync(runId));
+
+        ActAs(Guid.NewGuid());
+        var invalidClaim = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => reporting.GetRegisterAsync(runId));
+        Assert.Contains("unavailable", invalidClaim.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PayrollWorkflow_EnforcesSeparationRejectsAndPreservesEncryptedCorrections()
     {
         using var services = CreateServiceProvider();
