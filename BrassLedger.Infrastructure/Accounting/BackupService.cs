@@ -27,10 +27,11 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
         if (!db.Database.IsSqlite()) return BackupResult.Failure("PostgreSQL backups require the database platform backup service; no unsafe file-copy fallback is used.");
         var backupId = $"brassledger-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}";
         var destination = Path.Combine(storagePaths.DataDirectory, "backups", backupId);
-        Directory.CreateDirectory(destination);
         var databasePath = Path.Combine(destination, "brassledger.db");
         try
         {
+            EnsurePrivateDirectory(Path.Combine(storagePaths.DataDirectory, "backups"));
+            EnsurePrivateDirectory(destination);
             var escapedPath = databasePath.Replace("'", "''", StringComparison.Ordinal);
             var connection = db.Database.GetDbConnection();
             await connection.OpenAsync(cancellationToken);
@@ -41,7 +42,8 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
             finally { await connection.CloseAsync(); }
-            var keyDestination = Path.Combine(destination, "keys"); Directory.CreateDirectory(keyDestination);
+            EnsurePrivateFile(databasePath);
+            var keyDestination = Path.Combine(destination, "keys"); EnsurePrivateDirectory(keyDestination);
             var protectionFileHashes = new List<BackupProtectionFileHash>();
             foreach (var keyFile in Directory.EnumerateFiles(storagePaths.KeysDirectory).OrderBy(Path.GetFileName, StringComparer.Ordinal))
             {
@@ -50,6 +52,7 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
                 var sourceHash = await HashFileAsync(keyFile, cancellationToken);
                 var copiedKey = Path.Combine(keyDestination, name);
                 File.Copy(keyFile, copiedKey);
+                EnsurePrivateFile(copiedKey);
                 var copiedHash = await HashFileAsync(copiedKey, cancellationToken);
                 if (copiedHash != sourceHash || await HashFileAsync(keyFile, cancellationToken) != sourceHash
                     || !IsValidDataProtectionFile(copiedKey, name))
@@ -59,7 +62,9 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
             if (!protectionFileHashes.Any(file => file.Name.StartsWith("key-", StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException("No data-protection keys are available to back up.");
             var manifest = new BackupManifest(backupId, DateTimeOffset.UtcNow, "brassledger.db", await HashFileAsync(databasePath, cancellationToken), protectionFileHashes.ToArray(), BackupFormat);
-            await File.WriteAllTextAsync(Path.Combine(destination, "manifest.json"), JsonSerializer.Serialize(manifest, ManifestJsonOptions), cancellationToken);
+            var manifestPath = Path.Combine(destination, "manifest.json");
+            await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, ManifestJsonOptions), cancellationToken);
+            EnsurePrivateFile(manifestPath);
             var verification = await VerifyBackupAsync(backupId, cancellationToken);
             if (!verification.Succeeded) throw new InvalidOperationException(verification.ErrorMessage);
             return BackupResult.Success(backupId);
@@ -93,15 +98,24 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
         var staging = Path.Combine(storagePaths.DataDirectory, "recovery-rehearsals", $"{backupId}-{Guid.NewGuid():N}");
         try
         {
-            Directory.CreateDirectory(staging);
+            EnsurePrivateDirectory(Path.Combine(storagePaths.DataDirectory, "recovery-rehearsals"));
+            EnsurePrivateDirectory(staging);
             var restoredDatabase = Path.Combine(staging, "brassledger.db");
             File.Copy(sourceDatabase, restoredDatabase);
-            File.Copy(Path.Combine(source, "manifest.json"), Path.Combine(staging, "manifest.json"));
+            EnsurePrivateFile(restoredDatabase);
+            var restoredManifest = Path.Combine(staging, "manifest.json");
+            File.Copy(Path.Combine(source, "manifest.json"), restoredManifest);
+            EnsurePrivateFile(restoredManifest);
             var restoredKeys = Path.Combine(staging, "keys");
             if (Directory.Exists(sourceKeys))
             {
-                Directory.CreateDirectory(restoredKeys);
-                foreach (var keyFile in Directory.EnumerateFiles(sourceKeys)) File.Copy(keyFile, Path.Combine(restoredKeys, Path.GetFileName(keyFile)));
+                EnsurePrivateDirectory(restoredKeys);
+                foreach (var keyFile in Directory.EnumerateFiles(sourceKeys))
+                {
+                    var restoredKey = Path.Combine(restoredKeys, Path.GetFileName(keyFile));
+                    File.Copy(keyFile, restoredKey);
+                    EnsurePrivateFile(restoredKey);
+                }
             }
 
             var restoredVerification = await VerifyBackupDirectoryAsync(staging, backupId, cancellationToken);
@@ -179,6 +193,17 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
     }
 
     private static bool IsSha256(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
+    private static void EnsurePrivateDirectory(string path)
+    {
+        if (Directory.Exists(path) && IsLink(path)) throw new InvalidOperationException("Backup directory cannot be a symbolic link.");
+        Directory.CreateDirectory(path);
+        if (IsLink(path)) throw new InvalidOperationException("Backup directory cannot be a symbolic link.");
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
+    private static void EnsurePrivateFile(string path)
+    {
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+    }
     private static bool IsLink(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
     private static bool IsValidFileName(string? name) => !string.IsNullOrWhiteSpace(name) && name != "." && name != ".."
         && !name.Contains('/') && !name.Contains('\\')
