@@ -699,6 +699,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var paths = scope.ServiceProvider.GetRequiredService<BrassLedgerStoragePaths>();
         var backupDirectory = Path.Combine(paths.DataDirectory, "backups", backup.BackupId!);
         var keyPath = Directory.EnumerateFiles(Path.Combine(backupDirectory, "keys")).First();
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.Combine(paths.DataDirectory, "recovery-rehearsals")));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.Combine(paths.DataDirectory, "backups")));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(backupDirectory));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.Combine(backupDirectory, "keys")));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(backupDirectory, "brassledger.db")));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(keyPath));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(backupDirectory, "manifest.json")));
+        }
         var originalKey = await File.ReadAllBytesAsync(keyPath);
         await File.AppendAllTextAsync(keyPath, "corrupted copy");
         var alteredKey = await backupService.VerifyBackupAsync(backup.BackupId!);
