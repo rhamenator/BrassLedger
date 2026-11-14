@@ -40,6 +40,13 @@ public sealed class MultiCompanyContextGuardTests
             await payrollSession.GotoAsync("/payroll");
             await payrollSession.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
             await Assertions.Expect(payrollSession.Page.GetByRole(AriaRole.Heading, new() { Name = "Employee payment files" })).ToBeVisibleAsync();
+            await payrollSession.Page.GetByText("Configure a Form 941 deposit schedule", new() { Exact = true }).ClickAsync();
+            var depositSchedule = payrollSession.Page.GetByRole(AriaRole.Heading, new() { Name = "Federal payroll deposit schedule", Exact = true }).Locator("..");
+            await depositSchedule.GetByRole(AriaRole.Button, new() { Name = "Load official 2026 defaults", Exact = true }).ClickAsync();
+            await depositSchedule.GetByLabel("Approved against the official sources").CheckAsync();
+            await depositSchedule.GetByLabel("Federal deposit schedule review notes").FillAsync("Multi-company browser isolation review.");
+            await depositSchedule.GetByRole(AriaRole.Button, new() { Name = "Save deposit schedule", Exact = true }).ClickAsync();
+            await payrollSession.Page.GetByText("Federal Form 941 deposit schedule saved; open liabilities were recalculated from their pay dates.", new() { Exact = true }).WaitForAsync();
             await payrollSession.AssertNoUiFailuresAsync("multi-company payroll workspace read");
         }
         finally
