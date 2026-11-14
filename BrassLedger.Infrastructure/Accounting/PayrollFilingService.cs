@@ -652,7 +652,20 @@ public sealed class PayrollFilingService(
     private void RequirePermission(string permission, string action) { if (!HasPermission(permission)) throw new UnauthorizedAccessException($"You are not authorized to {action}."); }
     private bool HasPermission(string permission) => httpContextAccessor.HttpContext is null || httpContextAccessor.HttpContext.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission);
     private Guid? ResolveUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
-    private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken cancellationToken) { var context = httpContextAccessor.HttpContext; var claim = context?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType); if (context is not null && !Guid.TryParse(claim, out _)) throw new UnauthorizedAccessException("An authenticated company context is required."); if (Guid.TryParse(claim, out var id) && await db.Companies.AnyAsync(item => item.Id == id, cancellationToken)) return id; return await db.Companies.OrderBy(item => item.Name).Select(item => item.Id).FirstAsync(cancellationToken); }
+    private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken cancellationToken)
+    {
+        var context = httpContextAccessor.HttpContext;
+        var claim = context?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
+        if (Guid.TryParse(claim, out var id))
+        {
+            if (await db.Companies.AnyAsync(item => item.Id == id, cancellationToken)) return id;
+            throw new UnauthorizedAccessException("The selected company is unavailable.");
+        }
+        if (context is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
+        var companyIds = await db.Companies.Select(item => item.Id).Take(2).ToArrayAsync(cancellationToken);
+        if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
+        return companyIds[0];
+    }
     private void AddAudit(BrassLedgerDbContext db, Guid companyId, string action, string entityType, Guid entityId, object detail) => db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = entityType, EntityId = entityId, DetailJson = JsonSerializer.Serialize(detail), OccurredAtUtc = DateTimeOffset.UtcNow });
 
     private sealed record FilingDeposit(Guid ApplicationId, string ObligationCode, decimal Amount);

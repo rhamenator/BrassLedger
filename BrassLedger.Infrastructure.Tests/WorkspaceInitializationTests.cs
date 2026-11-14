@@ -5078,6 +5078,103 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task PayrollFiling_RequiresExplicitCompanyAndIsolatesProtectedRecords()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var filings = scope.ServiceProvider.GetRequiredService<IPayrollFilingService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid originalCompanyId; var secondCompanyId = Guid.NewGuid();
+        var originalFilingId = Guid.NewGuid(); var secondFilingId = Guid.NewGuid();
+        var originalCorrectionId = Guid.NewGuid(); var secondCorrectionId = Guid.NewGuid();
+        var originalPeriodId = Guid.NewGuid(); var secondPeriodId = Guid.NewGuid();
+        var originalToken = Guid.NewGuid().ToString("N"); var secondToken = Guid.NewGuid().ToString("N");
+        var originalPeriodToken = Guid.NewGuid().ToString("N"); var secondPeriodToken = Guid.NewGuid().ToString("N");
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Filing isolation subsidiary", LegalName = "Filing Isolation Subsidiary Ltd.", TaxId = "FIL-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            PayrollFiling SeedFiling(Guid id, Guid companyId, string token) => new()
+            {
+                Id = id, CompanyId = companyId, FormCode = "941", TaxYear = 2026, Quarter = 2, PeriodKey = "2026-Q2",
+                PeriodStart = new DateOnly(2026, 4, 1), PeriodEnd = new DateOnly(2026, 6, 30), Status = "Approved",
+                DataJson = "{}", SummaryJson = "{}", SourcePayrollRunIdsJson = "[]", SourceDigestSha256 = new string('a', 64),
+                ApprovedDataJson = "{}", ApprovedSourceDigestSha256 = new string('a', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/i941",
+                ContentVersion = "2026-941-1", PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = token
+            };
+            db.PayrollFilings.AddRange(SeedFiling(originalFilingId, originalCompanyId, originalToken), SeedFiling(secondFilingId, secondCompanyId, secondToken));
+            PayrollFilingCorrection SeedCorrection(Guid id, Guid companyId, Guid filingId) => new()
+            {
+                Id = id, CompanyId = companyId, OriginalPayrollFilingId = filingId, Sequence = 1, FormCode = "941-X",
+                TaxYear = 2026, Quarter = 2, Process = "Adjustment", DiscoveredOn = new DateOnly(2026, 7, 1),
+                Explanation = "Correct protected filing data for the company isolation test.", Status = "Draft", DataJson = "{}",
+                CorrectedSourceDigestSha256 = new string('b', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/i941x",
+                ContentVersion = "2026-941-X-1", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N")
+            };
+            db.PayrollFilingCorrections.AddRange(SeedCorrection(originalCorrectionId, originalCompanyId, originalFilingId), SeedCorrection(secondCorrectionId, secondCompanyId, secondFilingId));
+            PayrollClosePeriod SeedPeriod(Guid id, Guid companyId, string token) => new()
+            {
+                Id = id, CompanyId = companyId, PeriodType = "Quarter", TaxYear = 2026, Quarter = 1, PeriodKey = "2026-Q1",
+                PeriodStart = new DateOnly(2026, 1, 1), PeriodEnd = new DateOnly(2026, 3, 31), Status = "Closed",
+                ClosedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = token
+            };
+            db.PayrollClosePeriods.AddRange(SeedPeriod(originalPeriodId, originalCompanyId, originalPeriodToken), SeedPeriod(secondPeriodId, secondCompanyId, secondPeriodToken));
+            await db.SaveChangesAsync();
+        }
+
+        var readError = await Assert.ThrowsAsync<InvalidOperationException>(() => filings.GetFilingsAsync());
+        Assert.Contains("explicit company context", readError.Message, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => filings.GetClosePeriodsAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => filings.GetCorrectionsAsync());
+        var writeError = await Assert.ThrowsAsync<InvalidOperationException>(() => filings.ReopenFilingAsync(new(originalFilingId, "Review filing source", originalToken)));
+        Assert.Contains("explicit company context", writeError.Message, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => filings.ReopenPeriodAsync(new(originalPeriodId, "Review close period", originalPeriodToken)));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal("Approved", (await db.PayrollFilings.SingleAsync(item => item.Id == originalFilingId)).Status);
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(item => item.Action == "payroll-filing.reopened" && item.EntityId == originalFilingId));
+        }
+
+        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollReverse)], "test"))
+        };
+        ActAs(originalCompanyId);
+        Assert.Equal(originalFilingId, Assert.Single(await filings.GetFilingsAsync()).Id);
+        Assert.Equal(originalCorrectionId, Assert.Single(await filings.GetCorrectionsAsync()).Id);
+        Assert.Equal(originalPeriodId, Assert.Single(await filings.GetClosePeriodsAsync()).Id);
+        Assert.Null(await filings.GetFilingAsync(secondFilingId));
+        Assert.Null(await filings.GetCorrectionAsync(secondCorrectionId));
+        ActAs(secondCompanyId);
+        Assert.Equal(secondFilingId, Assert.Single(await filings.GetFilingsAsync()).Id);
+        Assert.Equal(secondCorrectionId, Assert.Single(await filings.GetCorrectionsAsync()).Id);
+        Assert.Equal(secondPeriodId, Assert.Single(await filings.GetClosePeriodsAsync()).Id);
+        Assert.Null(await filings.GetFilingAsync(originalFilingId));
+        Assert.Null(await filings.GetCorrectionAsync(originalCorrectionId));
+        var crossPeriodUpdate = await filings.ReopenPeriodAsync(new(originalPeriodId, "Cross-company attempt", originalPeriodToken));
+        Assert.Equal("Payroll close period not found.", crossPeriodUpdate.ErrorMessage);
+        var crossUpdate = await filings.ReopenFilingAsync(new(originalFilingId, "Cross-company attempt", originalToken));
+        Assert.Equal("Payroll filing not found.", crossUpdate.ErrorMessage);
+        var ownUpdate = await filings.ReopenFilingAsync(new(secondFilingId, "Reviewed filing source", secondToken));
+        Assert.True(ownUpdate.Succeeded, ownUpdate.ErrorMessage);
+        ActAs(Guid.NewGuid());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => filings.GetFilingsAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => filings.ReopenFilingAsync(new(originalFilingId, "Unknown company", originalToken)));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal("Approved", (await db.PayrollFilings.SingleAsync(item => item.Id == originalFilingId)).Status);
+            Assert.Equal("Draft", (await db.PayrollFilings.SingleAsync(item => item.Id == secondFilingId)).Status);
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(item => item.Action == "payroll-filing.reopened" && item.EntityId == originalFilingId));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == secondCompanyId && item.Action == "payroll-filing.reopened" && item.EntityId == secondFilingId));
+        }
+    }
+
+    [Fact]
     public async Task PayrollFilings_ReconcileProtectDataDetectSourceChangesAndLockClosedPeriods()
     {
         using var services = CreateServiceProvider();
