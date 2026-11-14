@@ -103,7 +103,18 @@ public sealed partial class AccountingTransactionService
         var activeBills = await db.VendorBills.Where(item => item.CompanyId == companyId && item.InventoryReceiptId == receipt.Id && item.Status != "Voided").OrderBy(item => item.BillDate).ThenBy(item => item.BillNumber).ToListAsync(cancellationToken);
         var activeBillIds = activeBills.Select(item => item.Id).ToArray();
         var activeBillLines = activeBillIds.Length == 0 ? [] : await db.VendorBillLines.Where(item => activeBillIds.Contains(item.VendorBillId) && item.InventoryReceiptLineId.HasValue && item.MatchedQuantity > 0m).OrderBy(item => item.Sequence).ToListAsync(cancellationToken);
-        var priorInvoicedReturns = await (from returnLine in db.SupplierReturnShipmentLines join priorShipment in db.SupplierReturnShipments on returnLine.SupplierReturnShipmentId equals priorShipment.Id where priorShipment.CompanyId == companyId && priorShipment.Status == "Posted" select new { returnLine.InventoryReceiptLineId, returnLine.InvoicedQuantity }).ToListAsync(cancellationToken);
+        var receiptLineIds = lines.Select(line => line.InventoryReceiptLineId).Distinct().ToArray();
+        var receiptLines = await db.InventoryReceiptLines.Where(line => receiptLineIds.Contains(line.Id)).ToDictionaryAsync(line => line.Id, cancellationToken);
+        var activeMatchReservations = await (
+            from matchLine in db.PurchaseInvoiceMatchLines
+            join match in db.PurchaseInvoiceMatches on matchLine.PurchaseInvoiceMatchId equals match.Id
+            where match.CompanyId == companyId
+                && match.InventoryReceiptId == receipt.Id
+                && ReservingPurchaseInvoiceMatchStatuses.Contains(match.Status)
+                && receiptLineIds.Contains(matchLine.InventoryReceiptLineId)
+            select new { matchLine.InventoryReceiptLineId, matchLine.MatchedQuantity, matchLine.AccrualAmount })
+            .ToListAsync(cancellationToken);
+        var priorInvoicedReturns = await (from returnLine in db.SupplierReturnShipmentLines join priorShipment in db.SupplierReturnShipments on returnLine.SupplierReturnShipmentId equals priorShipment.Id where priorShipment.CompanyId == companyId && priorShipment.Status == "Posted" && receiptLineIds.Contains(returnLine.InventoryReceiptLineId) select new { returnLine.InventoryReceiptLineId, returnLine.InvoicedQuantity, returnLine.GrniReductionAmount }).ToListAsync(cancellationToken);
         var returnCalculations = new Dictionary<Guid, (decimal InvoicedQuantity, decimal VendorCreditAmount, decimal TransactionVendorCreditAmount, decimal GrniReductionAmount)>();
         foreach (var requestedLine in requested)
         {
@@ -119,7 +130,22 @@ public sealed partial class AccountingTransactionService
                 var baseUnitCost = invoiceLine.LineTotal == 0m ? invoiceLine.UnitCost : RoundCurrency(invoiceLine.UnitCost * invoiceLine.BaseLineTotal / invoiceLine.LineTotal);
                 var lineAvailable = invoiceLine.MatchedQuantity; var skipped = Math.Min(lineAvailable, priorCredited); lineAvailable -= skipped; priorCredited -= skipped; if (lineAvailable <= 0m || remainingReturn <= 0m) continue; var creditedQuantity = Math.Min(lineAvailable, remainingReturn); vendorCredit += RoundCurrency(creditedQuantity * baseUnitCost); txnVendorCredit += RoundCurrency(creditedQuantity * invoiceLine.UnitCost); remainingReturn -= creditedQuantity;
             }
-            var invoicedQuantity = returnQuantity - remainingReturn; var grniReduction = RoundCurrency(remainingReturn * authorizationLine.ReceiptUnitCost); returnCalculations[authorizationLine.Id] = (invoicedQuantity, vendorCredit, txnVendorCredit, grniReduction);
+            if (!receiptLines.TryGetValue(authorizationLine.InventoryReceiptLineId, out var source)) return TransactionResult.Failure("The supplier return's source receipt line is unavailable.");
+            var matchedQuantity = activeBillLines.Where(line => line.InventoryReceiptLineId == source.Id).Sum(line => line.MatchedQuantity);
+            var reservedQuantity = activeMatchReservations.Where(line => line.InventoryReceiptLineId == source.Id).Sum(line => line.MatchedQuantity);
+            var priorInvoicedReturnQuantity = priorInvoicedReturns.Where(line => line.InventoryReceiptLineId == source.Id).Sum(line => line.InvoicedQuantity);
+            var availableUnbilledQuantity = RoundQuantity(source.Quantity - matchedQuantity - (source.ReturnedQuantity - priorInvoicedReturnQuantity) - reservedQuantity);
+            if (remainingReturn > availableUnbilledQuantity) return TransactionResult.Failure("The uninvoiced return quantity overlaps an active invoice match. Resolve the match before shipping this return.");
+            var availableGrni = source.LineTotal
+                - activeBillLines.Where(line => line.InventoryReceiptLineId == source.Id).Sum(line => line.AccrualAmount)
+                - activeMatchReservations.Where(line => line.InventoryReceiptLineId == source.Id).Sum(line => line.AccrualAmount)
+                - priorInvoicedReturns.Where(line => line.InventoryReceiptLineId == source.Id).Sum(line => line.GrniReductionAmount);
+            if (availableGrni < 0m) return TransactionResult.Failure("The receipt accrual has already been over-cleared. Reconcile invoices and supplier returns before shipping another return.");
+            var grniReduction = remainingReturn == 0m ? 0m
+                : remainingReturn == availableUnbilledQuantity ? availableGrni
+                : Math.Min(RoundCurrency(remainingReturn * authorizationLine.ReceiptUnitCost), availableGrni);
+            var invoicedQuantity = returnQuantity - remainingReturn;
+            returnCalculations[authorizationLine.Id] = (invoicedQuantity, vendorCredit, txnVendorCredit, grniReduction);
         }
         var projectAmounts = requested.Select(item =>
         {
@@ -169,7 +195,7 @@ public sealed partial class AccountingTransactionService
         journalLines.AddRange(projectAmounts.Where(item => item.PurchaseVarianceAmount < 0m).Select(item => new JournalLineRequest(OperationalRoleReference(AccountingAccountRoles.PurchasePriceVariance), 0m, -item.PurchaseVarianceAmount, "Favorable supplier-return variance", item.ProjectJobId, item.ProjectPhaseId, item.ProjectCostCodeId, item.DepartmentId, item.ClassId)));
         var posting = await PostAsync(db, companyId, request.ShippedOn, "Purchasing", shipmentNumber, $"Supplier return {authorization.ReturnNumber}", journalLines, cancellationToken, allowControlAccounts: true, sourceDocumentId: shipmentId, sourceDocumentType: "SupplierReturnShipment", resolveOperationalRoles: true, allowClosedProjects: true); if (!posting.Succeeded) return posting;
         var sourceApplied = createsCredit ? Math.Min(vendorCreditAmount, bill!.BalanceDue) : 0m; var txnSourceApplied = createsCredit ? Math.Min(txnVendorCreditAmount, bill!.TransactionBalanceDue) : 0m; var shipment = new SupplierReturnShipment { Id = shipmentId, CompanyId = companyId, SupplierReturnAuthorizationId = authorization.Id, SourceVendorBillId = bill?.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, ShipmentNumber = shipmentNumber, ShippedOn = request.ShippedOn, TotalAmount = total, VendorCreditAmount = vendorCreditAmount, TransactionVendorCreditAmount = txnVendorCreditAmount, CreatesVendorCredit = createsCredit, SourceAppliedAmount = sourceApplied, AppliedAmount = sourceApplied, TransactionSourceAppliedAmount = txnSourceApplied, TransactionAppliedAmount = txnSourceApplied, TransactionCurrency = bill?.TransactionCurrency ?? "USD", ExchangeRateId = bill?.ExchangeRateId, ExchangeRateToBase = bill?.ExchangeRateToBase ?? 1m, ExchangeRateEffectiveOn = bill?.ExchangeRateEffectiveOn, ExchangeRateSource = bill?.ExchangeRateSource ?? string.Empty, ExchangeRateSourceReference = bill?.ExchangeRateSourceReference ?? string.Empty, JournalEntryId = posting.Id!.Value, ShippedByUserId = ResolveUserId(), ShippedAtUtc = DateTimeOffset.UtcNow }; db.SupplierReturnShipments.Add(shipment);
-        var receiptLines = await db.InventoryReceiptLines.Where(line => lines.Select(item => item.InventoryReceiptLineId).Contains(line.Id)).ToDictionaryAsync(line => line.Id, cancellationToken); var sequence = 0;
+        var sequence = 0;
         foreach (var requestedLine in requested.OrderBy(item => lines.Single(line => line.Id == item.SupplierReturnAuthorizationLineId).Sequence))
         {
             var line = lines.Single(item => item.Id == requestedLine.SupplierReturnAuthorizationLineId); var quantity = RoundQuantity(requestedLine.Quantity); var amount = RoundCurrency(quantity * line.UnitCost); var inventoryItem = items[line.InventoryItemId]; var priorQuantity = inventoryItem.QuantityOnHand; var priorCost = inventoryItem.UnitCost; var resultingQuantity = priorQuantity - quantity; var resultingValue = RoundCurrency(priorQuantity * priorCost) - amount; var resultingCost = resultingQuantity == 0m ? priorCost : RoundCurrency(resultingValue / resultingQuantity);

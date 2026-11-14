@@ -101,7 +101,7 @@ public sealed partial class AccountingTransactionService
                 && postedBill.InventoryReceiptId == receipt.Id
                 && postedBill.Status != "Voided"
                 && billLine.InventoryReceiptLineId.HasValue
-            select new { ReceiptLineId = billLine.InventoryReceiptLineId.GetValueOrDefault(), billLine.MatchedQuantity })
+            select new { ReceiptLineId = billLine.InventoryReceiptLineId.GetValueOrDefault(), billLine.MatchedQuantity, billLine.AccrualAmount })
             .ToListAsync(cancellationToken);
         var reservedMatchQuantities = await (
             from line in db.PurchaseInvoiceMatchLines
@@ -110,14 +110,32 @@ public sealed partial class AccountingTransactionService
                 && matchedDocument.InventoryReceiptId == receipt.Id
                 && matchedDocument.Id != request.Id
                 && ReservingPurchaseInvoiceMatchStatuses.Contains(matchedDocument.Status)
-            select new { line.InventoryReceiptLineId, line.MatchedQuantity })
+            select new { line.InventoryReceiptLineId, line.MatchedQuantity, line.AccrualAmount })
             .ToListAsync(cancellationToken);
+        var postedReturnReductions = await (
+            from line in db.SupplierReturnShipmentLines
+            join shipment in db.SupplierReturnShipments on line.SupplierReturnShipmentId equals shipment.Id
+            where shipment.CompanyId == companyId
+                && shipment.Status == "Posted"
+                && requestedIds.Contains(line.InventoryReceiptLineId)
+            select new { line.InventoryReceiptLineId, line.InvoicedQuantity, line.GrniReductionAmount })
+            .ToListAsync(cancellationToken);
+        var remainingAccruals = receiptLines.Where(line => requestedIds.Contains(line.Id)).ToDictionary(
+            line => line.Id,
+            line => line.LineTotal
+                - postedMatchQuantities.Where(item => item.ReceiptLineId == line.Id).Sum(item => item.AccrualAmount)
+                - reservedMatchQuantities.Where(item => item.InventoryReceiptLineId == line.Id).Sum(item => item.AccrualAmount)
+                - postedReturnReductions.Where(item => item.InventoryReceiptLineId == line.Id).Sum(item => item.GrniReductionAmount));
+        if (remainingAccruals.Values.Any(amount => amount < 0m))
+            return TransactionResult.Failure("The receipt accrual has been over-cleared. Reconcile prior invoices and supplier returns before preparing another match.");
 
         var calculatedLines = requestedLines
             .Select((requested, index) =>
             {
                 var source = receiptLines.Single(line => line.Id == requested.InventoryReceiptLineId);
-                var retainedQuantity = source.Quantity - source.ReturnedQuantity;
+                var returnedUnbilledQuantity = source.ReturnedQuantity - postedReturnReductions
+                    .Where(line => line.InventoryReceiptLineId == source.Id).Sum(line => line.InvoicedQuantity);
+                var retainedQuantity = source.Quantity - returnedUnbilledQuantity;
                 var alreadyMatched = postedMatchQuantities
                     .Where(line => line.ReceiptLineId == source.Id)
                     .Sum(line => line.MatchedQuantity);
@@ -129,7 +147,10 @@ public sealed partial class AccountingTransactionService
                 var invoiceUnitCost = RoundCurrency(requested.UnitCost);
                 var matchedQuantity = Math.Min(invoiceQuantity, availableQuantity);
                 var quantityVarianceQuantity = invoiceQuantity - matchedQuantity;
-                var accrualAmount = RoundCurrency(matchedQuantity * source.UnitCost);
+                var availableAccrual = remainingAccruals[source.Id];
+                var accrualAmount = matchedQuantity == 0m ? 0m
+                    : matchedQuantity == availableQuantity ? availableAccrual
+                    : Math.Min(RoundCurrency(matchedQuantity * source.UnitCost), availableAccrual);
                 var invoiceAmount = RoundCurrency(invoiceQuantity * invoiceUnitCost);
                 var matchedInvoiceAmount = RoundCurrency(matchedQuantity * invoiceUnitCost);
                 var priceVarianceAmount = matchedInvoiceAmount - accrualAmount;
@@ -489,7 +510,7 @@ public sealed partial class AccountingTransactionService
                 && postedBill.InventoryReceiptId == receipt.Id
                 && postedBill.Status != "Voided"
                 && billLine.InventoryReceiptLineId.HasValue
-            select new { ReceiptLineId = billLine.InventoryReceiptLineId.GetValueOrDefault(), billLine.MatchedQuantity })
+            select new { ReceiptLineId = billLine.InventoryReceiptLineId.GetValueOrDefault(), billLine.MatchedQuantity, billLine.AccrualAmount })
             .ToListAsync(cancellationToken);
         var activeReservations = await (
             from reservedLine in db.PurchaseInvoiceMatchLines
@@ -497,14 +518,29 @@ public sealed partial class AccountingTransactionService
             where reservedMatch.CompanyId == companyId
                 && reservedMatch.InventoryReceiptId == receipt.Id
                 && ReservingPurchaseInvoiceMatchStatuses.Contains(reservedMatch.Status)
-            select new { reservedLine.InventoryReceiptLineId, reservedLine.MatchedQuantity })
+            select new { reservedLine.InventoryReceiptLineId, reservedLine.MatchedQuantity, reservedLine.AccrualAmount })
+            .ToListAsync(cancellationToken);
+        var receiptLineIds = receiptLines.Keys.ToArray();
+        var postedReturnReductions = await (
+            from line in db.SupplierReturnShipmentLines
+            join shipment in db.SupplierReturnShipments on line.SupplierReturnShipmentId equals shipment.Id
+            where shipment.CompanyId == companyId
+                && shipment.Status == "Posted"
+                && receiptLineIds.Contains(line.InventoryReceiptLineId)
+            select new { line.InventoryReceiptLineId, line.InvoicedQuantity, line.GrniReductionAmount })
             .ToListAsync(cancellationToken);
         if (lines.Any(line => !receiptLines.ContainsKey(line.InventoryReceiptLineId))
             || receiptLines.Any(source =>
                 postedMatches.Where(line => line.ReceiptLineId == source.Key).Sum(line => line.MatchedQuantity)
                 + activeReservations.Where(line => line.InventoryReceiptLineId == source.Key).Sum(line => line.MatchedQuantity)
-                > source.Value.Quantity - source.Value.ReturnedQuantity))
-            return TransactionResult.Failure("The retained or already-invoiced receipt quantity changed after preparation. Return the invoice match to draft and recalculate it.");
+                > source.Value.Quantity - source.Value.ReturnedQuantity
+                    + postedReturnReductions.Where(line => line.InventoryReceiptLineId == source.Key).Sum(line => line.InvoicedQuantity))
+            || lines.Any(line =>
+                postedMatches.Where(item => item.ReceiptLineId == line.InventoryReceiptLineId).Sum(item => item.AccrualAmount)
+                + activeReservations.Where(item => item.InventoryReceiptLineId == line.InventoryReceiptLineId).Sum(item => item.AccrualAmount)
+                + postedReturnReductions.Where(item => item.InventoryReceiptLineId == line.InventoryReceiptLineId).Sum(item => item.GrniReductionAmount)
+                > receiptLines[line.InventoryReceiptLineId].LineTotal))
+            return TransactionResult.Failure("The retained receipt quantity or accrual changed after preparation. Return the invoice match to draft and recalculate it.");
 
         var grni = await db.Accounts.SingleOrDefaultAsync(
             account => account.CompanyId == companyId
