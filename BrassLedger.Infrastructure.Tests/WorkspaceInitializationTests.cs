@@ -773,11 +773,44 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
         await File.WriteAllBytesAsync(keyPath, originalKey);
         Assert.True((await backupService.VerifyBackupAsync(backup.BackupId!)).Succeeded);
+        if (!OperatingSystem.IsWindows())
+        {
+            var pathsToProtect = new[]
+            {
+                keyPath, Path.Combine(backupDirectory, "brassledger.db"), Path.Combine(backupDirectory, "manifest.json"),
+                Path.Combine(backupDirectory, "keys"), backupDirectory, Path.Combine(paths.DataDirectory, "backups")
+            };
+            int verificationFailuresBefore;
+            await using (var db = await factory.CreateDbContextAsync())
+                verificationFailuresBefore = await db.BusinessAuditEntries.CountAsync(entry => entry.Action == "backup.verification_failed");
+            foreach (var path in pathsToProtect)
+            {
+                var privateMode = File.GetUnixFileMode(path);
+                try
+                {
+                    File.SetUnixFileMode(path, privateMode | (path == keyPath ? UnixFileMode.OtherRead : UnixFileMode.GroupRead | UnixFileMode.GroupExecute));
+                    var exposed = await backupService.VerifyBackupAsync(backup.BackupId!);
+                    Assert.False(exposed.Succeeded);
+                    Assert.Contains("permissions", exposed.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+                    if (path == keyPath)
+                    {
+                        var exposedRehearsal = await backupService.RehearseRestoreAsync(backup.BackupId!);
+                        Assert.False(exposedRehearsal.Succeeded);
+                        Assert.Contains("permissions", exposedRehearsal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+                finally { File.SetUnixFileMode(path, privateMode); }
+            }
+            await using (var db = await factory.CreateDbContextAsync())
+                Assert.Equal(verificationFailuresBefore + pathsToProtect.Length, await db.BusinessAuditEntries.CountAsync(entry => entry.Action == "backup.verification_failed"));
+            Assert.True((await backupService.VerifyBackupAsync(backup.BackupId!)).Succeeded);
+        }
         File.Delete(keyPath);
         var missingKey = await backupService.VerifyBackupAsync(backup.BackupId!);
         Assert.False(missingKey.Succeeded);
         Assert.Contains("protection files", missingKey.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         await File.WriteAllBytesAsync(keyPath, originalKey);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
         var databasePath = Path.Combine(backupDirectory, "brassledger.db");
         await File.AppendAllTextAsync(databasePath, "corrupted copy");
@@ -788,9 +821,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var manifestPath = Path.Combine(backupDirectory, "manifest.json");
         var manifest = await File.ReadAllTextAsync(manifestPath);
         await File.WriteAllTextAsync(manifestPath, "{\"backupId\":\"legacy\",\"format\":\"sqlite-vacuum-into-v1\",\"keyFiles\":[\"key-example.xml\"]}");
-        var legacyManifest = await backupService.VerifyBackupAsync(backup.BackupId!);
-        Assert.False(legacyManifest.Succeeded);
-        Assert.Contains("Legacy v1", legacyManifest.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var originalBackupMode = OperatingSystem.IsWindows() ? default : File.GetUnixFileMode(backupDirectory);
+        try
+        {
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(backupDirectory, originalBackupMode | UnixFileMode.GroupRead | UnixFileMode.GroupExecute);
+            var legacyManifest = await backupService.VerifyBackupAsync(backup.BackupId!);
+            Assert.False(legacyManifest.Succeeded);
+            Assert.Contains("Legacy v1", legacyManifest.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        }
+        finally { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(backupDirectory, originalBackupMode); }
         await File.WriteAllTextAsync(manifestPath, manifest);
 
         var sourceKeyPath = Path.Combine(paths.KeysDirectory, Path.GetFileName(keyPath));
