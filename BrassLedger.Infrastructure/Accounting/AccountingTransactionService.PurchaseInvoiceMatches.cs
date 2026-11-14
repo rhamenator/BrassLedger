@@ -9,6 +9,26 @@ public sealed partial class AccountingTransactionService
 {
     private static readonly string[] ReservingPurchaseInvoiceMatchStatuses = ["Draft", "Submitted", "Approved"];
 
+    private static bool HasConsistentBaseReceiptValuation(
+        InventoryReceipt receipt,
+        IReadOnlyCollection<InventoryReceiptLine> lines,
+        string baseCurrency)
+    {
+        return !string.IsNullOrWhiteSpace(receipt.TransactionCurrency)
+            && NormalizeTransactionCurrency(receipt.TransactionCurrency, baseCurrency) == baseCurrency
+            && receipt.TransactionAmount == receipt.TotalAmount
+            && receipt.TotalAmount > 0m
+            && receipt.ExchangeRateId is null
+            && receipt.ExchangeRateToBase == 1m
+            && receipt.ExchangeRateEffectiveOn == receipt.ReceivedOn
+            && receipt.ExchangeRateSource == "Company base currency"
+            && string.IsNullOrEmpty(receipt.ExchangeRateSourceReference)
+            && receipt.ExchangeRateDirection == "Base"
+            && lines.Count > 0
+            && lines.All(line => line.TransactionAmount == line.LineTotal)
+            && lines.Sum(line => line.LineTotal) == receipt.TotalAmount;
+    }
+
     public async Task<TransactionResult> SavePurchaseInvoiceMatchAsync(
         SavePurchaseInvoiceMatchRequest request,
         CancellationToken cancellationToken = default)
@@ -68,6 +88,8 @@ public sealed partial class AccountingTransactionService
             .Where(line => line.InventoryReceiptId == receipt.Id)
             .OrderBy(line => line.Sequence)
             .ToListAsync(cancellationToken);
+        if (!HasConsistentBaseReceiptValuation(receipt, receiptLines, baseCurrency))
+            return TransactionResult.Failure("The receipt's retained currency or inventory valuation no longer reconciles. Correct the source before preparing a vendor bill.");
         var requestedIds = requestedLines.Select(line => line.InventoryReceiptLineId).ToArray();
         if (receiptLines.Count(line => requestedIds.Contains(line.Id)) != requestedIds.Length)
             return TransactionResult.Failure("Every invoice line must belong to the selected receipt.");
@@ -458,6 +480,8 @@ public sealed partial class AccountingTransactionService
         var receiptLines = await db.InventoryReceiptLines
             .Where(line => line.InventoryReceiptId == receipt.Id)
             .ToDictionaryAsync(line => line.Id, cancellationToken);
+        if (!HasConsistentBaseReceiptValuation(receipt, receiptLines.Values.ToArray(), baseCurrency))
+            return TransactionResult.Failure("The receipt's retained currency or inventory valuation no longer reconciles. Return the invoice match to draft and review its source.");
         var postedMatches = await (
             from billLine in db.VendorBillLines
             join postedBill in db.VendorBills on billLine.VendorBillId equals postedBill.Id
