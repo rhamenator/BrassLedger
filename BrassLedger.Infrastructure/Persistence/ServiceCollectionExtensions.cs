@@ -691,6 +691,12 @@ public static class ServiceCollectionExtensions
             return await HasColumnAsync(dbContext, "SalesOrders", "TransactionCurrency", cancellationToken);
         if (migrationId.EndsWith("_AddPurchaseOrderTransactionCurrency", StringComparison.Ordinal))
             return await HasColumnAsync(dbContext, "PurchaseOrders", "TransactionCurrency", cancellationToken);
+        if (migrationId.EndsWith("_AddInventoryReceiptCurrencyProvenance", StringComparison.Ordinal))
+        {
+            foreach (var column in new[] { "TransactionCurrency", "TransactionAmount", "ExchangeRateId", "ExchangeRateToBase", "ExchangeRateEffectiveOn", "ExchangeRateSource", "ExchangeRateSourceReference", "ExchangeRateDirection" })
+                if (!await HasColumnAsync(dbContext, "InventoryReceipts", column, cancellationToken)) return false;
+            return await HasColumnAsync(dbContext, "InventoryReceiptLines", "TransactionAmount", cancellationToken);
+        }
         return false;
     }
 

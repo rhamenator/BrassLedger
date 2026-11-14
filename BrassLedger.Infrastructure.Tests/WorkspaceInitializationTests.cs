@@ -67,7 +67,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
         Assert.Equal("13", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions WHERE Description LIKE 'Compatibility checkpoint recorded by EF migration baseline%';"));
         Assert.StartsWith("2026082513-", await ReadScalarAsync(connection, "SELECT VersionId FROM BrassLedgerSchemaVersions ORDER BY VersionId DESC LIMIT 1;"));
-        Assert.Equal("48", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("49", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826014829_InitialCurrentSchema';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
         Assert.Equal("1", await ReadScalarAsync(connection, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826033453_AddFixedAssetDisposals';"));
@@ -186,7 +186,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var verified = new SqliteConnection($"Data Source={databasePath}");
         await verified.OpenAsync();
         Assert.Equal("13", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM BrassLedgerSchemaVersions;"));
-        Assert.Equal("48", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("49", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory;"));
+        Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20261114132408_AddInventoryReceiptCurrencyProvenance';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20261113200226_AddSalesOrderTransactionCurrency';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20261113215406_AddPurchaseOrderTransactionCurrency';"));
         Assert.Equal("1", await ReadScalarAsync(verified, "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = '20260826025658_AddAccountingSchedules';"));
@@ -531,6 +532,96 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var invoice = await db.SalesInvoices.SingleAsync(item => item.Id == invoiceId); var bill = await db.VendorBills.SingleAsync(item => item.Id == billId);
         Assert.Equal("CAD", invoice.TransactionCurrency); Assert.Equal(105m, invoice.TransactionTotalAmount); Assert.Equal(80m, invoice.TransactionBalanceDue); Assert.Equal(1m, invoice.ExchangeRateToBase); Assert.Null(invoice.ExchangeRateId);
         Assert.Equal("CAD", bill.TransactionCurrency); Assert.Equal(90m, bill.TransactionTotalAmount); Assert.Equal(60m, bill.TransactionBalanceDue); Assert.Equal(1m, bill.ExchangeRateToBase); Assert.Null(bill.ExchangeRateId);
+    }
+
+    [Fact]
+    public async Task InventoryReceiptCurrencyMigration_BackfillsPostedBaseReceipts()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        Guid vendorId; Guid itemId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            vendorId = await db.Vendors.Select(item => item.Id).FirstAsync();
+            itemId = await db.InventoryItems.Select(item => item.Id).FirstAsync();
+        }
+        var ordered = await transactions.SavePurchaseOrderAsync(new(null, vendorId, "PO-RECEIPT-MIGRATION", new DateOnly(2026, 8, 1), null, "Historical receipt", [new(itemId, "Inventory", 2m, 12.5m)]));
+        Assert.True(ordered.Succeeded, ordered.ErrorMessage);
+        Guid orderLineId; string orderToken;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var order = await db.PurchaseOrders.SingleAsync(item => item.Id == ordered.Id);
+            Assert.True((await transactions.ApprovePurchaseOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded);
+            orderLineId = await db.PurchaseOrderLines.Where(item => item.PurchaseOrderId == order.Id).Select(item => item.Id).SingleAsync();
+            orderToken = await db.PurchaseOrders.Where(item => item.Id == order.Id).Select(item => item.ConcurrencyToken).SingleAsync();
+        }
+        var posted = await transactions.ReceivePurchaseOrderAsync(new(ordered.Id!.Value, "RCV-RECEIPT-MIGRATION", new DateOnly(2026, 8, 2), [new(orderLineId, 2m)], orderToken));
+        Assert.True(posted.Succeeded, posted.ErrorMessage);
+
+        var cadCompanyId = Guid.NewGuid();
+        var cadReceiptId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var cadVendorId = Guid.NewGuid(); var cadItemId = Guid.NewGuid(); var cadOrderId = Guid.NewGuid();
+            var cadOrderLineId = Guid.NewGuid(); var cadJournalId = Guid.NewGuid();
+            db.Companies.Add(new Company { Id = cadCompanyId, Name = "CAD receipt migration company", LegalName = "CAD receipt migration company", BaseCurrency = "CAD", FiscalYearStartMonth = 1 });
+            db.Vendors.Add(new Vendor { Id = cadVendorId, CompanyId = cadCompanyId, VendorNumber = "V-CAD-MIGRATION", Name = "CAD vendor" });
+            db.InventoryItems.Add(new InventoryItem { Id = cadItemId, CompanyId = cadCompanyId, Sku = "CAD-MIGRATION", Description = "CAD inventory", IsActive = true, UnitCost = 12.5m, QuantityOnHand = 3m });
+            db.PurchaseOrders.Add(new PurchaseOrder { Id = cadOrderId, CompanyId = cadCompanyId, VendorId = cadVendorId, OrderNumber = "PO-CAD-MIGRATION", TransactionCurrency = "CAD", OrderedOn = new DateOnly(2026, 8, 1), Status = "Received", TotalAmount = 37.5m });
+            db.PurchaseOrderLines.Add(new PurchaseOrderLine { Id = cadOrderLineId, PurchaseOrderId = cadOrderId, InventoryItemId = cadItemId, Sequence = 1, Description = "CAD inventory", OrderedQuantity = 3m, ReceivedQuantity = 3m, UnitCost = 12.5m, LineTotal = 37.5m });
+            db.JournalEntries.Add(new JournalEntry { Id = cadJournalId, CompanyId = cadCompanyId, EntryNumber = "JE-CAD-MIGRATION", PostedOn = new DateOnly(2026, 8, 2), SourceModule = "Purchasing", Reference = "RCV-CAD-MIGRATION", TotalAmount = 37.5m, IsPosted = true, CreatedAtUtc = DateTimeOffset.UtcNow, PostedAtUtc = DateTimeOffset.UtcNow });
+            db.InventoryReceipts.Add(new InventoryReceipt { Id = cadReceiptId, CompanyId = cadCompanyId, PurchaseOrderId = cadOrderId, JournalEntryId = cadJournalId, ReceiptNumber = "RCV-CAD-MIGRATION", ReceivedOn = new DateOnly(2026, 8, 2), TotalAmount = 37.5m, TransactionCurrency = "CAD", TransactionAmount = 37.5m, ExchangeRateToBase = 1m, ExchangeRateEffectiveOn = new DateOnly(2026, 8, 2), ExchangeRateSource = "Company base currency", ReceivedAtUtc = DateTimeOffset.UtcNow });
+            db.InventoryReceiptLines.Add(new InventoryReceiptLine { Id = Guid.NewGuid(), InventoryReceiptId = cadReceiptId, PurchaseOrderLineId = cadOrderLineId, InventoryItemId = cadItemId, Sequence = 1, Quantity = 3m, UnitCost = 12.5m, LineTotal = 37.5m, TransactionAmount = 37.5m });
+            await db.SaveChangesAsync();
+        }
+
+        var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                ALTER TABLE "InventoryReceiptLines" DROP COLUMN "TransactionAmount";
+                ALTER TABLE "InventoryReceipts" DROP COLUMN "ExchangeRateDirection";
+                ALTER TABLE "InventoryReceipts" DROP COLUMN "ExchangeRateEffectiveOn";
+                ALTER TABLE "InventoryReceipts" DROP COLUMN "ExchangeRateId";
+                ALTER TABLE "InventoryReceipts" DROP COLUMN "ExchangeRateSource";
+                ALTER TABLE "InventoryReceipts" DROP COLUMN "ExchangeRateSourceReference";
+                ALTER TABLE "InventoryReceipts" DROP COLUMN "ExchangeRateToBase";
+                ALTER TABLE "InventoryReceipts" DROP COLUMN "TransactionAmount";
+                ALTER TABLE "InventoryReceipts" DROP COLUMN "TransactionCurrency";
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261114132408_AddInventoryReceiptCurrencyProvenance';
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await using var migrated = await factory.CreateDbContextAsync();
+        await migrated.Database.GetService<IMigrator>().MigrateAsync();
+        migrated.ChangeTracker.Clear();
+        var receipt = await migrated.InventoryReceipts.SingleAsync(item => item.Id == posted.Id);
+        var line = await migrated.InventoryReceiptLines.SingleAsync(item => item.InventoryReceiptId == receipt.Id);
+        Assert.Equal("USD", receipt.TransactionCurrency);
+        Assert.Equal(receipt.TotalAmount, receipt.TransactionAmount);
+        Assert.Equal(1m, receipt.ExchangeRateToBase);
+        Assert.Equal(receipt.ReceivedOn, receipt.ExchangeRateEffectiveOn);
+        Assert.Equal("Company base currency", receipt.ExchangeRateSource);
+        Assert.Equal("Base", receipt.ExchangeRateDirection);
+        Assert.Null(receipt.ExchangeRateId);
+        Assert.Equal(line.LineTotal, line.TransactionAmount);
+        var cadReceipt = await migrated.InventoryReceipts.SingleAsync(item => item.Id == cadReceiptId);
+        var cadLine = await migrated.InventoryReceiptLines.SingleAsync(item => item.InventoryReceiptId == cadReceiptId);
+        Assert.Equal(cadCompanyId, cadReceipt.CompanyId);
+        Assert.Equal("CAD", cadReceipt.TransactionCurrency);
+        Assert.Equal(37.5m, cadReceipt.TotalAmount);
+        Assert.Equal(37.5m, cadReceipt.TransactionAmount);
+        Assert.Equal(1m, cadReceipt.ExchangeRateToBase);
+        Assert.Equal(cadReceipt.ReceivedOn, cadReceipt.ExchangeRateEffectiveOn);
+        Assert.Equal("Company base currency", cadReceipt.ExchangeRateSource);
+        Assert.Equal("Base", cadReceipt.ExchangeRateDirection);
+        Assert.Equal(37.5m, cadLine.TransactionAmount);
     }
 
     [Fact]
@@ -3923,6 +4014,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal(priorQuantity + 2m, receivedItem.QuantityOnHand);
             Assert.Equal(decimal.Round(((priorQuantity * priorCost) + 40m) / (priorQuantity + 2m), 2, MidpointRounding.AwayFromZero), receivedItem.UnitCost);
             Assert.Equal(40m, receipt.TotalAmount);
+            Assert.Equal("USD", receipt.TransactionCurrency);
+            Assert.Equal(40m, receipt.TransactionAmount);
+            Assert.Null(receipt.ExchangeRateId);
+            Assert.Equal(1m, receipt.ExchangeRateToBase);
+            Assert.Equal(new DateOnly(2026, 8, 3), receipt.ExchangeRateEffectiveOn);
+            Assert.Equal("Company base currency", receipt.ExchangeRateSource);
+            Assert.Equal("Base", receipt.ExchangeRateDirection);
+            var receiptLine = await receiptDb.InventoryReceiptLines.SingleAsync(candidate => candidate.InventoryReceiptId == receipt.Id);
+            Assert.Equal(receiptLine.LineTotal, receiptLine.TransactionAmount);
             Assert.Equal(priorLocation.WarehouseId, receipt.WarehouseId); Assert.Equal(priorLocation.BinId, receipt.BinId);
             Assert.Equal(priorLocation.QuantityOnHand + 2m, await receiptDb.InventoryLocationBalances.Where(balance => balance.Id == priorLocation.Id).Select(balance => balance.QuantityOnHand).SingleAsync());
             Assert.Equal(inventoryBalance + 40m, await receiptDb.Accounts.Where(account => account.OperationalRole == AccountingAccountRoles.InventoryAsset).Select(account => account.CurrentBalance).SingleAsync());

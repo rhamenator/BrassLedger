@@ -3455,6 +3455,28 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("ExchangeRateDirection")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("ExchangeRateEffectiveOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasPrecision(18, 10)
+                        .HasColumnType("numeric(18,10)");
+
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("uuid");
 
@@ -3497,6 +3519,14 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
                     b.Property<decimal>("TotalAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TransactionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<Guid?>("WarehouseId")
                         .HasColumnType("uuid");
@@ -3561,6 +3591,10 @@ namespace BrassLedger.Migrations.PostgreSql.Migrations
 
                     b.Property<int>("Sequence")
                         .HasColumnType("integer");
+
+                    b.Property<decimal>("TransactionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<decimal>("UnitCost")
                         .HasPrecision(18, 2)

@@ -960,9 +960,12 @@ public sealed class BrassLedgerDbContext(
         ConfigureMoney(modelBuilder.Entity<LandedCostAllocationLine>().Property(x => x.PriorUnitCost));
         ConfigureMoney(modelBuilder.Entity<LandedCostAllocationLine>().Property(x => x.ResultingUnitCost));
         ConfigureMoney(modelBuilder.Entity<InventoryReceipt>().Property(x => x.TotalAmount));
+        ConfigureMoney(modelBuilder.Entity<InventoryReceipt>().Property(x => x.TransactionAmount));
+        modelBuilder.Entity<InventoryReceipt>().Property(x => x.ExchangeRateToBase).HasPrecision(18, 10);
         ConfigureMoney(modelBuilder.Entity<InventoryReceiptLine>().Property(x => x.Quantity), 18, 4);
         ConfigureMoney(modelBuilder.Entity<InventoryReceiptLine>().Property(x => x.UnitCost));
         ConfigureMoney(modelBuilder.Entity<InventoryReceiptLine>().Property(x => x.LineTotal));
+        ConfigureMoney(modelBuilder.Entity<InventoryReceiptLine>().Property(x => x.TransactionAmount));
         ConfigureMoney(modelBuilder.Entity<InventoryReceiptLine>().Property(x => x.PriorQuantityOnHand), 18, 4);
         ConfigureMoney(modelBuilder.Entity<InventoryReceiptLine>().Property(x => x.PriorUnitCost));
         ConfigureMoney(modelBuilder.Entity<InventoryReceiptLine>().Property(x => x.ResultingUnitCost));

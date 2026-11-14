@@ -1572,6 +1572,14 @@ public sealed class InventoryReceipt
     public DateOnly ReceivedOn { get; set; }
     public string Status { get; set; } = "Posted";
     public decimal TotalAmount { get; set; }
+    public string TransactionCurrency { get; set; } = string.Empty;
+    public decimal TransactionAmount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToBase { get; set; } = 1m;
+    public DateOnly? ExchangeRateEffectiveOn { get; set; }
+    public string ExchangeRateSource { get; set; } = string.Empty;
+    public string ExchangeRateSourceReference { get; set; } = string.Empty;
+    public string ExchangeRateDirection { get; set; } = "Base";
     public Guid JournalEntryId { get; set; }
     public Guid? ReversalJournalEntryId { get; set; }
     public Guid? ReceivedByUserId { get; set; }
@@ -1594,6 +1602,7 @@ public sealed class InventoryReceiptLine
     public decimal ReturnedQuantity { get; set; }
     public decimal UnitCost { get; set; }
     public decimal LineTotal { get; set; }
+    public decimal TransactionAmount { get; set; }
     public decimal PriorQuantityOnHand { get; set; }
     public decimal PriorUnitCost { get; set; }
     public decimal ResultingUnitCost { get; set; }

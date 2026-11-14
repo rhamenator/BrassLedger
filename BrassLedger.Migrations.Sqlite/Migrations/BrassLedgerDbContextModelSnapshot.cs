@@ -3448,6 +3448,28 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ExchangeRateDirection")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("ExchangeRateEffectiveOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExchangeRateSourceReference")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ExchangeRateToBase")
+                        .HasPrecision(18, 10)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("TEXT");
 
@@ -3489,6 +3511,14 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.Property<decimal>("TotalAmount")
                         .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TransactionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TransactionCurrency")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("WarehouseId")
@@ -3554,6 +3584,10 @@ namespace BrassLedger.Migrations.Sqlite.Migrations
 
                     b.Property<int>("Sequence")
                         .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("TransactionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
 
                     b.Property<decimal>("UnitCost")
                         .HasPrecision(18, 2)
