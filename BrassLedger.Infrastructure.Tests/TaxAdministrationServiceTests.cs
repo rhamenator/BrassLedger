@@ -1,5 +1,8 @@
 using BrassLedger.Application.Taxation;
+using BrassLedger.Domain.Accounting;
+using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -33,6 +36,114 @@ public sealed class TaxAdministrationServiceTests : IDisposable
         Assert.Contains(snapshot.RuleSets, rule => rule.Code == "LOCAL-E");
         Assert.Contains(snapshot.LegacyArtifacts, artifact => artifact.SourcePath.EndsWith("calc.ovr", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(snapshot.Methods, method => method.Code == "local-code-e");
+    }
+
+    [Fact]
+    public async Task TaxAdministration_RequiresExplicitCompanyAndIsolatesPackages()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<ITaxAdministrationService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var blockedHttp = new RejectingHttpClientFactory();
+        var guardedService = new BrassLedger.Infrastructure.Taxation.TaxAdministrationService(factory, accessor, blockedHttp);
+        Guid originalCompanyId; var secondCompanyId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Tax isolation subsidiary", LegalName = "Tax Isolation Subsidiary Ltd.", TaxId = "TAX-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            await db.SaveChangesAsync();
+        }
+        var request = new SaveTaxContentPackageRequest(null, "ISOLATION-2026", "1.0", new DateOnly(2026, 1, 1), "Draft", "1.0", "{}", "Isolation test", "Reviewed company-specific tax package.");
+        var readError = await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetSnapshotAsync());
+        Assert.Contains("explicit company context", readError.Message, StringComparison.OrdinalIgnoreCase);
+        var saveError = await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveContentPackageAsync(request));
+        Assert.Contains("explicit company context", saveError.Message, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => guardedService.ImportTaxLocusAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => guardedService.CaptureStateSourceAsync(new("MI", "https://www.irs.gov", "Company context test")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ValidateContentPackageAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ActivateContentPackageAsync(Guid.NewGuid()));
+        Assert.Equal(0, blockedHttp.CreateCount);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.TaxContentPackages.AnyAsync(item => item.PackageCode == request.PackageCode));
+            Assert.False(await db.TaxRuleSets.AnyAsync(item => item.CompanyId == secondCompanyId));
+            Assert.False(await db.TaxSourceCaptures.AnyAsync(item => item.CompanyId == secondCompanyId));
+        }
+
+        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString())], "test"))
+        };
+        ActAs(originalCompanyId);
+        var originalSave = await service.SaveContentPackageAsync(request);
+        Assert.True(originalSave.Succeeded, originalSave.ErrorMessage);
+        Assert.Contains((await service.GetSnapshotAsync()).Packages, item => item.Id == originalSave.SavedId);
+
+        ActAs(secondCompanyId);
+        Assert.DoesNotContain((await service.GetSnapshotAsync()).Packages, item => item.Id == originalSave.SavedId);
+        var crossUpdate = await service.SaveContentPackageAsync(request with { Id = originalSave.SavedId });
+        Assert.Equal("Tax content package not found.", crossUpdate.ErrorMessage);
+        var crossValidation = await service.ValidateContentPackageAsync(originalSave.SavedId!.Value);
+        Assert.False(crossValidation.Succeeded);
+        Assert.Contains(crossValidation.Errors, error => error.Contains("not found", StringComparison.OrdinalIgnoreCase));
+        var crossActivation = await service.ActivateContentPackageAsync(originalSave.SavedId.Value);
+        Assert.False(crossActivation.Succeeded);
+        Assert.Contains("not found", crossActivation.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var secondSave = await service.SaveContentPackageAsync(request);
+        Assert.True(secondSave.Succeeded, secondSave.ErrorMessage);
+        Assert.NotEqual(originalSave.SavedId, secondSave.SavedId);
+        Assert.Contains((await service.GetSnapshotAsync()).Packages, item => item.Id == secondSave.SavedId);
+        var olderSecondSave = await service.SaveContentPackageAsync(request with { Version = "0.9" });
+        Assert.True(olderSecondSave.Succeeded, olderSecondSave.ErrorMessage);
+        var secondRule = (await service.GetSnapshotAsync()).RuleSets.Single(item => item.Code == "NJ-WH");
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.TaxContentPackages.SingleAsync(item => item.Id == originalSave.SavedId)).Status = "Approved";
+            (await db.TaxContentPackages.SingleAsync(item => item.Id == olderSecondSave.SavedId)).Status = "Approved";
+            (await db.TaxRuleSets.SingleAsync(item => item.Id == secondRule.Id)).TaxContentPackageId = secondSave.SavedId;
+            await db.SaveChangesAsync();
+        }
+        var testCase = await service.SaveTestCaseAsync(new(secondRule.Id, null, "Company-scoped activation baseline", "{\"grossPay\":1000}", "{\"withholding\":0}", true));
+        Assert.True(testCase.Succeeded, testCase.ErrorMessage);
+        var activation = await service.ActivateContentPackageAsync(secondSave.SavedId!.Value);
+        Assert.True(activation.Succeeded, activation.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal("Approved", (await db.TaxContentPackages.SingleAsync(item => item.Id == originalSave.SavedId)).Status);
+            Assert.Equal("Superseded", (await db.TaxContentPackages.SingleAsync(item => item.Id == olderSecondSave.SavedId)).Status);
+            Assert.Equal("Approved", (await db.TaxContentPackages.SingleAsync(item => item.Id == secondSave.SavedId)).Status);
+            Assert.True((await db.TaxRuleSets.SingleAsync(item => item.Id == secondRule.Id)).IsActive);
+        }
+        ActAs(originalCompanyId);
+        Assert.DoesNotContain((await service.GetSnapshotAsync()).Packages, item => item.Id == secondSave.SavedId);
+        ActAs(Guid.NewGuid());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetSnapshotAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.SaveContentPackageAsync(request));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => guardedService.ImportTaxLocusAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => guardedService.CaptureStateSourceAsync(new("MI", "https://www.irs.gov", "Unknown company test")));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.ValidateContentPackageAsync(originalSave.SavedId.Value));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.ActivateContentPackageAsync(originalSave.SavedId.Value));
+        Assert.Equal(0, blockedHttp.CreateCount);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(originalCompanyId, (await db.TaxContentPackages.SingleAsync(item => item.Id == originalSave.SavedId)).CompanyId);
+            Assert.Equal(secondCompanyId, (await db.TaxContentPackages.SingleAsync(item => item.Id == secondSave.SavedId)).CompanyId);
+            Assert.Equal(3, await db.TaxContentPackages.CountAsync(item => item.PackageCode == request.PackageCode));
+        }
+    }
+
+    private sealed class RejectingHttpClientFactory : IHttpClientFactory
+    {
+        public int CreateCount { get; private set; }
+        public HttpClient CreateClient(string name)
+        {
+            CreateCount++;
+            throw new InvalidOperationException("No HTTP request is authorized for this company-context test.");
+        }
     }
 
     [Fact]

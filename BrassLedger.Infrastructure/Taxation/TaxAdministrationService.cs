@@ -485,7 +485,7 @@ public sealed class TaxAdministrationService(
         if (supersededPackageIds.Length > 0)
         {
             await db.TaxRuleSets.Where(rule => rule.CompanyId == companyId && rule.TaxContentPackageId.HasValue && supersededPackageIds.Contains(rule.TaxContentPackageId.Value)).ExecuteUpdateAsync(setters => setters.SetProperty(rule => rule.IsActive, false), cancellationToken);
-            await db.TaxContentPackages.Where(item => supersededPackageIds.Contains(item.Id)).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Status, "Superseded"), cancellationToken);
+            await db.TaxContentPackages.Where(item => item.CompanyId == companyId && supersededPackageIds.Contains(item.Id)).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Status, "Superseded"), cancellationToken);
         }
         await db.TaxRuleSets.Where(rule => rule.CompanyId == companyId && rule.TaxContentPackageId == package.Id).ExecuteUpdateAsync(setters => setters.SetProperty(rule => rule.IsActive, true), cancellationToken);
         await db.SaveChangesAsync(cancellationToken); return TaxAdministrationResult.Success(package.Id);
@@ -493,6 +493,8 @@ public sealed class TaxAdministrationService(
 
     public async Task<TaxAdministrationResult> ImportTaxLocusAsync(CancellationToken cancellationToken = default)
     {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var sources = new[]
         {
             "payroll_federal_rates", "payroll_state_pit", "payroll_state_suta", "payroll_local_income_tax", "payroll_reciprocity"
@@ -517,8 +519,6 @@ public sealed class TaxAdministrationService(
             return TaxAdministrationResult.Failure($"TaxLocus import could not complete: {exception.Message}");
         }
 
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         var combinedHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("|", downloaded.Select(item => item.Hash)))))
             .ToLowerInvariant();
         var version = $"{DateOnly.FromDateTime(DateTime.UtcNow):yyyy-MM-dd}-{combinedHash[..12]}";
@@ -560,11 +560,11 @@ public sealed class TaxAdministrationService(
     public async Task<TaxAdministrationResult> CaptureStateSourceAsync(CaptureTaxSourceRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.JurisdictionCode)) return TaxAdministrationResult.Failure("Enter a state or locality code.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
         try
         {
             var response = await DownloadSafeSourceAsync(request.SourceUrl, cancellationToken);
-            await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
             var capture = new TaxSourceCapture
             {
                 Id = Guid.NewGuid(), CompanyId = companyId, SourceKind = "State web capture",
@@ -654,7 +654,7 @@ public sealed class TaxAdministrationService(
         dbContext.TaxContentPackages.AnyAsync(package => package.CompanyId == companyId && package.Id == packageId && package.Status == "Approved", cancellationToken);
     private static Task<bool> IsApprovedPackageRuleAsync(BrassLedgerDbContext dbContext, TaxRuleSet rule, CancellationToken cancellationToken) =>
         rule.TaxContentPackageId.HasValue
-            ? dbContext.TaxContentPackages.AnyAsync(package => package.Id == rule.TaxContentPackageId.Value && package.Status == "Approved", cancellationToken)
+            ? dbContext.TaxContentPackages.AnyAsync(package => package.CompanyId == rule.CompanyId && package.Id == rule.TaxContentPackageId.Value && package.Status == "Approved", cancellationToken)
             : Task.FromResult(false);
     private static bool IsCompatibleWithCurrentEngine(string minimumVersion) => Version.TryParse(minimumVersion, out var required) && Version.TryParse(CurrentTaxEngineVersion, out var current) && required <= current;
     private static bool TryReadNumber(string json, string property, out decimal value) { value = 0; using var document = System.Text.Json.JsonDocument.Parse(json); return document.RootElement.TryGetProperty(property, out var element) && element.TryGetDecimal(out value); }
@@ -764,15 +764,14 @@ public sealed class TaxAdministrationService(
         var claimValue = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         if (Guid.TryParse(claimValue, out var companyId))
         {
-            return companyId;
+            if (await dbContext.Companies.AnyAsync(company => company.Id == companyId, cancellationToken)) return companyId;
+            throw new UnauthorizedAccessException("The selected company is unavailable.");
         }
 
         if (httpContext is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
-        return await dbContext.Companies
-            .AsNoTracking()
-            .OrderBy(company => company.Name)
-            .Select(company => company.Id)
-            .FirstAsync(cancellationToken);
+        var companyIds = await dbContext.Companies.Select(company => company.Id).Take(2).ToArrayAsync(cancellationToken);
+        if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
+        return companyIds[0];
     }
 
     private static string NormalizeValueType(string valueType)

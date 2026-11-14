@@ -19,6 +19,20 @@ public sealed class MultiCompanyContextGuardTests
             await session.WaitForHeadingAsync("Control project scope, cost, billing, and revenue.");
             await session.AssertNoUiFailuresAsync("multi-company project workspace read");
 
+            await session.GotoAsync("/taxes");
+            await session.WaitForHeadingAsync("Keep withholdings, filing rules, and odd state behavior in editable tables instead of buried code.");
+            await session.Page.GetByRole(AriaRole.Button, new() { Name = "New package", Exact = true }).ClickAsync();
+            var packageCode = $"TAX-CONTEXT-{Guid.NewGuid().ToString("N")[..8]}";
+            await session.Page.GetByLabel("Tax package code").FillAsync(packageCode);
+            await Assertions.Expect(session.Page.GetByLabel("Tax package code")).ToHaveValueAsync(packageCode);
+            await session.Page.GetByLabel("Tax package version").FillAsync("1.0");
+            await session.Page.GetByLabel("Tax package change summary").FillAsync("Multi-company browser isolation review.");
+            await session.Page.GetByRole(AriaRole.Button, new() { Name = "Save package", Exact = true }).ClickAsync();
+            await session.Page.GetByText("Tax content package saved.", new() { Exact = true }).WaitForAsync();
+            await session.AssertNoUiFailuresAsync("multi-company tax-content package save");
+            var packageTable = session.Page.Locator("section.panel").Filter(new() { HasTextString = "Versioned tax-content packages" }).Locator("table");
+            Assert.Contains(packageCode.ToUpperInvariant(), await packageTable.InnerTextAsync());
+
             await using var operationsSession = await fixture.CreateSessionAsync(BrowserKind.Chromium);
             await operationsSession.SignInAsync("operations", returnPath: "/operations");
             await operationsSession.GotoAsync("/operations");
