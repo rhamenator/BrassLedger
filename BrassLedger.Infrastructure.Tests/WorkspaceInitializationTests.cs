@@ -3489,7 +3489,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.False(unrepresentableReceipt.Succeeded); Assert.Contains("positive receipt quantity", unrepresentableReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var overReceipt = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id.Value, "RCV-OVER-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 6m)], approvedToken));
         Assert.False(overReceipt.Succeeded); Assert.Contains("exceeds", overReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        var received = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id!.Value, "RCV-RECEIVE-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 2m)], approvedToken));
+        var received = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id!.Value, "RCV-RECEIVE-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 2.00004m)], approvedToken));
         Assert.True(received.Succeeded, received.ErrorMessage);
 
         await using (var receiptDb = await factory.CreateDbContextAsync())
@@ -3758,7 +3758,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             vendorId = await db.Vendors.Select(vendor => vendor.Id).FirstAsync();
             var item = await db.InventoryItems.SingleAsync(candidate => candidate.Sku == "RM-220"); itemId = item.Id; startingQuantity = item.QuantityOnHand;
         }
-        var request = new SavePurchaseOrderRequest(null, vendorId, "PO-FX-GUARD-1", new DateOnly(2026, 8, 20), null, "Foreign order before receipt valuation", [new PurchaseOrderLineRequest(itemId, "Foreign fasteners", 2m, 50m)], Currency: "CAD");
+        var request = new SavePurchaseOrderRequest(null, vendorId, "PO-FX-GUARD-1", new DateOnly(2026, 8, 20), null, "Foreign order before receipt valuation", [new PurchaseOrderLineRequest(itemId, "Foreign fasteners", 2.00004m, 50m)], Currency: "CAD");
         var unrepresentable = await transactions.SavePurchaseOrderAsync(request with { OrderNumber = "PO-FX-TINY-1", Lines = [new PurchaseOrderLineRequest(itemId, "Unrepresentable quantity", 0.00001m, 50m)] });
         Assert.False(unrepresentable.Succeeded);
         Assert.Contains("positive quantity", unrepresentable.ErrorMessage, StringComparison.OrdinalIgnoreCase);
@@ -3769,7 +3769,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         {
             var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id);
             Assert.Equal("CAD", order.TransactionCurrency); Assert.Equal(100m, order.TotalAmount);
-            lineId = await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).Select(line => line.Id).SingleAsync(); token = order.ConcurrencyToken;
+            var line = await db.PurchaseOrderLines.SingleAsync(line => line.PurchaseOrderId == order.Id);
+            Assert.Equal(2m, line.OrderedQuantity); Assert.Equal(100m, line.LineTotal);
+            lineId = line.Id; token = order.ConcurrencyToken;
         }
         var legacyEdit = await transactions.SavePurchaseOrderAsync(request with { Id = saved.Id, ConcurrencyToken = token, Currency = "" });
         Assert.True(legacyEdit.Succeeded, legacyEdit.ErrorMessage);
