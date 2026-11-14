@@ -58,7 +58,12 @@ public sealed class LedgerPageTests : TestContext
         Assert.NotNull(cut.Find("select[aria-label='Tracking dimension type']"));
         Assert.Contains("FIELD", cut.Find("select[aria-label='Journal entry department']").TextContent);
         Assert.Contains("COMMERCIAL", cut.Find("select[aria-label='Journal entry class']").TextContent);
-        Assert.NotNull(cut.Find("input[aria-label='Journal rejection reason']"));
+        var rejectionReason = cut.Find("input[aria-label='Journal rejection reason']");
+        var rejectButtons = cut.FindAll("button").Where(button => button.TextContent.Trim() == "Reject").ToArray();
+        Assert.NotEmpty(rejectButtons);
+        Assert.All(rejectButtons, button => Assert.True(button.HasAttribute("disabled")));
+        rejectionReason.Input("Attach the acquisition support.");
+        Assert.All(cut.FindAll("button").Where(button => button.TextContent.Trim() == "Reject"), button => Assert.False(button.HasAttribute("disabled")));
         Assert.Contains("Attach the supporting bank statement.", cut.Markup);
         var projectSelect = cut.Find("select[aria-label='Journal entry project']");
         Assert.Contains("JOB-5007", projectSelect.TextContent);

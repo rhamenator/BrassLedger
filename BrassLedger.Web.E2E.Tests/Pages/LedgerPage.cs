@@ -114,7 +114,9 @@ public sealed class LedgerPage
         await reviewer._session.Page.GetByLabel("Journal rejection reason").FillAsync("Attach the acquisition support.");
         var reviewerEntries = reviewer._session.Page.Locator("article.panel").Filter(new() { HasText = "Recent journal entries" });
         var reviewerAcquisitionRow = reviewerEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First;
-        await reviewerAcquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Reject", Exact = true }).ClickAsync();
+        var rejectButton = reviewerAcquisitionRow.GetByRole(AriaRole.Button, new() { Name = "Reject", Exact = true });
+        await Assertions.Expect(rejectButton).ToBeEnabledAsync();
+        await rejectButton.ClickAsync();
         await Assertions.Expect(reviewer._session.Page.GetByRole(AriaRole.Status)).ToContainTextAsync("Journal draft rejected");
         await Assertions.Expect(reviewerEntries.Locator("tbody tr").Filter(new() { HasText = acquisitionReference }).First).ToContainTextAsync("Attach the acquisition support.");
 

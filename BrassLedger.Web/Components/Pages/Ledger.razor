@@ -282,12 +282,12 @@ else
                                     {
                                         @if (entry.SourceModule == "General Ledger") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PrepareJournals"><button class="action-secondary" type="button" @onclick="() => EditJournal(entry)">Edit</button></AuthorizeView> }
                                         <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals">
-                                            <Authorized Context="journalApprovalAuthorization"><button class="action-secondary" type="button" @onclick="() => ApproveJournalAsync(entry.Id)">Approve</button>@if (entry.SourceModule == "General Ledger") { <button class="action-secondary" type="button" @onclick="() => RejectJournalAsync(entry)">Reject</button> }</Authorized>
+                                            <Authorized Context="journalApprovalAuthorization"><button class="action-secondary" type="button" @onclick="() => ApproveJournalAsync(entry.Id)">Approve</button>@if (entry.SourceModule == "General Ledger") { <button class="action-secondary" type="button" disabled="@string.IsNullOrWhiteSpace(JournalRejectionReason)" @onclick="() => RejectJournalAsync(entry)">Reject</button> }</Authorized>
                                         </AuthorizeView>
                                     }
                                     else if (entry.Status == "Approved")
                                     {
-                                        @if (entry.SourceModule == "General Ledger") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-secondary" type="button" @onclick="() => RejectJournalAsync(entry)">Reject</button></AuthorizeView> }
+                                        @if (entry.SourceModule == "General Ledger") { <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ApproveJournals"><button class="action-secondary" type="button" disabled="@string.IsNullOrWhiteSpace(JournalRejectionReason)" @onclick="() => RejectJournalAsync(entry)">Reject</button></AuthorizeView> }
                                         <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.PostJournals">
                                             <Authorized Context="journalPostingAuthorization"><button class="action-primary" type="button" @onclick="() => PostApprovedJournalAsync(entry.Id)">Post</button></Authorized>
                                         </AuthorizeView>
