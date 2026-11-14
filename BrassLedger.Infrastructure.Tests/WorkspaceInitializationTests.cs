@@ -731,6 +731,20 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         var paths = scope.ServiceProvider.GetRequiredService<BrassLedgerStoragePaths>();
         var backupDirectory = Path.Combine(paths.DataDirectory, "backups", backup.BackupId!);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var audits = (await db.BusinessAuditEntries.Where(entry => entry.EntityType == "DatabaseBackup").ToArrayAsync()).OrderBy(entry => entry.OccurredAtUtc).ToArray();
+            Assert.Equal(4, audits.Length);
+            Assert.Equal(new[] { "backup.snapshot_requested", "backup.created", "backup.verified", "backup.rehearsed" }, audits.Select(entry => entry.Action));
+            Assert.All(audits, entry => { Assert.Equal(user.UserId, entry.UserId); Assert.Equal(user.CompanyId, entry.CompanyId); Assert.Contains(backup.BackupId!, entry.DetailJson, StringComparison.Ordinal); });
+        }
+        await using (var snapshot = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(backupDirectory, "brassledger.db"), Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString()))
+        {
+            await snapshot.OpenAsync();
+            await using var command = snapshot.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM \"BusinessAuditEntries\" WHERE \"Action\" = 'backup.snapshot_requested';";
+            Assert.Equal(1L, (long)(await command.ExecuteScalarAsync())!);
+        }
         var keyPath = Directory.EnumerateFiles(Path.Combine(backupDirectory, "keys")).First();
         if (!OperatingSystem.IsWindows())
         {
@@ -750,6 +764,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var blockedRehearsal = await backupService.RehearseRestoreAsync(backup.BackupId!);
         Assert.False(blockedRehearsal.Succeeded);
         Assert.Contains("file checksum", blockedRehearsal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var verificationFailure = Assert.Single(await db.BusinessAuditEntries.Where(entry => entry.Action == "backup.verification_failed" && entry.UserId == user.UserId).ToArrayAsync());
+            var rehearsalFailure = Assert.Single(await db.BusinessAuditEntries.Where(entry => entry.Action == "backup.rehearsal_failed" && entry.UserId == user.UserId).ToArrayAsync());
+            Assert.Contains(backup.BackupId!, verificationFailure.DetailJson, StringComparison.Ordinal);
+            Assert.Contains(backup.BackupId!, rehearsalFailure.DetailJson, StringComparison.Ordinal);
+        }
         await File.WriteAllBytesAsync(keyPath, originalKey);
         Assert.True((await backupService.VerifyBackupAsync(backup.BackupId!)).Succeeded);
         File.Delete(keyPath);
@@ -780,6 +801,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.False(malformedSource.Succeeded);
         Assert.Contains("key", malformedSource.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(backupCount, Directory.EnumerateDirectories(Path.Combine(paths.DataDirectory, "backups")).Count());
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Single(await db.BusinessAuditEntries.Where(entry => entry.Action == "backup.create_failed" && entry.UserId == user.UserId).ToArrayAsync());
         await File.WriteAllBytesAsync(sourceKeyPath, sourceKey);
 
         var revocationPath = Path.Combine(paths.KeysDirectory, $"revocation-{Guid.NewGuid():D}.xml");
@@ -799,6 +822,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var subsidiary = await companies.CreateCompanyAsync(new("Backup scope subsidiary", "Backup scope subsidiary", "BACKUP-TEST", "USD", 1));
         Assert.True(subsidiary.Succeeded, subsidiary.ErrorMessage);
         Assert.True((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        int auditCount;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var subsidiaryAudit = Assert.Single(await db.BusinessAuditEntries.Where(entry => entry.CompanyId == subsidiary.CompanyId && entry.Action == "backup.verified").ToArrayAsync());
+            Assert.NotNull(subsidiaryAudit.EntityId);
+            Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(entry => entry.EntityId == subsidiaryAudit.EntityId));
+            auditCount = await db.BusinessAuditEntries.CountAsync(entry => entry.EntityType == "DatabaseBackup");
+        }
         await using (var db = await factory.CreateDbContextAsync())
         {
             var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == user.UserId && item.CompanyId == subsidiary.CompanyId);
@@ -812,6 +843,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(directoryCount, Directory.EnumerateDirectories(Path.Combine(paths.DataDirectory, "backups")).Count());
         Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
         Assert.False((await backupService.RehearseRestoreAsync(withRevocation.BackupId!)).Succeeded);
+        var deniedInvalidId = await backupService.VerifyBackupAsync("../invalid");
+        Assert.Contains("every company", deniedInvalidId.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(auditCount, await db.BusinessAuditEntries.CountAsync(entry => entry.EntityType == "DatabaseBackup"));
+            Assert.Equal(4, await db.AuthenticationAuditEntries.CountAsync(entry => entry.UserId == user.UserId && entry.EventType.StartsWith("backup_") && !entry.Succeeded));
+        }
         await using (var db = await factory.CreateDbContextAsync())
         {
             var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == user.UserId && item.CompanyId == subsidiary.CompanyId);
@@ -871,6 +909,19 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
         SelectBackupActor();
         Assert.True((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        Assert.False((await backupService.VerifyBackupAsync("../invalid")).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Single(await db.AuthenticationAuditEntries.Where(entry => entry.UserId == user.UserId && entry.EventType == "backup_verify_denied" && entry.Detail == "Invalid backup identifier.").ToArrayAsync());
+
+        await using (var db = await factory.CreateDbContextAsync())
+            await db.Database.ExecuteSqlRawAsync("""CREATE TRIGGER backup_audit_block BEFORE INSERT ON "BusinessAuditEntries" WHEN NEW."Action" = 'backup.created' BEGIN SELECT RAISE(ABORT, 'audit rejected'); END;""");
+        var beforeAuditFailure = Directory.EnumerateDirectories(Path.Combine(paths.DataDirectory, "backups")).Count();
+        var auditRejected = await backupService.CreateBackupAsync();
+        Assert.False(auditRejected.Succeeded);
+        Assert.Contains("completion audit could not be recorded", auditRejected.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(beforeAuditFailure, Directory.EnumerateDirectories(Path.Combine(paths.DataDirectory, "backups")).Count());
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Equal(3, await db.BusinessAuditEntries.CountAsync(entry => entry.Action == "backup.create_failed" && entry.UserId == user.UserId));
     }
 
     [Fact]

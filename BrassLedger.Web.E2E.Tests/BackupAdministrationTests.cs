@@ -20,11 +20,14 @@ public sealed class BackupAdministrationTests(PlaywrightWebAppFixture fixture)
 
             await session.Page.GetByRole(AriaRole.Button, new() { Name = "Create backup" }).ClickAsync();
             await Assertions.Expect(session.Page.GetByText("Latest backup:", new() { Exact = false })).ToBeVisibleAsync();
+            await Assertions.Expect(session.Page.GetByText("backup.created", new() { Exact = true })).ToBeVisibleAsync();
             await session.Page.GetByRole(AriaRole.Button, new() { Name = "Verify backup" }).ClickAsync();
             await Assertions.Expect(session.Page.GetByText("Verified at", new() { Exact = false })).ToBeVisibleAsync();
+            await Assertions.Expect(session.Page.GetByText("backup.verified", new() { Exact = true })).ToBeVisibleAsync();
             await session.Page.GetByRole(AriaRole.Button, new() { Name = "Rehearse restore" }).ClickAsync();
             await Assertions.Expect(session.Page.GetByText("Local file restore check passed:", new() { Exact = false })).ToBeVisibleAsync();
             await Assertions.Expect(session.Page.GetByText("Off-machine key recovery is not verified.", new() { Exact = false })).ToBeVisibleAsync();
+            await Assertions.Expect(session.Page.GetByText("backup.rehearsed", new() { Exact = true })).ToBeVisibleAsync();
             await session.AssertNoUiFailuresAsync("backup administration owner workflow");
         }
         finally

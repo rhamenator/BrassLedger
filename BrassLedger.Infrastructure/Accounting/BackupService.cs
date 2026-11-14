@@ -23,13 +23,18 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
     public async Task<BackupResult> CreateBackupAsync(CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        if (!await CanAccessWholeBackupAsync(db, cancellationToken)) return BackupResult.Failure("System-wide backup access requires an active owner with current authority in every company.");
+        if (!await CanAccessWholeBackupAsync(db, cancellationToken))
+        {
+            await TryRecordBackupDenialAsync("create", "authorization", CancellationToken.None);
+            return BackupResult.Failure("System-wide backup access requires an active owner with current authority in every company.");
+        }
         if (!db.Database.IsSqlite()) return BackupResult.Failure("PostgreSQL backups require the database platform backup service; no unsafe file-copy fallback is used.");
         var backupId = $"brassledger-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}";
         var destination = Path.Combine(storagePaths.DataDirectory, "backups", backupId);
         var databasePath = Path.Combine(destination, "brassledger.db");
         try
         {
+            await RecordBackupAuditAsync("backup.snapshot_requested", backupId, cancellationToken);
             EnsurePrivateDirectory(Path.Combine(storagePaths.DataDirectory, "backups"));
             EnsurePrivateDirectory(destination);
             var escapedPath = databasePath.Replace("'", "''", StringComparison.Ordinal);
@@ -65,35 +70,67 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
             var manifestPath = Path.Combine(destination, "manifest.json");
             await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, ManifestJsonOptions), cancellationToken);
             EnsurePrivateFile(manifestPath);
-            var verification = await VerifyBackupAsync(backupId, cancellationToken);
+            var verification = await VerifyBackupDirectoryAsync(destination, backupId, cancellationToken);
             if (!verification.Succeeded) throw new InvalidOperationException(verification.ErrorMessage);
+            try { await RecordBackupAuditAsync("backup.created", backupId, cancellationToken); }
+            catch (Exception exception) { throw new InvalidOperationException("Backup completion audit could not be recorded.", exception); }
             return BackupResult.Success(backupId);
         }
         catch (Exception exception)
         {
             try { if (Directory.Exists(destination)) Directory.Delete(destination, recursive: true); } catch { /* Preserve the original backup failure. */ }
-            return BackupResult.Failure($"Backup failed: {exception.Message}");
+            var auditFailure = false;
+            try { await RecordBackupAuditAsync("backup.create_failed", backupId, CancellationToken.None); }
+            catch { auditFailure = true; }
+            return BackupResult.Failure($"Backup failed: {exception.Message}" + (auditFailure ? " Failure audit could not be recorded." : string.Empty));
         }
     }
 
     public async Task<BackupVerificationResult> VerifyBackupAsync(string backupId, CancellationToken cancellationToken = default)
     {
-        if (!IsValidBackupId(backupId)) return new(false, "Invalid backup identifier.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        if (!await CanAccessWholeBackupAsync(db, cancellationToken)) return new(false, "System-wide backup access requires an active owner with current authority in every company.", backupId);
+        if (!await CanAccessWholeBackupAsync(db, cancellationToken))
+        {
+            await TryRecordBackupDenialAsync("verify", "authorization", CancellationToken.None);
+            return new(false, "System-wide backup access requires an active owner with current authority in every company.", backupId);
+        }
+        if (!IsValidBackupId(backupId))
+        {
+            await TryRecordBackupDenialAsync("verify", "invalid_identifier", CancellationToken.None);
+            return new(false, "Invalid backup identifier.");
+        }
         var directory = Path.Combine(storagePaths.DataDirectory, "backups", backupId);
-        return await VerifyBackupDirectoryAsync(directory, backupId, cancellationToken);
+        var result = await VerifyBackupDirectoryAsync(directory, backupId, cancellationToken);
+        try { await RecordBackupAuditAsync(result.Succeeded ? "backup.verified" : "backup.verification_failed", backupId, result.Succeeded ? cancellationToken : CancellationToken.None); }
+        catch { return new(false, result.Succeeded ? "Backup verification audit could not be recorded." : $"{result.ErrorMessage} Verification failure audit could not be recorded.", backupId); }
+        return result;
     }
 
     public async Task<BackupRecoveryRehearsalResult> RehearseRestoreAsync(string backupId, CancellationToken cancellationToken = default)
     {
-        if (!IsValidBackupId(backupId)) return new(false, "Invalid backup identifier.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        if (!await CanAccessWholeBackupAsync(db, cancellationToken)) return new(false, "System-wide backup access requires an active owner with current authority in every company.", backupId);
+        if (!await CanAccessWholeBackupAsync(db, cancellationToken))
+        {
+            await TryRecordBackupDenialAsync("rehearse", "authorization", CancellationToken.None);
+            return new(false, "System-wide backup access requires an active owner with current authority in every company.", backupId);
+        }
+        if (!IsValidBackupId(backupId))
+        {
+            await TryRecordBackupDenialAsync("rehearse", "invalid_identifier", CancellationToken.None);
+            return new(false, "Invalid backup identifier.");
+        }
+        var result = await RehearseRestoreCoreAsync(backupId, cancellationToken);
+        try { await RecordBackupAuditAsync(result.Succeeded ? "backup.rehearsed" : "backup.rehearsal_failed", backupId, result.Succeeded ? cancellationToken : CancellationToken.None); }
+        catch { return new(false, result.Succeeded ? "Backup recovery rehearsal audit could not be recorded." : $"{result.ErrorMessage} Rehearsal failure audit could not be recorded.", backupId); }
+        return result;
+    }
+
+    private async Task<BackupRecoveryRehearsalResult> RehearseRestoreCoreAsync(string backupId, CancellationToken cancellationToken)
+    {
         var source = Path.Combine(storagePaths.DataDirectory, "backups", backupId);
         var sourceDatabase = Path.Combine(source, "brassledger.db");
         var sourceKeys = Path.Combine(source, "keys");
-        var sourceVerification = await VerifyBackupAsync(backupId, cancellationToken);
+        var sourceVerification = await VerifyBackupDirectoryAsync(source, backupId, cancellationToken);
         if (!sourceVerification.Succeeded) return new(false, sourceVerification.ErrorMessage, backupId);
         var staging = Path.Combine(storagePaths.DataDirectory, "recovery-rehearsals", $"{backupId}-{Guid.NewGuid():N}");
         try
@@ -232,6 +269,50 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
     }
 
     private static bool IsValidBackupId(string backupId) => !string.IsNullOrWhiteSpace(backupId) && backupId.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && !backupId.Contains("..", StringComparison.Ordinal) && !backupId.Contains(Path.DirectorySeparatorChar) && !backupId.Contains(Path.AltDirectorySeparatorChar);
+    private async Task TryRecordBackupDenialAsync(string operation, string reason, CancellationToken cancellationToken)
+    {
+        var context = httpContextAccessor.HttpContext;
+        if (context?.User.Identity?.IsAuthenticated != true) return;
+        try
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var userId = Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var parsedUserId) ? parsedUserId : (Guid?)null;
+            var user = userId.HasValue ? await db.Users.AsNoTracking().SingleOrDefaultAsync(item => item.Id == userId.Value, cancellationToken) : null;
+            db.AuthenticationAuditEntries.Add(new AuthenticationAuditEntry
+            {
+                Id = Guid.NewGuid(), UserId = user?.Id, CompanyId = user?.CompanyId,
+                UserName = user?.UserName ?? string.Empty, EventType = $"backup_{operation}_denied",
+                Succeeded = false, OccurredUtc = DateTimeOffset.UtcNow,
+                IpAddress = context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+                UserAgent = context.Request.Headers.UserAgent.ToString(),
+                Detail = reason == "invalid_identifier" ? "Invalid backup identifier." : "Current authority does not permit a whole-database backup operation."
+            });
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch { /* An audit outage must not turn a denied backup operation into an allowed one. */ }
+    }
+    private async Task RecordBackupAuditAsync(string action, string backupId, CancellationToken cancellationToken)
+    {
+        var principal = httpContextAccessor.HttpContext?.User;
+        if (!Guid.TryParse(principal?.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+            throw new InvalidOperationException("Backup audit actor is unavailable.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyIds = await db.Companies.AsNoTracking().Select(company => company.Id).ToArrayAsync(cancellationToken);
+        if (companyIds.Length == 0) throw new InvalidOperationException("Backup audit company scope is unavailable.");
+        var occurredAtUtc = DateTimeOffset.UtcNow;
+        var detailJson = JsonSerializer.Serialize(new { backupId });
+        var eventId = Guid.NewGuid();
+        foreach (var companyId in companyIds)
+        {
+            db.BusinessAuditEntries.Add(new BusinessAuditEntry
+            {
+                Id = Guid.NewGuid(), CompanyId = companyId, UserId = userId,
+                Action = action, EntityType = "DatabaseBackup", EntityId = eventId, DetailJson = detailJson,
+                OccurredAtUtc = occurredAtUtc
+            });
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
     private async Task<bool> CanAccessWholeBackupAsync(BrassLedgerDbContext db, CancellationToken cancellationToken)
     {
         var principal = httpContextAccessor.HttpContext?.User;
