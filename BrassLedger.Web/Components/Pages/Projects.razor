@@ -27,8 +27,12 @@ else
             <article class="stat-card accent-sand"><span class="stat-value">@Workspace.Projects.OpenJobs</span><span class="stat-label">Active projects</span></article>
             <article class="stat-card accent-sky"><span class="stat-value">@Workspace.Projects.BudgetAmount.ToString("C0")</span><span class="stat-label">Total budget</span></article>
             <article class="stat-card accent-sage"><span class="stat-value">@Workspace.Projects.ActualCost.ToString("C0")</span><span class="stat-label">Posted costs</span></article>
-            <article class="stat-card accent-coral"><span class="stat-value">@Workspace.Projects.Commitments.ToString("C0")</span><span class="stat-label">Open commitments</span></article>
+            <article class="stat-card accent-coral"><span class="stat-value">@Workspace.Projects.Commitments.ToString("C0")</span><span class="stat-label">Open commitments (base currency)</span></article>
         </section>
+        @if ((Workspace.Projects.ForeignCommitments ?? []).Count > 0)
+        {
+            <p class="page-intro">Foreign-currency purchase commitments are listed by currency below and excluded from base-currency totals. Budget remaining is unavailable for affected projects until a reviewed base valuation is recorded.</p>
+        }
 
         <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized Context="projectAuthorization"><section class="panel">
             <h2>@(ProjectForm.Id.HasValue ? $"Edit {ProjectForm.JobNumber}" : "Add a project")</h2>
@@ -171,7 +175,7 @@ else
             {
                 <div class="table-scroll"><table class="data-table project-portfolio-table" aria-label="Project portfolio">
                     <thead><tr><th>Project</th><th>Customer</th><th>Status</th><th>Billing / recognition</th><th>Contract</th><th>Budget</th><th>Cost</th><th>Commitments</th><th>Revenue</th><th>Gross margin</th><th>Action</th></tr></thead>
-                    <tbody>@foreach (var job in Workspace.Projects.Jobs) { <tr><td><button class="table-link" type="button" @onclick="() => SelectProject(job.Id)">@job.JobNumber — @job.Name</button></td><td>@job.CustomerName</td><td>@job.Status</td><td>@BillingMethodLabel(job.BillingMethod)<br />@RecognitionMethodLabel(job.RevenueRecognitionMethod)</td><td>@job.ContractAmount.ToString("C")</td><td>@job.BudgetAmount.ToString("C")</td><td>@job.ActualCost.ToString("C")</td><td>@job.Commitments.ToString("C")</td><td>@job.Revenue.ToString("C")</td><td>@((job.Revenue - job.ActualCost).ToString("C"))</td><td><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized><button class="action-secondary" type="button" @onclick="() => EditProject(job)">Edit</button> @if (job.Status == "Closed") { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, true)">Reopen</button> } else { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, false)">Close</button> }</Authorized><NotAuthorized>View only</NotAuthorized></AuthorizeView></td></tr> }</tbody>
+                    <tbody>@foreach (var job in Workspace.Projects.Jobs) { <tr><td><button class="table-link" type="button" @onclick="() => SelectProject(job.Id)">@job.JobNumber — @job.Name</button></td><td>@job.CustomerName</td><td>@job.Status</td><td>@BillingMethodLabel(job.BillingMethod)<br />@RecognitionMethodLabel(job.RevenueRecognitionMethod)</td><td>@job.ContractAmount.ToString("C")</td><td>@job.BudgetAmount.ToString("C")</td><td>@job.ActualCost.ToString("C")</td><td>@job.Commitments.ToString("C") @foreach (var commitment in (Workspace.Projects.ForeignCommitments ?? []).Where(item => item.ProjectJobId == job.Id)) { <br /><span>@commitment.Currency @commitment.Amount.ToString("N2") (unvalued)</span> }</td><td>@job.Revenue.ToString("C")</td><td>@((job.Revenue - job.ActualCost).ToString("C"))</td><td><AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageProjects"><Authorized><button class="action-secondary" type="button" @onclick="() => EditProject(job)">Edit</button> @if (job.Status == "Closed") { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, true)">Reopen</button> } else { <button class="action-secondary" type="button" @onclick="() => BeginDecision(job, false)">Close</button> }</Authorized><NotAuthorized>View only</NotAuthorized></AuthorizeView></td></tr> }</tbody>
                 </table></div>
             }
         </section>
@@ -311,7 +315,14 @@ else
         {
             <section class="panel">
                 <h2>@SelectedProject.JobNumber ledger</h2>
-                <p class="page-intro">Budget remaining after posted cost and open commitments: @((SelectedProject.BudgetAmount - SelectedProject.ActualCost - SelectedProject.Commitments).ToString("C")); retainage: @SelectedProject.RetainagePercent.ToString("P2").</p>
+                @if ((Workspace.Projects.ForeignCommitments ?? []).Any(item => item.ProjectJobId == SelectedProject.Id))
+                {
+                    <p class="page-intro">Budget remaining is unavailable while this project has unvalued foreign-currency purchase commitments; retainage: @SelectedProject.RetainagePercent.ToString("P2").</p>
+                }
+                else
+                {
+                    <p class="page-intro">Budget remaining after posted cost and open commitments: @((SelectedProject.BudgetAmount - SelectedProject.ActualCost - SelectedProject.Commitments).ToString("C")); retainage: @SelectedProject.RetainagePercent.ToString("P2").</p>
+                }
                 @{ var ledgerLines = (Workspace.Projects.LedgerLines ?? []).Where(line => line.ProjectJobId == SelectedProject.Id).ToArray(); }
                 @if (ledgerLines.Length == 0) { <p class="empty-state">No posted ledger lines are assigned to this project.</p> }
                 else { <div class="table-scroll"><table class="data-table" aria-label="Selected project ledger"><thead><tr><th>Date</th><th>Reference</th><th>Source</th><th>Phase / task</th><th>Cost code</th><th>Account</th><th>Description</th><th>Debit</th><th>Credit</th><th>Cost</th><th>Revenue</th></tr></thead><tbody>@foreach (var line in ledgerLines) { <tr><td>@line.PostedOn</td><td>@line.Reference</td><td>@line.SourceModule</td><td>@(string.IsNullOrWhiteSpace(line.ProjectPhaseCode) ? "—" : line.ProjectPhaseCode)</td><td>@(string.IsNullOrWhiteSpace(line.ProjectCostCode) ? "—" : line.ProjectCostCode)</td><td>@line.AccountNumber — @line.AccountName</td><td>@line.Description</td><td>@line.Debit.ToString("C")</td><td>@line.Credit.ToString("C")</td><td>@line.Cost.ToString("C")</td><td>@line.Revenue.ToString("C")</td></tr> }</tbody></table></div> }

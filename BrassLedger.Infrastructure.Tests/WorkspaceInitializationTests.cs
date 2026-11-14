@@ -3796,14 +3796,17 @@ public sealed class WorkspaceInitializationTests : IDisposable
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
         var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IBusinessWorkspaceService>();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
-        Guid vendorId; Guid itemId; decimal startingQuantity;
+        Guid vendorId; Guid itemId; Guid projectId; decimal startingQuantity;
         await using (var db = await factory.CreateDbContextAsync())
         {
             vendorId = await db.Vendors.Select(vendor => vendor.Id).FirstAsync();
             var item = await db.InventoryItems.SingleAsync(candidate => candidate.Sku == "RM-220"); itemId = item.Id; startingQuantity = item.QuantityOnHand;
+            projectId = await db.ProjectJobs.Where(project => project.Status == "Active").Select(project => project.Id).FirstAsync();
         }
-        var request = new SavePurchaseOrderRequest(null, vendorId, "PO-FX-GUARD-1", new DateOnly(2026, 8, 20), null, "Foreign order before receipt valuation", [new PurchaseOrderLineRequest(itemId, "Foreign fasteners", 2.00004m, 50m)], Currency: "CAD");
+        var previousCommitments = (await workspaceService.GetWorkspaceAsync()).Projects.Jobs.Single(project => project.Id == projectId).Commitments;
+        var request = new SavePurchaseOrderRequest(null, vendorId, "PO-FX-GUARD-1", new DateOnly(2026, 8, 20), null, "Foreign order before receipt valuation", [new PurchaseOrderLineRequest(itemId, "Foreign fasteners", 2.00004m, 50m, projectId)], Currency: "CAD");
         var unrepresentable = await transactions.SavePurchaseOrderAsync(request with { OrderNumber = "PO-FX-TINY-1", Lines = [new PurchaseOrderLineRequest(itemId, "Unrepresentable quantity", 0.00001m, 50m)] });
         Assert.False(unrepresentable.Succeeded);
         Assert.Contains("positive quantity", unrepresentable.ErrorMessage, StringComparison.OrdinalIgnoreCase);
@@ -3829,6 +3832,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var relabel = await transactions.SavePurchaseOrderAsync(request with { Id = saved.Id, ConcurrencyToken = token, Currency = "USD" });
         Assert.False(relabel.Succeeded); Assert.Contains("cannot be changed", relabel.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var approved = await transactions.ApprovePurchaseOrderAsync(new(saved.Id!.Value, token)); Assert.True(approved.Succeeded, approved.ErrorMessage);
+        var projectWorkspace = (await workspaceService.GetWorkspaceAsync()).Projects;
+        Assert.Equal(previousCommitments, projectWorkspace.Jobs.Single(project => project.Id == projectId).Commitments);
+        var foreignCommitment = Assert.Single(projectWorkspace.ForeignCommitments!, commitment => commitment.ProjectJobId == projectId && commitment.Currency == "CAD");
+        Assert.Equal(projectId, foreignCommitment.ProjectJobId); Assert.Equal("CAD", foreignCommitment.Currency); Assert.Equal(100m, foreignCommitment.Amount);
         await using (var db = await factory.CreateDbContextAsync()) token = await db.PurchaseOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
         var blocked = await transactions.ReceivePurchaseOrderAsync(new(saved.Id.Value, "RCV-FX-GUARD-1", new DateOnly(2026, 8, 21), [new ReceivePurchaseOrderLineRequest(lineId, 2m)], token));
         Assert.False(blocked.Succeeded); Assert.Contains("dated base-currency inventory valuation", blocked.ErrorMessage, StringComparison.OrdinalIgnoreCase);
