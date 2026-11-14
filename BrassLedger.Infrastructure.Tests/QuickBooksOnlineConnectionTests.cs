@@ -174,8 +174,11 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
             Assert.Single(await db.OAuthAuthorizationAttempts.ToListAsync());
     }
 
-    [Fact]
-    public async Task OAuthCallback_RevokedDuringProviderExchange_DiscardsAndRevokesUnusedGrant()
+    [Theory]
+    [InlineData("session")]
+    [InlineData("permission")]
+    [InlineData("security-stamp")]
+    public async Task OAuthCallback_AuthorityChangedDuringProviderExchange_DiscardsAndRevokesUnusedGrant(string change)
     {
         var provider = new FakeQuickBooksOnlineClient
         {
@@ -197,8 +200,22 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using (var db = await factory.CreateDbContextAsync())
         {
-            var session = await db.UserSessions.SingleAsync(item => item.Id == actor.SessionId);
-            session.RevokedAtUtc = DateTimeOffset.UtcNow;
+            switch (change)
+            {
+                case "session":
+                    (await db.UserSessions.SingleAsync(item => item.Id == actor.SessionId)).RevokedAtUtc = DateTimeOffset.UtcNow;
+                    break;
+                case "permission":
+                    var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == actor.CompanyId && item.Name == "Controller");
+                    role.Permissions = string.Join('|', role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Where(permission => !string.Equals(permission, BrassLedgerPermissions.UserManage, StringComparison.OrdinalIgnoreCase)));
+                    break;
+                case "security-stamp":
+                    (await db.Users.SingleAsync(item => item.Id == actor.UserId)).SecurityStamp = Guid.NewGuid().ToString("N");
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(change));
+            }
             await db.SaveChangesAsync();
         }
         provider.ReleaseExchange.TrySetResult(true);
