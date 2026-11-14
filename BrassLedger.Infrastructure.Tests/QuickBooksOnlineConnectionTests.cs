@@ -763,6 +763,13 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "quickbooks-test");
         Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
         Assert.NotNull(signedIn.User);
+        Assert.Equal("Controller", signedIn.User.Role);
+        var factory = services.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var controllerRole = await db.AccessRoles.SingleAsync(role => role.CompanyId == signedIn.User.CompanyId && role.Name == signedIn.User.Role);
+        controllerRole.Permissions = string.Join('|', controllerRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Append(BrassLedgerPermissions.UserManage).Distinct(StringComparer.OrdinalIgnoreCase));
+        await db.SaveChangesAsync();
         return (signedIn.User.UserId, signedIn.User.CompanyId);
     }
 
@@ -786,7 +793,10 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
                 new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
                 new Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
                 new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage),
-                new Claim(ClaimTypes.Role, "Owner/CEO")
+                new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.LedgerManage),
+                new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage),
+                new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayablesManage),
+                new Claim(ClaimTypes.Role, "Controller")
             ], "test"))
         };
     }

@@ -30,27 +30,50 @@ public sealed class IntegrationService(IDbContextFactory<BrassLedgerDbContext> d
 
     public async Task<IReadOnlyList<IntegrationConnectionSnapshot>> GetConnectionsAsync(CancellationToken cancellationToken = default)
     {
-        var companyId = CompanyId(); if (companyId is null) return [];
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await db.IntegrationConnections.AsNoTracking().Where(connection => connection.CompanyId == companyId).OrderBy(connection => connection.ProviderCode).ThenBy(connection => connection.Name).Select(connection => new IntegrationConnectionSnapshot(connection.Id, connection.ProviderCode, connection.Name, connection.Status, connection.SettingsJson, connection.LastValidatedAtUtc)).ToArrayAsync(cancellationToken);
+        var actor = await AuthorizedActorAsync(db, cancellationToken); if (actor is null) return [];
+        return await db.IntegrationConnections.AsNoTracking().Where(connection => connection.CompanyId == actor.Value.CompanyId).OrderBy(connection => connection.ProviderCode).ThenBy(connection => connection.Name).Select(connection => new IntegrationConnectionSnapshot(connection.Id, connection.ProviderCode, connection.Name, connection.Status, connection.SettingsJson, connection.LastValidatedAtUtc)).ToArrayAsync(cancellationToken);
     }
 
     public async Task<TransactionResult> SaveConnectionAsync(SaveIntegrationConnectionRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || !Catalog.Any(provider => provider.Code == request.ProviderCode) || !IsJson(request.SettingsJson)) return TransactionResult.Failure("Select a known provider and provide valid JSON settings.");
         if (request.ProviderCode == "quickbooks-online") return TransactionResult.Failure("Use the protected QuickBooks connect or reconnect workflow; QuickBooks credentials cannot be entered as JSON.");
-        var companyId = CompanyId(); if (companyId is null) return TransactionResult.Failure("An active company is required.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var entity = request.Id is { } id ? await db.IntegrationConnections.SingleOrDefaultAsync(connection => connection.CompanyId == companyId && connection.Id == id, cancellationToken) : null;
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var actor = await AuthorizedActorAsync(db, cancellationToken); if (actor is null) return TransactionResult.Failure("An authorized active company is required.");
+        var companyId = actor.Value.CompanyId;
+        var entity = request.Id is { } id ? await db.IntegrationConnections.SingleOrDefaultAsync(connection => connection.CompanyId == companyId && connection.Id == id, cancellationToken) : null;
         if (request.Id.HasValue && entity is null) return TransactionResult.Failure("Integration connection not found.");
         if (entity is null && (string.IsNullOrWhiteSpace(request.CredentialsJson) || !IsJson(request.CredentialsJson))) return TransactionResult.Failure("Provide valid JSON credentials for a new integration connection.");
         if (!string.IsNullOrWhiteSpace(request.CredentialsJson) && !IsJson(request.CredentialsJson)) return TransactionResult.Failure("Credentials must be valid JSON when supplied.");
-        entity ??= new IntegrationConnection { Id = Guid.NewGuid(), CompanyId = companyId.Value }; entity.ProviderCode = request.ProviderCode; entity.Name = request.Name.Trim(); entity.SettingsJson = request.SettingsJson.Trim(); if (!string.IsNullOrWhiteSpace(request.CredentialsJson)) entity.CredentialsJson = request.CredentialsJson.Trim(); entity.Status = request.Enable ? "ProfileOnly" : "Disabled";
+        entity ??= new IntegrationConnection { Id = Guid.NewGuid(), CompanyId = companyId }; entity.ProviderCode = request.ProviderCode; entity.Name = request.Name.Trim(); entity.SettingsJson = request.SettingsJson.Trim(); if (!string.IsNullOrWhiteSpace(request.CredentialsJson)) entity.CredentialsJson = request.CredentialsJson.Trim(); entity.Status = request.Enable ? "ProfileOnly" : "Disabled";
         if (db.Entry(entity).State == EntityState.Detached) db.IntegrationConnections.Add(entity);
-        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId.Value, UserId = UserId(), Action = "integration.configured", EntityType = "IntegrationConnection", EntityId = entity.Id, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { entity.ProviderCode, entity.Name, entity.Status }), OccurredAtUtc = DateTimeOffset.UtcNow });
+        db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = actor.Value.UserId, Action = "integration.configured", EntityType = "IntegrationConnection", EntityId = entity.Id, DetailJson = System.Text.Json.JsonSerializer.Serialize(new { entity.ProviderCode, entity.Name, entity.Status }), OccurredAtUtc = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync(cancellationToken); return TransactionResult.Success(entity.Id);
     }
 
     private static bool IsJson(string value) { try { using var _ = System.Text.Json.JsonDocument.Parse(value); return true; } catch { return false; } }
-    private Guid? CompanyId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var id) ? id : null;
-    private Guid? UserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
+    private async Task<(Guid UserId, Guid CompanyId)?> AuthorizedActorAsync(BrassLedgerDbContext db, CancellationToken cancellationToken)
+    {
+        var principal = httpContextAccessor.HttpContext?.User;
+        if (principal?.Identity?.IsAuthenticated != true
+            || principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+            || !principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)
+            || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId)) return null;
+
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(item => item.Id == userId && item.IsActive, cancellationToken);
+        var membership = await db.CompanyMemberships.AsNoTracking().SingleOrDefaultAsync(
+            item => item.UserId == userId && item.CompanyId == companyId && item.IsActive, cancellationToken);
+        if (user is null || membership is null
+            || !await db.Companies.AsNoTracking().AnyAsync(company => company.Id == companyId, cancellationToken)
+            || !string.Equals(membership.Role, principal.FindFirstValue(ClaimTypes.Role), StringComparison.Ordinal)) return null;
+        var role = await db.AccessRoles.AsNoTracking().SingleOrDefaultAsync(
+            item => item.CompanyId == companyId && item.Name == membership.Role && item.IsActive, cancellationToken);
+        if (role is null || !role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Contains(BrassLedgerPermissions.UserManage, StringComparer.OrdinalIgnoreCase)) return null;
+        if (role.RequiresMfa && !user.MfaEnabled) return null;
+        if (user.MfaEnabled && !string.Equals(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType), "mfa", StringComparison.Ordinal)) return null;
+        return (userId, companyId);
+    }
 }
