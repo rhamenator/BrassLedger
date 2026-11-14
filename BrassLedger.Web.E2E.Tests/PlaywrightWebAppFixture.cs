@@ -466,6 +466,7 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
 
         startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         startInfo.Environment["ConnectionStrings__BrassLedgerSqlite"] = _sqliteConnectionString;
+        startInfo.Environment["Storage__DataRoot"] = _dataRootPath;
 
         _appProcess = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start BrassLedger.Web for Playwright tests.");
         PumpLogs(_appProcess.StandardOutput, "stdout");
