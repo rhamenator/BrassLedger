@@ -208,7 +208,9 @@ public sealed class UiSession : IAsyncDisposable
                 await Page.Keyboard.PressAsync("Enter");
                 await Page.WaitForURLAsync(url => url.EndsWith($"/{href}", StringComparison.OrdinalIgnoreCase), new PageWaitForURLOptions
                 {
-                    Timeout = 15000
+                    Timeout = 15000,
+                    // Blazor client-side navigation changes the URL without a full page load.
+                    WaitUntil = WaitUntilState.Commit
                 });
                 await WaitForHeadingAsync(expectedHeading);
                 return;
