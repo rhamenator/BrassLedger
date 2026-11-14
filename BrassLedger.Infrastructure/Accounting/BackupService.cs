@@ -182,6 +182,12 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
         if (!File.Exists(databasePath) || !File.Exists(manifestPath)) return new(false, "Backup database or manifest was not found.", backupId);
         try
         {
+            var backupRoot = Path.GetDirectoryName(directory)!;
+            if (IsLink(backupRoot) || IsLink(directory) || IsLink(databasePath) || IsLink(manifestPath))
+                return new(false, "Backup directory or file is a symbolic link.", backupId);
+            if (!HasPrivateUnixMode(backupRoot) || !HasPrivateUnixMode(directory)
+                || !HasPrivateUnixMode(databasePath) || !HasPrivateUnixMode(manifestPath))
+                return new(false, "Backup permissions are not owner-only or could not be verified.", backupId);
             var manifestJson = await File.ReadAllTextAsync(manifestPath, cancellationToken);
             using var manifestDocument = JsonDocument.Parse(manifestJson);
             if (manifestDocument.RootElement.TryGetProperty("format", out var format)
@@ -197,12 +203,16 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
             if (manifest.BackupId != backupId)
                 return new(false, "Backup directory name does not match the manifest identifier.", backupId);
             var keyDirectory = Path.Combine(directory, "keys");
-            if (!Directory.Exists(keyDirectory) || IsLink(keyDirectory)
-                || !Directory.EnumerateFileSystemEntries(keyDirectory).Select(Path.GetFileName).OrderBy(name => name, StringComparer.Ordinal)
+            if (!Directory.Exists(keyDirectory) || IsLink(keyDirectory))
+                return new(false, "Backup data-protection files are missing, unexpected, or unsafe.", backupId);
+            if (!HasPrivateUnixMode(keyDirectory))
+                return new(false, "Backup permissions are not owner-only or could not be verified.", backupId);
+            if (!Directory.EnumerateFileSystemEntries(keyDirectory).Select(Path.GetFileName).OrderBy(name => name, StringComparer.Ordinal)
                     .SequenceEqual(manifest.ProtectionFiles.Select(file => file.Name).OrderBy(name => name, StringComparer.Ordinal))
-                || IsLink(databasePath) || IsLink(manifestPath)
                 || manifest.ProtectionFiles.Any(file => IsLink(Path.Combine(keyDirectory, file.Name))))
                 return new(false, "Backup data-protection files are missing, unexpected, or unsafe.", backupId);
+            if (manifest.ProtectionFiles.Any(file => !HasPrivateUnixMode(Path.Combine(keyDirectory, file.Name))))
+                return new(false, "Backup permissions are not owner-only or could not be verified.", backupId);
             if (!string.Equals(await HashFileAsync(databasePath, cancellationToken), manifest.DatabaseSha256, StringComparison.OrdinalIgnoreCase))
                 return new(false, "Backup database checksum does not match its manifest.", backupId);
             foreach (var file in manifest.ProtectionFiles)
@@ -230,6 +240,16 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
     }
 
     private static bool IsSha256(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
+    private static bool HasPrivateUnixMode(string path)
+    {
+        if (OperatingSystem.IsWindows()) return true;
+        const UnixFileMode sharedPermissions = UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute
+            | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+        try { return (File.GetUnixFileMode(path) & sharedPermissions) == 0; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+        catch (PlatformNotSupportedException) { return false; }
+    }
     private static void EnsurePrivateDirectory(string path)
     {
         if (Directory.Exists(path) && IsLink(path)) throw new InvalidOperationException("Backup directory cannot be a symbolic link.");
