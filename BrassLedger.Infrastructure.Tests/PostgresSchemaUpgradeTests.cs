@@ -59,8 +59,9 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
             Guid vendorId; Guid itemId;
             await using (var db = await factory.CreateDbContextAsync())
             {
-                vendorId = await db.Vendors.Select(item => item.Id).FirstAsync();
-                itemId = await db.InventoryItems.Select(item => item.Id).FirstAsync();
+                var companyId = await db.Companies.Where(item => item.Name == "Brass Ledger Manufacturing").Select(item => item.Id).SingleAsync();
+                vendorId = await db.Vendors.Where(item => item.CompanyId == companyId).OrderBy(item => item.VendorNumber).Select(item => item.Id).FirstAsync();
+                itemId = await db.InventoryItems.Where(item => item.CompanyId == companyId && item.IsActive).OrderBy(item => item.Sku).Select(item => item.Id).FirstAsync();
             }
             var ordered = await transactions.SavePurchaseOrderAsync(new(null, vendorId, "PO-PG-RECEIPT-MIGRATION", new DateOnly(2026, 8, 1), null, "Historical receipt", [new(itemId, "Inventory", 2m, 12.5m)]));
             Assert.True(ordered.Succeeded, ordered.ErrorMessage);
@@ -170,8 +171,8 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
 
         await using var verified = new NpgsqlConnection(connectionString);
         await verified.OpenAsync();
-        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"InventoryReceipts\" WHERE \"ReceiptNumber\" = 'RCV-PG-RECEIPT-MIGRATION' AND \"TransactionCurrency\" = 'USD' AND \"TransactionAmount\" = \"TotalAmount\" AND \"ExchangeRateToBase\" = 1 AND \"ExchangeRateEffectiveOn\" = \"ReceivedOn\" AND \"ExchangeRateSource\" = 'Company base currency' AND \"ExchangeRateDirection\" = 'Base';"));
-        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"InventoryReceiptLines\" WHERE \"InventoryReceiptId\" IN (SELECT \"Id\" FROM \"InventoryReceipts\" WHERE \"ReceiptNumber\" = 'RCV-PG-RECEIPT-MIGRATION') AND \"TransactionAmount\" = \"LineTotal\";"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"InventoryReceipts\" WHERE \"ReceiptNumber\" = 'RCV-PG-RECEIPT-MIGRATION' AND \"TransactionCurrency\" = (SELECT \"BaseCurrency\" FROM \"Companies\" WHERE \"Id\" = \"InventoryReceipts\".\"CompanyId\") AND \"TransactionAmount\" = 25 AND \"TotalAmount\" = 25 AND \"ExchangeRateToBase\" = 1 AND \"ExchangeRateEffectiveOn\" = \"ReceivedOn\" AND \"ExchangeRateSource\" = 'Company base currency' AND \"ExchangeRateSourceReference\" = '' AND \"ExchangeRateDirection\" = 'Base' AND \"ExchangeRateId\" IS NULL;"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"InventoryReceiptLines\" WHERE \"InventoryReceiptId\" IN (SELECT \"Id\" FROM \"InventoryReceipts\" WHERE \"ReceiptNumber\" = 'RCV-PG-RECEIPT-MIGRATION') AND \"TransactionAmount\" = 25 AND \"LineTotal\" = 25;"));
         Assert.Equal(13L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826014843_InitialCurrentSchema';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826025706_AddAccountingSchedules';"));
