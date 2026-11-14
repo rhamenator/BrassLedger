@@ -7460,6 +7460,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var caseVariantAdministrator = await db.Users.SingleAsync(user => user.UserName == "warehouse");
             caseVariantAdministratorId = caseVariantAdministrator.Id;
             priorCaseVariantStamp = caseVariantAdministrator.SecurityStamp;
+            caseVariantAdministrator.MfaEnabled = true;
+            caseVariantAdministrator.MfaSecret = "MANDATORY-MFA-REGRESSION-SECRET";
             var caseVariantMembership = await db.CompanyMemberships.SingleOrDefaultAsync(membership => membership.UserId == caseVariantAdministrator.Id && membership.CompanyId == administrator.CompanyId);
             if (caseVariantMembership is null)
             {
@@ -7482,6 +7484,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
         Assert.True((await authentication.GetAccountSecurityAsync(administratorId))!.MfaRequiredByRole);
         Assert.True((await authentication.GetAccountSecurityAsync(caseVariantAdministratorId))!.MfaRequiredByRole);
+        var disableAttempt = await authentication.DisableMfaAsync(caseVariantAdministratorId, downgradedSignIn.User.CompanyId,
+            "irrelevant", "000000", "127.0.0.1", "mandatory-mfa-test");
+        Assert.Equal(AccountSecurityOutcome.InvalidRequest, disableAttempt.Outcome);
         var repairedSnapshot = await administration.GetSnapshotAsync();
         Assert.True(repairedSnapshot.Roles.Single(role => role.Name == "Administrator").RequiresMfa);
         Assert.True(repairedSnapshot.Roles.Single(role => role.Name == "Owner/CEO").RequiresMfa);
