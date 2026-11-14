@@ -31,11 +31,16 @@ public sealed class FakeDataPopulationService(
     public async Task<FakeDataPopulationResult> PopulateAsync(CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var company = await dbContext.Companies.OrderBy(candidate => candidate.Name).FirstOrDefaultAsync(cancellationToken);
-        if (company is null)
+        var companies = await dbContext.Companies.OrderBy(candidate => candidate.Name).Take(2).ToArrayAsync(cancellationToken);
+        if (companies.Length == 0)
         {
             throw new InvalidOperationException("Run first-time setup before loading fake data.");
         }
+        if (companies.Length != 1)
+        {
+            throw new InvalidOperationException("Fake data loading requires a workspace with exactly one company.");
+        }
+        var company = companies[0];
 
         await SecurityAdministrationService.EnsureBuiltInRolesAsync(dbContext, company.Id, cancellationToken);
 

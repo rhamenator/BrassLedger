@@ -1,3 +1,4 @@
+using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
 using Microsoft.Extensions.Configuration;
@@ -24,13 +25,34 @@ if (!arguments.Any(argument => string.Equals(argument, "--confirm", StringCompar
     return 2;
 }
 
-var dataRoot = GetOption(arguments, "--data-root")
-    ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrassLedger", "App_Data");
+var dataRoot = GetOption(arguments, "--data-root");
+if (string.IsNullOrWhiteSpace(dataRoot) || dataRoot.StartsWith("-", StringComparison.Ordinal))
+{
+    Console.Error.WriteLine("Refusing to add fake data without an explicit --data-root for a disposable workspace.");
+    return 2;
+}
+
+dataRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Environment.ExpandEnvironmentVariables(dataRoot)));
+var defaultDataRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrassLedger", "App_Data")));
+var contentRootDataRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "App_Data")));
+var pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+if (string.Equals(dataRoot, defaultDataRoot, pathComparison)
+    || string.Equals(dataRoot, contentRootDataRoot, pathComparison))
+{
+    Console.Error.WriteLine("Refusing to add fake data to the default application data root.");
+    return 2;
+}
+if (Directory.Exists(dataRoot) || File.Exists(dataRoot))
+{
+    Console.Error.WriteLine("Refusing to add fake data to an existing path. Choose a new disposable workspace directory.");
+    return 2;
+}
 
 var configuration = new ConfigurationBuilder()
     .AddInMemoryCollection(new Dictionary<string, string?>
     {
-        ["Storage:DataRoot"] = dataRoot
+        ["Storage:DataRoot"] = dataRoot,
+        ["Bootstrap:AdminPassword"] = BrassLedgerAuthenticationDefaults.SeededPassword
     })
     .Build();
 
@@ -81,6 +103,6 @@ static void PrintUsage()
     Console.WriteLine("BrassLedger Tools");
     Console.WriteLine();
     Console.WriteLine("Commands:");
-    Console.WriteLine("  populate-fake-data --confirm [--data-root <path>]");
+    Console.WriteLine("  populate-fake-data --confirm --data-root <disposable-path>");
     Console.WriteLine("    Adds demo records only. Use a disposable data root; it must not be production data.");
 }
