@@ -6229,6 +6229,125 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task PayrollPaymentFiles_RequireExplicitCompanyAndIsolateBankSettingsAndDownloads()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var paymentFiles = scope.ServiceProvider.GetRequiredService<IPayrollPaymentFileService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid originalCompanyId; Guid originalBankId; Guid operatorId; Guid secondCompanyId = Guid.NewGuid(); Guid secondBankId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            originalBankId = await db.BankAccounts.Where(bank => bank.CompanyId == originalCompanyId).Select(bank => bank.Id).FirstAsync();
+            operatorId = await db.Users.Where(user => user.UserName == "payroll").Select(user => user.Id).SingleAsync();
+            var secondLedgerId = Guid.NewGuid();
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Payment isolation subsidiary", LegalName = "Payment Isolation Subsidiary Ltd.", TaxId = "PAY-FILE-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            db.Accounts.Add(new GeneralLedgerAccount { Id = secondLedgerId, CompanyId = secondCompanyId, Number = "1000", Name = "Operating cash", Type = AccountType.Asset, IsActive = true });
+            db.BankAccounts.Add(new BankAccount { Id = secondBankId, CompanyId = secondCompanyId, LedgerAccountId = secondLedgerId, Name = "Subsidiary bank", AccountNumberMasked = "****0002" });
+            await db.SaveChangesAsync();
+        }
+        var originRequest = new SavePayrollBankOriginConfigurationRequest(null, originalBankId, "021000021", "123456789", "EXAMPLE ODFI", "ISOLATION PAYROLL", "1123456789", "PAYROLL", "02100002", new DateOnly(2026, 1, 1), null, true, false, "Awaiting bank test");
+        var runId = Guid.NewGuid(); var fileId = Guid.NewGuid();
+        var readError = await Assert.ThrowsAsync<InvalidOperationException>(() => paymentFiles.GetAsync());
+        Assert.Contains("explicit company context", readError.Message, StringComparison.OrdinalIgnoreCase);
+        var saveError = await Assert.ThrowsAsync<InvalidOperationException>(() => paymentFiles.SaveBankOriginAsync(originRequest));
+        Assert.Contains("explicit company context", saveError.Message, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => paymentFiles.GenerateAsync(new GeneratePayrollPaymentFileRequest(runId, "CheckRegisterCsv")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => paymentFiles.DownloadAsync(fileId));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.PayrollBankOriginConfigurations.AnyAsync(origin => origin.BankAccountId == originalBankId));
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(entry => entry.Action == "payroll-bank-origin.created"));
+        }
+
+        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                 new(System.Security.Claims.ClaimTypes.NameIdentifier, operatorId.ToString()),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPost),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)], "test"))
+        };
+        ActAs(originalCompanyId);
+        var saved = await paymentFiles.SaveBankOriginAsync(originRequest);
+        Assert.True(saved.Succeeded, saved.ErrorMessage);
+        var original = await paymentFiles.GetAsync();
+        var originalOrigin = Assert.Single(original.BankOrigins, origin => origin.Id == saved.Id);
+        const string protectedContent = "PAYROLL-ISOLATION-TEST";
+        var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(protectedContent))).ToLowerInvariant();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.PayrollRuns.Add(new PayrollRun { Id = runId, CompanyId = originalCompanyId, BankAccountId = originalBankId, Reference = "PAY-FILE-ISO", PayDate = new DateOnly(2026, 6, 5), PeriodStart = new DateOnly(2026, 5, 16), PeriodEnd = new DateOnly(2026, 5, 31) });
+            db.PayrollPaymentFiles.Add(new PayrollPaymentFile { Id = fileId, CompanyId = originalCompanyId, PayrollRunId = runId, Format = "CheckRegisterCsv", FileName = "payroll-isolation.csv", Content = protectedContent, ContentSha256 = contentHash, GeneratedAtUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        var originalDownload = await paymentFiles.DownloadAsync(fileId);
+        Assert.Equal(protectedContent, System.Text.Encoding.UTF8.GetString(originalDownload!.Content));
+
+        ActAs(secondCompanyId);
+        var second = await paymentFiles.GetAsync();
+        Assert.DoesNotContain(second.BankOrigins, origin => origin.Id == saved.Id);
+        Assert.DoesNotContain(second.Files, file => file.Id == fileId);
+        Assert.Null(await paymentFiles.DownloadAsync(fileId));
+        var crossRun = await paymentFiles.GenerateAsync(new GeneratePayrollPaymentFileRequest(runId, "CheckRegisterCsv"));
+        Assert.Equal("Payroll run not found.", crossRun.ErrorMessage);
+        var crossBank = await paymentFiles.SaveBankOriginAsync(originRequest);
+        Assert.Equal("Payroll funding bank account not found in the active company.", crossBank.ErrorMessage);
+        var crossUpdate = await paymentFiles.SaveBankOriginAsync(originRequest with { Id = saved.Id, BankAccountId = secondBankId, ConcurrencyToken = originalOrigin.ConcurrencyToken });
+        Assert.Equal("Payroll bank-origin configuration not found.", crossUpdate.ErrorMessage);
+
+        var secondRunId = Guid.NewGuid(); var secondFileId = Guid.NewGuid();
+        const string secondContent = "SUBSIDIARY-PAYROLL-ISOLATION";
+        var secondHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(secondContent))).ToLowerInvariant();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.PayrollRuns.Add(new PayrollRun { Id = secondRunId, CompanyId = secondCompanyId, BankAccountId = secondBankId, Reference = "PAY-FILE-ISO-2", PayDate = new DateOnly(2026, 6, 5), PeriodStart = new DateOnly(2026, 5, 16), PeriodEnd = new DateOnly(2026, 5, 31) });
+            db.PayrollPaymentFiles.Add(new PayrollPaymentFile { Id = secondFileId, CompanyId = secondCompanyId, PayrollRunId = secondRunId, Format = "CheckRegisterCsv", FileName = "subsidiary-payroll.csv", Content = secondContent, ContentSha256 = secondHash, GeneratedAtUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(secondContent, System.Text.Encoding.UTF8.GetString((await paymentFiles.DownloadAsync(secondFileId))!.Content));
+        ActAs(originalCompanyId);
+        Assert.Null(await paymentFiles.DownloadAsync(secondFileId));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var file = await db.PayrollPaymentFiles.SingleAsync(item => item.Id == fileId);
+            file.Content = "TAMPERED-PAYROLL-ISOLATION";
+            await db.SaveChangesAsync();
+        }
+        var integrityError = await Assert.ThrowsAsync<InvalidOperationException>(() => paymentFiles.DownloadAsync(fileId));
+        Assert.Contains("integrity check", integrityError.Message, StringComparison.OrdinalIgnoreCase);
+
+        ActAs(Guid.NewGuid());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => paymentFiles.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => paymentFiles.DownloadAsync(fileId));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => paymentFiles.SaveBankOriginAsync(originRequest));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => paymentFiles.GenerateAsync(new GeneratePayrollPaymentFileRequest(runId, "CheckRegisterCsv")));
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, originalCompanyId.ToString())], "test")) };
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => paymentFiles.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => paymentFiles.DownloadAsync(fileId));
+        Assert.False((await paymentFiles.SaveBankOriginAsync(originRequest)).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var persisted = await db.PayrollBankOriginConfigurations.SingleAsync(origin => origin.Id == saved.Id);
+            Assert.Equal(originalCompanyId, persisted.CompanyId);
+            Assert.Equal(originalOrigin.ConcurrencyToken, persisted.ConcurrencyToken);
+            Assert.True(await db.BusinessAuditEntries.AnyAsync(entry => entry.CompanyId == originalCompanyId && entry.Action == "payroll-bank-origin.created" && entry.EntityId == saved.Id));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == originalCompanyId && entry.Action == "payroll-payment-file.downloaded" && entry.EntityId == fileId));
+            Assert.True(await db.BusinessAuditEntries.AnyAsync(entry => entry.CompanyId == originalCompanyId && entry.UserId == operatorId && entry.Action == "payroll-payment-file.downloaded" && entry.EntityId == fileId));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == originalCompanyId && entry.Action == "payroll-payment-file.integrity-failed" && entry.EntityId == fileId));
+            Assert.True(await db.BusinessAuditEntries.AnyAsync(entry => entry.CompanyId == originalCompanyId && entry.UserId == operatorId && entry.Action == "payroll-payment-file.integrity-failed" && entry.EntityId == fileId));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == secondCompanyId && entry.Action == "payroll-payment-file.downloaded" && entry.EntityId == secondFileId));
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(entry => entry.CompanyId == secondCompanyId && entry.Action == "payroll-payment-file.downloaded" && entry.EntityId == fileId));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(entry => entry.Action == "payroll-bank-origin.created" && entry.EntityId == saved.Id));
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(entry => entry.Action == "payroll-payment-file.generated" && (entry.EntityId == fileId || entry.EntityId == secondFileId)));
+        }
+    }
+
+    [Fact]
     public async Task PayrollPaymentFiles_AreProtectedReconciledFixedWidthAndVoidedWithReversal()
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
