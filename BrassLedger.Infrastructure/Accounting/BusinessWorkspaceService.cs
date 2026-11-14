@@ -233,9 +233,23 @@ public sealed class BusinessWorkspaceService(
         var contractLiabilityBalance = accounts.SingleOrDefault(account => account.OperationalRole == AccountingAccountRoles.ContractLiability)?.CurrentBalance ?? 0m;
         var projectActualCost = projectLedgerTotals.ToDictionary(item => item.Key, item => item.Value.ActualCost);
         var projectRevenue = projectLedgerTotals.ToDictionary(item => item.Key, item => item.Value.Revenue);
-        var projectCommitments = purchaseOrderLines.Where(line => line.ProjectJobId.HasValue && purchaseOrders.Any(order => order.Id == line.PurchaseOrderId && order.Status is "Approved" or "PartiallyReceived" or "Received"))
-            .GroupBy(line => line.ProjectJobId!.Value)
-            .ToDictionary(group => group.Key, group => group.Sum(line => Math.Max(0m, line.OrderedQuantity - (line.ReceivedQuantity - line.ReturnedQuantity)) * line.UnitCost));
+        var commitmentBaseCurrency = company.BaseCurrency.Trim().ToUpperInvariant();
+        var openPurchaseOrders = purchaseOrders.Where(order => order.Status is "Approved" or "PartiallyReceived" or "Received").ToDictionary(order => order.Id);
+        var projectCommitmentLines = purchaseOrderLines.Where(line => line.ProjectJobId.HasValue && openPurchaseOrders.ContainsKey(line.PurchaseOrderId))
+            .Select(line => new
+            {
+                Line = line,
+                Currency = string.IsNullOrWhiteSpace(openPurchaseOrders[line.PurchaseOrderId].TransactionCurrency) ? commitmentBaseCurrency : openPurchaseOrders[line.PurchaseOrderId].TransactionCurrency.Trim().ToUpperInvariant(),
+                Amount = Math.Max(0m, line.OrderedQuantity - (line.ReceivedQuantity - line.ReturnedQuantity)) * line.UnitCost
+            })
+            .Where(item => item.Amount > 0m).ToArray();
+        var projectCommitments = projectCommitmentLines.Where(item => item.Currency == commitmentBaseCurrency)
+            .GroupBy(item => item.Line.ProjectJobId!.Value)
+            .ToDictionary(group => group.Key, group => group.Sum(item => item.Amount));
+        var projectForeignCommitments = projectCommitmentLines.Where(item => item.Currency != commitmentBaseCurrency)
+            .GroupBy(item => new { ProjectJobId = item.Line.ProjectJobId!.Value, item.Currency })
+            .Select(group => new ProjectForeignCommitmentSnapshot(group.Key.ProjectJobId, group.Key.Currency, group.Sum(item => decimal.Round(item.Amount, 2, MidpointRounding.AwayFromZero))))
+            .OrderBy(item => item.Currency).ToArray();
         var invoiceNumbersById = invoices.ToDictionary(invoice => invoice.Id, invoice => invoice.InvoiceNumber);
         var bankAccountNamesById = bankAccounts.ToDictionary(account => account.Id, account => account.Name);
         var billNumbersById = vendorBills.ToDictionary(bill => bill.Id, bill => bill.BillNumber);
@@ -537,6 +551,7 @@ public sealed class BusinessWorkspaceService(
                 Jobs: projectJobs.Select(x => new ProjectJobSnapshot(x.JobNumber, x.Name, x.CustomerId.HasValue ? customerNames.GetValueOrDefault(x.CustomerId.Value, x.CustomerName) : x.CustomerName, x.Status, x.BudgetAmount, projectActualCost.GetValueOrDefault(x.Id), x.Id, x.CustomerId, x.StartDate, x.ExpectedEndDate, x.ClosedOn, x.BillingMethod, x.ContractAmount, x.RetainagePercent, projectRevenue.GetValueOrDefault(x.Id), projectCommitments.GetValueOrDefault(x.Id), x.ConcurrencyToken, x.RevenueRecognitionMethod)).ToArray(),
                 Revenue: projectRevenue.Values.Sum(),
                 Commitments: projectCommitments.Values.Sum(),
+                ForeignCommitments: projectForeignCommitments,
                 LedgerLines: projectLedgerRows.Select(row => new ProjectLedgerLineSnapshot(row.LineId, row.ProjectJobId, row.PostedOn, row.Reference, row.SourceModule, row.AccountNumber, row.AccountName, row.LineDescription, row.Debit, row.Credit, row.AccountType == AccountType.Expense ? row.Debit - row.Credit : 0m, row.AccountType == AccountType.Revenue ? row.Credit - row.Debit : 0m, row.EntryId, row.ProjectPhaseId, row.ProjectPhaseId.HasValue && projectPhaseById.TryGetValue(row.ProjectPhaseId.Value, out var phase) ? phase.Code : string.Empty, row.ProjectCostCodeId, row.ProjectCostCodeId.HasValue && projectCostCodeById.TryGetValue(row.ProjectCostCodeId.Value, out var costCode) ? costCode.Code : string.Empty)).ToArray(),
                 ChangeOrders: projectChangeOrders.Select(change => new ProjectChangeOrderSnapshot(change.Id, change.ProjectJobId, projectById.GetValueOrDefault(change.ProjectJobId)?.JobNumber ?? "Unavailable", change.ChangeOrderNumber, change.Description, change.Reason, change.RequestedOn, change.EffectiveOn, change.ContractAmountChange, change.BudgetAmountChange, change.Status, change.ContractAmountBefore, change.ContractAmountAfter, change.BudgetAmountBefore, change.BudgetAmountAfter, change.PreparedAtUtc, change.SubmittedAtUtc, change.DecidedAtUtc, change.DecisionReason, change.CancelledAtUtc, change.CancellationReason, change.ConcurrencyToken)).ToArray(),
                 BillingRates: projectBillingRates.Select(rate => new ProjectBillingRateSnapshot(rate.Id, rate.ProjectJobId, projectById.GetValueOrDefault(rate.ProjectJobId)?.JobNumber ?? "Unavailable", rate.EarningCode, rate.HourlyRate, rate.EffectiveOn, rate.EffectiveThrough, rate.IsActive, rate.ConcurrencyToken)).ToArray(),

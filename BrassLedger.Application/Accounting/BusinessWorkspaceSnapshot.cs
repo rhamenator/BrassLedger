@@ -406,7 +406,10 @@ public sealed record ProjectsWorkspace(
     decimal ContractLiabilityReconciliationDifference = 0m,
     IReadOnlyList<ProjectPhaseSnapshot>? Phases = null,
     IReadOnlyList<ProjectCostCodeSnapshot>? CostCodes = null,
-    IReadOnlyList<ProjectBudgetAllocationSnapshot>? BudgetAllocations = null);
+    IReadOnlyList<ProjectBudgetAllocationSnapshot>? BudgetAllocations = null,
+    IReadOnlyList<ProjectForeignCommitmentSnapshot>? ForeignCommitments = null);
+
+public sealed record ProjectForeignCommitmentSnapshot(Guid ProjectJobId, string Currency, decimal Amount);
 
 public sealed record ProjectJobSnapshot(
     string JobNumber,
