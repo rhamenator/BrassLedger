@@ -520,7 +520,7 @@ public sealed partial class QuickBooksOnlineConnectionService(
         }
         finally
         {
-            if (leaseId is not null && !leaseCompleted)
+            if (leaseId is not null && !leaseCompleted && actor is not null)
                 await CompleteCredentialOperationLeaseAsync(actor, connectionId, leaseId, null, "integration.credential_operation_released", new { provider = ProviderCode, operation = "Refresh", completed = false }, CancellationToken.None);
             operationLock.Release();
         }
@@ -598,7 +598,7 @@ public sealed partial class QuickBooksOnlineConnectionService(
         }
         finally
         {
-            if (leaseId is not null && !leaseCompleted)
+            if (leaseId is not null && !leaseCompleted && actor is not null)
                 await CompleteCredentialOperationLeaseAsync(actor, connectionId, leaseId, null, "integration.credential_operation_released", new { provider = ProviderCode, operation = "Disconnect", completed = false }, CancellationToken.None);
             operationLock.Release();
         }
