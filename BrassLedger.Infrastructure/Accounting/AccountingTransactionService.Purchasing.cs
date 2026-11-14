@@ -194,6 +194,12 @@ public sealed partial class AccountingTransactionService
             ReceiptNumber = receiptNumber,
             ReceivedOn = request.ReceivedOn,
             TotalAmount = total,
+            TransactionCurrency = companyBaseCurrency,
+            TransactionAmount = total,
+            ExchangeRateToBase = 1m,
+            ExchangeRateEffectiveOn = request.ReceivedOn,
+            ExchangeRateSource = "Company base currency",
+            ExchangeRateDirection = "Base",
             JournalEntryId = posting.Id!.Value,
             ReceivedByUserId = ResolveUserId(),
             ReceivedAtUtc = DateTimeOffset.UtcNow,
@@ -217,11 +223,11 @@ public sealed partial class AccountingTransactionService
             item.UnitCost = resultingCost;
             orderLine.ReceivedQuantity += quantity;
             var lineTotal = RoundCurrency(quantity * orderLine.UnitCost);
-            db.InventoryReceiptLines.Add(new InventoryReceiptLine { Id = Guid.NewGuid(), InventoryReceiptId = receipt.Id, PurchaseOrderLineId = orderLine.Id, InventoryItemId = item.Id, Sequence = ++sequence, Quantity = quantity, UnitCost = orderLine.UnitCost, LineTotal = lineTotal, PriorQuantityOnHand = priorQuantity, PriorUnitCost = priorCost, ResultingUnitCost = resultingCost });
+            db.InventoryReceiptLines.Add(new InventoryReceiptLine { Id = Guid.NewGuid(), InventoryReceiptId = receipt.Id, PurchaseOrderLineId = orderLine.Id, InventoryItemId = item.Id, Sequence = ++sequence, Quantity = quantity, UnitCost = orderLine.UnitCost, LineTotal = lineTotal, TransactionAmount = lineTotal, PriorQuantityOnHand = priorQuantity, PriorUnitCost = priorCost, ResultingUnitCost = resultingCost });
             db.InventoryTransactions.Add(new InventoryTransaction { Id = Guid.NewGuid(), CompanyId = companyId, InventoryItemId = item.Id, WarehouseId = location.Value.Warehouse.Id, BinId = location.Value.Bin.Id, OccurredOn = request.ReceivedOn, TransactionType = "Purchase receipt", QuantityChange = quantity, UnitCost = orderLine.UnitCost, TotalCost = lineTotal, Reference = receiptNumber, JournalEntryId = posting.Id.Value });
         }
         SetPurchaseOrderReturnStatus(order, orderLines);
-        AddPurchasingAudit(db, companyId, "inventory-receipt.posted", nameof(InventoryReceipt), receipt.Id, new { receipt.ReceiptNumber, order.Id, order.OrderNumber, receipt.TotalAmount, lineCount = requestedLines.Length });
+        AddPurchasingAudit(db, companyId, "inventory-receipt.posted", nameof(InventoryReceipt), receipt.Id, new { receipt.ReceiptNumber, order.Id, order.OrderNumber, receipt.TotalAmount, receipt.TransactionCurrency, receipt.TransactionAmount, receipt.ExchangeRateToBase, lineCount = requestedLines.Length });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The purchase order or inventory changed while the receipt was posting. Refresh and try again."); }
         catch (DbUpdateException) { return TransactionResult.Failure("The receipt number or purchase-order quantities changed concurrently. Refresh and try again."); }
