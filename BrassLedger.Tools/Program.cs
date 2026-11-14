@@ -1,3 +1,4 @@
+using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
 using BrassLedger.Infrastructure.SecurityAdministration;
 using Microsoft.Extensions.Configuration;
@@ -50,7 +51,8 @@ if (Directory.Exists(dataRoot) || File.Exists(dataRoot))
 var configuration = new ConfigurationBuilder()
     .AddInMemoryCollection(new Dictionary<string, string?>
     {
-        ["Storage:DataRoot"] = dataRoot
+        ["Storage:DataRoot"] = dataRoot,
+        ["Bootstrap:AdminPassword"] = BrassLedgerAuthenticationDefaults.SeededPassword
     })
     .Build();
 
