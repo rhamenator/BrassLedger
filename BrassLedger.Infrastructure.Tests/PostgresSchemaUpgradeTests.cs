@@ -171,8 +171,9 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
 
         await using var verified = new NpgsqlConnection(connectionString);
         await verified.OpenAsync();
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20261114132426_AddInventoryReceiptCurrencyProvenance';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"InventoryReceipts\" WHERE \"ReceiptNumber\" = 'RCV-PG-RECEIPT-MIGRATION' AND \"TransactionCurrency\" = (SELECT \"BaseCurrency\" FROM \"Companies\" WHERE \"Id\" = \"InventoryReceipts\".\"CompanyId\") AND \"TransactionAmount\" = 25 AND \"TotalAmount\" = 25 AND \"ExchangeRateToBase\" = 1 AND \"ExchangeRateEffectiveOn\" = \"ReceivedOn\" AND \"ExchangeRateSource\" = 'Company base currency' AND \"ExchangeRateSourceReference\" = '' AND \"ExchangeRateDirection\" = 'Base' AND \"ExchangeRateId\" IS NULL;"));
-        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"InventoryReceiptLines\" WHERE \"InventoryReceiptId\" IN (SELECT \"Id\" FROM \"InventoryReceipts\" WHERE \"ReceiptNumber\" = 'RCV-PG-RECEIPT-MIGRATION') AND \"TransactionAmount\" = 25 AND \"LineTotal\" = 25;"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"InventoryReceiptLines\" WHERE \"InventoryReceiptId\" IN (SELECT \"Id\" FROM \"InventoryReceipts\" WHERE \"ReceiptNumber\" = 'RCV-PG-RECEIPT-MIGRATION') AND \"Quantity\" = 2 AND \"UnitCost\" = 12.5 AND \"TransactionAmount\" = 25 AND \"LineTotal\" = 25;"));
         Assert.Equal(13L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826014843_InitialCurrentSchema';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826025706_AddAccountingSchedules';"));
