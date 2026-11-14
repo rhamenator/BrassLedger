@@ -2173,12 +2173,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var bank = before.Treasury.BankAccounts.First();
         var originalBankBalance = bank.CurrentBalance;
 
+        Guid originalCompanyId;
         var documentRateId = Guid.NewGuid(); var settlementRateId = Guid.NewGuid();
         var inactiveRateId = Guid.NewGuid(); var futureRateId = Guid.NewGuid();
         var wrongPairRateId = Guid.NewGuid(); var otherCompanyRateId = Guid.NewGuid();
         await using (var db = await factory.CreateDbContextAsync())
         {
             var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            originalCompanyId = companyId;
             db.CurrencyExchangeRates.AddRange(
                 new() { Id = documentRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .75m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 1), Source = "Test document rate", SourceReference = "https://example.test/cad-usd/2026-06-01" },
                 new() { Id = settlementRateId, CompanyId = companyId, BaseCurrency = "CAD", QuoteCurrency = "USD", Rate = .80m, RateType = CurrencyRateType.Closing, EffectiveOn = new DateOnly(2026, 6, 2), Source = "Test settlement rate", SourceReference = "https://example.test/cad-usd/2026-06-02" },
@@ -2255,7 +2257,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         ActAsCompany(secondCompany.CompanyId!.Value, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PaymentReverse);
         var crossCompanyRefund = await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-CROSS-CO", "Cross-company refund rejected", settlementRateId, token));
         Assert.False(crossCompanyRefund.Succeeded);
-        accessor.HttpContext = null;
+        // Once a second company exists, an absent HTTP context has no stable default company across providers.
+        ActAsCompany(originalCompanyId, BrassLedgerPermissions.PaymentReverse);
 
         var untouched = (await workspaceService.GetWorkspaceAsync()).Receivables.Payments!.Single(item => item.Id == deposit.Id);
         Assert.Equal(100m, untouched.TransactionUnappliedAmount);
