@@ -6398,6 +6398,73 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task PayrollDepositSchedule_RequiresExplicitCompanyAndIsolatesApprovedRules()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var schedules = scope.ServiceProvider.GetRequiredService<IPayrollDepositScheduleService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid originalCompanyId; Guid secondCompanyId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Deposit isolation subsidiary", LegalName = "Deposit Isolation Subsidiary Ltd.", TaxId = "DEP-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            await db.SaveChangesAsync();
+        }
+        var request = new SavePayrollDepositScheduleRequest(null, 2026, "Monthly", 40000m, new DateOnly(2024, 7, 1), new DateOnly(2025, 6, 30), 50000m, 100000m, 2500m, "[]", "[\"2026-01-01\"]", "https://www.irs.gov/publications/p15", "https://www.irs.gov/publications/p509", new DateOnly(2026, 8, 25), "Reviewed official sources for isolation test.", true, true);
+
+        var readError = await Assert.ThrowsAsync<InvalidOperationException>(() => schedules.GetAsync());
+        Assert.Contains("explicit company context", readError.Message, StringComparison.OrdinalIgnoreCase);
+        var saveError = await Assert.ThrowsAsync<InvalidOperationException>(() => schedules.SaveAsync(request));
+        Assert.Contains("explicit company context", saveError.Message, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.PayrollDepositScheduleConfigurations.AnyAsync(configuration => configuration.TaxYear == 2026 && (configuration.CompanyId == originalCompanyId || configuration.CompanyId == secondCompanyId)));
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(entry => entry.Action == "payroll-deposit-schedule.created" && (entry.CompanyId == originalCompanyId || entry.CompanyId == secondCompanyId)));
+        }
+
+        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollApprove)], "test"))
+        };
+        ActAs(originalCompanyId);
+        var originalSave = await schedules.SaveAsync(request);
+        Assert.True(originalSave.Succeeded, originalSave.ErrorMessage);
+        var originalSnapshot = Assert.Single((await schedules.GetAsync()).Configurations, item => item.Id == originalSave.Id);
+        Assert.True(originalSnapshot.IsApproved);
+
+        ActAs(secondCompanyId);
+        Assert.DoesNotContain((await schedules.GetAsync()).Configurations, item => item.Id == originalSave.Id);
+        var crossUpdate = await schedules.SaveAsync(request with { Id = originalSave.Id, ConcurrencyToken = originalSnapshot.ConcurrencyToken });
+        Assert.Equal("Payroll deposit schedule not found.", crossUpdate.ErrorMessage);
+        var secondSave = await schedules.SaveAsync(request);
+        Assert.True(secondSave.Succeeded, secondSave.ErrorMessage);
+        Assert.NotEqual(originalSave.Id, secondSave.Id);
+        Assert.DoesNotContain((await schedules.GetAsync()).Configurations, item => item.Id == originalSave.Id);
+        Assert.Contains((await schedules.GetAsync()).Configurations, item => item.Id == secondSave.Id);
+
+        ActAs(originalCompanyId);
+        Assert.DoesNotContain((await schedules.GetAsync()).Configurations, item => item.Id == secondSave.Id);
+        ActAs(Guid.NewGuid());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => schedules.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => schedules.SaveAsync(request));
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(originalCompanyId, (await db.PayrollDepositScheduleConfigurations.SingleAsync(item => item.Id == originalSave.Id)).CompanyId);
+            Assert.Equal(secondCompanyId, (await db.PayrollDepositScheduleConfigurations.SingleAsync(item => item.Id == secondSave.Id)).CompanyId);
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == originalCompanyId && entry.Action == "payroll-deposit-schedule.created" && entry.EntityId == originalSave.Id));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == secondCompanyId && entry.Action == "payroll-deposit-schedule.created" && entry.EntityId == secondSave.Id));
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(entry => entry.Action == "payroll-deposit-schedule.updated" && (entry.EntityId == originalSave.Id || entry.EntityId == secondSave.Id)));
+        }
+    }
+
+    [Fact]
     public async Task FederalDepositSchedule_AssignsHolidayAdjustedAndNextDayDueDates()
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
