@@ -17,7 +17,7 @@ public sealed partial class AccountingTransactionService
             return TransactionResult.Failure("A vendor, order number, and at least one line are required.");
         if (request.ExpectedOn.HasValue && request.ExpectedOn.Value < request.OrderedOn)
             return TransactionResult.Failure("The expected date cannot precede the order date.");
-        if (requestedLines.Any(line => line.InventoryItemId == Guid.Empty || string.IsNullOrWhiteSpace(line.Description) || line.Quantity <= 0m || line.UnitCost < 0m))
+        if (requestedLines.Any(line => line.InventoryItemId == Guid.Empty || string.IsNullOrWhiteSpace(line.Description) || RoundQuantity(line.Quantity) <= 0m || line.UnitCost < 0m))
             return TransactionResult.Failure("Every purchase-order line requires an inventory item, description, positive quantity, and non-negative unit cost.");
         if (requestedLines.Select(line => line.InventoryItemId).Distinct().Count() != requestedLines.Length)
             return TransactionResult.Failure("Combine duplicate inventory items into one purchase-order line.");
@@ -130,7 +130,7 @@ public sealed partial class AccountingTransactionService
     {
         if (!HasPermission(BrassLedgerPermissions.PurchasingManage)) return TransactionResult.Failure("You are not authorized to receive purchase orders.");
         var requestedLines = request.Lines?.Where(line => line.Quantity != 0m).ToArray() ?? [];
-        if (string.IsNullOrWhiteSpace(request.ReceiptNumber) || requestedLines.Length == 0 || requestedLines.Any(line => line.PurchaseOrderLineId == Guid.Empty || line.Quantity <= 0m))
+        if (string.IsNullOrWhiteSpace(request.ReceiptNumber) || requestedLines.Length == 0 || requestedLines.Any(line => line.PurchaseOrderLineId == Guid.Empty || RoundQuantity(line.Quantity) <= 0m))
             return TransactionResult.Failure("A receipt number and at least one positive receipt quantity are required.");
         if (requestedLines.Select(line => line.PurchaseOrderLineId).Distinct().Count() != requestedLines.Length)
             return TransactionResult.Failure("Combine duplicate purchase-order receipt lines.");

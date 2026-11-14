@@ -3485,9 +3485,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
         var staleReceipt = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id!.Value, "RCV-STALE-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 1m)], "stale-token"));
         Assert.False(staleReceipt.Succeeded); Assert.Contains("changed", staleReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var unrepresentableReceipt = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id.Value, "RCV-TINY-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 0.00001m)], approvedToken));
+        Assert.False(unrepresentableReceipt.Succeeded); Assert.Contains("positive receipt quantity", unrepresentableReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var overReceipt = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id.Value, "RCV-OVER-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 6m)], approvedToken));
         Assert.False(overReceipt.Succeeded); Assert.Contains("exceeds", overReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        var received = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id!.Value, "RCV-RECEIVE-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 2m)], approvedToken));
+        var received = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id!.Value, "RCV-RECEIVE-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 2.00004m)], approvedToken));
         Assert.True(received.Succeeded, received.ErrorMessage);
 
         await using (var receiptDb = await factory.CreateDbContextAsync())
@@ -3510,6 +3512,25 @@ public sealed class WorkspaceInitializationTests : IDisposable
 
         string receiptToken;
         await using (var matchDb = await factory.CreateDbContextAsync()) receiptToken = await matchDb.InventoryReceipts.Where(receipt => receipt.Id == received.Id).Select(receipt => receipt.ConcurrencyToken).SingleAsync();
+        Guid receivedLineId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            receivedLineId = await db.InventoryReceiptLines.Where(line => line.InventoryReceiptId == received.Id).Select(line => line.Id).SingleAsync();
+            var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id);
+            order.TransactionCurrency = "CAD";
+            await db.SaveChangesAsync();
+        }
+        var blockedForeignMatch = await transactions.SavePurchaseInvoiceMatchAsync(new(null, received.Id!.Value, "BILL-FOREIGN-BLOCKED-1", new DateOnly(2026, 8, 4), new DateOnly(2026, 9, 3), "Cannot relabel retained amounts", [new(receivedLineId, 2m, 20m)], receiptToken));
+        Assert.False(blockedForeignMatch.Succeeded);
+        Assert.Contains("bill-date exchange-rate accounting", blockedForeignMatch.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.False(await db.PurchaseInvoiceMatches.AnyAsync(match => match.BillNumber == "BILL-FOREIGN-BLOCKED-1"));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id);
+            order.TransactionCurrency = "USD";
+            await db.SaveChangesAsync();
+        }
         var matched = await PostControlledPurchaseInvoiceAsync(transactions, factory, received.Id!.Value, "BILL-RECEIVE-1", new DateOnly(2026, 8, 4), new DateOnly(2026, 9, 3), "Matched inventory invoice");
         var unsafeGenericVoid = await transactions.VoidVendorBillAsync(new VoidSubledgerDocumentRequest(matched.VendorBillId, new DateOnly(2026, 8, 4), "Would desynchronize receiving"));
         Assert.False(unsafeGenericVoid.Succeeded); Assert.Contains("invoice match", unsafeGenericVoid.ErrorMessage, StringComparison.OrdinalIgnoreCase);
@@ -3549,7 +3570,33 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var saved = await transactions.SavePurchaseInvoiceMatchAsync(new(null, receiptResult.Id!.Value, billNumber, new DateOnly(2026, 8, 3), new DateOnly(2026, 9, 2), "Partial supplier invoice", [new(receiptLineId, quantity, unitCost)], receiptToken)); Assert.True(saved.Succeeded, saved.ErrorMessage);
             PurchaseInvoiceMatch match; await using (var db = await factory.CreateDbContextAsync()) match = await db.PurchaseInvoiceMatches.SingleAsync(item => item.Id == saved.Id); Assert.True((await transactions.SubmitPurchaseInvoiceMatchAsync(new(match.Id, match.ConcurrencyToken))).Succeeded);
             await using (var db = await factory.CreateDbContextAsync()) match = await db.PurchaseInvoiceMatches.SingleAsync(item => item.Id == saved.Id); Assert.True((await transactions.DecidePurchaseInvoiceMatchAsync(new(match.Id, true, "Quantity and price variance accepted", match.ConcurrencyToken))).Succeeded);
-            await using (var db = await factory.CreateDbContextAsync()) match = await db.PurchaseInvoiceMatches.SingleAsync(item => item.Id == saved.Id); var posted = await transactions.PostPurchaseInvoiceMatchAsync(new(match.Id, match.ConcurrencyToken)); Assert.True(posted.Succeeded, posted.ErrorMessage); return match.Id;
+            await using (var db = await factory.CreateDbContextAsync()) match = await db.PurchaseInvoiceMatches.SingleAsync(item => item.Id == saved.Id);
+            if (billNumber == "BILL-MATCH-PARTIAL-1")
+            {
+                int journalCount;
+                await using (var db = await factory.CreateDbContextAsync())
+                {
+                    journalCount = await db.JournalEntries.CountAsync();
+                    var order = await db.PurchaseOrders.SingleAsync(item => item.Id == orderResult.Id);
+                    order.TransactionCurrency = "CAD";
+                    await db.SaveChangesAsync();
+                }
+                var blocked = await transactions.PostPurchaseInvoiceMatchAsync(new(match.Id, match.ConcurrencyToken));
+                Assert.False(blocked.Succeeded); Assert.Contains("bill-date exchange-rate accounting", blocked.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+                await using (var db = await factory.CreateDbContextAsync())
+                {
+                    Assert.Equal("Approved", await db.PurchaseInvoiceMatches.Where(item => item.Id == match.Id).Select(item => item.Status).SingleAsync());
+                    Assert.False(await db.VendorBills.AnyAsync(bill => bill.BillNumber == billNumber));
+                    Assert.Equal(journalCount, await db.JournalEntries.CountAsync());
+                }
+                await using (var db = await factory.CreateDbContextAsync())
+                {
+                    var order = await db.PurchaseOrders.SingleAsync(item => item.Id == orderResult.Id);
+                    order.TransactionCurrency = "USD";
+                    await db.SaveChangesAsync();
+                }
+            }
+            var posted = await transactions.PostPurchaseInvoiceMatchAsync(new(match.Id, match.ConcurrencyToken)); Assert.True(posted.Succeeded, posted.ErrorMessage); return match.Id;
         }
 
         var firstMatchId = await PostMatchAsync("BILL-MATCH-PARTIAL-1", 4m, 12m); var secondMatchId = await PostMatchAsync("BILL-MATCH-PARTIAL-2", 7m, 9m);
@@ -3756,7 +3803,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
             vendorId = await db.Vendors.Select(vendor => vendor.Id).FirstAsync();
             var item = await db.InventoryItems.SingleAsync(candidate => candidate.Sku == "RM-220"); itemId = item.Id; startingQuantity = item.QuantityOnHand;
         }
-        var request = new SavePurchaseOrderRequest(null, vendorId, "PO-FX-GUARD-1", new DateOnly(2026, 8, 20), null, "Foreign order before receipt valuation", [new PurchaseOrderLineRequest(itemId, "Foreign fasteners", 2m, 50m)], Currency: "CAD");
+        var request = new SavePurchaseOrderRequest(null, vendorId, "PO-FX-GUARD-1", new DateOnly(2026, 8, 20), null, "Foreign order before receipt valuation", [new PurchaseOrderLineRequest(itemId, "Foreign fasteners", 2.00004m, 50m)], Currency: "CAD");
+        var unrepresentable = await transactions.SavePurchaseOrderAsync(request with { OrderNumber = "PO-FX-TINY-1", Lines = [new PurchaseOrderLineRequest(itemId, "Unrepresentable quantity", 0.00001m, 50m)] });
+        Assert.False(unrepresentable.Succeeded);
+        Assert.Contains("positive quantity", unrepresentable.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var malformed = await transactions.SavePurchaseOrderAsync(request with { Currency = "C4D" }); Assert.False(malformed.Succeeded); Assert.Contains("currency", malformed.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var saved = await transactions.SavePurchaseOrderAsync(request); Assert.True(saved.Succeeded, saved.ErrorMessage);
         Guid lineId; string token;
@@ -3764,7 +3814,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         {
             var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id);
             Assert.Equal("CAD", order.TransactionCurrency); Assert.Equal(100m, order.TotalAmount);
-            lineId = await db.PurchaseOrderLines.Where(line => line.PurchaseOrderId == order.Id).Select(line => line.Id).SingleAsync(); token = order.ConcurrencyToken;
+            var line = await db.PurchaseOrderLines.SingleAsync(line => line.PurchaseOrderId == order.Id);
+            Assert.Equal(2m, line.OrderedQuantity); Assert.Equal(100m, line.LineTotal);
+            lineId = line.Id; token = order.ConcurrencyToken;
         }
         var legacyEdit = await transactions.SavePurchaseOrderAsync(request with { Id = saved.Id, ConcurrencyToken = token, Currency = "" });
         Assert.True(legacyEdit.Succeeded, legacyEdit.ErrorMessage);

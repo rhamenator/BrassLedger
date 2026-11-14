@@ -46,6 +46,9 @@ public sealed partial class AccountingTransactionService
         var order = await db.PurchaseOrders.SingleAsync(
             item => item.Id == receipt.PurchaseOrderId && item.CompanyId == companyId,
             cancellationToken);
+        var baseCurrency = await db.Companies.Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        if (NormalizeTransactionCurrency(order.TransactionCurrency, baseCurrency) != baseCurrency)
+            return TransactionResult.Failure("Foreign-currency receipt matching requires retained transaction amounts and bill-date exchange-rate accounting; this workflow is not yet available.");
         var vendor = await db.Vendors.SingleAsync(
             item => item.Id == order.VendorId && item.CompanyId == companyId,
             cancellationToken);
@@ -426,6 +429,14 @@ public sealed partial class AccountingTransactionService
             cancellationToken);
         if (receipt.Status != "Posted")
             return TransactionResult.Failure("The source receipt is no longer posted. Return the invoice match to draft and review it again.");
+        var order = await db.PurchaseOrders.SingleAsync(
+            item => item.Id == receipt.PurchaseOrderId && item.CompanyId == companyId,
+            cancellationToken);
+        var baseCurrency = await db.Companies.AsNoTracking().Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
+        if (order.Id != match.PurchaseOrderId)
+            return TransactionResult.Failure("The approved invoice match no longer references the receipt's purchase order. Return it to draft and review it again.");
+        if (NormalizeTransactionCurrency(order.TransactionCurrency, baseCurrency) != baseCurrency)
+            return TransactionResult.Failure("Foreign-currency receipt matching requires retained transaction amounts and bill-date exchange-rate accounting; this workflow is not yet available.");
         if (await db.VendorBills.AnyAsync(
                 bill => bill.CompanyId == companyId && bill.VendorId == match.VendorId && bill.BillNumber == match.BillNumber,
                 cancellationToken))
@@ -517,7 +528,6 @@ public sealed partial class AccountingTransactionService
         if (!posting.Succeeded)
             return posting;
 
-        var baseCurrency = await db.Companies.AsNoTracking().Where(company => company.Id == companyId).Select(company => company.BaseCurrency).SingleAsync(cancellationToken);
         var bill = new VendorBill
         {
             Id = billId,
@@ -565,9 +575,6 @@ public sealed partial class AccountingTransactionService
             QuantityVarianceAmount = line.QuantityVarianceAmount
         }));
 
-        var order = await db.PurchaseOrders.SingleAsync(
-            item => item.Id == match.PurchaseOrderId && item.CompanyId == companyId,
-            cancellationToken);
         var orderLines = await db.PurchaseOrderLines
             .Where(line => line.PurchaseOrderId == order.Id)
             .ToDictionaryAsync(line => line.Id, cancellationToken);
