@@ -34,6 +34,13 @@ public sealed class MultiCompanyContextGuardTests
             await operationsSession.Page.GetByText("Purchase-order draft saved.", new() { Exact = true }).WaitForAsync();
             await Assertions.Expect(operationsSession.Page.Locator("tr").Filter(new() { HasTextString = orderNumber })).ToBeVisibleAsync();
             await operationsSession.AssertNoUiFailuresAsync("multi-company purchase-order draft");
+
+            await using var payrollSession = await fixture.CreateSessionAsync(BrowserKind.Chromium);
+            await payrollSession.SignInAsync("payroll", returnPath: "/payroll");
+            await payrollSession.GotoAsync("/payroll");
+            await payrollSession.WaitForHeadingAsync("Prepare, approve, post, and audit payroll.");
+            await Assertions.Expect(payrollSession.Page.GetByRole(AriaRole.Heading, new() { Name = "Employee payment files" })).ToBeVisibleAsync();
+            await payrollSession.AssertNoUiFailuresAsync("multi-company payroll workspace read");
         }
         finally
         {

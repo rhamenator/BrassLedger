@@ -122,7 +122,14 @@ public sealed class PayrollPaymentFileService(
         if (file is null) return null;
         var bytes = Encoding.UTF8.GetBytes(file.Content);
         var actualHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-        if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(actualHash), Encoding.ASCII.GetBytes(file.ContentSha256))) throw new InvalidOperationException("The protected payroll payment file failed its stored integrity check.");
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(actualHash), Encoding.ASCII.GetBytes(file.ContentSha256)))
+        {
+            AddAudit(db, companyId, "payroll-payment-file.integrity-failed", "PayrollPaymentFile", file.Id, new { file.Format, file.Status, file.ContentSha256 });
+            await db.SaveChangesAsync(cancellationToken);
+            throw new InvalidOperationException("The protected payroll payment file failed its stored integrity check.");
+        }
+        AddAudit(db, companyId, "payroll-payment-file.downloaded", "PayrollPaymentFile", file.Id, new { file.Format, file.Status, file.ContentSha256 });
+        await db.SaveChangesAsync(cancellationToken);
         var downloadName = file.Status == "Voided" ? $"VOID-DO-NOT-PROCESS-{file.FileName}" : file.FileName;
         return new PayrollPaymentFileDownload(downloadName, file.ContentType, bytes, file.ContentSha256);
     }
@@ -187,6 +194,19 @@ public sealed class PayrollPaymentFileService(
     private bool HasPermission(string permission) => httpContextAccessor.HttpContext is null || httpContextAccessor.HttpContext.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission);
     private void RequireSensitivePayroll() { if (!HasPermission(BrassLedgerPermissions.PayrollSensitiveData)) throw new UnauthorizedAccessException("You are not authorized to access protected payroll payment files."); }
     private Guid? ResolveUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
-    private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken cancellationToken) { var context = httpContextAccessor.HttpContext; var claim = context?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType); if (context is not null && !Guid.TryParse(claim, out _)) throw new UnauthorizedAccessException("An authenticated company context is required."); if (Guid.TryParse(claim, out var id) && await db.Companies.AnyAsync(item => item.Id == id, cancellationToken)) return id; return await db.Companies.OrderBy(item => item.Name).Select(item => item.Id).FirstAsync(cancellationToken); }
+    private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken cancellationToken)
+    {
+        var context = httpContextAccessor.HttpContext;
+        var claim = context?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
+        if (Guid.TryParse(claim, out var id))
+        {
+            if (await db.Companies.AnyAsync(item => item.Id == id, cancellationToken)) return id;
+            throw new UnauthorizedAccessException("The selected company is unavailable.");
+        }
+        if (context is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
+        var companyIds = await db.Companies.Select(item => item.Id).Take(2).ToArrayAsync(cancellationToken);
+        if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
+        return companyIds[0];
+    }
     private void AddAudit(BrassLedgerDbContext db, Guid companyId, string action, string entityType, Guid entityId, object detail) => db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = entityType, EntityId = entityId, DetailJson = JsonSerializer.Serialize(detail), OccurredAtUtc = DateTimeOffset.UtcNow });
 }
