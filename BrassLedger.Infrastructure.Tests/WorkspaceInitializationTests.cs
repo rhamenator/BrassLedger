@@ -1135,13 +1135,20 @@ public sealed class WorkspaceInitializationTests : IDisposable
         using var services = CreateServiceProvider();
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
+        var permissionFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await permissionFactory.CreateDbContextAsync())
+        {
+            var controllerRole = await db.AccessRoles.SingleAsync(role => role.Name == "Controller");
+            controllerRole.Permissions += $"|{BrassLedgerPermissions.UserManage}";
+            await db.SaveChangesAsync();
+        }
         var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
         var signedInOwner = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
         Assert.Equal(AuthenticationOutcome.Succeeded, signedInOwner.Outcome);
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
         var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
         context.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString())], "test"));
+            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString()), new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, signedInOwner.User.Role), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)], "test"));
         accessor.HttpContext = context;
         var integrations = scope.ServiceProvider.GetRequiredService<IIntegrationService>();
         var catalog = await integrations.GetCatalogAsync();
@@ -1164,6 +1171,155 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var stored = await ReadScalarAsync(connection, "SELECT CredentialsJson FROM IntegrationConnections WHERE Name = 'Primary Stripe';");
         Assert.DoesNotContain("super-secret", stored);
         Assert.StartsWith("enc::", stored);
+    }
+
+    [Fact]
+    public async Task IntegrationConnections_RequireCurrentMembershipAndManagementPermission()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var integrations = scope.ServiceProvider.GetRequiredService<IIntegrationService>();
+        Guid userId; Guid originalCompanyId; string roleName;
+        var secondCompanyId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.UserName == "controller");
+            userId = user.Id; originalCompanyId = user.CompanyId; roleName = user.Role;
+            var originalRole = await db.AccessRoles.SingleAsync(item => item.CompanyId == originalCompanyId && item.Name == roleName);
+            originalRole.Permissions += $"|{BrassLedgerPermissions.UserManage}";
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Integration subsidiary", LegalName = "Integration Subsidiary Ltd.", TaxId = "INTEGRATION-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            await db.SaveChangesAsync();
+            await SecurityAdministrationService.EnsureBuiltInRolesAsync(db, secondCompanyId);
+            var secondRole = await db.AccessRoles.SingleAsync(item => item.CompanyId == secondCompanyId && item.Name == roleName);
+            secondRole.Permissions += $"|{BrassLedgerPermissions.UserManage}";
+            await db.SaveChangesAsync();
+        }
+
+        void SelectCompany(Guid companyId, bool managementClaim = true, string? claimedRole = null, bool mfaAuthenticated = false, bool enrollmentRequired = false)
+        {
+            var claims = new List<System.Security.Claims.Claim>
+            {
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(System.Security.Claims.ClaimTypes.Role, claimedRole ?? roleName)
+            };
+            if (managementClaim) claims.Add(new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage));
+            if (mfaAuthenticated) claims.Add(new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "mfa"));
+            if (enrollmentRequired) claims.Add(new(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true"));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test"))
+            };
+        }
+        static SaveIntegrationConnectionRequest NewProfile(string name) => new(null, "stripe", name, "{}", "{}", false);
+
+        accessor.HttpContext = null;
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("Background profile"))).Succeeded);
+        SelectCompany(originalCompanyId);
+        var original = await integrations.SaveConnectionAsync(NewProfile("Original company profile"));
+        Assert.True(original.Succeeded, original.ErrorMessage);
+        SelectCompany(originalCompanyId, managementClaim: false);
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("No claim profile"))).Succeeded);
+        SelectCompany(originalCompanyId, claimedRole: "Sales Clerk");
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("Wrong role profile"))).Succeeded);
+        SelectCompany(originalCompanyId, enrollmentRequired: true);
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("Enrollment pending profile"))).Succeeded);
+
+        SelectCompany(Guid.NewGuid());
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("Unknown company profile"))).Succeeded);
+        SelectCompany(secondCompanyId);
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("Unowned company profile"))).Succeeded);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.CompanyMemberships.Add(new CompanyMembership { Id = Guid.NewGuid(), UserId = userId, CompanyId = secondCompanyId, Role = roleName, IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        var second = await integrations.SaveConnectionAsync(NewProfile("Second company profile"));
+        Assert.True(second.Succeeded, second.ErrorMessage);
+        Assert.Single(await integrations.GetConnectionsAsync(), item => item.Id == second.Id);
+        Assert.False((await integrations.SaveConnectionAsync(new SaveIntegrationConnectionRequest(original.Id, "stripe", "Cross-company overwrite", "{}", string.Empty, false))).Succeeded);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == userId && item.CompanyId == secondCompanyId);
+            membership.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("Revoked company profile"))).Succeeded);
+        Assert.False((await integrations.SaveConnectionAsync(new SaveIntegrationConnectionRequest(second.Id, "stripe", "Revoked overwrite", "{}", string.Empty, false))).Succeeded);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == userId && item.CompanyId == secondCompanyId);
+            membership.IsActive = true;
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == secondCompanyId && item.Name == roleName);
+            role.Permissions = string.Join('|', role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(permission => !string.Equals(permission, BrassLedgerPermissions.UserManage, StringComparison.OrdinalIgnoreCase)));
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("Unprivileged company profile"))).Succeeded);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == secondCompanyId && item.Name == roleName);
+            role.Permissions += $"|{BrassLedgerPermissions.UserManage}";
+            role.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("Inactive role profile"))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == secondCompanyId && item.Name == roleName);
+            role.IsActive = true;
+            role.RequiresMfa = true;
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("MFA not enrolled profile"))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == userId);
+            user.MfaEnabled = true;
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("MFA not authenticated profile"))).Succeeded);
+        SelectCompany(secondCompanyId, mfaAuthenticated: true);
+        Assert.Single(await integrations.GetConnectionsAsync(), item => item.Id == second.Id);
+
+        SelectCompany(originalCompanyId, mfaAuthenticated: true);
+        Assert.Single(await integrations.GetConnectionsAsync(), item => item.Id == original.Id);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == userId);
+            user.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(NewProfile("Inactive user profile"))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(2, await db.IntegrationConnections.CountAsync());
+            Assert.Equal("Original company profile", await db.IntegrationConnections.Where(item => item.Id == original.Id).Select(item => item.Name).SingleAsync());
+            Assert.Equal("Second company profile", await db.IntegrationConnections.Where(item => item.Id == second.Id).Select(item => item.Name).SingleAsync());
+            Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(item => item.Action == "integration.configured"));
+        }
     }
 
     [Fact]
