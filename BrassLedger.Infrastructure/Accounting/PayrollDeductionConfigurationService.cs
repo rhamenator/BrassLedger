@@ -159,10 +159,17 @@ public sealed class PayrollDeductionConfigurationService(
     private Guid? ResolveUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
     private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken cancellationToken)
     {
-        var context = httpContextAccessor.HttpContext; var claim = context?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
-        if (context is not null && !Guid.TryParse(claim, out _)) throw new UnauthorizedAccessException("An authenticated company context is required.");
-        if (Guid.TryParse(claim, out var id) && await db.Companies.AnyAsync(item => item.Id == id, cancellationToken)) return id;
-        return await db.Companies.OrderBy(item => item.Name).Select(item => item.Id).FirstAsync(cancellationToken);
+        var context = httpContextAccessor.HttpContext;
+        var claim = context?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
+        if (Guid.TryParse(claim, out var id))
+        {
+            if (await db.Companies.AnyAsync(item => item.Id == id, cancellationToken)) return id;
+            throw new UnauthorizedAccessException("The selected company is unavailable.");
+        }
+        if (context is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
+        var companyIds = await db.Companies.Select(item => item.Id).Take(2).ToArrayAsync(cancellationToken);
+        if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
+        return companyIds[0];
     }
     private void AddAudit(BrassLedgerDbContext db, Guid companyId, string action, string entityType, Guid entityId, object detail) => db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = entityType, EntityId = entityId, DetailJson = JsonSerializer.Serialize(detail), OccurredAtUtc = DateTimeOffset.UtcNow });
 }
