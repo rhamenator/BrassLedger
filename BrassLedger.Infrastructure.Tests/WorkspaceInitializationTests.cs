@@ -700,6 +700,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
                 role.Permissions += $"|{BrassLedgerPermissions.UserManage}";
             await db.SaveChangesAsync();
         }
+        var backupSession = await scope.ServiceProvider.GetRequiredService<IUserSessionService>().IssueAsync(
+            user with { MfaAuthenticated = true }, "127.0.0.1", "xunit");
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
         void SelectBackupActor(bool includePermission = true, string? role = null, bool mfa = true, bool enrollmentRequired = false)
         {
@@ -707,7 +709,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
             [
                 new(System.Security.Claims.ClaimTypes.NameIdentifier, user.UserId.ToString()),
                 new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, user.CompanyId.ToString()),
-                new(System.Security.Claims.ClaimTypes.Role, role ?? user.Role)
+                new(System.Security.Claims.ClaimTypes.Role, role ?? user.Role),
+                new(BrassLedgerAuthenticationDefaults.SessionIdClaimType, backupSession.SessionId!.Value.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, backupSession.SecurityStamp)
             ];
             if (includePermission) claims.Add(new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage));
             if (mfa) claims.Add(new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "mfa"));
@@ -973,10 +977,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var signedInOwner = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
         Assert.Equal(AuthenticationOutcome.Succeeded, signedInOwner.Outcome);
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
-        var ownerContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
-        ownerContext.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString()), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage)], "test"));
-        accessor.HttpContext = ownerContext;
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedInOwner.User!, BrassLedgerPermissions.ReportingManage);
         var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
         var consolidation = scope.ServiceProvider.GetRequiredService<IConsolidationService>();
         var secondCompany = await companies.CreateCompanyAsync(new CreateCompanyRequest("Canadian subsidiary", "Canadian subsidiary Ltd.", "CA-TEST", "CAD", 1));
@@ -1540,8 +1541,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
         var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
         Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
-        var userId = signedIn.User!.UserId;
-        var originalCompanyId = signedIn.User.CompanyId;
+        var activeUser = await scope.ServiceProvider.GetRequiredService<IUserSessionService>().IssueAsync(signedIn.User!, "127.0.0.1", "xunit");
+        var userId = activeUser.UserId;
+        var originalCompanyId = activeUser.CompanyId;
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
         var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
@@ -1551,7 +1553,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var claims = new List<System.Security.Claims.Claim>
             {
                 new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()),
-                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString())
+                new(System.Security.Claims.ClaimTypes.Role, activeUser.Role),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SessionIdClaimType, activeUser.SessionId!.Value.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, activeUser.SecurityStamp),
+                new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "pwd")
             };
             if (enrollmentRequired) claims.Add(new(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true"));
             accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
@@ -1610,6 +1616,77 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.False((await companies.CreateCompanyAsync(NewCompany("Inactive user company"))).Succeeded);
         await using (var db = await factory.CreateDbContextAsync())
             Assert.Equal(2, await db.Companies.CountAsync());
+    }
+
+    [Fact]
+    public async Task CompanyManagement_RejectsRevokedSessionAndSecurityStampDrift()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!);
+        Assert.Single(await companies.GetMyCompaniesAsync());
+
+        var sessionId = Guid.Parse(accessor.HttpContext.User.FindFirst(BrassLedgerAuthenticationDefaults.SessionIdClaimType)!.Value);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var session = await db.UserSessions.SingleAsync(item => item.Id == sessionId);
+            session.RevokedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await companies.GetMyCompaniesAsync());
+        Assert.False((await companies.CreateCompanyAsync(new("Revoked session subsidiary", "Revoked session subsidiary", "REVOKED", "USD", 1))).Succeeded);
+
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!);
+        Assert.Single(await companies.GetMyCompaniesAsync());
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == signedIn.User!.UserId);
+            user.SecurityStamp = Guid.NewGuid().ToString("N");
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await companies.GetMyCompaniesAsync());
+        Assert.False((await companies.CreateCompanyAsync(new("Stale stamp subsidiary", "Stale stamp subsidiary", "STALE", "USD", 1))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Single(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CompanyManagement_EnforcesAdministratorMfaDespiteCorruptedRoleFlag()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var firstSignIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, firstSignIn.Outcome);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == firstSignIn.User!.UserId);
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == user.Id && item.CompanyId == user.CompanyId);
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == user.CompanyId && item.Name == "Administrator");
+            user.Role = membership.Role = "Administrator";
+            role.RequiresMfa = false;
+            await db.SaveChangesAsync();
+        }
+        var adminSignIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, adminSignIn.Outcome);
+        Assert.True(adminSignIn.User!.MfaEnrollmentRequired);
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        // Simulate a stale circuit principal that omits the enrollment claim.
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, adminSignIn.User);
+        var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
+        Assert.Empty(await companies.GetMyCompaniesAsync());
+        Assert.False((await companies.CreateCompanyAsync(new("MFA bypass subsidiary", "MFA bypass subsidiary", "MFA-BYPASS", "USD", 1))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Single(await db.Companies.ToListAsync());
     }
 
     [Fact]
@@ -3009,13 +3086,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
         var signedInOwner = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
         Assert.Equal(AuthenticationOutcome.Succeeded, signedInOwner.Outcome);
-        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
-        {
-            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-                [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()),
-                 new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString()),
-                 new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage)], "test"))
-        };
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedInOwner.User!, BrassLedgerPermissions.ReportingManage);
         var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
         var secondCompany = await companies.CreateCompanyAsync(new CreateCompanyRequest("Isolation test subsidiary", "Isolation Test Subsidiary Ltd.", "ISO-TEST", "USD", 1));
         Assert.True(secondCompany.Succeeded, secondCompany.ErrorMessage);
@@ -3292,13 +3363,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
         var signedInOwner = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
         Assert.Equal(AuthenticationOutcome.Succeeded, signedInOwner.Outcome);
-        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
-        {
-            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-                [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()),
-                 new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString()),
-                 new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReportingManage)], "test"))
-        };
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedInOwner.User!, BrassLedgerPermissions.ReportingManage);
         var secondCompany = await companies.CreateCompanyAsync(new CreateCompanyRequest("Rate assignment isolation subsidiary", "Rate Assignment Isolation Subsidiary Ltd.", "RATE-ISO", "USD", 1));
         Assert.True(secondCompany.Succeeded, secondCompany.ErrorMessage);
         ActAsCompany(secondCompany.CompanyId!.Value, BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PayablesManage);
@@ -9933,6 +9998,25 @@ public sealed class WorkspaceInitializationTests : IDisposable
                 new(BrassLedgerAuthenticationDefaults.SessionIdClaimType, sessionId.ToString()),
                 new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, user.SecurityStamp),
                 new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "pwd"),
+                .. permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))
+            ], "test"))
+        };
+    }
+
+    private static async Task<Microsoft.AspNetCore.Http.HttpContext> CreateCompanyOwnerContextAsync(
+        IServiceProvider services, AuthenticatedUser user, params string[] permissions)
+    {
+        var issued = await services.GetRequiredService<IUserSessionService>().IssueAsync(user, "127.0.0.1", "xunit");
+        return new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, issued.UserId.ToString()),
+                new(System.Security.Claims.ClaimTypes.Role, issued.Role),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, issued.CompanyId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SessionIdClaimType, issued.SessionId!.Value.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, issued.SecurityStamp),
+                new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, issued.MfaAuthenticated ? "mfa" : "pwd"),
                 .. permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))
             ], "test"))
         };
