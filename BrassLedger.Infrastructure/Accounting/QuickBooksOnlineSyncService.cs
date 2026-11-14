@@ -23,12 +23,12 @@ public sealed class QuickBooksOnlineSyncService(
 
     public async Task<QuickBooksSyncResult> ImportAsync(QuickBooksSyncRequest request, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
+        var actor = await CurrentActorAsync(cancellationToken);
         if (actor is null) return QuickBooksSyncResult.Failure("An authenticated company is required.", request.DryRun);
         var entityType = (request.EntityType ?? string.Empty).Trim().ToLowerInvariant();
         if (!SupportedEntityTypes.Contains(entityType, StringComparer.Ordinal))
             return QuickBooksSyncResult.Failure("Supported API imports are accounts, customers, and vendors.", request.DryRun);
-        if (!CanSynchronize(actor.Principal, entityType))
+        if (!CanSynchronize(actor, entityType))
             return QuickBooksSyncResult.Failure("You are not authorized to synchronize this QuickBooks data type.", request.DryRun);
 
         var loaded = await LoadAuthorizationAsync(actor.CompanyId, request.ConnectionId, cancellationToken);
@@ -66,6 +66,8 @@ public sealed class QuickBooksOnlineSyncService(
         }
         if (!providerResponse.Succeeded)
             return await RecordProviderFailureAsync(actor, request, entityType, startedAt, SafeCode(providerResponse.ErrorCode), $"QuickBooks could not provide {entityType} ({SafeCode(providerResponse.ErrorCode)}). No accounting records changed.", cancellationToken);
+        if (!await StillAuthorizedAsync(actor, entityType, cancellationToken))
+            return QuickBooksSyncResult.Failure("Your authorization changed while QuickBooks data was being fetched. No accounting records changed.", request.DryRun);
 
         var remoteEntities = providerResponse.Entities.OrderBy(entity => entity.Id, StringComparer.Ordinal).ToArray();
         var snapshotSha256 = Fingerprint(remoteEntities.Select(CanonicalRemoteSnapshot));
@@ -97,6 +99,8 @@ public sealed class QuickBooksOnlineSyncService(
                 var rejectedRun = new IntegrationSyncRun { Id = Guid.NewGuid(), CompanyId = actor.CompanyId, IntegrationConnectionId = request.ConnectionId, ProviderCode = ProviderCode, EntityType = entityType, Direction = "Import", IsDryRun = false, Status = previewExists ? "PreviewStale" : "PreviewRequired", FetchedCount = remoteEntities.Length, ConflictCount = 1, SnapshotSha256 = snapshotSha256, DetailJson = JsonSerializer.Serialize(new[] { issue }), InitiatedByUserId = actor.UserId, StartedAtUtc = startedAt, CompletedAtUtc = rejectedAt };
                 db.IntegrationSyncRuns.Add(rejectedRun);
                 db.BusinessAuditEntries.Add(new BusinessAuditEntry { Id = Guid.NewGuid(), CompanyId = actor.CompanyId, UserId = actor.UserId, Action = "integration.quickbooks.sync_commit_rejected", EntityType = nameof(IntegrationSyncRun), EntityId = rejectedRun.Id, DetailJson = JsonSerializer.Serialize(new { connectionId = request.ConnectionId, entityType, issue.Code, noRecordsChanged = true, currentSnapshotSha256 = snapshotSha256 }), OccurredAtUtc = rejectedAt });
+                if (!await StillAuthorizedAsync(actor, entityType, cancellationToken))
+                    return QuickBooksSyncResult.Failure("Your authorization changed while the QuickBooks import was being reviewed. No accounting records changed.", request.DryRun);
                 await db.SaveChangesAsync(cancellationToken);
                 return new(false, issue.Message, rejectedRun.Id, false, remoteEntities.Length, 0, 0, 0, 1, 0, snapshotSha256, [issue]);
             }
@@ -149,6 +153,8 @@ public sealed class QuickBooksOnlineSyncService(
         });
         try
         {
+            if (!await StillAuthorizedAsync(actor, entityType, cancellationToken))
+                return QuickBooksSyncResult.Failure("Your authorization changed while the QuickBooks import was being prepared. No accounting records changed.", request.DryRun);
             await db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException)
@@ -160,8 +166,8 @@ public sealed class QuickBooksOnlineSyncService(
 
     public async Task<IReadOnlyList<QuickBooksSyncRunSnapshot>> GetRecentRunsAsync(Guid? connectionId = null, int limit = 20, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
-        if (actor is null || !CanViewRuns(actor.Principal)) return [];
+        var actor = await CurrentActorAsync(cancellationToken);
+        if (actor is null || !CanViewRuns(actor)) return [];
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var runs = await db.IntegrationSyncRuns.AsNoTracking().Where(run => run.CompanyId == actor.CompanyId && (!connectionId.HasValue || run.IntegrationConnectionId == connectionId)).ToListAsync(cancellationToken);
         var selected = runs.OrderByDescending(run => run.CompletedAtUtc).Take(Math.Clamp(limit, 1, 100)).ToArray();
@@ -176,12 +182,12 @@ public sealed class QuickBooksOnlineSyncService(
 
     public async Task<QuickBooksMappingWorkspace> PreviewMappingsAsync(Guid connectionId, string entityType, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
+        var actor = await CurrentActorAsync(cancellationToken);
         var normalizedEntityType = NormalizeEntityType(entityType);
         if (actor is null) return QuickBooksMappingWorkspace.Failure(connectionId, normalizedEntityType, "An authenticated company is required.");
         if (!SupportedEntityTypes.Contains(normalizedEntityType, StringComparer.Ordinal))
             return QuickBooksMappingWorkspace.Failure(connectionId, normalizedEntityType, "Supported mappings are accounts, customers, and vendors.");
-        if (!CanSynchronize(actor.Principal, normalizedEntityType))
+        if (!CanSynchronize(actor, normalizedEntityType))
             return QuickBooksMappingWorkspace.Failure(connectionId, normalizedEntityType, "You are not authorized to map this QuickBooks data type.");
 
         var startedAt = timeProvider.GetUtcNow();
@@ -191,6 +197,8 @@ public sealed class QuickBooksOnlineSyncService(
             await RecordMappingFailureAsync(actor, connectionId, normalizedEntityType, startedAt, fetched.ErrorCode, fetched.ErrorMessage, cancellationToken);
             return QuickBooksMappingWorkspace.Failure(connectionId, normalizedEntityType, fetched.ErrorMessage);
         }
+        if (!await StillAuthorizedAsync(actor, normalizedEntityType, cancellationToken))
+            return QuickBooksMappingWorkspace.Failure(connectionId, normalizedEntityType, "Your authorization changed while QuickBooks mappings were being fetched. Review mappings again.");
 
         var remotes = fetched.Entities.OrderBy(entity => entity.Id, StringComparer.Ordinal).ToArray();
         var snapshotSha256 = Fingerprint(remotes.Select(CanonicalRemoteSnapshot));
@@ -254,17 +262,19 @@ public sealed class QuickBooksOnlineSyncService(
             DetailJson = JsonSerializer.Serialize(new { connectionId, entityType = normalizedEntityType, run.FetchedCount, eligibleCount = remoteCandidates.Count(candidate => candidate.Eligible), run.RejectedCount, run.SnapshotSha256, noBusinessRecordsChanged = true }),
             OccurredAtUtc = completedAt
         });
+        if (!await StillAuthorizedAsync(actor, normalizedEntityType, cancellationToken))
+            return QuickBooksMappingWorkspace.Failure(connectionId, normalizedEntityType, "Your authorization changed while QuickBooks mappings were being prepared. Review mappings again.");
         await db.SaveChangesAsync(cancellationToken);
         return new(true, string.Empty, connectionId, normalizedEntityType, run.Id, snapshotSha256, remoteCandidates, localCandidates);
     }
 
     public async Task<TransactionResult> SaveMappingAsync(SaveQuickBooksMappingRequest request, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
+        var actor = await CurrentActorAsync(cancellationToken);
         var entityType = NormalizeEntityType(request.EntityType);
         if (actor is null) return TransactionResult.Failure("An authenticated company is required.");
         if (!SupportedEntityTypes.Contains(entityType, StringComparer.Ordinal)) return TransactionResult.Failure("Supported mappings are accounts, customers, and vendors.");
-        if (!CanSynchronize(actor.Principal, entityType)) return TransactionResult.Failure("You are not authorized to map this QuickBooks data type.");
+        if (!CanSynchronize(actor, entityType)) return TransactionResult.Failure("You are not authorized to map this QuickBooks data type.");
         var providerEntityId = (request.ProviderEntityId ?? string.Empty).Trim();
         var expectedSnapshot = (request.ExpectedSnapshotSha256 ?? string.Empty).Trim().ToUpperInvariant();
         if (request.PreviewRunId == Guid.Empty || expectedSnapshot.Length != 64 || providerEntityId.Length is < 1 or > 128 || providerEntityId.Any(char.IsControl) || request.LocalEntityId == Guid.Empty)
@@ -272,6 +282,8 @@ public sealed class QuickBooksOnlineSyncService(
 
         var fetched = await FetchRemoteEntitiesAsync(actor.CompanyId, request.ConnectionId, entityType, cancellationToken);
         if (!fetched.Succeeded) return TransactionResult.Failure(fetched.ErrorMessage);
+        if (!await StillAuthorizedAsync(actor, entityType, cancellationToken))
+            return TransactionResult.Failure("Your authorization changed while QuickBooks mappings were being fetched. Review mappings again.");
         var remotes = fetched.Entities.OrderBy(entity => entity.Id, StringComparer.Ordinal).ToArray();
         var currentSnapshot = Fingerprint(remotes.Select(CanonicalRemoteSnapshot));
         if (!string.Equals(expectedSnapshot, currentSnapshot, StringComparison.Ordinal))
@@ -364,6 +376,8 @@ public sealed class QuickBooksOnlineSyncService(
         });
         try
         {
+            if (!await StillAuthorizedAsync(actor, entityType, cancellationToken))
+                return TransactionResult.Failure("Your authorization changed while the QuickBooks mapping was being prepared. Nothing was saved.");
             await db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -379,11 +393,11 @@ public sealed class QuickBooksOnlineSyncService(
 
     public async Task<TransactionResult> RemoveMappingAsync(RemoveQuickBooksMappingRequest request, CancellationToken cancellationToken = default)
     {
-        var actor = CurrentActor();
+        var actor = await CurrentActorAsync(cancellationToken);
         var entityType = NormalizeEntityType(request.EntityType);
         if (actor is null) return TransactionResult.Failure("An authenticated company is required.");
         if (!SupportedEntityTypes.Contains(entityType, StringComparer.Ordinal)) return TransactionResult.Failure("Supported mappings are accounts, customers, and vendors.");
-        if (!CanSynchronize(actor.Principal, entityType)) return TransactionResult.Failure("You are not authorized to remove this QuickBooks mapping.");
+        if (!CanSynchronize(actor, entityType)) return TransactionResult.Failure("You are not authorized to remove this QuickBooks mapping.");
         if (!request.ConfirmRemoval) return TransactionResult.Failure("Removing a mapping requires explicit confirmation.");
         var providerEntityId = (request.ProviderEntityId ?? string.Empty).Trim();
         if (providerEntityId.Length is < 1 or > 128 || providerEntityId.Any(char.IsControl) || request.ExpectedLocalEntityId == Guid.Empty)
@@ -431,6 +445,8 @@ public sealed class QuickBooksOnlineSyncService(
         });
         try
         {
+            if (!await StillAuthorizedAsync(actor, entityType, cancellationToken))
+                return TransactionResult.Failure("Your authorization changed while the QuickBooks mapping was being removed. Nothing was removed.");
             await db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -845,24 +861,65 @@ public sealed class QuickBooksOnlineSyncService(
         };
     }
 
-    private Actor? CurrentActor()
+    private async Task<Actor?> CurrentActorAsync(CancellationToken cancellationToken)
     {
         var principal = httpContextAccessor.HttpContext?.User;
-        if (principal?.Identity?.IsAuthenticated != true || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId)) return null;
-        return new(userId, companyId, principal);
+        if (principal?.Identity?.IsAuthenticated != true
+            || principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+            || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId)
+            || string.IsNullOrWhiteSpace(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType))
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId))
+            return null;
+
+        var now = timeProvider.GetUtcNow();
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(item => item.Id == userId && item.IsActive, cancellationToken);
+        var session = await db.UserSessions.AsNoTracking().SingleOrDefaultAsync(item => item.Id == sessionId && item.UserId == userId, cancellationToken);
+        var membership = await db.CompanyMemberships.AsNoTracking().SingleOrDefaultAsync(
+            item => item.UserId == userId && item.CompanyId == companyId && item.IsActive, cancellationToken);
+        var claimedStamp = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType);
+        var authenticationMethod = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType);
+        if (user is null || user.LockoutEndUtc > now || membership is null
+            || session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= now
+            || !string.Equals(user.SecurityStamp, claimedStamp, StringComparison.Ordinal)
+            || !string.Equals(session.SecurityStamp, claimedStamp, StringComparison.Ordinal)
+            || !string.Equals(session.AuthenticationMethod,
+                authenticationMethod == "mfa" ? "Password + MFA" : authenticationMethod == "pwd" ? "Password" : null,
+                StringComparison.Ordinal)
+            || !string.Equals(membership.Role, principal.FindFirstValue(ClaimTypes.Role), StringComparison.Ordinal)
+            || !await db.Companies.AsNoTracking().AnyAsync(company => company.Id == companyId, cancellationToken)) return null;
+        var role = await db.AccessRoles.AsNoTracking().SingleOrDefaultAsync(
+            item => item.CompanyId == companyId && item.Name == membership.Role && item.IsActive, cancellationToken);
+        if (role is null
+            || ((role.RequiresMfa || BrassLedgerRoleTemplates.IsMandatoryMfaRole(role.Name)) && !user.MfaEnabled)
+            || (user.MfaEnabled && !string.Equals(authenticationMethod, "mfa", StringComparison.Ordinal))) return null;
+        return new Actor(userId, companyId, sessionId, principal, role.Name, role.Permissions);
     }
 
-    private static bool CanSynchronize(ClaimsPrincipal principal, string entityType)
+    private static bool CanSynchronize(Actor actor, string entityType)
     {
-        if (principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")) return false;
-        var privileged = principal.IsInRole("Administrator") || principal.IsInRole("Owner/CEO");
-        var managesConnection = privileged || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage);
+        var privileged = BrassLedgerRoleTemplates.IsMandatoryMfaRole(actor.RoleName);
+        var managesConnection = privileged || HasCurrentPermission(actor, BrassLedgerPermissions.UserManage);
         var dataPermission = entityType switch { "accounts" => BrassLedgerPermissions.LedgerManage, "customers" => BrassLedgerPermissions.ReceivablesManage, _ => BrassLedgerPermissions.PayablesManage };
-        return managesConnection && (privileged || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, dataPermission));
+        return managesConnection && (privileged || HasCurrentPermission(actor, dataPermission));
     }
-    private static bool CanViewRuns(ClaimsPrincipal principal) => !principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true") && (principal.IsInRole("Administrator") || principal.IsInRole("Owner/CEO") || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage));
+    private static bool CanViewRuns(Actor actor) => BrassLedgerRoleTemplates.IsMandatoryMfaRole(actor.RoleName) || HasCurrentPermission(actor, BrassLedgerPermissions.UserManage);
+    private async Task<bool> StillAuthorizedAsync(Actor original, string entityType, CancellationToken cancellationToken)
+    {
+        var current = await CurrentActorAsync(cancellationToken);
+        return current is not null
+            && current.UserId == original.UserId
+            && current.CompanyId == original.CompanyId
+            && current.SessionId == original.SessionId
+            && CanSynchronize(current, entityType);
+    }
+    private static bool HasCurrentPermission(Actor actor, string permission) =>
+        actor.Principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)
+        && actor.RolePermissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Contains(permission, StringComparer.OrdinalIgnoreCase);
 
-    private sealed record Actor(Guid UserId, Guid CompanyId, ClaimsPrincipal Principal);
+    private sealed record Actor(Guid UserId, Guid CompanyId, Guid SessionId, ClaimsPrincipal Principal, string RoleName, string RolePermissions);
     private sealed record AuthorizedConnection(IntegrationConnection? Connection, TokenEnvelope? Credentials, ConnectionSettings? Settings, string ErrorMessage);
     private sealed record RemoteEntityFetch(bool Succeeded, string ErrorMessage, string ErrorCode, int CredentialVersion, IReadOnlyList<QuickBooksRemoteEntity> Entities)
     {
