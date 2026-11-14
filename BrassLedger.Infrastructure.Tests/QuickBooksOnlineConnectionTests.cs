@@ -595,6 +595,148 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
     }
 
     [Fact]
+    public async Task ApiSync_RejectsRevokedSessionAndStaleRolePermissionBeforeProviderOrLocalWrites()
+    {
+        var provider = new FakeQuickBooksOnlineClient();
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
+        var connectionId = await ConnectAsync(scope.ServiceProvider);
+        var sync = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineSyncService>();
+        var preview = await sync.ImportAsync(new(connectionId, "accounts", true));
+        Assert.True(preview.Succeeded, preview.ErrorMessage);
+        Assert.NotEmpty(await sync.GetRecentRunsAsync(connectionId));
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var baselineQueries = provider.QueryCount;
+        int baselineRuns;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            baselineRuns = await db.IntegrationSyncRuns.CountAsync();
+            (await db.UserSessions.SingleAsync(item => item.Id == actor.SessionId)).RevokedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.False((await sync.ImportAsync(new(connectionId, "accounts", true))).Succeeded);
+        Assert.Empty(await sync.GetRecentRunsAsync(connectionId));
+        Assert.False((await sync.PreviewMappingsAsync(connectionId, "accounts")).Succeeded);
+        Assert.False((await sync.SaveMappingAsync(new(connectionId, "accounts", Guid.NewGuid(), string.Empty, "remote", Guid.NewGuid()))).Succeeded);
+        Assert.False((await sync.RemoveMappingAsync(new(connectionId, "accounts", "remote", Guid.NewGuid(), true))).Succeeded);
+        Assert.Equal(baselineQueries, provider.QueryCount);
+
+        var renewed = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, renewed, renewed.CompanyId);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == actor.CompanyId && item.Name == "Controller");
+            role.Permissions = string.Join('|', role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(permission => !string.Equals(permission, BrassLedgerPermissions.UserManage, StringComparison.OrdinalIgnoreCase)));
+            await db.SaveChangesAsync();
+        }
+        Assert.False((await sync.ImportAsync(new(connectionId, "accounts", true))).Succeeded);
+        Assert.Empty(await sync.GetRecentRunsAsync(connectionId));
+        Assert.False((await sync.PreviewMappingsAsync(connectionId, "accounts")).Succeeded);
+        Assert.False((await sync.SaveMappingAsync(new(connectionId, "accounts", Guid.NewGuid(), string.Empty, "remote", Guid.NewGuid()))).Succeeded);
+        Assert.False((await sync.RemoveMappingAsync(new(connectionId, "accounts", "remote", Guid.NewGuid(), true))).Succeeded);
+        Assert.Equal(baselineQueries, provider.QueryCount);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Equal(baselineRuns, await db.IntegrationSyncRuns.CountAsync());
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == actor.CompanyId && item.Name == "Controller");
+            role.Permissions = string.Join('|', role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Append(BrassLedgerPermissions.UserManage)
+                .Where(permission => !string.Equals(permission, BrassLedgerPermissions.LedgerManage, StringComparison.OrdinalIgnoreCase)));
+            await db.SaveChangesAsync();
+        }
+        Assert.NotEmpty(await sync.GetRecentRunsAsync(connectionId));
+        Assert.False((await sync.ImportAsync(new(connectionId, "accounts", true))).Succeeded);
+        Assert.False((await sync.PreviewMappingsAsync(connectionId, "accounts")).Succeeded);
+        Assert.Equal(baselineQueries, provider.QueryCount);
+    }
+
+    [Fact]
+    public async Task ApiSync_RevokedDuringProviderFetch_DoesNotCommitPreviewedImport()
+    {
+        var provider = new FakeQuickBooksOnlineClient();
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
+        var connectionId = await ConnectAsync(scope.ServiceProvider);
+        var sync = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineSyncService>();
+        var preview = await sync.ImportAsync(new(connectionId, "accounts", true));
+        Assert.True(preview.Succeeded, preview.ErrorMessage);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        int baselineRuns;
+        int baselineAccounts;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            baselineRuns = await db.IntegrationSyncRuns.CountAsync();
+            baselineAccounts = await db.Accounts.CountAsync();
+        }
+
+        provider.QueryEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        provider.ReleaseQuery = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var importTask = sync.ImportAsync(new(connectionId, "accounts", false, preview.SnapshotSha256));
+        await provider.QueryEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.UserSessions.SingleAsync(item => item.Id == actor.SessionId)).RevokedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        provider.ReleaseQuery.TrySetResult(true);
+        var import = await importTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(import.Succeeded);
+        Assert.Contains("authorization changed", import.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(baselineRuns, await db.IntegrationSyncRuns.CountAsync());
+            Assert.Equal(baselineAccounts, await db.Accounts.CountAsync());
+            Assert.DoesNotContain(await db.BusinessAuditEntries.ToArrayAsync(), entry => entry.Action == "integration.quickbooks.sync_committed");
+        }
+    }
+
+    [Fact]
+    public async Task ApiSync_EnforcesAdministratorMfaDespiteCorruptedRoleFlag()
+    {
+        var provider = new FakeQuickBooksOnlineClient();
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
+        var connectionId = await ConnectAsync(scope.ServiceProvider);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == actor.UserId);
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == actor.UserId && item.CompanyId == actor.CompanyId);
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == actor.CompanyId && item.Name == "Administrator");
+            user.Role = membership.Role = "Administrator";
+            role.RequiresMfa = false;
+            await db.SaveChangesAsync();
+        }
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "quickbooks-test");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        Assert.True(signedIn.User!.MfaEnrollmentRequired);
+        var issued = await scope.ServiceProvider.GetRequiredService<IUserSessionService>().IssueAsync(signedIn.User, "127.0.0.1", "quickbooks-test");
+        SetContext(scope.ServiceProvider, (issued.UserId, issued.CompanyId, issued.SessionId!.Value, issued.SecurityStamp), issued.CompanyId, "Administrator");
+
+        var sync = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineSyncService>();
+        Assert.False((await sync.ImportAsync(new(connectionId, "accounts", true))).Succeeded);
+        Assert.Empty(await sync.GetRecentRunsAsync(connectionId));
+        Assert.False((await sync.PreviewMappingsAsync(connectionId, "accounts")).Succeeded);
+        Assert.Equal(0, provider.QueryCount);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Empty(await db.IntegrationSyncRuns.ToArrayAsync());
+    }
+
+    [Fact]
     public async Task ApiSync_PreviewsCommitsIdempotentlyUpdatesOnlyUnchangedLocalRecordsAndRetainsConflicts()
     {
         var provider = new FakeQuickBooksOnlineClient
@@ -976,6 +1118,9 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         public int ExchangeCodeCount { get; private set; }
         public TaskCompletionSource<bool>? ExchangeEntered { get; set; }
         public TaskCompletionSource<bool>? ReleaseExchange { get; set; }
+        public int QueryCount { get; private set; }
+        public TaskCompletionSource<bool>? QueryEntered { get; set; }
+        public TaskCompletionSource<bool>? ReleaseQuery { get; set; }
         public int RefreshCount { get; private set; }
         public string LastRefreshToken { get; private set; } = string.Empty;
         public string LastRevokedToken { get; private set; } = string.Empty;
@@ -1025,8 +1170,13 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
                 : new QuickBooksCompanyInfoResponse(false, "company_validation_failed", string.Empty, string.Empty, string.Empty));
         }
 
-        public Task<QuickBooksEntityQueryResponse> QueryEntitiesAsync(string environment, string realmId, string accessToken, string entityType, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new QuickBooksEntityQueryResponse(true, string.Empty, Entities.GetValueOrDefault(entityType, [])));
+        public async Task<QuickBooksEntityQueryResponse> QueryEntitiesAsync(string environment, string realmId, string accessToken, string entityType, CancellationToken cancellationToken = default)
+        {
+            QueryCount++;
+            QueryEntered?.TrySetResult(true);
+            if (ReleaseQuery is { } release) await release.Task.WaitAsync(cancellationToken);
+            return new QuickBooksEntityQueryResponse(true, string.Empty, Entities.GetValueOrDefault(entityType, []));
+        }
     }
 
     private sealed class StaticHttpClientFactory(HttpClient client) : IHttpClientFactory
