@@ -263,9 +263,28 @@ public sealed partial class QuickBooksOnlineConnectionService(
             await ReleaseReconnectLeaseAsync("provider_timeout");
             return QuickBooksAuthorizationCompletionResult.Failure("QuickBooks did not respond before the secure connection timed out. No credentials were saved." + cleanupMessage);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            if (issuedToken is not null)
+                await CleanupUnusedAuthorizationAsync(actor, attempt.Id, issuedToken, "request_cancelled_during_callback");
+            else
+            {
+                try
+                {
+                    await RecordFailureAsync(actor, attempt.Id, "integration.oauth_cancelled_outcome_unknown", "request_cancelled_before_token_received", CancellationToken.None);
+                }
+                catch (DbUpdateException)
+                {
+                    // Cancellation still needs to release a reconnect lease if the audit write failed.
+                }
+            }
+            await ReleaseReconnectLeaseAsync("request_cancelled_during_callback");
+            throw;
+        }
 
-        var currentActor = await CurrentActorAsync(cancellationToken);
-        if (currentActor is null
+        var currentActor = await CurrentActorAsync(CancellationToken.None);
+        if (cancellationToken.IsCancellationRequested
+            || currentActor is null
             || currentActor.UserId != actor.UserId
             || currentActor.CompanyId != actor.CompanyId
             || !string.Equals(
@@ -274,8 +293,10 @@ public sealed partial class QuickBooksOnlineConnectionService(
                 StringComparison.Ordinal)
             || !CanManageConnections(currentActor.Principal))
         {
-            var cleaned = await CleanupUnusedAuthorizationAsync(actor, attempt.Id, token, "operator_authority_changed_during_callback");
-            await ReleaseReconnectLeaseAsync("operator_authority_changed_during_callback");
+            var reason = cancellationToken.IsCancellationRequested ? "request_cancelled_during_callback" : "operator_authority_changed_during_callback";
+            var cleaned = await CleanupUnusedAuthorizationAsync(actor, attempt.Id, token, reason);
+            await ReleaseReconnectLeaseAsync(reason);
+            cancellationToken.ThrowIfCancellationRequested();
             return QuickBooksAuthorizationCompletionResult.Failure("Your authorization changed while QuickBooks was responding. No credentials were saved; sign in and start again." + UnusedGrantCleanupMessage(cleaned));
         }
 
@@ -300,17 +321,17 @@ public sealed partial class QuickBooksOnlineConnectionService(
             companyInfo.Country,
             now);
 
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        await using var db = await dbContextFactory.CreateDbContextAsync(CancellationToken.None);
         IntegrationConnection? connection = null;
         if (attempt.ConnectionId is { } connectionId)
-            connection = await db.IntegrationConnections.SingleOrDefaultAsync(candidate => candidate.Id == connectionId && candidate.CompanyId == actor.CompanyId && candidate.ProviderCode == ProviderCode, cancellationToken);
+            connection = await db.IntegrationConnections.SingleOrDefaultAsync(candidate => candidate.Id == connectionId && candidate.CompanyId == actor.CompanyId && candidate.ProviderCode == ProviderCode, CancellationToken.None);
         if (attempt.ConnectionId.HasValue && connection is null)
         {
             var cleaned = await CleanupUnusedAuthorizationAsync(actor, attempt.Id, token, "connection_removed_during_callback");
             await ReleaseReconnectLeaseAsync("connection_removed_during_callback");
             return QuickBooksAuthorizationCompletionResult.Failure("The original QuickBooks connection no longer exists. No credentials were saved." + UnusedGrantCleanupMessage(cleaned));
         }
-        if (connection is null && await db.IntegrationConnections.AnyAsync(candidate => candidate.CompanyId == actor.CompanyId && candidate.ProviderCode == ProviderCode && candidate.Name == attempt.ConnectionName, cancellationToken))
+        if (connection is null && await db.IntegrationConnections.AnyAsync(candidate => candidate.CompanyId == actor.CompanyId && candidate.ProviderCode == ProviderCode && candidate.Name == attempt.ConnectionName, CancellationToken.None))
         {
             var cleaned = await CleanupUnusedAuthorizationAsync(actor, attempt.Id, token, "connection_name_claimed_during_callback");
             await ReleaseReconnectLeaseAsync("connection_name_claimed_during_callback");
@@ -324,6 +345,13 @@ public sealed partial class QuickBooksOnlineConnectionService(
             var cleaned = await CleanupUnusedAuthorizationAsync(actor, attempt.Id, token, "credential_operation_started_during_callback");
             await ReleaseReconnectLeaseAsync("credential_operation_started_during_callback");
             return QuickBooksAuthorizationCompletionResult.Failure("Another application instance began changing this QuickBooks authorization. No credentials were saved; start reconnect again after it finishes." + UnusedGrantCleanupMessage(cleaned));
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            await CleanupUnusedAuthorizationAsync(actor, attempt.Id, token, "request_cancelled_during_callback");
+            await ReleaseReconnectLeaseAsync("request_cancelled_during_callback");
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         connection ??= new IntegrationConnection
@@ -343,7 +371,8 @@ public sealed partial class QuickBooksOnlineConnectionService(
         AddAudit(db, actor, "integration.connected", connection.Id, new { provider = ProviderCode, connection.Name, attempt.Environment, realmId = request.RealmId, companyName = settings.CompanyName });
         try
         {
-            await db.SaveChangesAsync(cancellationToken);
+            // Once the credential write starts, complete it independently of a disconnected caller so its outcome is definite.
+            await db.SaveChangesAsync(CancellationToken.None);
         }
         catch (DbUpdateException)
         {
