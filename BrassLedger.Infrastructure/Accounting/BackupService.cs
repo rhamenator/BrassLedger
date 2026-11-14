@@ -1,5 +1,9 @@
+using System.Security.Claims;
 using BrassLedger.Application.Accounting;
+using BrassLedger.Domain.Accounting;
+using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
@@ -9,7 +13,7 @@ using System.Xml.Linq;
 
 namespace BrassLedger.Infrastructure.Accounting;
 
-public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbContextFactory, BrassLedgerStoragePaths storagePaths) : IBackupService
+public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbContextFactory, BrassLedgerStoragePaths storagePaths, IHttpContextAccessor httpContextAccessor) : IBackupService
 {
     private const string BackupFormat = "sqlite-vacuum-into-v2";
     private static readonly JsonSerializerOptions ManifestJsonOptions = new(JsonSerializerDefaults.Web);
@@ -19,6 +23,7 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
     public async Task<BackupResult> CreateBackupAsync(CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        if (!await CanAccessWholeBackupAsync(db, cancellationToken)) return BackupResult.Failure("System-wide backup access requires an active owner with current authority in every company.");
         if (!db.Database.IsSqlite()) return BackupResult.Failure("PostgreSQL backups require the database platform backup service; no unsafe file-copy fallback is used.");
         var backupId = $"brassledger-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}";
         var destination = Path.Combine(storagePaths.DataDirectory, "backups", backupId);
@@ -69,6 +74,8 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
     public async Task<BackupVerificationResult> VerifyBackupAsync(string backupId, CancellationToken cancellationToken = default)
     {
         if (!IsValidBackupId(backupId)) return new(false, "Invalid backup identifier.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        if (!await CanAccessWholeBackupAsync(db, cancellationToken)) return new(false, "System-wide backup access requires an active owner with current authority in every company.", backupId);
         var directory = Path.Combine(storagePaths.DataDirectory, "backups", backupId);
         return await VerifyBackupDirectoryAsync(directory, backupId, cancellationToken);
     }
@@ -76,6 +83,8 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
     public async Task<BackupRecoveryRehearsalResult> RehearseRestoreAsync(string backupId, CancellationToken cancellationToken = default)
     {
         if (!IsValidBackupId(backupId)) return new(false, "Invalid backup identifier.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        if (!await CanAccessWholeBackupAsync(db, cancellationToken)) return new(false, "System-wide backup access requires an active owner with current authority in every company.", backupId);
         var source = Path.Combine(storagePaths.DataDirectory, "backups", backupId);
         var sourceDatabase = Path.Combine(source, "brassledger.db");
         var sourceKeys = Path.Combine(source, "keys");
@@ -198,6 +207,33 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
     }
 
     private static bool IsValidBackupId(string backupId) => !string.IsNullOrWhiteSpace(backupId) && backupId.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && !backupId.Contains("..", StringComparison.Ordinal) && !backupId.Contains(Path.DirectorySeparatorChar) && !backupId.Contains(Path.AltDirectorySeparatorChar);
+    private async Task<bool> CanAccessWholeBackupAsync(BrassLedgerDbContext db, CancellationToken cancellationToken)
+    {
+        var principal = httpContextAccessor.HttpContext?.User;
+        if (principal?.Identity?.IsAuthenticated != true
+            || principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+            || !principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)
+            || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId)) return false;
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(item => item.Id == userId && item.IsActive, cancellationToken);
+        if (user is null || (user.MfaEnabled && !string.Equals(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType), "mfa", StringComparison.Ordinal))) return false;
+        var companyIds = await db.Companies.AsNoTracking().Select(company => company.Id).ToArrayAsync(cancellationToken);
+        if (companyIds.Length == 0 || !companyIds.Contains(companyId)) return false;
+        var memberships = await db.CompanyMemberships.AsNoTracking()
+            .Where(membership => membership.UserId == userId && membership.IsActive && membership.IsOwner)
+            .ToListAsync(cancellationToken);
+        if (memberships.Count != companyIds.Length || memberships.Any(membership => !companyIds.Contains(membership.CompanyId))) return false;
+        var activeRoles = await db.AccessRoles.AsNoTracking().Where(role => companyIds.Contains(role.CompanyId) && role.IsActive).ToListAsync(cancellationToken);
+        foreach (var membership in memberships)
+        {
+            var role = activeRoles.SingleOrDefault(candidate => candidate.CompanyId == membership.CompanyId && candidate.Name == membership.Role);
+            if (role is null || (role.RequiresMfa && !user.MfaEnabled)
+                || !role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Contains(BrassLedgerPermissions.UserManage, StringComparer.OrdinalIgnoreCase)) return false;
+            if (membership.CompanyId == companyId && !string.Equals(principal.FindFirstValue(ClaimTypes.Role), membership.Role, StringComparison.Ordinal)) return false;
+        }
+        return true;
+    }
     private static async Task<int> ReadCountAsync(SqliteConnection connection, string table, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();

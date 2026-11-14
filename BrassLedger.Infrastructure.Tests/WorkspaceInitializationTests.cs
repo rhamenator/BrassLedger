@@ -685,6 +685,39 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var backupService = scope.ServiceProvider.GetRequiredService<IBackupService>();
+        Assert.False((await backupService.CreateBackupAsync()).Succeeded);
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var user = signedIn.User!;
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var appUser = await db.Users.SingleAsync(item => item.Id == user.UserId);
+            appUser.MfaEnabled = true;
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == user.CompanyId && item.Name == user.Role);
+            if (!role.Permissions.Split('|').Contains(BrassLedgerPermissions.UserManage))
+                role.Permissions += $"|{BrassLedgerPermissions.UserManage}";
+            await db.SaveChangesAsync();
+        }
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        void SelectBackupActor(bool includePermission = true, string? role = null, bool mfa = true, bool enrollmentRequired = false)
+        {
+            List<System.Security.Claims.Claim> claims =
+            [
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, user.UserId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, user.CompanyId.ToString()),
+                new(System.Security.Claims.ClaimTypes.Role, role ?? user.Role)
+            ];
+            if (includePermission) claims.Add(new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage));
+            if (mfa) claims.Add(new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "mfa"));
+            if (enrollmentRequired) claims.Add(new(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true"));
+            accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test"))
+            };
+        }
+        SelectBackupActor();
         var backup = await backupService.CreateBackupAsync();
         Assert.True(backup.Succeeded, backup.ErrorMessage);
         var verification = await backupService.VerifyBackupAsync(backup.BackupId!);
@@ -745,6 +778,83 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(withRevocation.Succeeded, withRevocation.ErrorMessage);
         Assert.True((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
         File.Delete(revocationPath);
+
+        var companies = scope.ServiceProvider.GetRequiredService<ICompanyManagementService>();
+        var subsidiary = await companies.CreateCompanyAsync(new("Backup scope subsidiary", "Backup scope subsidiary", "BACKUP-TEST", "USD", 1));
+        Assert.True(subsidiary.Succeeded, subsidiary.ErrorMessage);
+        Assert.True((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == user.UserId && item.CompanyId == subsidiary.CompanyId);
+            membership.IsOwner = false;
+            await db.SaveChangesAsync();
+        }
+        var directoryCount = Directory.EnumerateDirectories(Path.Combine(paths.DataDirectory, "backups")).Count();
+        var deniedCreate = await backupService.CreateBackupAsync();
+        Assert.False(deniedCreate.Succeeded);
+        Assert.Contains("every company", deniedCreate.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(directoryCount, Directory.EnumerateDirectories(Path.Combine(paths.DataDirectory, "backups")).Count());
+        Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        Assert.False((await backupService.RehearseRestoreAsync(withRevocation.BackupId!)).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == user.UserId && item.CompanyId == subsidiary.CompanyId);
+            membership.IsOwner = true;
+            await db.SaveChangesAsync();
+        }
+        SelectBackupActor(includePermission: false);
+        Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        SelectBackupActor(role: user.Role + "-stale");
+        Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        SelectBackupActor(enrollmentRequired: true);
+        Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        SelectBackupActor();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == user.UserId && item.CompanyId == user.CompanyId);
+            membership.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == user.UserId && item.CompanyId == user.CompanyId);
+            membership.IsActive = true;
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == user.CompanyId && item.Name == user.Role);
+            role.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        string originalPermissions;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == user.CompanyId && item.Name == user.Role);
+            role.IsActive = true;
+            originalPermissions = role.Permissions;
+            role.Permissions = string.Join('|', role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries).Where(permission => permission != BrassLedgerPermissions.UserManage));
+            await db.SaveChangesAsync();
+        }
+        Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == user.CompanyId && item.Name == user.Role);
+            role.Permissions = originalPermissions;
+            var appUser = await db.Users.SingleAsync(item => item.Id == user.UserId);
+            appUser.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var appUser = await db.Users.SingleAsync(item => item.Id == user.UserId);
+            appUser.IsActive = true;
+            appUser.MfaEnabled = true;
+            await db.SaveChangesAsync();
+        }
+        SelectBackupActor(mfa: false);
+        Assert.False((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        SelectBackupActor();
+        Assert.True((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
     }
 
     [Fact]
