@@ -850,6 +850,7 @@ else
     {
         LatestBackup = await BackupService.CreateBackupAsync();
         BackupVerification = null; RecoveryRehearsal = null;
+        AccountingControls = await AccountingPeriodService.GetSnapshotAsync();
         StatusMessage = LatestBackup.Succeeded ? "Local backup created. Verify it and complete an encrypted off-machine restore test before relying on it operationally." : LatestBackup.ErrorMessage;
     }
 
@@ -857,6 +858,7 @@ else
     {
         if (LatestBackup?.BackupId is null) return;
         BackupVerification = await BackupService.VerifyBackupAsync(LatestBackup.BackupId);
+        AccountingControls = await AccountingPeriodService.GetSnapshotAsync();
         StatusMessage = BackupVerification.Succeeded ? "Backup checksums and SQLite integrity passed; key decryption was not tested." : BackupVerification.ErrorMessage;
     }
 
@@ -864,6 +866,7 @@ else
     {
         if (LatestBackup?.BackupId is null) return;
         RecoveryRehearsal = await BackupService.RehearseRestoreAsync(LatestBackup.BackupId);
+        AccountingControls = await AccountingPeriodService.GetSnapshotAsync();
         StatusMessage = RecoveryRehearsal.Succeeded ? "Isolated file restore check passed; off-machine key recovery remains unverified." : RecoveryRehearsal.ErrorMessage;
     }
 
