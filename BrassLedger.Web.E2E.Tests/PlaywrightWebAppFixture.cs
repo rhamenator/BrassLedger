@@ -137,6 +137,19 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
+    public async Task SetIntegrationAdministratorOwnershipAsync(bool isOwner)
+    {
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE "CompanyMemberships" SET "IsOwner" = $isOwner
+            WHERE "UserId" = (SELECT "Id" FROM "Users" WHERE "UserName" = 'integration-admin');
+            """;
+        command.Parameters.AddWithValue("$isOwner", isOwner);
+        await command.ExecuteNonQueryAsync();
+    }
+
     public async Task CreateForeignRefundRatesAsync()
     {
         await using var connection = new SqliteConnection(_sqliteConnectionString);
