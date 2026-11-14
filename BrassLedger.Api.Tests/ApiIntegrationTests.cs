@@ -608,6 +608,70 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task ExistingSession_IsRejectedAfterCompanyMembershipIsDeactivated()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/dashboard")).StatusCode);
+
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+            var user = await dbContext.Users.SingleAsync(candidate => candidate.UserName == "controller");
+            var membership = await dbContext.CompanyMemberships.SingleAsync(candidate => candidate.UserId == user.Id && candidate.CompanyId == user.CompanyId);
+            membership.IsActive = false;
+            await dbContext.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/dashboard")).StatusCode);
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+            var user = await dbContext.Users.SingleAsync(candidate => candidate.UserName == "controller");
+            var membership = await dbContext.CompanyMemberships.SingleAsync(candidate => candidate.UserId == user.Id && candidate.CompanyId == user.CompanyId);
+            Assert.False(membership.IsActive);
+            var session = await dbContext.UserSessions.SingleAsync(candidate => candidate.UserId == user.Id);
+            Assert.Equal(user.SecurityStamp, session.SecurityStamp);
+            Assert.NotNull(session.RevokedAtUtc);
+            Assert.True(await dbContext.AuthenticationAuditEntries.AnyAsync(entry => entry.UserId == user.Id && entry.CompanyId == user.CompanyId && entry.EventType == "session_rejected"));
+        }
+    }
+
+    [Fact]
+    public async Task ExistingSession_IsRejectedAfterRolePermissionsChange()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = await CreateAuthenticatedClientAsync(isolatedFactory);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/dashboard")).StatusCode);
+
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+            var user = await dbContext.Users.SingleAsync(candidate => candidate.UserName == "controller");
+            var role = await dbContext.AccessRoles.SingleAsync(candidate => candidate.CompanyId == user.CompanyId && candidate.Name == user.Role);
+            var permissions = role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            Assert.NotEmpty(permissions);
+            role.Permissions = string.Join('|', permissions.Skip(1));
+            await dbContext.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/dashboard")).StatusCode);
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync();
+            var user = await dbContext.Users.SingleAsync(candidate => candidate.UserName == "controller");
+            var session = await dbContext.UserSessions.SingleAsync(candidate => candidate.UserId == user.Id);
+            Assert.Equal(user.SecurityStamp, session.SecurityStamp);
+            Assert.NotNull(session.RevokedAtUtc);
+            Assert.True(await dbContext.AuthenticationAuditEntries.AnyAsync(entry => entry.UserId == user.Id && entry.CompanyId == user.CompanyId && entry.EventType == "session_rejected"));
+        }
+    }
+
+    [Fact]
     public async Task ChangePassword_ReissuesCurrentSession_RevokesOtherSessions_AndAuditsTheChange()
     {
         using var isolatedFactory = new BrassLedgerApiFactory();
