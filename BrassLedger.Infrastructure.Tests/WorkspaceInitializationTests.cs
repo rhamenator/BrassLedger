@@ -7341,13 +7341,82 @@ public sealed class WorkspaceInitializationTests : IDisposable
             "new-operator",
             "New Operator",
             "new-operator@example.test",
-            "Controller"));
+            "Security Test Manager"));
 
         Assert.False(result.Succeeded);
         Assert.Contains("security-email delivery", result.ErrorMessage);
         var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         await using var dbContext = await dbContextFactory.CreateDbContextAsync();
         Assert.False(await dbContext.Users.AnyAsync(candidate => candidate.UserName == "new-operator"));
+    }
+
+    [Fact]
+    public async Task SecurityAdministration_UserManagerCannotInviteBeyondCurrentPrivileges()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var companyId = Guid.Parse("0e561f1b-47b0-4c33-bd9f-1a3298ed29c6");
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, companyId, BrassLedgerPermissions.UserManage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.AccessRoles.AddRange(
+                new AccessRole { Id = Guid.NewGuid(), CompanyId = companyId, Name = "Equal custom manager", Description = "Equal privilege", TemplateCode = "test-equal-manager", Permissions = BrassLedgerPermissions.UserManage, IsActive = true },
+                new AccessRole { Id = Guid.NewGuid(), CompanyId = companyId, Name = "Elevated custom manager", Description = "Extra privilege", TemplateCode = "test-elevated-manager", Permissions = $"{BrassLedgerPermissions.UserManage}|{BrassLedgerPermissions.RoleManage}", IsActive = true },
+                new AccessRole { Id = Guid.NewGuid(), CompanyId = companyId, Name = "Empty custom role", Description = "No privilege", TemplateCode = "test-empty-role", Permissions = string.Empty, IsActive = true });
+            await db.SaveChangesAsync();
+        }
+
+        foreach (var roleName in new[] { "Administrator", "Owner/CEO", "Controller" })
+        {
+            var result = await administration.InviteOperatorAsync(new($"restricted-{roleName.Replace('/', '-')}", "Restricted", "restricted@example.test", roleName));
+            Assert.False(result.Succeeded);
+            Assert.Contains("privileges beyond their own", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        }
+        var elevated = await administration.InviteOperatorAsync(new("elevated-custom", "Elevated", "elevated@example.test", "Elevated custom manager"));
+        Assert.Contains("privileges beyond their own", elevated.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var samePrivilege = await administration.InviteOperatorAsync(new("same-privilege", "Same Privilege", "same@example.test", "Security Test Manager"));
+        Assert.False(samePrivilege.Succeeded);
+        Assert.Contains("security-email delivery", samePrivilege.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var equalCustom = await administration.InviteOperatorAsync(new("equal-custom", "Equal Custom", "equal@example.test", "Equal custom manager"));
+        Assert.Contains("security-email delivery", equalCustom.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var emptyCustom = await administration.InviteOperatorAsync(new("empty-custom", "Empty Custom", "empty@example.test", "Empty custom role"));
+        Assert.Contains("security-email delivery", emptyCustom.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        Guid administratorId; string securityStamp; var sessionId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var operatorUser = await db.Users.SingleAsync(user => user.UserName == "operations");
+            administratorId = operatorUser.Id;
+            securityStamp = operatorUser.SecurityStamp;
+            operatorUser.MfaEnabled = true;
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == administratorId && item.CompanyId == companyId);
+            membership.Role = "Administrator";
+            var now = DateTimeOffset.UtcNow;
+            db.UserSessions.Add(new UserSession { Id = sessionId, UserId = administratorId, SecurityStamp = securityStamp, AuthenticationMethod = "Password + MFA", CreatedAtUtc = now, LastSeenAtUtc = now, ExpiresAtUtc = now.AddHours(1) });
+            await db.SaveChangesAsync();
+        }
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, administratorId.ToString()),
+                new(System.Security.Claims.ClaimTypes.Role, "Administrator"),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SessionIdClaimType, sessionId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, securityStamp),
+                new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "mfa")
+            ], "test"))
+        };
+        var administratorInvite = await administration.InviteOperatorAsync(new("administrator-invite", "Administrator Invite", "admin-invite@example.test", "Administrator"));
+        Assert.Contains("security-email delivery", administratorInvite.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        await using var verified = await factory.CreateDbContextAsync();
+        Assert.False(await verified.Users.AnyAsync(user => user.UserName.StartsWith("restricted-") || user.UserName == "same-privilege" || user.UserName == "elevated-custom" || user.UserName == "equal-custom" || user.UserName == "empty-custom" || user.UserName == "administrator-invite"));
     }
 
     [Fact]
