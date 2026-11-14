@@ -29,7 +29,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var actor = await SetOwnerContextAsync(scope.ServiceProvider);
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
         var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
 
         var start = await service.BeginAuthorizationAsync(new(null, "Primary books", "Sandbox"));
@@ -57,12 +57,12 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         }
 
         var otherCompany = Guid.NewGuid();
-        SetContext(scope.ServiceProvider, actor.UserId, otherCompany);
+        SetContext(scope.ServiceProvider, actor, otherCompany);
         var wrongCompany = await service.CompleteAuthorizationAsync(new(state, "one-use-code", "123456789", null, null));
         Assert.False(wrongCompany.Succeeded);
         Assert.Equal(0, provider.ExchangeCodeCount);
 
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
         var completion = await service.CompleteAuthorizationAsync(new(state, "one-use-code", "123456789", null, null));
 
         Assert.True(completion.Succeeded, completion.ErrorMessage);
@@ -138,7 +138,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var actor = await SetOwnerContextAsync(scope.ServiceProvider);
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
         var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
         var connectionId = await ConnectAsync(scope.ServiceProvider);
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
@@ -213,7 +213,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         };
         Assert.False((await service.BeginAuthorizationAsync(new(null, "Unauthorized", "Sandbox"))).Succeeded);
 
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
         var deniedStart = await service.BeginAuthorizationAsync(new(null, "Denied", "Sandbox"));
         var deniedState = QueryHelpers.ParseQuery(new Uri(deniedStart.AuthorizationUrl!).Query)["state"].ToString();
         var denied = await service.CompleteAuthorizationAsync(new(deniedState, null, null, "access_denied", "operator declined"));
@@ -251,7 +251,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var actor = await SetOwnerContextAsync(scope.ServiceProvider);
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
         var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
 
         var first = await service.BeginAuthorizationAsync(new(null, "Superseded books", "Sandbox"));
@@ -280,7 +280,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var actor = await SetOwnerContextAsync(scope.ServiceProvider);
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
         var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
         var connectionId = await ConnectAsync(scope.ServiceProvider);
 
@@ -309,7 +309,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var actor = await SetOwnerContextAsync(scope.ServiceProvider);
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
         var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
 
         var start = await service.BeginAuthorizationAsync(new(null, "Invalid company", "Sandbox"));
@@ -334,7 +334,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var actor = await SetOwnerContextAsync(scope.ServiceProvider);
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
 
         var result = await scope.ServiceProvider.GetRequiredService<IIntegrationService>().SaveConnectionAsync(
             new(null, "quickbooks-online", "Unsafe", "{}", "{\"accessToken\":\"do-not-store-this-way\"}", true));
@@ -469,7 +469,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var actor = await SetOwnerContextAsync(scope.ServiceProvider);
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
         var connectionId = await ConnectAsync(scope.ServiceProvider);
         var sync = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineSyncService>();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
@@ -564,7 +564,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         Assert.NotEmpty(history);
         Assert.All(history, run => Assert.Equal(connectionId, run.ConnectionId));
 
-        SetContext(scope.ServiceProvider, actor.UserId, Guid.NewGuid());
+        SetContext(scope.ServiceProvider, actor, Guid.NewGuid());
         Assert.False((await sync.ImportAsync(new(connectionId, "accounts", true))).Succeeded);
     }
 
@@ -587,7 +587,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
         var actor = await SetOwnerContextAsync(scope.ServiceProvider);
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
         var connectionId = await ConnectAsync(scope.ServiceProvider);
         var sync = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineSyncService>();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
@@ -630,7 +630,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
             ], "test"))
         };
         Assert.False((await sync.PreviewMappingsAsync(connectionId, "accounts")).Succeeded);
-        SetContext(scope.ServiceProvider, actor.UserId, actor.CompanyId);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
 
         var accountWorkspace = await sync.PreviewMappingsAsync(connectionId, "accounts");
         Assert.True(accountWorkspace.Succeeded, accountWorkspace.ErrorMessage);
@@ -757,7 +757,7 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         return collection.BuildServiceProvider();
     }
 
-    private static async Task<(Guid UserId, Guid CompanyId)> SetOwnerContextAsync(IServiceProvider services)
+    private static async Task<(Guid UserId, Guid CompanyId, Guid SessionId, string SecurityStamp)> SetOwnerContextAsync(IServiceProvider services)
     {
         var authentication = services.GetRequiredService<IUserAuthenticationService>();
         var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "quickbooks-test");
@@ -770,7 +770,8 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         controllerRole.Permissions = string.Join('|', controllerRole.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Append(BrassLedgerPermissions.UserManage).Distinct(StringComparer.OrdinalIgnoreCase));
         await db.SaveChangesAsync();
-        return (signedIn.User.UserId, signedIn.User.CompanyId);
+        var issued = await services.GetRequiredService<IUserSessionService>().IssueAsync(signedIn.User, "127.0.0.1", "quickbooks-test");
+        return (issued.UserId, issued.CompanyId, issued.SessionId!.Value, issued.SecurityStamp);
     }
 
     private static async Task<Guid> ConnectAsync(IServiceProvider services)
@@ -784,14 +785,17 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         return completion.ConnectionId!.Value;
     }
 
-    private static void SetContext(IServiceProvider services, Guid userId, Guid companyId)
+    private static void SetContext(IServiceProvider services, (Guid UserId, Guid CompanyId, Guid SessionId, string SecurityStamp) actor, Guid companyId)
     {
         services.GetRequiredService<IHttpContextAccessor>().HttpContext = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(
             [
-                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                new Claim(ClaimTypes.NameIdentifier, actor.UserId.ToString()),
                 new Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new Claim(BrassLedgerAuthenticationDefaults.SessionIdClaimType, actor.SessionId.ToString()),
+                new Claim(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, actor.SecurityStamp),
+                new Claim(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "pwd"),
                 new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage),
                 new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.LedgerManage),
                 new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.ReceivablesManage),

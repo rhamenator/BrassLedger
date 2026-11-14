@@ -1505,10 +1505,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var signedInOwner = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
         Assert.Equal(AuthenticationOutcome.Succeeded, signedInOwner.Outcome);
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
-        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
-        context.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, signedInOwner.User!.UserId.ToString()), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, signedInOwner.User.CompanyId.ToString()), new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, signedInOwner.User.Role), new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)], "test"));
-        accessor.HttpContext = context;
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedInOwner.User!, BrassLedgerPermissions.UserManage);
         var integrations = scope.ServiceProvider.GetRequiredService<IIntegrationService>();
         var catalog = await integrations.GetCatalogAsync();
         var quickBooks = catalog.Single(provider => provider.Code == "quickbooks-online");
@@ -1716,6 +1713,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
             secondRole.Permissions += $"|{BrassLedgerPermissions.UserManage}";
             await db.SaveChangesAsync();
         }
+        var sessionService = scope.ServiceProvider.GetRequiredService<IUserSessionService>();
+        var activeSession = await sessionService.IssueAsync(signedIn.User!, "127.0.0.1", "xunit");
 
         void SelectCompany(Guid companyId, bool managementClaim = true, string? claimedRole = null, bool mfaAuthenticated = false, bool enrollmentRequired = false)
         {
@@ -1723,10 +1722,12 @@ public sealed class WorkspaceInitializationTests : IDisposable
             {
                 new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()),
                 new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
-                new(System.Security.Claims.ClaimTypes.Role, claimedRole ?? roleName)
+                new(System.Security.Claims.ClaimTypes.Role, claimedRole ?? roleName),
+                new(BrassLedgerAuthenticationDefaults.SessionIdClaimType, activeSession.SessionId!.Value.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, activeSession.SecurityStamp),
+                new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, mfaAuthenticated ? "mfa" : "pwd")
             };
             if (managementClaim) claims.Add(new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage));
-            if (mfaAuthenticated) claims.Add(new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "mfa"));
             if (enrollmentRequired) claims.Add(new(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true"));
             accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
             {
@@ -1816,6 +1817,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
         Assert.Empty(await integrations.GetConnectionsAsync());
         Assert.False((await integrations.SaveConnectionAsync(NewProfile("MFA not authenticated profile"))).Succeeded);
+        activeSession = await sessionService.IssueAsync(signedIn.User! with { MfaAuthenticated = true }, "127.0.0.1", "xunit");
         SelectCompany(secondCompanyId, mfaAuthenticated: true);
         Assert.Single(await integrations.GetConnectionsAsync(), item => item.Id == second.Id);
 
@@ -1836,6 +1838,85 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal("Second company profile", await db.IntegrationConnections.Where(item => item.Id == second.Id).Select(item => item.Name).SingleAsync());
             Assert.Equal(2, await db.BusinessAuditEntries.CountAsync(item => item.Action == "integration.configured"));
         }
+    }
+
+    [Fact]
+    public async Task IntegrationConnections_RejectRevokedSessionAndSecurityStampDrift()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == signedIn.User!.CompanyId && item.Name == "Controller");
+            role.Permissions += $"|{BrassLedgerPermissions.UserManage}";
+            await db.SaveChangesAsync();
+        }
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var integrations = scope.ServiceProvider.GetRequiredService<IIntegrationService>();
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!, BrassLedgerPermissions.UserManage);
+        var created = await integrations.SaveConnectionAsync(new(null, "stripe", "Active session profile", "{}", "{}", false));
+        Assert.True(created.Succeeded, created.ErrorMessage);
+        Assert.Single(await integrations.GetConnectionsAsync());
+
+        var sessionId = Guid.Parse(accessor.HttpContext.User.FindFirst(BrassLedgerAuthenticationDefaults.SessionIdClaimType)!.Value);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var session = await db.UserSessions.SingleAsync(item => item.Id == sessionId);
+            session.RevokedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(new(null, "stripe", "Revoked session profile", "{}", "{}", false))).Succeeded);
+
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!, BrassLedgerPermissions.UserManage);
+        Assert.Single(await integrations.GetConnectionsAsync());
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == signedIn.User!.UserId);
+            user.SecurityStamp = Guid.NewGuid().ToString("N");
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(new(null, "stripe", "Stale stamp profile", "{}", "{}", false))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Single(await db.IntegrationConnections.ToListAsync());
+    }
+
+    [Fact]
+    public async Task IntegrationConnections_EnforceAdministratorMfaDespiteCorruptedRoleFlag()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var firstSignIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, firstSignIn.Outcome);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == firstSignIn.User!.UserId);
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.UserId == user.Id && item.CompanyId == user.CompanyId);
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == user.CompanyId && item.Name == "Administrator");
+            user.Role = membership.Role = "Administrator";
+            role.RequiresMfa = false;
+            await db.SaveChangesAsync();
+        }
+        var adminSignIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, adminSignIn.Outcome);
+        Assert.True(adminSignIn.User!.MfaEnrollmentRequired);
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        // Simulate a stale circuit principal that omits the enrollment claim.
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, adminSignIn.User, BrassLedgerPermissions.UserManage);
+        var integrations = scope.ServiceProvider.GetRequiredService<IIntegrationService>();
+        Assert.Empty(await integrations.GetConnectionsAsync());
+        Assert.False((await integrations.SaveConnectionAsync(new(null, "stripe", "MFA bypass profile", "{}", "{}", false))).Succeeded);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Empty(await db.IntegrationConnections.ToListAsync());
     }
 
     [Fact]

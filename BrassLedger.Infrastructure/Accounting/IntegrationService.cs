@@ -8,7 +8,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BrassLedger.Infrastructure.Accounting;
 
-public sealed class IntegrationService(IDbContextFactory<BrassLedgerDbContext> dbContextFactory, IHttpContextAccessor httpContextAccessor) : IIntegrationService
+public sealed class IntegrationService(
+    IDbContextFactory<BrassLedgerDbContext> dbContextFactory,
+    IHttpContextAccessor httpContextAccessor,
+    TimeProvider timeProvider) : IIntegrationService
 {
     private static readonly IReadOnlyList<IntegrationProviderSnapshot> Catalog =
     [
@@ -60,20 +63,33 @@ public sealed class IntegrationService(IDbContextFactory<BrassLedgerDbContext> d
             || principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
             || !principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)
             || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId)
+            || string.IsNullOrWhiteSpace(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType))
             || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId)) return null;
 
         var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(item => item.Id == userId && item.IsActive, cancellationToken);
+        var session = await db.UserSessions.AsNoTracking().SingleOrDefaultAsync(
+            item => item.Id == sessionId && item.UserId == userId, cancellationToken);
         var membership = await db.CompanyMemberships.AsNoTracking().SingleOrDefaultAsync(
             item => item.UserId == userId && item.CompanyId == companyId && item.IsActive, cancellationToken);
-        if (user is null || membership is null
+        var now = timeProvider.GetUtcNow();
+        var claimedStamp = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType);
+        var authenticationMethod = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType);
+        if (user is null || user.LockoutEndUtc > now || membership is null
+            || session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= now
+            || !string.Equals(user.SecurityStamp, claimedStamp, StringComparison.Ordinal)
+            || !string.Equals(session.SecurityStamp, claimedStamp, StringComparison.Ordinal)
+            || !string.Equals(session.AuthenticationMethod,
+                authenticationMethod == "mfa" ? "Password + MFA" : authenticationMethod == "pwd" ? "Password" : null,
+                StringComparison.Ordinal)
             || !await db.Companies.AsNoTracking().AnyAsync(company => company.Id == companyId, cancellationToken)
             || !string.Equals(membership.Role, principal.FindFirstValue(ClaimTypes.Role), StringComparison.Ordinal)) return null;
         var role = await db.AccessRoles.AsNoTracking().SingleOrDefaultAsync(
             item => item.CompanyId == companyId && item.Name == membership.Role && item.IsActive, cancellationToken);
         if (role is null || !role.Permissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Contains(BrassLedgerPermissions.UserManage, StringComparer.OrdinalIgnoreCase)) return null;
-        if (role.RequiresMfa && !user.MfaEnabled) return null;
-        if (user.MfaEnabled && !string.Equals(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType), "mfa", StringComparison.Ordinal)) return null;
+        if ((role.RequiresMfa || BrassLedgerRoleTemplates.IsMandatoryMfaRole(role.Name)) && !user.MfaEnabled) return null;
+        if (user.MfaEnabled && !string.Equals(authenticationMethod, "mfa", StringComparison.Ordinal)) return null;
         return (userId, companyId);
     }
 }
