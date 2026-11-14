@@ -7438,9 +7438,12 @@ public sealed class WorkspaceInitializationTests : IDisposable
         string priorAdministratorStamp;
         string priorLegacyStamp;
         string priorCaseVariantStamp;
+        Guid administratorId;
+        Guid caseVariantAdministratorId;
         await using (var db = await factory.CreateDbContextAsync())
         {
             var administrator = await db.Users.SingleAsync(user => user.UserName == "sales");
+            administratorId = administrator.Id;
             priorAdministratorStamp = administrator.SecurityStamp;
             var administratorMembership = await db.CompanyMemberships.SingleOrDefaultAsync(membership => membership.UserId == administrator.Id && membership.CompanyId == administrator.CompanyId);
             if (administratorMembership is null)
@@ -7455,6 +7458,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var legacyMemberships = await db.CompanyMemberships.Where(membership => membership.UserId == legacyAdministrator.Id && membership.CompanyId == administrator.CompanyId).ToListAsync();
             db.CompanyMemberships.RemoveRange(legacyMemberships);
             var caseVariantAdministrator = await db.Users.SingleAsync(user => user.UserName == "warehouse");
+            caseVariantAdministratorId = caseVariantAdministrator.Id;
             priorCaseVariantStamp = caseVariantAdministrator.SecurityStamp;
             var caseVariantMembership = await db.CompanyMemberships.SingleOrDefaultAsync(membership => membership.UserId == caseVariantAdministrator.Id && membership.CompanyId == administrator.CompanyId);
             if (caseVariantMembership is null)
@@ -7467,6 +7471,17 @@ public sealed class WorkspaceInitializationTests : IDisposable
             (await db.AccessRoles.SingleAsync(role => role.CompanyId == administrator.CompanyId && role.Name == "Owner/CEO")).RequiresMfa = false;
             await db.SaveChangesAsync();
         }
+        var downgradedSignIn = await authentication.AuthenticateAsync("sales", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "mandatory-mfa-test");
+        Assert.Equal(AuthenticationOutcome.Succeeded, downgradedSignIn.Outcome);
+        Assert.True(downgradedSignIn.User!.MfaEnrollmentRequired);
+        Assert.Empty(downgradedSignIn.User.Permissions);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.AccessRoles.SingleAsync(role => role.CompanyId == downgradedSignIn.User.CompanyId && role.Name == "Administrator")).IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        Assert.True((await authentication.GetAccountSecurityAsync(administratorId))!.MfaRequiredByRole);
+        Assert.True((await authentication.GetAccountSecurityAsync(caseVariantAdministratorId))!.MfaRequiredByRole);
         var repairedSnapshot = await administration.GetSnapshotAsync();
         Assert.True(repairedSnapshot.Roles.Single(role => role.Name == "Administrator").RequiresMfa);
         Assert.True(repairedSnapshot.Roles.Single(role => role.Name == "Owner/CEO").RequiresMfa);

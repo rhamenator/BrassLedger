@@ -62,7 +62,7 @@ public sealed class BrassLedgerCookieEvents(
                 context.HttpContext.RequestAborted);
         var claimedPermissions = context.Principal?.FindAll(BrassLedgerAuthenticationDefaults.PermissionClaimType).Select(claim => claim.Value).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
         var roleTemplate = BrassLedgerRoleTemplates.BuiltIn.FirstOrDefault(template => string.Equals(template.Name, membership?.Role, StringComparison.OrdinalIgnoreCase));
-        var roleRequiresMfa = currentRole?.RequiresMfa ?? roleTemplate?.RequiresMfa ?? false;
+        var roleRequiresMfa = currentRole?.RequiresMfa == true || roleTemplate?.RequiresMfa == true;
         var enrollmentRequired = roleRequiresMfa && user is { MfaEnabled: false };
         var currentPermissions = enrollmentRequired
             ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)

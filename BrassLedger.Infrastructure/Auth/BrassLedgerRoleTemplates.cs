@@ -3,7 +3,7 @@ namespace BrassLedger.Infrastructure.Auth;
 public static class BrassLedgerRoleTemplates
 {
     public static bool IsMandatoryMfaRole(string roleName) =>
-        BuiltIn.Any(template => template.RequiresMfa && string.Equals(template.Name, roleName, StringComparison.OrdinalIgnoreCase));
+        MandatoryMfaRoleNames.Contains(roleName, StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<RoleTemplateDefinition> BuiltIn { get; } =
     [
@@ -205,6 +205,11 @@ public static class BrassLedgerRoleTemplates
             BrassLedgerPermissions.ReportingManage
         ])
     ];
+
+    public static IReadOnlyList<string> MandatoryMfaRoleNames { get; } = BuiltIn
+        .Where(template => template.RequiresMfa)
+        .Select(template => template.Name)
+        .ToArray();
 
     public static IReadOnlyList<string> NormalizePermissions(IEnumerable<string> permissions)
     {

@@ -577,7 +577,7 @@ public sealed class SecurityAdministrationService(
             || !string.Equals(membership.Role, principal.FindFirstValue(ClaimTypes.Role), StringComparison.Ordinal)
             || !await dbContext.Companies.AsNoTracking().AnyAsync(company => company.Id == companyId, cancellationToken))
             throw new UnauthorizedAccessException("The selected company membership or role is unavailable.");
-        if ((role.RequiresMfa && !user.MfaEnabled)
+        if (((role.RequiresMfa || BrassLedgerRoleTemplates.IsMandatoryMfaRole(role.Name)) && !user.MfaEnabled)
             || (user.MfaEnabled && !string.Equals(authenticationMethod, "mfa", StringComparison.Ordinal)))
             throw new UnauthorizedAccessException("Current MFA authentication is required.");
 
