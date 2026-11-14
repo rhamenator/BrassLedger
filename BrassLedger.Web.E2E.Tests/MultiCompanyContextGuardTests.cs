@@ -1,0 +1,43 @@
+using Microsoft.Playwright;
+
+namespace BrassLedger.Web.E2E.Tests;
+
+public sealed class MultiCompanyContextGuardTests
+{
+    [Fact]
+    public async Task OriginalCompanyUsersCanReadAndPrepareAfterSecondCompanyAppears()
+    {
+        var fixture = new PlaywrightWebAppFixture();
+        await fixture.InitializeAsync();
+        try
+        {
+            await using var session = await fixture.CreateSessionAsync(BrowserKind.Chromium);
+            await session.SignInAsync(returnPath: "/projects");
+            await fixture.AddUnrelatedCompanyForIsolationAsync();
+
+            await session.GotoAsync("/projects");
+            await session.WaitForHeadingAsync("Control project scope, cost, billing, and revenue.");
+            await session.AssertNoUiFailuresAsync("multi-company project workspace read");
+
+            await using var operationsSession = await fixture.CreateSessionAsync(BrowserKind.Chromium);
+            await operationsSession.SignInAsync("operations", returnPath: "/operations");
+            await operationsSession.GotoAsync("/operations");
+            await operationsSession.WaitForHeadingAsync("Operational flow from stock to shipment.");
+            var orderNumber = $"PO-CONTEXT-{Guid.NewGuid().ToString("N")[..8]}";
+            await operationsSession.Page.GetByLabel("Purchase order vendor").SelectOptionAsync(new SelectOptionValue { Index = 1 });
+            await operationsSession.Page.GetByLabel("Purchase order number").FillAsync(orderNumber);
+            await operationsSession.Page.GetByLabel("Purchase order line 1 item").SelectOptionAsync(new SelectOptionValue { Label = "RM-220 — Steel Fastener Pack" });
+            await operationsSession.Page.GetByLabel("Purchase order line 1 description").FillAsync("Context-isolated fasteners");
+            await operationsSession.Page.GetByLabel("Purchase order line 1 quantity").FillAsync("1");
+            await operationsSession.Page.GetByLabel("Purchase order line 1 unit cost").FillAsync("5");
+            await operationsSession.Page.GetByRole(AriaRole.Button, new() { Name = "Save purchase-order draft" }).ClickAsync();
+            await operationsSession.Page.GetByText("Purchase-order draft saved.", new() { Exact = true }).WaitForAsync();
+            await Assertions.Expect(operationsSession.Page.Locator("tr").Filter(new() { HasTextString = orderNumber })).ToBeVisibleAsync();
+            await operationsSession.AssertNoUiFailuresAsync("multi-company purchase-order draft");
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
+}

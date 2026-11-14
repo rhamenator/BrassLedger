@@ -2257,7 +2257,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         ActAsCompany(secondCompany.CompanyId!.Value, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PaymentReverse);
         var crossCompanyRefund = await transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-CROSS-CO", "Cross-company refund rejected", settlementRateId, token));
         Assert.False(crossCompanyRefund.Succeeded);
-        // Once a second company exists, an absent HTTP context has no stable default company across providers.
+        accessor.HttpContext = null;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workspaceService.GetWorkspaceAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transactions.RefundUnappliedPaymentAsync(new(deposit.Id!.Value, bank.Id, new DateOnly(2026, 6, 2), 40m, "RF-H-NO-CONTEXT", "Ambiguous company rejected", settlementRateId, token)));
         ActAsCompany(originalCompanyId, BrassLedgerPermissions.PaymentReverse);
 
         var untouched = (await workspaceService.GetWorkspaceAsync()).Receivables.Payments!.Single(item => item.Id == deposit.Id);
@@ -2529,14 +2531,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
         ActAsCompany(secondCompany.CompanyId!.Value, BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.PayablesManage);
         var crossCompany = await transactions.AssignRecurringOccurrenceRateAsync(new(occurrence.Id, rateId, occurrence.ConcurrencyToken));
         Assert.False(crossCompany.Succeeded);
-        accessor.HttpContext = null;
+        ActAs(BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage);
 
         // Every rejected attempt above must leave the occurrence entirely untouched.
         var untouched = (await workspaceService.GetWorkspaceAsync()).Receivables.Workflows!.Single(item => item.Id == occurrence.Id);
         Assert.True(untouched.RequiresRateAssignment);
         Assert.Equal(occurrence.ConcurrencyToken, untouched.ConcurrencyToken);
 
-        ActAs(BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage);
         var assigned = await transactions.AssignRecurringOccurrenceRateAsync(new(occurrence.Id, rateId, occurrence.ConcurrencyToken));
         Assert.True(assigned.Succeeded, assigned.ErrorMessage);
     }
