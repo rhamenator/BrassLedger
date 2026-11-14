@@ -13,4 +13,4 @@ public sealed record BackupResult(bool Succeeded, string ErrorMessage, string? B
     public static BackupResult Failure(string error) => new(false, error);
 }
 public sealed record BackupVerificationResult(bool Succeeded, string ErrorMessage, string? BackupId = null, DateTimeOffset? VerifiedAtUtc = null);
-public sealed record BackupRecoveryRehearsalResult(bool Succeeded, string ErrorMessage, string? BackupId = null, DateTimeOffset? RehearsedAtUtc = null, int CompanyCount = 0, int JournalEntryCount = 0, int PayrollRunCount = 0, int DataProtectionKeyCount = 0);
+public sealed record BackupRecoveryRehearsalResult(bool Succeeded, string ErrorMessage, string? BackupId = null, DateTimeOffset? RehearsedAtUtc = null, int CompanyCount = 0, int JournalEntryCount = 0, int PayrollRunCount = 0, int DataProtectionKeyCount = 0, bool OffMachineKeyRecoveryVerified = false);
