@@ -1,12 +1,15 @@
 param(
-    [string]$DataRoot = ""
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$DataRoot,
+    [switch]$ConfirmFakeData
 )
 
-$project = Join-Path $PSScriptRoot "BrassLedger.Tools\BrassLedger.Tools.csproj"
-$arguments = @("run", "--project", $project, "--", "populate-fake-data")
-
-if (-not [string]::IsNullOrWhiteSpace($DataRoot)) {
-    $arguments += @("--data-root", $DataRoot)
+if (-not $ConfirmFakeData) {
+    throw "Pass -ConfirmFakeData to load known-password demo accounts into a new disposable workspace."
 }
+
+$project = Join-Path $PSScriptRoot "BrassLedger.Tools\BrassLedger.Tools.csproj"
+$arguments = @("run", "--project", $project, "--", "populate-fake-data", "--confirm", "--data-root", $DataRoot)
 
 dotnet @arguments

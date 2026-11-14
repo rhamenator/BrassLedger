@@ -1263,6 +1263,36 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task FakeDataPopulation_RejectsMultipleCompaniesBeforeWriting()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        int customersBefore;
+        int rolesBefore;
+        int usersBefore;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            customersBefore = await db.Customers.CountAsync();
+            rolesBefore = await db.AccessRoles.CountAsync();
+            usersBefore = await db.Users.CountAsync();
+            db.Companies.Add(new Company { Id = Guid.NewGuid(), Name = "Fake data guard subsidiary", LegalName = "Fake Data Guard Subsidiary Ltd.", TaxId = "FAKE-DATA-GUARD", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            await db.SaveChangesAsync();
+        }
+
+        var seeder = scope.ServiceProvider.GetRequiredService<IFakeDataPopulationService>();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.PopulateAsync());
+        Assert.Contains("exactly one company", error.Message, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(customersBefore, await db.Customers.CountAsync());
+            Assert.Equal(rolesBefore, await db.AccessRoles.CountAsync());
+            Assert.Equal(usersBefore, await db.Users.CountAsync());
+        }
+    }
+
+    [Fact]
     public async Task InitializeBrassLedgerAsync_UsesConfiguredDataRootWhenProvided()
     {
         var configuredDataRoot = Path.Combine(_contentRootPath, "CustomDataRoot");
