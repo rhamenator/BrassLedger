@@ -2,6 +2,8 @@
 
 This is the implementation contract for the unfinished purchase side of `FX-TRANSACTIONS` sub-slice 7. A foreign purchase order retains its commercial currency, but receiving remains blocked until the entire receipt-to-bill accounting path below is implemented and verified. Do not enable receiving by simply translating the order's unit costs into the two-decimal inventory cost field.
 
+The base-currency invoice-match path also checks the linked order's retained currency when a draft is prepared and again immediately before posting. This protects imported or historically inconsistent receipts from being silently relabeled as base-currency vendor bills.
+
 ## Required retained facts
 
 - The order and each line retain the transaction currency and agreed transaction unit price. Neither an edit nor a later rate update may relabel an approved amount.
