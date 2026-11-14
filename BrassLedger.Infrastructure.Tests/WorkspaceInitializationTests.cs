@@ -6604,6 +6604,67 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task PayrollDisasterRelief_RequiresExplicitCompanyAndIsolatesConfigurations()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var relief = scope.ServiceProvider.GetRequiredService<IPayrollDisasterReliefService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid originalCompanyId; var secondCompanyId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Disaster isolation subsidiary", LegalName = "Disaster Isolation Subsidiary Ltd.", TaxId = "DIS-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            await db.SaveChangesAsync();
+        }
+        var request = new SavePayrollDisasterReliefRequest(null, "ZZ-2026-01", "Test severe storms", "DR-9999", "[\"Test County, ZZ\"]", "PrincipalPlaceOfBusiness", "IRS address-of-record confirmation", "[]", "https://www.irs.gov/newsroom/tax-relief-in-disaster-situations", new DateOnly(2026, 1, 2), "Draft awaiting official relief window review.", false, false);
+
+        var readError = await Assert.ThrowsAsync<InvalidOperationException>(() => relief.GetAsync());
+        Assert.Contains("explicit company context", readError.Message, StringComparison.OrdinalIgnoreCase);
+        var saveError = await Assert.ThrowsAsync<InvalidOperationException>(() => relief.SaveAsync(request));
+        Assert.Contains("explicit company context", saveError.Message, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.PayrollDisasterReliefConfigurations.AnyAsync(item => item.AnnouncementCode == request.AnnouncementCode));
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(item => item.Action == "payroll-disaster-relief.created"));
+        }
+
+        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage)], "test"))
+        };
+        ActAs(originalCompanyId);
+        var originalSave = await relief.SaveAsync(request);
+        Assert.True(originalSave.Succeeded, originalSave.ErrorMessage);
+        var originalSnapshot = Assert.Single((await relief.GetAsync()).Configurations, item => item.Id == originalSave.Id);
+        ActAs(secondCompanyId);
+        Assert.DoesNotContain((await relief.GetAsync()).Configurations, item => item.Id == originalSave.Id);
+        var crossUpdate = await relief.SaveAsync(request with { Id = originalSave.Id, ConcurrencyToken = originalSnapshot.ConcurrencyToken });
+        Assert.Equal("Payroll disaster relief configuration not found.", crossUpdate.ErrorMessage);
+        var secondSave = await relief.SaveAsync(request);
+        Assert.True(secondSave.Succeeded, secondSave.ErrorMessage);
+        Assert.NotEqual(originalSave.Id, secondSave.Id);
+        Assert.Equal(secondSave.Id, Assert.Single((await relief.GetAsync()).Configurations).Id);
+        ActAs(originalCompanyId);
+        Assert.Equal(originalSave.Id, Assert.Single((await relief.GetAsync()).Configurations).Id);
+        ActAs(Guid.NewGuid());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => relief.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => relief.SaveAsync(request));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(originalCompanyId, (await db.PayrollDisasterReliefConfigurations.SingleAsync(item => item.Id == originalSave.Id)).CompanyId);
+            Assert.Equal(secondCompanyId, (await db.PayrollDisasterReliefConfigurations.SingleAsync(item => item.Id == secondSave.Id)).CompanyId);
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == originalCompanyId && item.Action == "payroll-disaster-relief.created" && item.EntityId == originalSave.Id));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == secondCompanyId && item.Action == "payroll-disaster-relief.created" && item.EntityId == secondSave.Id));
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(item => item.Action == "payroll-disaster-relief.updated" && (item.EntityId == originalSave.Id || item.EntityId == secondSave.Id)));
+        }
+    }
+
+    [Fact]
     public async Task FederalDepositSchedule_UsesThreeBusinessDaysForSemiweeklyPeriods()
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
