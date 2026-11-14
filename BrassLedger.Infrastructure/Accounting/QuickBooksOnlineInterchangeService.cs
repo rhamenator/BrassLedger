@@ -608,7 +608,12 @@ public sealed class QuickBooksOnlineInterchangeService(
     {
         var httpContext = httpContextAccessor.HttpContext;
         var claim = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
-        if (Guid.TryParse(claim, out var id)) return id;
+        if (Guid.TryParse(claim, out var id))
+        {
+            if (!await db.Companies.AnyAsync(company => company.Id == id, ct))
+                throw new UnauthorizedAccessException("The requested company context is not available.");
+            return id;
+        }
         if (httpContext is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
         var companyIds = await db.Companies.Select(company => company.Id).Take(2).ToArrayAsync(ct);
         if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
