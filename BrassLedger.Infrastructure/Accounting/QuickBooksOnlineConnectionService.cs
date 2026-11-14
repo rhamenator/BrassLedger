@@ -430,6 +430,9 @@ public sealed partial class QuickBooksOnlineConnectionService(
         var leaseCompleted = false;
         try
         {
+            actor = await CurrentActorAsync(cancellationToken);
+            if (actor is null || !CanManageConnections(actor.Principal))
+                return TransactionResult.Failure("You are not authorized to refresh accounting connections.");
             var lease = await TryAcquireCredentialOperationLeaseAsync(
                 actor,
                 connectionId,
@@ -533,6 +536,9 @@ public sealed partial class QuickBooksOnlineConnectionService(
         var leaseCompleted = false;
         try
         {
+            actor = await CurrentActorAsync(cancellationToken);
+            if (actor is null || !CanManageConnections(actor.Principal))
+                return TransactionResult.Failure("You are not authorized to disconnect accounting connections.");
             var lease = await TryAcquireCredentialOperationLeaseAsync(
                 actor,
                 connectionId,
