@@ -4033,8 +4033,31 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using (var matchDb = await factory.CreateDbContextAsync()) receiptToken = await matchDb.InventoryReceipts.Where(receipt => receipt.Id == received.Id).Select(receipt => receipt.ConcurrencyToken).SingleAsync();
         Guid receivedLineId;
         await using (var db = await factory.CreateDbContextAsync())
-        {
             receivedLineId = await db.InventoryReceiptLines.Where(line => line.InventoryReceiptId == received.Id).Select(line => line.Id).SingleAsync();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var receipt = await db.InventoryReceipts.SingleAsync(candidate => candidate.Id == received.Id);
+            receipt.TransactionCurrency = "CAD";
+            await db.SaveChangesAsync();
+        }
+        var relabeledReceipt = await transactions.SavePurchaseInvoiceMatchAsync(new(null, received.Id!.Value, "BILL-RELABELLED-RECEIPT", new DateOnly(2026, 8, 4), new DateOnly(2026, 9, 3), "Reject mismatched receipt currency", [new(receivedLineId, 2m, 20m)], receiptToken));
+        Assert.False(relabeledReceipt.Succeeded);
+        Assert.Contains("retained currency or inventory valuation", relabeledReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var receipt = await db.InventoryReceipts.SingleAsync(candidate => candidate.Id == received.Id);
+            receipt.TransactionCurrency = "USD";
+            var line = await db.InventoryReceiptLines.SingleAsync(candidate => candidate.Id == receivedLineId);
+            line.TransactionAmount = 41m;
+            await db.SaveChangesAsync();
+        }
+        var mismatchedLine = await transactions.SavePurchaseInvoiceMatchAsync(new(null, received.Id!.Value, "BILL-MISMATCHED-LINE", new DateOnly(2026, 8, 4), new DateOnly(2026, 9, 3), "Reject mismatched line amount", [new(receivedLineId, 2m, 20m)], receiptToken));
+        Assert.False(mismatchedLine.Succeeded);
+        Assert.Contains("retained currency or inventory valuation", mismatchedLine.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var line = await db.InventoryReceiptLines.SingleAsync(candidate => candidate.Id == receivedLineId);
+            line.TransactionAmount = line.LineTotal;
             var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id);
             order.TransactionCurrency = "CAD";
             await db.SaveChangesAsync();
@@ -4043,7 +4066,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.False(blockedForeignMatch.Succeeded);
         Assert.Contains("bill-date exchange-rate accounting", blockedForeignMatch.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         await using (var db = await factory.CreateDbContextAsync())
-            Assert.False(await db.PurchaseInvoiceMatches.AnyAsync(match => match.BillNumber == "BILL-FOREIGN-BLOCKED-1"));
+        {
+            Assert.False(await db.PurchaseInvoiceMatches.AnyAsync(match => match.BillNumber == "BILL-RELABELLED-RECEIPT" || match.BillNumber == "BILL-MISMATCHED-LINE" || match.BillNumber == "BILL-FOREIGN-BLOCKED-1"));
+        }
         await using (var db = await factory.CreateDbContextAsync())
         {
             var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == saved.Id);
@@ -4112,6 +4137,20 @@ public sealed class WorkspaceInitializationTests : IDisposable
                 {
                     var order = await db.PurchaseOrders.SingleAsync(item => item.Id == orderResult.Id);
                     order.TransactionCurrency = "USD";
+                    var receipt = await db.InventoryReceipts.SingleAsync(item => item.Id == receiptResult.Id);
+                    receipt.ExchangeRateToBase = .75m;
+                    await db.SaveChangesAsync();
+                }
+                var alteredValuation = await transactions.PostPurchaseInvoiceMatchAsync(new(match.Id, match.ConcurrencyToken));
+                Assert.False(alteredValuation.Succeeded);
+                Assert.Contains("retained currency or inventory valuation", alteredValuation.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+                await using (var db = await factory.CreateDbContextAsync())
+                {
+                    Assert.Equal("Approved", await db.PurchaseInvoiceMatches.Where(item => item.Id == match.Id).Select(item => item.Status).SingleAsync());
+                    Assert.False(await db.VendorBills.AnyAsync(bill => bill.BillNumber == billNumber));
+                    Assert.Equal(journalCount, await db.JournalEntries.CountAsync());
+                    var receipt = await db.InventoryReceipts.SingleAsync(item => item.Id == receiptResult.Id);
+                    receipt.ExchangeRateToBase = 1m;
                     await db.SaveChangesAsync();
                 }
             }
