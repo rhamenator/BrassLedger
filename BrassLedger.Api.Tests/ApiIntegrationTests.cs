@@ -1036,6 +1036,48 @@ public sealed class ApiIntegrationTests : IClassFixture<BrassLedgerApiFactory>
     }
 
     [Fact]
+    public async Task CorruptedAdministratorMfaFlag_EnrollmentCookieRemainsValidAndCannotAccessWorkspace()
+    {
+        using var isolatedFactory = new BrassLedgerApiFactory();
+        using var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<BrassLedgerDbContext>();
+            var controller = await db.Users.SingleAsync(user => user.UserName == "controller");
+            var administratorRole = await db.AccessRoles.SingleAsync(role => role.CompanyId == controller.CompanyId && role.Name == "Administrator");
+            db.CompanyMemberships.Add(new CompanyMembership
+            {
+                Id = Guid.NewGuid(),
+                UserId = controller.Id,
+                CompanyId = controller.CompanyId,
+                Role = "Administrator",
+                IsOwner = true,
+                IsActive = true,
+                GrantedAtUtc = DateTimeOffset.UtcNow
+            });
+            controller.Role = "Administrator";
+            administratorRole.RequiresMfa = false;
+            await db.SaveChangesAsync();
+        }
+
+        var login = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            UserName = "controller",
+            Password = BrassLedgerAuthenticationDefaults.SeededPassword
+        });
+
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var signedIn = await login.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.True(signedIn.GetProperty("mfaEnrollmentRequired").GetBoolean());
+        Assert.False(signedIn.GetProperty("mfaAuthenticated").GetBoolean());
+
+        // This request validates the issued cookie against the intentionally corrupt role row.
+        var identity = await client.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/auth/me");
+        Assert.True(identity.GetProperty("mfaEnrollmentRequired").GetBoolean());
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/dashboard")).StatusCode);
+    }
+
+    [Fact]
     public async Task TrialBalanceReport_ReturnsCsvForReportingUser()
     {
         using var client = await CreateAuthenticatedClientAsync();
