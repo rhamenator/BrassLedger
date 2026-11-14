@@ -74,6 +74,32 @@ public sealed class LedgerPageTests : TestContext
     }
 
     [Fact]
+    public void LedgerPage_EnablesJournalRejectionOnlyAfterReasonIsBound()
+    {
+        var workspace = TestWorkspaceData.CreateWorkspace();
+        var draft = workspace.GeneralLedger.RecentEntries.Single(entry => entry.Status == "Rejected") with
+        {
+            Id = Guid.NewGuid(),
+            EntryNumber = "DRAFT-REJECT-TEST",
+            Status = "Draft",
+            DecisionReason = string.Empty
+        };
+        var approved = draft with { Id = Guid.NewGuid(), EntryNumber = "APPROVED-REJECT-TEST", Status = "Approved" };
+        Services.AddSingleton<IBusinessWorkspaceService>(new StubBusinessWorkspaceService(workspace with
+        {
+            GeneralLedger = workspace.GeneralLedger with { RecentEntries = workspace.GeneralLedger.RecentEntries.Concat([draft, approved]).ToArray() }
+        }));
+
+        var cut = RenderComponent<Ledger>();
+        var rejectButtons = cut.FindAll("button").Where(button => button.TextContent.Trim() == "Reject").ToArray();
+        Assert.Equal(2, rejectButtons.Length);
+        Assert.All(rejectButtons, button => Assert.True(button.HasAttribute("disabled")));
+        cut.Find("input[aria-label='Journal rejection reason']").Input("Attach the acquisition support.");
+        rejectButtons = cut.FindAll("button").Where(button => button.TextContent.Trim() == "Reject").ToArray();
+        Assert.All(rejectButtons, button => Assert.False(button.HasAttribute("disabled")));
+    }
+
+    [Fact]
     public void OperationsPage_ExposesPurchaseOrderReceivingAndMatchingWorkflow()
     {
         var cut = RenderComponent<Operations>();

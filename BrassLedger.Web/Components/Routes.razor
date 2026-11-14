@@ -1,3 +1,5 @@
+@inject IJSRuntime JsRuntime
+
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
         <ErrorBoundary>
@@ -36,3 +38,16 @@
         </LayoutView>
     </NotFound>
 </Router>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("brassLedgerMarkInteractive");
+        }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
+}
