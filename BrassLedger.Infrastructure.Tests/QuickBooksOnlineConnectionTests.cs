@@ -175,6 +175,60 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
     }
 
     [Fact]
+    public async Task OAuthCallback_RevokedDuringProviderExchange_DiscardsAndRevokesUnusedGrant()
+    {
+        var provider = new FakeQuickBooksOnlineClient
+        {
+            ExchangeEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            ReleaseExchange = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+        var started = await service.BeginAuthorizationAsync(new(null, "Revocation race books", "Sandbox"));
+        Assert.True(started.Succeeded, started.ErrorMessage);
+        var state = QueryHelpers.ParseQuery(new Uri(started.AuthorizationUrl!).Query)["state"].ToString();
+
+        var completionTask = service.CompleteAuthorizationAsync(new(state, "unused-code", "123456789", null, null));
+        await provider.ExchangeEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var session = await db.UserSessions.SingleAsync(item => item.Id == actor.SessionId);
+            session.RevokedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        provider.ReleaseExchange.TrySetResult(true);
+
+        var completed = await completionTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(completed.Succeeded);
+        Assert.Contains("authorization changed", completed.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("refresh-token-one", provider.LastRevokedToken);
+        Guid pendingConnectionId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var connection = await db.IntegrationConnections.SingleAsync(item => item.Name == "Revocation race books");
+            pendingConnectionId = connection.Id;
+            Assert.Equal("AuthorizationPending", connection.Status);
+            Assert.Equal("{}", connection.CredentialsJson);
+            Assert.DoesNotContain(await db.BusinessAuditEntries.ToArrayAsync(), entry => entry.Action == "integration.connected" && entry.EntityId == connection.Id);
+            Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), entry => entry.Action == "integration.oauth_unused_grant_revoked");
+        }
+
+        var nextActor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, nextActor, nextActor.CompanyId);
+        var restarted = await service.BeginAuthorizationAsync(new(pendingConnectionId, "ignored", "Sandbox"));
+        Assert.True(restarted.Succeeded, restarted.ErrorMessage);
+        var nextState = QueryHelpers.ParseQuery(new Uri(restarted.AuthorizationUrl!).Query)["state"].ToString();
+        var retried = await service.CompleteAuthorizationAsync(new(nextState, "fresh-code", "123456789", null, null));
+        Assert.True(retried.Succeeded, retried.ErrorMessage);
+        Assert.Equal(pendingConnectionId, retried.ConnectionId);
+    }
+
+    [Fact]
     public async Task OAuthManagement_EnforcesAdministratorMfaDespiteCorruptedRoleFlag()
     {
         var provider = new FakeQuickBooksOnlineClient();
@@ -903,6 +957,8 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
     private sealed class FakeQuickBooksOnlineClient : IQuickBooksOnlineClient
     {
         public int ExchangeCodeCount { get; private set; }
+        public TaskCompletionSource<bool>? ExchangeEntered { get; set; }
+        public TaskCompletionSource<bool>? ReleaseExchange { get; set; }
         public int RefreshCount { get; private set; }
         public string LastRefreshToken { get; private set; } = string.Empty;
         public string LastRevokedToken { get; private set; } = string.Empty;
@@ -920,12 +976,14 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
             ["state"] = state
         });
 
-        public Task<QuickBooksTokenResponse> ExchangeAuthorizationCodeAsync(string code, CancellationToken cancellationToken = default)
+        public async Task<QuickBooksTokenResponse> ExchangeAuthorizationCodeAsync(string code, CancellationToken cancellationToken = default)
         {
             ExchangeCodeCount++;
-            return Task.FromResult(ExchangeCodeCount == 1
+            ExchangeEntered?.TrySetResult(true);
+            if (ReleaseExchange is { } release) await release.Task.WaitAsync(cancellationToken);
+            return ExchangeCodeCount == 1
                 ? new QuickBooksTokenResponse(true, string.Empty, "access-token-one", "refresh-token-one", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400)
-                : new QuickBooksTokenResponse(true, string.Empty, "access-token-reconnected", "refresh-token-reconnected", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400));
+                : new QuickBooksTokenResponse(true, string.Empty, "access-token-reconnected", "refresh-token-reconnected", "bearer", "com.intuit.quickbooks.accounting", 3600, 8_726_400);
         }
 
         public Task<QuickBooksTokenResponse> RefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)

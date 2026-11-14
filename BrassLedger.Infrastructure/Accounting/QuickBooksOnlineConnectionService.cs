@@ -264,6 +264,21 @@ public sealed partial class QuickBooksOnlineConnectionService(
             return QuickBooksAuthorizationCompletionResult.Failure("QuickBooks did not respond before the secure connection timed out. No credentials were saved." + cleanupMessage);
         }
 
+        var currentActor = await CurrentActorAsync(cancellationToken);
+        if (currentActor is null
+            || currentActor.UserId != actor.UserId
+            || currentActor.CompanyId != actor.CompanyId
+            || !string.Equals(
+                currentActor.Principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType),
+                actor.Principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType),
+                StringComparison.Ordinal)
+            || !CanManageConnections(currentActor.Principal))
+        {
+            var cleaned = await CleanupUnusedAuthorizationAsync(actor, attempt.Id, token, "operator_authority_changed_during_callback");
+            await ReleaseReconnectLeaseAsync("operator_authority_changed_during_callback");
+            return QuickBooksAuthorizationCompletionResult.Failure("Your authorization changed while QuickBooks was responding. No credentials were saved; sign in and start again." + UnusedGrantCleanupMessage(cleaned));
+        }
+
         var accessExpiresAt = now.AddSeconds(token.AccessTokenExpiresInSeconds);
         var refreshExpiresAt = now.AddSeconds(token.RefreshTokenExpiresInSeconds);
         var credentials = new QuickBooksTokenEnvelope(
