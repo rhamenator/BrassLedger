@@ -1,5 +1,7 @@
+using BrassLedger.Application.Accounting;
 using BrassLedger.Infrastructure.Auth;
 using BrassLedger.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -48,6 +50,30 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
             var security = await authentication.GetAccountSecurityAsync(signedIn.User!.UserId);
             Assert.NotNull(security);
             Assert.Contains(security.RecentEvents, entry => entry.EventType == "login_succeeded" && entry.Succeeded);
+        }
+
+        using (var scope = services.CreateScope())
+        {
+            var transactions = scope.ServiceProvider.GetRequiredService<IAccountingTransactionService>();
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+            Guid vendorId; Guid itemId;
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                vendorId = await db.Vendors.Select(item => item.Id).FirstAsync();
+                itemId = await db.InventoryItems.Select(item => item.Id).FirstAsync();
+            }
+            var ordered = await transactions.SavePurchaseOrderAsync(new(null, vendorId, "PO-PG-RECEIPT-MIGRATION", new DateOnly(2026, 8, 1), null, "Historical receipt", [new(itemId, "Inventory", 2m, 12.5m)]));
+            Assert.True(ordered.Succeeded, ordered.ErrorMessage);
+            Guid orderLineId; string orderToken;
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var order = await db.PurchaseOrders.SingleAsync(item => item.Id == ordered.Id);
+                Assert.True((await transactions.ApprovePurchaseOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded);
+                orderLineId = await db.PurchaseOrderLines.Where(item => item.PurchaseOrderId == order.Id).Select(item => item.Id).SingleAsync();
+                orderToken = await db.PurchaseOrders.Where(item => item.Id == order.Id).Select(item => item.ConcurrencyToken).SingleAsync();
+            }
+            var posted = await transactions.ReceivePurchaseOrderAsync(new(ordered.Id!.Value, "RCV-PG-RECEIPT-MIGRATION", new DateOnly(2026, 8, 2), [new(orderLineId, 2m)], orderToken));
+            Assert.True(posted.Succeeded, posted.ErrorMessage);
         }
 
         await using (var connection = new NpgsqlConnection(connectionString))
@@ -134,6 +160,8 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
                 DROP TABLE "AccountActionTokens";
                 ALTER TABLE "Users" DROP COLUMN "EmailConfirmedAtUtc";
                 ALTER TABLE "Users" DROP COLUMN "EmailLookupHash";
+                ALTER TABLE "InventoryReceiptLines" DROP COLUMN "TransactionAmount";
+                ALTER TABLE "InventoryReceipts" DROP COLUMN "ExchangeRateDirection", DROP COLUMN "ExchangeRateEffectiveOn", DROP COLUMN "ExchangeRateId", DROP COLUMN "ExchangeRateSource", DROP COLUMN "ExchangeRateSourceReference", DROP COLUMN "ExchangeRateToBase", DROP COLUMN "TransactionAmount", DROP COLUMN "TransactionCurrency";
                 """;
             await command.ExecuteNonQueryAsync();
         }
@@ -142,6 +170,8 @@ public sealed class PostgresSchemaUpgradeTests : IDisposable
 
         await using var verified = new NpgsqlConnection(connectionString);
         await verified.OpenAsync();
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"InventoryReceipts\" WHERE \"ReceiptNumber\" = 'RCV-PG-RECEIPT-MIGRATION' AND \"TransactionCurrency\" = 'USD' AND \"TransactionAmount\" = \"TotalAmount\" AND \"ExchangeRateToBase\" = 1 AND \"ExchangeRateEffectiveOn\" = \"ReceivedOn\" AND \"ExchangeRateSource\" = 'Company base currency' AND \"ExchangeRateDirection\" = 'Base';"));
+        Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"InventoryReceiptLines\" WHERE \"InventoryReceiptId\" IN (SELECT \"Id\" FROM \"InventoryReceipts\" WHERE \"ReceiptNumber\" = 'RCV-PG-RECEIPT-MIGRATION') AND \"TransactionAmount\" = \"LineTotal\";"));
         Assert.Equal(13L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"BrassLedgerSchemaVersions\";"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826014843_InitialCurrentSchema';"));
         Assert.Equal(1L, await ScalarLongAsync(verified, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260826025706_AddAccountingSchedules';"));
