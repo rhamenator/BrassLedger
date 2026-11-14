@@ -3694,7 +3694,9 @@ public sealed partial class AccountingTransactionService(
         var claim = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         if (Guid.TryParse(claim, out var id)) return id;
         if (httpContext is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
-        return await db.Companies.Select(x => x.Id).FirstAsync(ct);
+        var companyIds = await db.Companies.Select(company => company.Id).Take(2).ToArrayAsync(ct);
+        if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
+        return companyIds[0];
     }
 
     private static async Task<string> ResolveBankLedgerAccountNumberAsync(BrassLedgerDbContext db, Guid companyId, BankAccount bank, CancellationToken ct)

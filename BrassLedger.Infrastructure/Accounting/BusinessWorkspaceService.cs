@@ -28,9 +28,14 @@ public sealed class BusinessWorkspaceService(
         var claimValue = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         if (httpContext is not null && !Guid.TryParse(claimValue, out _)) throw new UnauthorizedAccessException("An authenticated company context is required.");
         var companies = dbContext.Companies.AsNoTracking();
-        var company = Guid.TryParse(claimValue, out var companyId)
-            ? await companies.SingleAsync(x => x.Id == companyId, cancellationToken)
-            : await companies.OrderBy(x => x.Name).FirstAsync(cancellationToken);
+        Company company;
+        if (Guid.TryParse(claimValue, out var companyId)) company = await companies.SingleAsync(x => x.Id == companyId, cancellationToken);
+        else
+        {
+            var availableCompanies = await companies.Take(2).ToArrayAsync(cancellationToken);
+            if (availableCompanies.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
+            company = availableCompanies[0];
+        }
         var users = await dbContext.Users.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsActive).ToListAsync(cancellationToken);
         var accounts = await dbContext.Accounts.AsNoTracking().Where(x => x.CompanyId == company.Id && x.IsActive).OrderBy(x => x.Number).ToListAsync(cancellationToken);
         var trackingDimensions = await dbContext.TrackingDimensionValues.AsNoTracking().Where(x => x.CompanyId == company.Id).OrderBy(x => x.DimensionType).ThenBy(x => x.Code).ToListAsync(cancellationToken);
