@@ -6091,6 +6091,93 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task PayrollDeductionConfiguration_RequiresExplicitCompanyAndIsolatesElections()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var configuration = scope.ServiceProvider.GetRequiredService<IPayrollDeductionConfigurationService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid originalCompanyId; Guid employeeId; Guid secondCompanyId = Guid.NewGuid(); Guid secondEmployeeId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            employeeId = await db.Employees.Where(employee => employee.CompanyId == originalCompanyId).Select(employee => employee.Id).FirstAsync();
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Deduction isolation subsidiary", LegalName = "Deduction Isolation Subsidiary Ltd.", TaxId = "DED-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            db.Employees.Add(new Employee { Id = secondEmployeeId, CompanyId = secondCompanyId, EmployeeNumber = "DED-ISO-EMP", FirstName = "Isolation", LastName = "Employee", IsActive = true });
+            db.Accounts.Add(new GeneralLedgerAccount { Id = Guid.NewGuid(), CompanyId = secondCompanyId, Number = "2200", Name = "Deduction liabilities", Type = AccountType.Liability, IsActive = true });
+            await db.SaveChangesAsync();
+        }
+        var planRequest = new SavePayrollDeductionPlanRequest(null, "ISO-DED", "Isolation deduction", "Other", "Fixed", 10m, 0m, false, false, false, false, false, "2200", 10, null, null, 0m, "None", "{}", "", null, new DateOnly(2026, 1, 1), null, true);
+        var electionRequest = new SaveEmployeePayrollDeductionElectionRequest(null, employeeId, Guid.NewGuid(), null, null, null, "{}", new DateOnly(2026, 1, 1), null, true);
+
+        var readError = await Assert.ThrowsAsync<InvalidOperationException>(() => configuration.GetAsync());
+        Assert.Contains("explicit company context", readError.Message, StringComparison.OrdinalIgnoreCase);
+        var planError = await Assert.ThrowsAsync<InvalidOperationException>(() => configuration.SavePlanAsync(planRequest));
+        Assert.Contains("explicit company context", planError.Message, StringComparison.OrdinalIgnoreCase);
+        var electionError = await Assert.ThrowsAsync<InvalidOperationException>(() => configuration.SaveElectionAsync(electionRequest));
+        Assert.Contains("explicit company context", electionError.Message, StringComparison.OrdinalIgnoreCase);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.PayrollDeductionPlans.AnyAsync(plan => plan.Code == "ISO-DED"));
+            Assert.False(await db.EmployeePayrollDeductionElections.AnyAsync(election => election.EmployeeId == employeeId));
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(entry => entry.Action == "payroll-deduction-plan.created" && entry.DetailJson.Contains("ISO-DED")));
+        }
+
+        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollManage),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)], "test"))
+        };
+        ActAs(originalCompanyId);
+        var savedPlan = await configuration.SavePlanAsync(planRequest);
+        Assert.True(savedPlan.Succeeded, savedPlan.ErrorMessage);
+        var savedElection = await configuration.SaveElectionAsync(electionRequest with { PayrollDeductionPlanId = savedPlan.Id!.Value });
+        Assert.True(savedElection.Succeeded, savedElection.ErrorMessage);
+        var original = await configuration.GetAsync();
+        var originalPlan = Assert.Single(original.Plans, plan => plan.Id == savedPlan.Id);
+        var originalElection = Assert.Single(original.Elections, election => election.Id == savedElection.Id);
+
+        ActAs(secondCompanyId);
+        var second = await configuration.GetAsync();
+        Assert.DoesNotContain(second.Plans, plan => plan.Id == savedPlan.Id);
+        Assert.DoesNotContain(second.Elections, election => election.Id == savedElection.Id);
+        var crossCompanyPlanUpdate = await configuration.SavePlanAsync(planRequest with { Id = savedPlan.Id, Name = "Wrong company edit", ConcurrencyToken = originalPlan.ConcurrencyToken });
+        Assert.False(crossCompanyPlanUpdate.Succeeded);
+        Assert.Contains("not found", crossCompanyPlanUpdate.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var crossCompany = await configuration.SaveElectionAsync(electionRequest with { EmployeeId = secondEmployeeId, PayrollDeductionPlanId = savedPlan.Id!.Value });
+        Assert.False(crossCompany.Succeeded);
+        Assert.Equal("Deduction plan not found in the active company.", crossCompany.ErrorMessage);
+        var secondPlan = await configuration.SavePlanAsync(planRequest);
+        Assert.True(secondPlan.Succeeded, secondPlan.ErrorMessage);
+        var crossCompanyEmployee = await configuration.SaveElectionAsync(electionRequest with { PayrollDeductionPlanId = secondPlan.Id!.Value });
+        Assert.Equal("Employee not found in the active company.", crossCompanyEmployee.ErrorMessage);
+        var crossCompanyElectionUpdate = await configuration.SaveElectionAsync(electionRequest with { Id = savedElection.Id, EmployeeId = secondEmployeeId, PayrollDeductionPlanId = secondPlan.Id!.Value, ConcurrencyToken = originalElection.ConcurrencyToken });
+        Assert.False(crossCompanyElectionUpdate.Succeeded);
+        Assert.Contains("not found", crossCompanyElectionUpdate.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        ActAs(Guid.NewGuid());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => configuration.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => configuration.SavePlanAsync(planRequest with { Code = "ISO-UNKNOWN" }));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var persistedPlan = await db.PayrollDeductionPlans.SingleAsync(plan => plan.Id == savedPlan.Id);
+            var persistedElection = await db.EmployeePayrollDeductionElections.SingleAsync(election => election.Id == savedElection.Id);
+            Assert.Equal(originalCompanyId, persistedPlan.CompanyId);
+            Assert.Equal(originalPlan.ConcurrencyToken, persistedPlan.ConcurrencyToken);
+            Assert.Equal(originalPlan.Name, persistedPlan.Name);
+            Assert.Equal(originalCompanyId, persistedElection.CompanyId);
+            Assert.Equal(originalElection.ConcurrencyToken, persistedElection.ConcurrencyToken);
+            Assert.False(await db.PayrollDeductionPlans.AnyAsync(plan => plan.Code == "ISO-UNKNOWN"));
+            Assert.True(await db.BusinessAuditEntries.AnyAsync(entry => entry.CompanyId == originalCompanyId && entry.Action == "payroll-deduction-plan.created" && entry.EntityId == savedPlan.Id));
+            Assert.True(await db.BusinessAuditEntries.AnyAsync(entry => entry.CompanyId == originalCompanyId && entry.Action == "employee-payroll-deduction-election.created" && entry.EntityId == savedElection.Id));
+        }
+    }
+
+    [Fact]
     public async Task PayrollDeductionPlans_AreEffectiveDatedAuditableAndApplyFederalGarnishmentLimit()
     {
         using var services = CreateServiceProvider();
