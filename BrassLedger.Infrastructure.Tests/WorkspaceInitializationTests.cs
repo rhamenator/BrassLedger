@@ -3832,10 +3832,20 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var relabel = await transactions.SavePurchaseOrderAsync(request with { Id = saved.Id, ConcurrencyToken = token, Currency = "USD" });
         Assert.False(relabel.Succeeded); Assert.Contains("cannot be changed", relabel.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var approved = await transactions.ApprovePurchaseOrderAsync(new(saved.Id!.Value, token)); Assert.True(approved.Succeeded, approved.ErrorMessage);
+        Guid secondItemId;
+        await using (var db = await factory.CreateDbContextAsync()) secondItemId = await db.InventoryItems.Where(item => item.Sku == "FG-200").Select(item => item.Id).SingleAsync();
+        var roundingOrder = await transactions.SavePurchaseOrderAsync(new(null, vendorId, "PO-FX-ROUND-1", new DateOnly(2026, 8, 20), null, "Per-line commitment rounding", [new(itemId, "First small line", 0.6m, 0.01m, projectId), new(secondItemId, "Second small line", 0.6m, 0.01m, projectId)], Currency: "CAD"));
+        Assert.True(roundingOrder.Succeeded, roundingOrder.ErrorMessage);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var order = await db.PurchaseOrders.SingleAsync(candidate => candidate.Id == roundingOrder.Id);
+            Assert.Equal(0.02m, order.TotalAmount);
+            Assert.True((await transactions.ApprovePurchaseOrderAsync(new(order.Id, order.ConcurrencyToken))).Succeeded);
+        }
         var projectWorkspace = (await workspaceService.GetWorkspaceAsync()).Projects;
         Assert.Equal(previousCommitments, projectWorkspace.Jobs.Single(project => project.Id == projectId).Commitments);
         var foreignCommitment = Assert.Single(projectWorkspace.ForeignCommitments!, commitment => commitment.ProjectJobId == projectId && commitment.Currency == "CAD");
-        Assert.Equal(projectId, foreignCommitment.ProjectJobId); Assert.Equal("CAD", foreignCommitment.Currency); Assert.Equal(100m, foreignCommitment.Amount);
+        Assert.Equal(projectId, foreignCommitment.ProjectJobId); Assert.Equal("CAD", foreignCommitment.Currency); Assert.Equal(100.02m, foreignCommitment.Amount);
         await using (var db = await factory.CreateDbContextAsync()) token = await db.PurchaseOrders.Where(order => order.Id == saved.Id).Select(order => order.ConcurrencyToken).SingleAsync();
         var blocked = await transactions.ReceivePurchaseOrderAsync(new(saved.Id.Value, "RCV-FX-GUARD-1", new DateOnly(2026, 8, 21), [new ReceivePurchaseOrderLineRequest(lineId, 2m)], token));
         Assert.False(blocked.Succeeded); Assert.Contains("dated base-currency inventory valuation", blocked.ErrorMessage, StringComparison.OrdinalIgnoreCase);

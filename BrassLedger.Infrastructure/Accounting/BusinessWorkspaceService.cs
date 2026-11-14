@@ -248,7 +248,7 @@ public sealed class BusinessWorkspaceService(
             .ToDictionary(group => group.Key, group => group.Sum(item => item.Amount));
         var projectForeignCommitments = projectCommitmentLines.Where(item => item.Currency != commitmentBaseCurrency)
             .GroupBy(item => new { ProjectJobId = item.Line.ProjectJobId!.Value, item.Currency })
-            .Select(group => new ProjectForeignCommitmentSnapshot(group.Key.ProjectJobId, group.Key.Currency, decimal.Round(group.Sum(item => item.Amount), 2, MidpointRounding.AwayFromZero)))
+            .Select(group => new ProjectForeignCommitmentSnapshot(group.Key.ProjectJobId, group.Key.Currency, group.Sum(item => decimal.Round(item.Amount, 2, MidpointRounding.AwayFromZero))))
             .OrderBy(item => item.Currency).ToArray();
         var invoiceNumbersById = invoices.ToDictionary(invoice => invoice.Id, invoice => invoice.InvoiceNumber);
         var bankAccountNamesById = bankAccounts.ToDictionary(account => account.Id, account => account.Name);
