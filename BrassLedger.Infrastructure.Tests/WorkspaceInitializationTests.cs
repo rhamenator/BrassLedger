@@ -1226,6 +1226,17 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.False(await db.AccountingInterchangeBatches.AnyAsync(batch => batch.FileName == "isolation.csv"));
         }
 
+        var unknownCompanyId = Guid.NewGuid();
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, unknownCompanyId.ToString())], "test")) };
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ExportQuickBooksOnlineCsvAsync("customers"));
+        await using (var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(importCsv)))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "unknown-company.csv")));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.Customers.AnyAsync(customer => customer.CustomerNumber == "ISO-C-001"));
+            Assert.False(await db.AccountingInterchangeBatches.AnyAsync(batch => batch.FileName == "unknown-company.csv"));
+        }
+
         accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, originalCompanyId.ToString())], "test")) };
         var originalExport = await interchange.ExportQuickBooksOnlineCsvAsync("customers");
         Assert.NotNull(originalExport);
