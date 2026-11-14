@@ -18,6 +18,8 @@ The base-currency invoice-match path also checks the linked order's retained cur
 3. A shipment, supplier return, landed-cost allocation, invoice-match reversal, receipt reversal, and report must use the retained currency and carrying values of their sources. Each reversal must undo exactly the original base journal, regardless of the current exchange rate.
 4. Within each document and accounting dimension, sum rounded line postings to the posted header. Allocate rounding residual deterministically once; do not independently round a unit cost and then assume quantity times that rounded unit cost equals the translated document amount. The existing two-decimal `InventoryItem.UnitCost` and `InventoryReceiptLine.UnitCost` require an explicit policy for residual carrying value before receiving can be enabled.
 
+For example, ten items received at CAD 10 each with a receipt rate of USD 0.75 per CAD create USD 75 of inventory and GRNI. If the vendor invoices all ten at CAD 11 each when the bill rate is USD 0.80 per CAD, the payable is USD 88: debit GRNI USD 75, debit purchase-price variance USD 8, debit exchange loss USD 5, and credit AP USD 88. A four-item first invoice would clear USD 30 of GRNI, recognize USD 3.20 of price variance and USD 2 of exchange loss, and create USD 35.20 of AP. The remaining six-item invoice must clear exactly the retained USD 45, including any residual cents from more difficult rates and quantities. These examples define expected journal balancing; they do not authorize receipt posting before the full lifecycle is implemented.
+
 ## Acceptance cases
 
 - Direct and inverse rate pairs; wrong company, inactive, future, wrong pair or wrong type; a rate changed after posting; closed period and stale token.
