@@ -14,6 +14,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PdfSharp.Pdf.IO;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace BrassLedger.Infrastructure.Tests;
 
@@ -1290,6 +1291,84 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.Equal(rolesBefore, await db.AccessRoles.CountAsync());
             Assert.Equal(usersBefore, await db.Users.CountAsync());
         }
+    }
+
+    [Fact]
+    public async Task FakeDataTool_CreatesDisposableWorkspaceAndRejectsReuse()
+    {
+        var configurationName = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
+            ?? throw new InvalidOperationException("The test build configuration could not be determined.");
+        var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var toolPath = Path.Combine(repositoryRoot, "BrassLedger.Tools", "bin", configurationName, "net10.0", "BrassLedger.Tools.dll");
+        Assert.True(File.Exists(toolPath), $"The fake-data tool was not built at {toolPath}.");
+        var dataRoot = Path.Combine(_contentRootPath, "disposable-demo-workspace");
+        Assert.False(Directory.Exists(dataRoot));
+
+        async Task<(int ExitCode, string Output, string Error)> RunToolAsync(string root, bool confirm = true)
+        {
+            var startInfo = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                WorkingDirectory = _contentRootPath
+            };
+            startInfo.ArgumentList.Add(toolPath);
+            startInfo.ArgumentList.Add("populate-fake-data");
+            if (confirm) startInfo.ArgumentList.Add("--confirm");
+            startInfo.ArgumentList.Add("--data-root");
+            startInfo.ArgumentList.Add(root);
+            using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("The fake-data tool did not start.");
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException)
+            {
+                process.Kill(entireProcessTree: true);
+                throw new TimeoutException("The fake-data tool did not finish within two minutes.");
+            }
+            return (process.ExitCode, await outputTask, await errorTask);
+        }
+
+        var missingConfirmation = await RunToolAsync(dataRoot, confirm: false);
+        Assert.Equal(2, missingConfirmation.ExitCode);
+        Assert.False(Directory.Exists(dataRoot));
+        var existingEmptyRoot = Path.Combine(_contentRootPath, "existing-empty-workspace");
+        Directory.CreateDirectory(existingEmptyRoot);
+        var existingRootResult = await RunToolAsync(existingEmptyRoot);
+        Assert.Equal(2, existingRootResult.ExitCode);
+        Assert.Contains("existing path", existingRootResult.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(existingEmptyRoot));
+
+        var firstRun = await RunToolAsync(dataRoot);
+        Assert.True(firstRun.ExitCode == 0, firstRun.Output + Environment.NewLine + firstRun.Error);
+        Assert.Contains("Customers added:", firstRun.Output, StringComparison.Ordinal);
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Storage:DataRoot"] = dataRoot,
+                ["ConnectionStrings:Sqlite"] = $"Data Source={Path.Combine(dataRoot, "brassledger.db")};Pooling=False"
+            })
+            .Build();
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: false);
+        using var services = serviceCollection.BuildServiceProvider();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        Assert.Single(await db.Companies.ToListAsync());
+        Assert.True(await db.Customers.CountAsync() > 0);
+        Assert.True(await db.Users.CountAsync() > 1);
+        var customersBefore = await db.Customers.CountAsync();
+        var usersBefore = await db.Users.CountAsync();
+
+        var secondRun = await RunToolAsync(dataRoot);
+        Assert.Equal(2, secondRun.ExitCode);
+        Assert.Contains("existing path", secondRun.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(customersBefore, await db.Customers.CountAsync());
+        Assert.Equal(usersBefore, await db.Users.CountAsync());
     }
 
     [Fact]

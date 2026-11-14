@@ -28,6 +28,7 @@
     <ProjectReference Include="..\BrassLedger.Infrastructure\BrassLedger.Infrastructure.csproj" />
     <ProjectReference Include="..\BrassLedger.Migrations.PostgreSql\BrassLedger.Migrations.PostgreSql.csproj" />
     <ProjectReference Include="..\BrassLedger.Migrations.Sqlite\BrassLedger.Migrations.Sqlite.csproj" />
+    <ProjectReference Include="..\BrassLedger.Tools\BrassLedger.Tools.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
