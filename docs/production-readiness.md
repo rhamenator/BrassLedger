@@ -8,6 +8,8 @@ BrassLedger is under active production-readiness development. A successful build
 
 The inventory purchasing workflow currently supports controlled purchase requisitions, purchase orders, partial receiving, multiple partial supplier invoices for one receipt, independent invoice review, posting, exact reversal, landed-cost allocation, and supplier returns.
 
+These verified receiving and matching paths use base-currency purchase orders. Foreign-currency purchase orders retain their commercial currency, but receiving is guarded until dated inventory valuation, bill-date matching, and explicit exchange movement satisfy the [foreign inventory receipt contract](foreign-inventory-receipt-design.md). Purchase-order and receipt inputs reject quantities that round to zero at four-decimal storage precision.
+
 Purchase-invoice matching records receipt accrual, actual invoice value, matched quantity, unmatched quantity variance, and price variance separately. Draft, submitted, approved, rejected, posted, cancelled, and reversed states retain actor, time, reason, source, and journal provenance. The preparer cannot decide a match, and the reviewer cannot post it. Supplier returns distinguish invoiced quantities from uninvoiced receipt accruals and can consume quantities across multiple partial invoices.
 
 SQLite and PostgreSQL have separate versioned migrations for this schema. Existing receipt-linked bill and supplier-return data is backfilled. Databases that already contain the new schema but have lost migration history are adopted without replaying incompatible column additions. Downgrade across this migration is deliberately prohibited because the former one-bill-per-receipt schema cannot preserve the new provenance.

@@ -3485,6 +3485,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
         var staleReceipt = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id!.Value, "RCV-STALE-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 1m)], "stale-token"));
         Assert.False(staleReceipt.Succeeded); Assert.Contains("changed", staleReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var unrepresentableReceipt = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id.Value, "RCV-TINY-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 0.00001m)], approvedToken));
+        Assert.False(unrepresentableReceipt.Succeeded); Assert.Contains("positive receipt quantity", unrepresentableReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var overReceipt = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id.Value, "RCV-OVER-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 6m)], approvedToken));
         Assert.False(overReceipt.Succeeded); Assert.Contains("exceeds", overReceipt.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var received = await transactions.ReceivePurchaseOrderAsync(new ReceivePurchaseOrderRequest(saved.Id!.Value, "RCV-RECEIVE-1", new DateOnly(2026, 8, 3), [new ReceivePurchaseOrderLineRequest(poLineId, 2m)], approvedToken));
@@ -3757,6 +3759,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var item = await db.InventoryItems.SingleAsync(candidate => candidate.Sku == "RM-220"); itemId = item.Id; startingQuantity = item.QuantityOnHand;
         }
         var request = new SavePurchaseOrderRequest(null, vendorId, "PO-FX-GUARD-1", new DateOnly(2026, 8, 20), null, "Foreign order before receipt valuation", [new PurchaseOrderLineRequest(itemId, "Foreign fasteners", 2m, 50m)], Currency: "CAD");
+        var unrepresentable = await transactions.SavePurchaseOrderAsync(request with { OrderNumber = "PO-FX-TINY-1", Lines = [new PurchaseOrderLineRequest(itemId, "Unrepresentable quantity", 0.00001m, 50m)] });
+        Assert.False(unrepresentable.Succeeded);
+        Assert.Contains("positive quantity", unrepresentable.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var malformed = await transactions.SavePurchaseOrderAsync(request with { Currency = "C4D" }); Assert.False(malformed.Succeeded); Assert.Contains("currency", malformed.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         var saved = await transactions.SavePurchaseOrderAsync(request); Assert.True(saved.Succeeded, saved.ErrorMessage);
         Guid lineId; string token;
