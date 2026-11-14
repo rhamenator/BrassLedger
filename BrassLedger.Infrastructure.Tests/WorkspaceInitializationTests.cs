@@ -821,9 +821,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var manifestPath = Path.Combine(backupDirectory, "manifest.json");
         var manifest = await File.ReadAllTextAsync(manifestPath);
         await File.WriteAllTextAsync(manifestPath, "{\"backupId\":\"legacy\",\"format\":\"sqlite-vacuum-into-v1\",\"keyFiles\":[\"key-example.xml\"]}");
-        var legacyManifest = await backupService.VerifyBackupAsync(backup.BackupId!);
-        Assert.False(legacyManifest.Succeeded);
-        Assert.Contains("Legacy v1", legacyManifest.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var originalBackupMode = OperatingSystem.IsWindows() ? default : File.GetUnixFileMode(backupDirectory);
+        try
+        {
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(backupDirectory, originalBackupMode | UnixFileMode.GroupRead | UnixFileMode.GroupExecute);
+            var legacyManifest = await backupService.VerifyBackupAsync(backup.BackupId!);
+            Assert.False(legacyManifest.Succeeded);
+            Assert.Contains("Legacy v1", legacyManifest.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        }
+        finally { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(backupDirectory, originalBackupMode); }
         await File.WriteAllTextAsync(manifestPath, manifest);
 
         var sourceKeyPath = Path.Combine(paths.KeysDirectory, Path.GetFileName(keyPath));

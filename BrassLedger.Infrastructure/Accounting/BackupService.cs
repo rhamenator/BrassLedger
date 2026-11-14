@@ -185,14 +185,14 @@ public sealed class BackupService(IDbContextFactory<BrassLedgerDbContext> dbCont
             var backupRoot = Path.GetDirectoryName(directory)!;
             if (IsLink(backupRoot) || IsLink(directory) || IsLink(databasePath) || IsLink(manifestPath))
                 return new(false, "Backup directory or file is a symbolic link.", backupId);
-            if (!HasPrivateUnixMode(backupRoot) || !HasPrivateUnixMode(directory)
-                || !HasPrivateUnixMode(databasePath) || !HasPrivateUnixMode(manifestPath))
-                return new(false, "Backup permissions are not owner-only or could not be verified.", backupId);
             var manifestJson = await File.ReadAllTextAsync(manifestPath, cancellationToken);
             using var manifestDocument = JsonDocument.Parse(manifestJson);
             if (manifestDocument.RootElement.TryGetProperty("format", out var format)
                 && format.ValueKind == JsonValueKind.String && format.GetString() == "sqlite-vacuum-into-v1")
                 return new(false, "Legacy v1 backup lacks database and key checksum evidence; create a new v2 backup before relying on verification.", backupId);
+            if (!HasPrivateUnixMode(backupRoot) || !HasPrivateUnixMode(directory)
+                || !HasPrivateUnixMode(databasePath) || !HasPrivateUnixMode(manifestPath))
+                return new(false, "Backup permissions are not owner-only or could not be verified.", backupId);
             var manifest = JsonSerializer.Deserialize<BackupManifest>(manifestJson, ManifestJsonOptions);
             if (manifest is null || manifest.Format != BackupFormat || manifest.Database != "brassledger.db"
                 || !IsSha256(manifest.DatabaseSha256) || manifest.ProtectionFiles is not { Length: > 0 }
