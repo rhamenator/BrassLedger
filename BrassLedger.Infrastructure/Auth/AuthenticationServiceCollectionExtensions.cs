@@ -182,9 +182,10 @@ public static class AuthenticationServiceCollectionExtensions
             {
                 policy.RequireAuthenticatedUser();
                 policy.RequireAssertion(context =>
-                    IsSystemAdministrator(context.User)
-                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage)
-                    || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage));
+                    IsPrivilegedMfaSatisfied(context.User)
+                    && (IsSystemAdministrator(context.User)
+                        || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage)
+                        || context.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)));
             });
 
             options.AddPolicy(BrassLedgerAuthorizationPolicies.ManageTaxes, policy =>

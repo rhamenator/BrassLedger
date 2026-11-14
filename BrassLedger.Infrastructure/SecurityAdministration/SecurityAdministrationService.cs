@@ -27,6 +27,9 @@ public sealed class SecurityAdministrationService(
 
     public async Task<SecurityAdministrationSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
+        var canManageUsers = CanManage(BrassLedgerPermissions.UserManage);
+        if (!CanManage(BrassLedgerPermissions.RoleManage) && !canManageUsers)
+            throw new UnauthorizedAccessException("An authenticated security-management context is required.");
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var companyId = await ResolveCompanyIdAsync(dbContext, cancellationToken);
 
@@ -38,42 +41,67 @@ public sealed class SecurityAdministrationService(
             .OrderByDescending(role => role.IsSystemRole)
             .ThenBy(role => role.Name)
             .ToListAsync(cancellationToken);
-        var operators = await dbContext.CompanyMemberships
+        var memberships = await dbContext.CompanyMemberships
             .AsNoTracking()
             .Where(membership => membership.CompanyId == companyId)
             .Join(
                 dbContext.Users,
                 membership => membership.UserId,
                 user => user.Id,
-                (membership, user) => new { membership, user })
-            .OrderBy(item => item.user.UserName)
+                (membership, user) => new { membership.Role, membership.IsActive, UserIsActive = user.IsActive })
             .ToListAsync(cancellationToken);
-        var operatorCounts = operators
-            .Where(item => item.membership.IsActive && item.user.IsActive)
-            .GroupBy(item => item.membership.Role, StringComparer.OrdinalIgnoreCase)
+        var operatorCounts = memberships
+            .Where(item => item.IsActive && item.UserIsActive)
+            .GroupBy(item => item.Role, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
         var roleMfaRequirements = roles.ToDictionary(role => role.Name, role => role.RequiresMfa, StringComparer.OrdinalIgnoreCase);
-        var deliveries = (await dbContext.SecurityEmailOutboxMessages
-            .AsNoTracking()
-            .Join(
-                dbContext.AccountActionTokens.Where(action => action.CompanyId == companyId),
-                message => message.AccountActionTokenId,
-                action => action.Id,
-                (message, action) => new { message, action.Purpose })
-            .ToListAsync(cancellationToken))
-            .OrderByDescending(item => item.message.CreatedAtUtc)
-            .Take(20)
-            .Select(item => new SecurityEmailDeliverySnapshot(
-                item.message.Id,
-                item.Purpose,
-                MaskEmail(item.message.RecipientEmail),
-                item.message.Status,
-                item.message.AttemptCount,
-                item.message.CreatedAtUtc,
-                item.message.NextAttemptAtUtc,
-                item.message.DeliveredAtUtc,
-                item.message.LastError))
-            .ToArray();
+        OperatorAccountSnapshot[] operators = [];
+        SecurityEmailDeliverySnapshot[] deliveries = [];
+        if (canManageUsers)
+        {
+            operators = (await dbContext.CompanyMemberships
+                .AsNoTracking()
+                .Where(membership => membership.CompanyId == companyId)
+                .Join(
+                    dbContext.Users,
+                    membership => membership.UserId,
+                    user => user.Id,
+                    (membership, user) => new { membership, user })
+                .OrderBy(item => item.user.UserName)
+                .ToListAsync(cancellationToken))
+                .Select(item => new OperatorAccountSnapshot(
+                    item.user.Id,
+                    item.user.UserName,
+                    item.user.DisplayName,
+                    item.user.Email,
+                    item.membership.Role,
+                    item.user.IsActive && item.membership.IsActive,
+                    item.user.MfaEnabled,
+                    roleMfaRequirements.GetValueOrDefault(item.membership.Role),
+                    item.user.LastSuccessfulSignInUtc))
+                .ToArray();
+            deliveries = (await dbContext.SecurityEmailOutboxMessages
+                .AsNoTracking()
+                .Join(
+                    dbContext.AccountActionTokens.Where(action => action.CompanyId == companyId),
+                    message => message.AccountActionTokenId,
+                    action => action.Id,
+                    (message, action) => new { message, action.Purpose })
+                .ToListAsync(cancellationToken))
+                .OrderByDescending(item => item.message.CreatedAtUtc)
+                .Take(20)
+                .Select(item => new SecurityEmailDeliverySnapshot(
+                    item.message.Id,
+                    item.Purpose,
+                    MaskEmail(item.message.RecipientEmail),
+                    item.message.Status,
+                    item.message.AttemptCount,
+                    item.message.CreatedAtUtc,
+                    item.message.NextAttemptAtUtc,
+                    item.message.DeliveredAtUtc,
+                    item.message.LastError))
+                .ToArray();
+        }
 
         return new SecurityAdministrationSnapshot(
             Permissions: BrassLedgerPermissions.Definitions
@@ -89,19 +117,8 @@ public sealed class SecurityAdministrationService(
                     operatorCounts.GetValueOrDefault(role.Name),
                     ParsePermissions(role.Permissions)))
                 .ToArray(),
-            Operators: operators
-                .Select(item => new OperatorAccountSnapshot(
-                    item.user.Id,
-                    item.user.UserName,
-                    item.user.DisplayName,
-                    item.user.Email,
-                    item.membership.Role,
-                    item.user.IsActive && item.membership.IsActive,
-                    item.user.MfaEnabled,
-                    roleMfaRequirements.GetValueOrDefault(item.membership.Role),
-                    item.user.LastSuccessfulSignInUtc))
-                .ToArray(),
-            SecurityEmailDeliveryConfigured: accountActionService.EmailDeliveryConfigured,
+            Operators: operators,
+            SecurityEmailDeliveryConfigured: canManageUsers && accountActionService.EmailDeliveryConfigured,
             SecurityEmailDeliveries: deliveries);
     }
 
@@ -481,17 +498,14 @@ public sealed class SecurityAdministrationService(
             throw new UnauthorizedAccessException("The selected company is unavailable.");
         }
 
-        if (httpContext is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
-        var companyIds = await dbContext.Companies.Select(company => company.Id).Take(2).ToArrayAsync(cancellationToken);
-        if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
-        return companyIds[0];
+        throw new UnauthorizedAccessException("An authenticated company context is required.");
     }
 
     private bool CanManage(string permission)
     {
         var user = httpContextAccessor.HttpContext?.User;
-        return user is null
-            || (!user.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+        return user?.Identity?.IsAuthenticated == true
+            && (!user.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
                 && (user.IsInRole("Administrator")
                     || user.IsInRole("Owner/CEO")
                     || user.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
