@@ -1194,6 +1194,64 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task QuickBooksInterchange_RequiresExplicitCompanyWhenMultipleCompaniesExist()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid originalCompanyId; Guid secondCompanyId = Guid.NewGuid();
+        string originalCustomerName;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            originalCustomerName = await db.Customers.Where(customer => customer.CompanyId == originalCompanyId).Select(customer => customer.Name).FirstAsync();
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Interchange isolation subsidiary", LegalName = "Interchange Isolation Subsidiary Ltd.", TaxId = "QBO-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            await db.SaveChangesAsync();
+        }
+
+        var exportError = await Assert.ThrowsAsync<InvalidOperationException>(() => interchange.ExportQuickBooksOnlineCsvAsync("customers"));
+        Assert.Contains("explicit company context", exportError.Message, StringComparison.OrdinalIgnoreCase);
+        const string importCsv = "Display Name,Company Name,Email,Customer Number\r\nIsolation Customer,Isolation Customer,,ISO-C-001\r\n";
+        await using (var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(importCsv)))
+        {
+            var importError = await Assert.ThrowsAsync<InvalidOperationException>(() => interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "isolation.csv")));
+            Assert.Contains("explicit company context", importError.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.Customers.AnyAsync(customer => customer.CustomerNumber == "ISO-C-001"));
+            Assert.False(await db.AccountingInterchangeBatches.AnyAsync(batch => batch.FileName == "isolation.csv"));
+        }
+
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, originalCompanyId.ToString())], "test")) };
+        var originalExport = await interchange.ExportQuickBooksOnlineCsvAsync("customers");
+        Assert.NotNull(originalExport);
+        Assert.Contains(originalCustomerName, System.Text.Encoding.UTF8.GetString(originalExport.Content), StringComparison.Ordinal);
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, secondCompanyId.ToString())], "test")) };
+        var secondExport = await interchange.ExportQuickBooksOnlineCsvAsync("customers");
+        Assert.NotNull(secondExport);
+        var emptySecondCsv = System.Text.Encoding.UTF8.GetString(secondExport.Content);
+        Assert.DoesNotContain(originalCustomerName, emptySecondCsv, StringComparison.Ordinal);
+        Assert.Single(emptySecondCsv.Split("\r\n", StringSplitOptions.RemoveEmptyEntries));
+        await using (var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(importCsv)))
+        {
+            var imported = await interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "isolation.csv"));
+            Assert.True(imported.Succeeded, string.Join("; ", imported.Errors));
+            Assert.Equal(1, imported.ImportedCount);
+        }
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var imported = await db.Customers.SingleAsync(customer => customer.CustomerNumber == "ISO-C-001");
+            Assert.Equal(secondCompanyId, imported.CompanyId);
+            var batch = await db.AccountingInterchangeBatches.SingleAsync(item => item.FileName == "isolation.csv");
+            Assert.Equal(secondCompanyId, batch.CompanyId);
+        }
+    }
+
+    [Fact]
     public async Task InitializeBrassLedgerAsync_UsesConfiguredDataRootWhenProvided()
     {
         var configuredDataRoot = Path.Combine(_contentRootPath, "CustomDataRoot");

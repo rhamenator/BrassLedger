@@ -4,6 +4,8 @@ BrassLedger is under active production-readiness development. A successful build
 
 Accounting transactions and business workspace reads now require an explicit company claim when a database contains multiple companies. A missing HTTP context remains supported for the single-company local/testing path. This guard prevents background or test callers from silently choosing whichever company happens to be returned first by a database provider. An isolated Chromium test confirms that authenticated Projects reads and Purchasing draft creation still work after a second company appears. Other service families and background entry points still need the company-isolation audit tracked in `work-remaining.md`.
 
+QuickBooks CSV interchange uses the same explicit-context rule. With multiple companies, a missing company claim cannot silently export one company's customers or import into arbitrary books; an explicit claim scopes the export. Other integration and payroll services still need this check.
+
 ## Verified checkpoints
 
 ### Controlled inventory purchasing
