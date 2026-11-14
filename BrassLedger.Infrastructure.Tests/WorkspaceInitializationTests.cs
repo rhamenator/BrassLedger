@@ -5489,6 +5489,130 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SsaWageFileServices_RequireExplicitCompanyAndIsolateConfigurations()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var originals = scope.ServiceProvider.GetRequiredService<ISsaOriginalWageFileService>();
+        var corrections = scope.ServiceProvider.GetRequiredService<ISsaWageFileService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid originalCompanyId; var secondCompanyId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "SSA isolation subsidiary", LegalName = "SSA Isolation Subsidiary Ltd.", TaxId = "SSA-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            await db.SaveChangesAsync();
+        }
+        var originalRequest = SsaOriginalConfigurationRequest(2026, true);
+        var correctionRequest = SsaConfigurationRequest(2026, true);
+        var originalReadError = await Assert.ThrowsAsync<InvalidOperationException>(() => originals.GetAsync());
+        Assert.Contains("explicit company context", originalReadError.Message, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.GetAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => originals.DownloadAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.DownloadAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => originals.SaveConfigurationAsync(originalRequest));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.SaveConfigurationAsync(correctionRequest));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => originals.GenerateAsync(new(Guid.NewGuid())));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.GenerateAsync(new(Guid.NewGuid())));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => originals.RecordValidationAsync(new(Guid.NewGuid(), true, "ACCUWAGE-NOCONTEXT", "Reviewed the AccuWage validation evidence.", "token")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.RecordValidationAsync(new(Guid.NewGuid(), true, "ACCUWAGE-NOCONTEXT", "Reviewed the AccuWage validation evidence.", "token")));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.PayrollSsaWageFileConfigurations.AnyAsync());
+            Assert.False(await db.BusinessAuditEntries.AnyAsync(item => item.Action == "ssa-efw2.configuration.created" || item.Action == "ssa-wage-file.configuration.created"));
+        }
+
+        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(System.Security.Claims.ClaimTypes.NameIdentifier, actorId.ToString()),
+                 new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPrepare),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollApprove),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)], "test"))
+        };
+        ActAs(originalCompanyId);
+        var originalEfw2 = await originals.SaveConfigurationAsync(originalRequest);
+        Assert.True(originalEfw2.Succeeded, originalEfw2.ErrorMessage);
+        var originalEfw2c = await corrections.SaveConfigurationAsync(correctionRequest);
+        Assert.True(originalEfw2c.Succeeded, originalEfw2c.ErrorMessage);
+        var originalEfw2Snapshot = Assert.Single((await originals.GetAsync()).Configurations);
+        var originalEfw2cSnapshot = Assert.Single((await corrections.GetAsync()).Configurations);
+        var wrongKindUpdate = await corrections.SaveConfigurationAsync(correctionRequest with { Id = originalEfw2.Id, ConcurrencyToken = originalEfw2Snapshot.ConcurrencyToken });
+        Assert.Equal("SSA wage-file configuration not found.", wrongKindUpdate.ErrorMessage);
+        var reverseKindUpdate = await originals.SaveConfigurationAsync(originalRequest with { Id = originalEfw2c.Id, ConcurrencyToken = originalEfw2cSnapshot.ConcurrencyToken });
+        Assert.Equal("SSA EFW2 configuration not found.", reverseKindUpdate.ErrorMessage);
+        var filingId = Guid.NewGuid(); var correctionId = Guid.NewGuid();
+        var originalFileId = Guid.NewGuid(); var correctionFileId = Guid.NewGuid();
+        var fileBytes = System.Text.Encoding.UTF8.GetBytes("SSA company isolation fixture");
+        var fileBase64 = Convert.ToBase64String(fileBytes);
+        var fileHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fileBytes)).ToLowerInvariant();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.PayrollFilings.Add(new PayrollFiling { Id = filingId, CompanyId = originalCompanyId, FormCode = "W2", TaxYear = 2026, PeriodKey = "2026-YEAR", PeriodStart = new DateOnly(2026, 1, 1), PeriodEnd = new DateOnly(2026, 12, 31), Status = "Approved", DataJson = "{}", SummaryJson = "{}", SourcePayrollRunIdsJson = "[]", SourceDigestSha256 = new string('a', 64), ApprovedDataJson = "{}", ApprovedSourceDigestSha256 = new string('a', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/iw2w3", ContentVersion = "2026", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+            db.PayrollFilingCorrections.Add(new PayrollFilingCorrection { Id = correctionId, CompanyId = originalCompanyId, OriginalPayrollFilingId = filingId, Sequence = 1, FormCode = "W-2c/W-3c", TaxYear = 2026, Process = "Correction", DiscoveredOn = new DateOnly(2026, 8, 1), Explanation = "Test SSA correction company isolation.", Status = "Approved", DataJson = "{}", CorrectedSourceDigestSha256 = new string('b', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/iw2w3", ContentVersion = "2026-W2C", PreparedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+            db.PayrollSsaOriginalWageFiles.Add(new PayrollSsaOriginalWageFile { Id = originalFileId, CompanyId = originalCompanyId, PayrollFilingId = filingId, PayrollSsaWageFileConfigurationId = originalEfw2.Id!.Value, TaxYear = 2026, FileName = "EFW2-2026.txt", ContentBase64 = fileBase64, ContentSha256 = fileHash, SourceDigestSha256 = new string('c', 64), SpecificationVersion = "2026", Status = "GeneratedForAccuWage", GeneratedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+            db.PayrollSsaWageFiles.Add(new PayrollSsaWageFile { Id = correctionFileId, CompanyId = originalCompanyId, PayrollFilingCorrectionId = correctionId, PayrollSsaWageFileConfigurationId = originalEfw2c.Id!.Value, TaxYear = 2026, FileName = "EFW2C-2026.txt", ContentBase64 = fileBase64, ContentSha256 = fileHash, SourceDigestSha256 = new string('d', 64), SpecificationVersion = "2026", Status = "GeneratedForAccuWage", GeneratedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") });
+            await db.SaveChangesAsync();
+        }
+
+        ActAs(secondCompanyId);
+        Assert.Empty((await originals.GetAsync()).Configurations);
+        Assert.Empty((await corrections.GetAsync()).Configurations);
+        Assert.Null(await originals.DownloadAsync(originalFileId));
+        Assert.Null(await corrections.DownloadAsync(correctionFileId));
+        Assert.Equal("Select a currently approved source-locked W-2/W-3 filing from this company.", (await originals.GenerateAsync(new(filingId))).ErrorMessage);
+        Assert.Equal("Select an approved source-locked W-2c/W-3c correction from this company.", (await corrections.GenerateAsync(new(correctionId))).ErrorMessage);
+        Assert.Equal("SSA original wage file not found.", (await originals.RecordValidationAsync(new(originalFileId, true, "ACCUWAGE-CROSS", "Reviewed the AccuWage validation evidence.", "token"))).ErrorMessage);
+        Assert.Equal("SSA wage file not found.", (await corrections.RecordValidationAsync(new(correctionFileId, true, "ACCUWAGE-CROSS", "Reviewed the AccuWage validation evidence.", "token"))).ErrorMessage);
+        var crossOriginal = await originals.SaveConfigurationAsync(originalRequest with { Id = originalEfw2.Id, ConcurrencyToken = originalEfw2Snapshot.ConcurrencyToken });
+        Assert.Equal("SSA EFW2 configuration not found.", crossOriginal.ErrorMessage);
+        var crossCorrection = await corrections.SaveConfigurationAsync(correctionRequest with { Id = originalEfw2c.Id, ConcurrencyToken = originalEfw2cSnapshot.ConcurrencyToken });
+        Assert.Equal("SSA wage-file configuration not found.", crossCorrection.ErrorMessage);
+        var secondEfw2 = await originals.SaveConfigurationAsync(originalRequest);
+        Assert.True(secondEfw2.Succeeded, secondEfw2.ErrorMessage);
+        var secondEfw2c = await corrections.SaveConfigurationAsync(correctionRequest);
+        Assert.True(secondEfw2c.Succeeded, secondEfw2c.ErrorMessage);
+        Assert.Equal(secondEfw2.Id, Assert.Single((await originals.GetAsync()).Configurations).Id);
+        Assert.Equal(secondEfw2c.Id, Assert.Single((await corrections.GetAsync()).Configurations).Id);
+        ActAs(originalCompanyId);
+        Assert.Equal(originalEfw2.Id, Assert.Single((await originals.GetAsync()).Configurations).Id);
+        Assert.Equal(originalEfw2c.Id, Assert.Single((await corrections.GetAsync()).Configurations).Id);
+        Assert.Equal(fileBytes, (await originals.DownloadAsync(originalFileId))!.Content);
+        Assert.Equal(fileBytes, (await corrections.DownloadAsync(correctionFileId))!.Content);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == originalCompanyId && item.UserId == actorId && item.Action == "ssa-efw2.downloaded" && item.EntityId == originalFileId));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == originalCompanyId && item.UserId == actorId && item.Action == "ssa-wage-file.downloaded" && item.EntityId == correctionFileId));
+            (await db.PayrollSsaOriginalWageFiles.SingleAsync(item => item.Id == originalFileId)).ContentBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("tampered original"));
+            (await db.PayrollSsaWageFiles.SingleAsync(item => item.Id == correctionFileId)).ContentBase64 = "not-base64";
+            await db.SaveChangesAsync();
+        }
+        await Assert.ThrowsAsync<InvalidOperationException>(() => originals.DownloadAsync(originalFileId));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.DownloadAsync(correctionFileId));
+        ActAs(Guid.NewGuid());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.DownloadAsync(originalFileId));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.DownloadAsync(correctionFileId));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.SaveConfigurationAsync(originalRequest));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.SaveConfigurationAsync(correctionRequest));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(4, await db.PayrollSsaWageFileConfigurations.CountAsync());
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == originalCompanyId && item.Action == "ssa-efw2.configuration.created" && item.EntityId == originalEfw2.Id));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == secondCompanyId && item.Action == "ssa-efw2.configuration.created" && item.EntityId == secondEfw2.Id));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == originalCompanyId && item.Action == "ssa-wage-file.configuration.created" && item.EntityId == originalEfw2c.Id));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == secondCompanyId && item.Action == "ssa-wage-file.configuration.created" && item.EntityId == secondEfw2c.Id));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == originalCompanyId && item.UserId == actorId && item.Action == "ssa-efw2.integrity-failed" && item.EntityId == originalFileId));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(item => item.CompanyId == originalCompanyId && item.UserId == actorId && item.Action == "ssa-wage-file.integrity-failed" && item.EntityId == correctionFileId));
+        }
+    }
+
+    [Fact]
     public async Task SsaWageFileWorkflow_RequiresApprovedExactYearEncryptsAndRecordsAccuWageOnce()
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
