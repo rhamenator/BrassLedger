@@ -5994,6 +5994,82 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SecurityAdministration_RequiresExplicitCompanyAndIsolatesRoles()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        Guid originalCompanyId; var secondCompanyId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            db.Companies.Add(new Company { Id = secondCompanyId, Name = "Security isolation subsidiary", LegalName = "Security Isolation Subsidiary Ltd.", TaxId = "SEC-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
+            var existingOperatorId = await db.Users.Select(user => user.Id).FirstAsync();
+            db.CompanyMemberships.Add(new CompanyMembership { Id = Guid.NewGuid(), UserId = existingOperatorId, CompanyId = originalCompanyId, Role = "Controller", IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        var request = new BrassLedger.Application.Security.CreateAccessRoleRequest("Isolated reviewer", "Company-specific review role", [BrassLedgerPermissions.ReportingManage]);
+        var readError = await Assert.ThrowsAsync<InvalidOperationException>(() => administration.GetSnapshotAsync());
+        Assert.Contains("explicit company context", readError.Message, StringComparison.OrdinalIgnoreCase);
+        var createError = await Assert.ThrowsAsync<InvalidOperationException>(() => administration.CreateRoleAsync(request));
+        Assert.Contains("explicit company context", createError.Message, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => administration.SetRoleMfaRequirementAsync(request.Name, true));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => administration.InviteOperatorAsync(new("context-invite", "Context Invite", "context@example.test", "Controller")));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.AccessRoles.AnyAsync(role => role.CompanyId == secondCompanyId));
+            Assert.False(await db.AccessRoles.AnyAsync(role => role.Name == request.Name));
+        }
+
+        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage),
+                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)], "test"))
+        };
+        ActAs(originalCompanyId);
+        var originalCreate = await administration.CreateRoleAsync(request);
+        Assert.True(originalCreate.Succeeded, originalCreate.ErrorMessage);
+        Assert.Contains((await administration.GetSnapshotAsync()).Roles, role => role.Name == request.Name);
+        Assert.NotEmpty((await administration.GetSnapshotAsync()).Operators);
+        ActAs(secondCompanyId);
+        var secondSnapshot = await administration.GetSnapshotAsync();
+        Assert.DoesNotContain(secondSnapshot.Roles, role => role.Name == request.Name);
+        Assert.Empty(secondSnapshot.Operators);
+        var secondCreate = await administration.CreateRoleAsync(request);
+        Assert.True(secondCreate.Succeeded, secondCreate.ErrorMessage);
+        Assert.Contains((await administration.GetSnapshotAsync()).Roles, role => role.Name == request.Name);
+        var secondMfa = await administration.SetRoleMfaRequirementAsync(request.Name, true);
+        Assert.True(secondMfa.Succeeded, secondMfa.ErrorMessage);
+        ActAs(originalCompanyId);
+        Assert.False(Assert.Single((await administration.GetSnapshotAsync()).Roles, role => role.Name == request.Name).RequiresMfa);
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, originalCompanyId.ToString())], "test"))
+        };
+        var missingPermission = await administration.CreateRoleAsync(new("Unauthorized reviewer", "Must not be created", [BrassLedgerPermissions.ReportingManage]));
+        Assert.False(missingPermission.Succeeded);
+        Assert.Contains("not authorized", missingPermission.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        ActAs(Guid.NewGuid());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.GetSnapshotAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.CreateRoleAsync(request));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.SetRoleMfaRequirementAsync(request.Name, true));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.InviteOperatorAsync(new("unknown-invite", "Unknown Invite", "unknown@example.test", "Controller")));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.Equal(1, await db.AccessRoles.CountAsync(role => role.CompanyId == originalCompanyId && role.Name == request.Name));
+            Assert.Equal(1, await db.AccessRoles.CountAsync(role => role.CompanyId == secondCompanyId && role.Name == request.Name && role.RequiresMfa));
+            Assert.False(await db.AccessRoles.AnyAsync(role => role.Name == "Unauthorized reviewer"));
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == secondCompanyId && entry.Action == "security.role.mfa-requirement-changed"));
+        }
+    }
+
+    [Fact]
     public async Task SecurityAdministration_SeparatesRoleAndUserManagementPermissions()
     {
         using var services = CreateServiceProvider();

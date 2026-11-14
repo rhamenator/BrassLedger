@@ -477,15 +477,14 @@ public sealed class SecurityAdministrationService(
         var claimValue = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         if (Guid.TryParse(claimValue, out var companyId))
         {
-            return companyId;
+            if (await dbContext.Companies.AnyAsync(company => company.Id == companyId, cancellationToken)) return companyId;
+            throw new UnauthorizedAccessException("The selected company is unavailable.");
         }
 
         if (httpContext is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
-        return await dbContext.Companies
-            .AsNoTracking()
-            .OrderBy(company => company.Name)
-            .Select(company => company.Id)
-            .FirstAsync(cancellationToken);
+        var companyIds = await dbContext.Companies.Select(company => company.Id).Take(2).ToArrayAsync(cancellationToken);
+        if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
+        return companyIds[0];
     }
 
     private bool CanManage(string permission)
