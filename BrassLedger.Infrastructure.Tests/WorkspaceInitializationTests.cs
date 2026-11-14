@@ -694,6 +694,57 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(rehearsal.CompanyCount > 0);
         Assert.True(rehearsal.JournalEntryCount > 0);
         Assert.True(rehearsal.DataProtectionKeyCount > 0);
+        Assert.False(rehearsal.OffMachineKeyRecoveryVerified);
+
+        var paths = scope.ServiceProvider.GetRequiredService<BrassLedgerStoragePaths>();
+        var backupDirectory = Path.Combine(paths.DataDirectory, "backups", backup.BackupId!);
+        var keyPath = Directory.EnumerateFiles(Path.Combine(backupDirectory, "keys")).First();
+        var originalKey = await File.ReadAllBytesAsync(keyPath);
+        await File.AppendAllTextAsync(keyPath, "corrupted copy");
+        var alteredKey = await backupService.VerifyBackupAsync(backup.BackupId!);
+        Assert.False(alteredKey.Succeeded);
+        Assert.Contains("file checksum", alteredKey.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var blockedRehearsal = await backupService.RehearseRestoreAsync(backup.BackupId!);
+        Assert.False(blockedRehearsal.Succeeded);
+        Assert.Contains("file checksum", blockedRehearsal.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await File.WriteAllBytesAsync(keyPath, originalKey);
+        Assert.True((await backupService.VerifyBackupAsync(backup.BackupId!)).Succeeded);
+        File.Delete(keyPath);
+        var missingKey = await backupService.VerifyBackupAsync(backup.BackupId!);
+        Assert.False(missingKey.Succeeded);
+        Assert.Contains("protection files", missingKey.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await File.WriteAllBytesAsync(keyPath, originalKey);
+
+        var databasePath = Path.Combine(backupDirectory, "brassledger.db");
+        await File.AppendAllTextAsync(databasePath, "corrupted copy");
+        var alteredDatabase = await backupService.VerifyBackupAsync(backup.BackupId!);
+        Assert.False(alteredDatabase.Succeeded);
+        Assert.Contains("database checksum", alteredDatabase.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        var manifestPath = Path.Combine(backupDirectory, "manifest.json");
+        var manifest = await File.ReadAllTextAsync(manifestPath);
+        await File.WriteAllTextAsync(manifestPath, "{\"backupId\":\"legacy\",\"format\":\"sqlite-vacuum-into-v1\",\"keyFiles\":[\"key-example.xml\"]}");
+        var legacyManifest = await backupService.VerifyBackupAsync(backup.BackupId!);
+        Assert.False(legacyManifest.Succeeded);
+        Assert.Contains("Legacy v1", legacyManifest.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        await File.WriteAllTextAsync(manifestPath, manifest);
+
+        var sourceKeyPath = Path.Combine(paths.KeysDirectory, Path.GetFileName(keyPath));
+        var sourceKey = await File.ReadAllBytesAsync(sourceKeyPath);
+        var backupCount = Directory.EnumerateDirectories(Path.Combine(paths.DataDirectory, "backups")).Count();
+        await File.WriteAllTextAsync(sourceKeyPath, "<key id='incomplete'>");
+        var malformedSource = await backupService.CreateBackupAsync();
+        Assert.False(malformedSource.Succeeded);
+        Assert.Contains("key", malformedSource.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(backupCount, Directory.EnumerateDirectories(Path.Combine(paths.DataDirectory, "backups")).Count());
+        await File.WriteAllBytesAsync(sourceKeyPath, sourceKey);
+
+        var revocationPath = Path.Combine(paths.KeysDirectory, $"revocation-{Guid.NewGuid():D}.xml");
+        await File.WriteAllTextAsync(revocationPath, "<revocation version='1'><revocationDate>2026-01-01T00:00:00Z</revocationDate><key id='*' /></revocation>");
+        var withRevocation = await backupService.CreateBackupAsync();
+        Assert.True(withRevocation.Succeeded, withRevocation.ErrorMessage);
+        Assert.True((await backupService.VerifyBackupAsync(withRevocation.BackupId!)).Succeeded);
+        File.Delete(revocationPath);
     }
 
     [Fact]
