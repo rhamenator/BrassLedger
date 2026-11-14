@@ -37,7 +37,9 @@ else
                 <p class="panel-kicker">Security snapshot</p>
                 <ul class="metric-stack">
                     <li><strong>@Snapshot.Roles.Count</strong><span>Active roles</span></li>
-                    <li><strong>@Snapshot.Operators.Count</strong><span>Operator accounts</span></li>
+                    <AuthorizeView Policy="@BrassLedgerAuthorizationPolicies.ManageUsers" Context="operatorCountAuthorization">
+                        <li><strong>@Snapshot.Operators.Count</strong><span>Operator accounts</span></li>
+                    </AuthorizeView>
                     <li><strong>@Snapshot.Permissions.Count</strong><span>Permission flags</span></li>
                 </ul>
             </aside>

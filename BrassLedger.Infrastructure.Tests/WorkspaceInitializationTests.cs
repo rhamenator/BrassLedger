@@ -7051,6 +7051,72 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SecurityAdministrationPolicy_RejectsMfaEnrollmentPendingManager()
+    {
+        var collection = new ServiceCollection();
+        collection.AddLogging();
+        collection.AddBrassLedgerCookieAuthentication();
+        using var services = collection.BuildServiceProvider();
+        var authorization = services.GetRequiredService<Microsoft.AspNetCore.Authorization.IAuthorizationService>();
+        var pending = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+        [
+            new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage),
+            new(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+        ], "test"));
+        Assert.False((await authorization.AuthorizeAsync(pending, null, BrassLedgerAuthorizationPolicies.AdministerSystem)).Succeeded);
+
+        var enrolled = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage)], "test"));
+        Assert.True((await authorization.AuthorizeAsync(enrolled, null, BrassLedgerAuthorizationPolicies.AdministerSystem)).Succeeded);
+    }
+
+    [Fact]
+    public async Task SecurityAdministration_RejectsMissingAndAnonymousManagerContextsInSingleCompany()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var role = new BrassLedger.Application.Security.CreateAccessRoleRequest("Untrusted background role", "Must not be created", [BrassLedgerPermissions.ReportingManage]);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.GetSnapshotAsync());
+        Assert.False((await administration.CreateRoleAsync(role)).Succeeded);
+        Assert.False((await administration.SetRoleMfaRequirementAsync("Controller", false)).Succeeded);
+        Assert.False((await administration.InviteOperatorAsync(new("untrusted-operator", "Untrusted Operator", "untrusted@example.test", "Controller"))).Succeeded);
+        Assert.False((await administration.RetrySecurityEmailAsync(Guid.NewGuid())).Succeeded);
+
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, "0e561f1b-47b0-4c33-bd9f-1a3298ed29c6"),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage),
+                new(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+            ], "test"))
+        };
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.GetSnapshotAsync());
+        Assert.False((await administration.CreateRoleAsync(role)).Succeeded);
+
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new(System.Security.Claims.ClaimTypes.Role, "Administrator"),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, "0e561f1b-47b0-4c33-bd9f-1a3298ed29c6"),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage)
+            ]))
+        };
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.GetSnapshotAsync());
+        Assert.False((await administration.CreateRoleAsync(role)).Succeeded);
+
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        Assert.False(await db.AccessRoles.AnyAsync(candidate => candidate.Name == role.Name));
+        Assert.False(await db.Users.AnyAsync(candidate => candidate.UserName == "untrusted-operator"));
+    }
+
+    [Fact]
     public async Task SecurityAdministration_RequiresExplicitCompanyAndIsolatesRoles()
     {
         using var services = CreateServiceProvider();
@@ -7069,12 +7135,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await db.SaveChangesAsync();
         }
         var request = new BrassLedger.Application.Security.CreateAccessRoleRequest("Isolated reviewer", "Company-specific review role", [BrassLedgerPermissions.ReportingManage]);
-        var readError = await Assert.ThrowsAsync<InvalidOperationException>(() => administration.GetSnapshotAsync());
-        Assert.Contains("explicit company context", readError.Message, StringComparison.OrdinalIgnoreCase);
-        var createError = await Assert.ThrowsAsync<InvalidOperationException>(() => administration.CreateRoleAsync(request));
-        Assert.Contains("explicit company context", createError.Message, StringComparison.OrdinalIgnoreCase);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => administration.SetRoleMfaRequirementAsync(request.Name, true));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => administration.InviteOperatorAsync(new("context-invite", "Context Invite", "context@example.test", "Controller")));
+        var readError = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.GetSnapshotAsync());
+        Assert.Contains("authenticated security-management context", readError.Message, StringComparison.OrdinalIgnoreCase);
+        var createError = await administration.CreateRoleAsync(request);
+        Assert.False(createError.Succeeded);
+        Assert.Contains("not authorized", createError.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False((await administration.SetRoleMfaRequirementAsync(request.Name, true)).Succeeded);
+        Assert.False((await administration.InviteOperatorAsync(new("context-invite", "Context Invite", "context@example.test", "Controller"))).Succeeded);
         await using (var db = await factory.CreateDbContextAsync())
         {
             Assert.False(await db.AccessRoles.AnyAsync(role => role.CompanyId == secondCompanyId));
@@ -7132,15 +7199,32 @@ public sealed class WorkspaceInitializationTests : IDisposable
         using var services = CreateServiceProvider();
         await services.InitializeBrassLedgerAsync();
         using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var companyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            var operatorId = await db.Users.Select(user => user.Id).FirstAsync();
+            if (!await db.CompanyMemberships.AnyAsync(membership => membership.UserId == operatorId && membership.CompanyId == companyId))
+            {
+                db.CompanyMemberships.Add(new CompanyMembership { Id = Guid.NewGuid(), UserId = operatorId, CompanyId = companyId, Role = "Controller", IsActive = true, GrantedAtUtc = DateTimeOffset.UtcNow });
+                await db.SaveChangesAsync();
+            }
+        }
         var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
 
         accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.UserManage);
+        var userManagerSnapshot = await administration.GetSnapshotAsync();
+        Assert.NotEmpty(userManagerSnapshot.Operators);
         var roleAttempt = await administration.CreateRoleAsync(new BrassLedger.Application.Security.CreateAccessRoleRequest("Escalation", "Should fail", [BrassLedgerPermissions.LedgerManage]));
         Assert.False(roleAttempt.Succeeded);
         Assert.Contains("not authorized", roleAttempt.ErrorMessage);
 
         accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.RoleManage);
+        var roleManagerSnapshot = await administration.GetSnapshotAsync();
+        Assert.Empty(roleManagerSnapshot.Operators);
+        Assert.Empty(roleManagerSnapshot.SecurityEmailDeliveries);
+        Assert.False(roleManagerSnapshot.SecurityEmailDeliveryConfigured);
         var operatorAttempt = await administration.InviteOperatorAsync(new BrassLedger.Application.Security.CreateOperatorInvitationRequest("role-only", "Role Only", "role@example.test", "Controller"));
         Assert.False(operatorAttempt.Succeeded);
         Assert.Contains("not authorized", operatorAttempt.ErrorMessage);

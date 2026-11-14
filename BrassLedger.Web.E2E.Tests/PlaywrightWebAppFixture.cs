@@ -150,6 +150,18 @@ public sealed class PlaywrightWebAppFixture : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
+    public async Task GrantIntegrationAdministratorRoleManagementAsync()
+    {
+        await using var connection = new SqliteConnection(_sqliteConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE "AccessRoles" SET "Permissions" = "Permissions" || '|security.roles.manage'
+            WHERE "TemplateCode" = 'e2e-integration-admin';
+            """;
+        await command.ExecuteNonQueryAsync();
+    }
+
     public async Task CreateForeignRefundRatesAsync()
     {
         await using var connection = new SqliteConnection(_sqliteConnectionString);
