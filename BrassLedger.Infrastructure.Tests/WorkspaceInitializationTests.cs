@@ -561,6 +561,23 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var posted = await transactions.ReceivePurchaseOrderAsync(new(ordered.Id!.Value, "RCV-RECEIPT-MIGRATION", new DateOnly(2026, 8, 2), [new(orderLineId, 2m)], orderToken));
         Assert.True(posted.Succeeded, posted.ErrorMessage);
 
+        var cadCompanyId = Guid.NewGuid();
+        var cadReceiptId = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var cadVendorId = Guid.NewGuid(); var cadItemId = Guid.NewGuid(); var cadOrderId = Guid.NewGuid();
+            var cadOrderLineId = Guid.NewGuid(); var cadJournalId = Guid.NewGuid();
+            db.Companies.Add(new Company { Id = cadCompanyId, Name = "CAD receipt migration company", LegalName = "CAD receipt migration company", BaseCurrency = "CAD", FiscalYearStartMonth = 1 });
+            db.Vendors.Add(new Vendor { Id = cadVendorId, CompanyId = cadCompanyId, VendorNumber = "V-CAD-MIGRATION", Name = "CAD vendor" });
+            db.InventoryItems.Add(new InventoryItem { Id = cadItemId, CompanyId = cadCompanyId, Sku = "CAD-MIGRATION", Description = "CAD inventory", IsActive = true, UnitCost = 12.5m, QuantityOnHand = 3m });
+            db.PurchaseOrders.Add(new PurchaseOrder { Id = cadOrderId, CompanyId = cadCompanyId, VendorId = cadVendorId, OrderNumber = "PO-CAD-MIGRATION", TransactionCurrency = "CAD", OrderedOn = new DateOnly(2026, 8, 1), Status = "Received", TotalAmount = 37.5m });
+            db.PurchaseOrderLines.Add(new PurchaseOrderLine { Id = cadOrderLineId, PurchaseOrderId = cadOrderId, InventoryItemId = cadItemId, Sequence = 1, Description = "CAD inventory", OrderedQuantity = 3m, ReceivedQuantity = 3m, UnitCost = 12.5m, LineTotal = 37.5m });
+            db.JournalEntries.Add(new JournalEntry { Id = cadJournalId, CompanyId = cadCompanyId, EntryNumber = "JE-CAD-MIGRATION", PostedOn = new DateOnly(2026, 8, 2), SourceModule = "Purchasing", Reference = "RCV-CAD-MIGRATION", TotalAmount = 37.5m, IsPosted = true, CreatedAtUtc = DateTimeOffset.UtcNow, PostedAtUtc = DateTimeOffset.UtcNow });
+            db.InventoryReceipts.Add(new InventoryReceipt { Id = cadReceiptId, CompanyId = cadCompanyId, PurchaseOrderId = cadOrderId, JournalEntryId = cadJournalId, ReceiptNumber = "RCV-CAD-MIGRATION", ReceivedOn = new DateOnly(2026, 8, 2), TotalAmount = 37.5m, TransactionCurrency = "CAD", TransactionAmount = 37.5m, ExchangeRateToBase = 1m, ExchangeRateEffectiveOn = new DateOnly(2026, 8, 2), ExchangeRateSource = "Company base currency", ReceivedAtUtc = DateTimeOffset.UtcNow });
+            db.InventoryReceiptLines.Add(new InventoryReceiptLine { Id = Guid.NewGuid(), InventoryReceiptId = cadReceiptId, PurchaseOrderLineId = cadOrderLineId, InventoryItemId = cadItemId, Sequence = 1, Quantity = 3m, UnitCost = 12.5m, LineTotal = 37.5m, TransactionAmount = 37.5m });
+            await db.SaveChangesAsync();
+        }
+
         var databasePath = Path.Combine(_contentRootPath, "App_Data", "brassledger.db");
         await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
         {
@@ -594,6 +611,17 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal("Base", receipt.ExchangeRateDirection);
         Assert.Null(receipt.ExchangeRateId);
         Assert.Equal(line.LineTotal, line.TransactionAmount);
+        var cadReceipt = await migrated.InventoryReceipts.SingleAsync(item => item.Id == cadReceiptId);
+        var cadLine = await migrated.InventoryReceiptLines.SingleAsync(item => item.InventoryReceiptId == cadReceiptId);
+        Assert.Equal(cadCompanyId, cadReceipt.CompanyId);
+        Assert.Equal("CAD", cadReceipt.TransactionCurrency);
+        Assert.Equal(37.5m, cadReceipt.TotalAmount);
+        Assert.Equal(37.5m, cadReceipt.TransactionAmount);
+        Assert.Equal(1m, cadReceipt.ExchangeRateToBase);
+        Assert.Equal(cadReceipt.ReceivedOn, cadReceipt.ExchangeRateEffectiveOn);
+        Assert.Equal("Company base currency", cadReceipt.ExchangeRateSource);
+        Assert.Equal("Base", cadReceipt.ExchangeRateDirection);
+        Assert.Equal(37.5m, cadLine.TransactionAmount);
     }
 
     [Fact]
