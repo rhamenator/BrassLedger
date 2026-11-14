@@ -27,11 +27,12 @@ public sealed class SecurityAdministrationService(
 
     public async Task<SecurityAdministrationSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
-        var canManageUsers = CanManage(BrassLedgerPermissions.UserManage);
-        if (!CanManage(BrassLedgerPermissions.RoleManage) && !canManageUsers)
-            throw new UnauthorizedAccessException("An authenticated security-management context is required.");
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(dbContext, cancellationToken);
+        var authority = await ResolveAuthorityAsync(dbContext, cancellationToken);
+        if (!authority.CanManageRoles && !authority.CanManageUsers)
+            throw new UnauthorizedAccessException("An authenticated security-management context is required.");
+        var canManageUsers = authority.CanManageUsers;
+        var companyId = authority.CompanyId;
 
         await EnsureBuiltInRolesAsync(dbContext, companyId, cancellationToken);
 
@@ -137,7 +138,9 @@ public sealed class SecurityAdministrationService(
         }
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(dbContext, cancellationToken);
+        Guid companyId;
+        try { companyId = await ResolveCompanyIdAsync(dbContext, BrassLedgerPermissions.RoleManage, cancellationToken); }
+        catch (UnauthorizedAccessException) { return SecurityOperationResult.Failure("Current role-management authority is required."); }
 
         await EnsureBuiltInRolesAsync(dbContext, companyId, cancellationToken);
 
@@ -177,7 +180,9 @@ public sealed class SecurityAdministrationService(
         if (string.IsNullOrWhiteSpace(roleName)) return SecurityOperationResult.Failure("Select a valid role.");
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(dbContext, cancellationToken);
+        Guid companyId;
+        try { companyId = await ResolveCompanyIdAsync(dbContext, BrassLedgerPermissions.RoleManage, cancellationToken); }
+        catch (UnauthorizedAccessException) { return SecurityOperationResult.Failure("Current role-management authority is required."); }
         await EnsureBuiltInRolesAsync(dbContext, companyId, cancellationToken);
         var role = await dbContext.AccessRoles.SingleOrDefaultAsync(
             candidate => candidate.CompanyId == companyId && candidate.IsActive && candidate.Name == roleName.Trim(),
@@ -212,7 +217,9 @@ public sealed class SecurityAdministrationService(
     {
         if (!CanManage(BrassLedgerPermissions.UserManage)) return SecurityOperationResult.Failure("You are not authorized to manage operator accounts.");
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(dbContext, cancellationToken);
+        Guid companyId;
+        try { companyId = await ResolveCompanyIdAsync(dbContext, BrassLedgerPermissions.UserManage, cancellationToken); }
+        catch (UnauthorizedAccessException) { return SecurityOperationResult.Failure("Current operator-management authority is required."); }
         var httpContext = httpContextAccessor.HttpContext;
         var result = await accountActionService.IssueInvitationAsync(new AccountInvitationRequest(
             companyId,
@@ -231,7 +238,9 @@ public sealed class SecurityAdministrationService(
         if (!CanManage(BrassLedgerPermissions.UserManage)) return SecurityOperationResult.Failure("You are not authorized to manage security-email delivery.");
         if (!accountActionService.EmailDeliveryConfigured) return SecurityOperationResult.Failure("Security-email delivery is not configured.");
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(dbContext, cancellationToken);
+        Guid companyId;
+        try { companyId = await ResolveCompanyIdAsync(dbContext, BrassLedgerPermissions.UserManage, cancellationToken); }
+        catch (UnauthorizedAccessException) { return SecurityOperationResult.Failure("Current operator-management authority is required."); }
         var record = await dbContext.SecurityEmailOutboxMessages
             .Join(
                 dbContext.AccountActionTokens.Where(action => action.CompanyId == companyId),
@@ -289,7 +298,9 @@ public sealed class SecurityAdministrationService(
 
         var now = timeProvider.GetUtcNow();
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        Guid companyId;
+        try { companyId = await ResolveCompanyIdAsync(db, BrassLedgerPermissions.UserManage, cancellationToken); }
+        catch (UnauthorizedAccessException) { return SecurityOperationResult.Failure("Current operator-management authority is required."); }
         var administrator = await db.Users.SingleOrDefaultAsync(user => user.Id == administratorId && user.IsActive, cancellationToken);
         var administratorMembership = administrator is null ? null : await db.CompanyMemberships.AsNoTracking().SingleOrDefaultAsync(
             membership => membership.UserId == administrator.Id && membership.CompanyId == companyId && membership.IsActive,
@@ -488,18 +499,64 @@ public sealed class SecurityAdministrationService(
         }
     }
 
-    private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext dbContext, string permission, CancellationToken cancellationToken)
     {
-        var httpContext = httpContextAccessor.HttpContext;
-        var claimValue = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
-        if (Guid.TryParse(claimValue, out var companyId))
-        {
-            if (await dbContext.Companies.AnyAsync(company => company.Id == companyId, cancellationToken)) return companyId;
-            throw new UnauthorizedAccessException("The selected company is unavailable.");
-        }
-
-        throw new UnauthorizedAccessException("An authenticated company context is required.");
+        if (permission is not (BrassLedgerPermissions.RoleManage or BrassLedgerPermissions.UserManage))
+            throw new ArgumentOutOfRangeException(nameof(permission));
+        var authority = await ResolveAuthorityAsync(dbContext, cancellationToken);
+        if (permission == BrassLedgerPermissions.RoleManage ? !authority.CanManageRoles : !authority.CanManageUsers)
+            throw new UnauthorizedAccessException("Current security-management authority is required.");
+        return authority.CompanyId;
     }
+
+    private async Task<SecurityAuthority> ResolveAuthorityAsync(BrassLedgerDbContext dbContext, CancellationToken cancellationToken)
+    {
+        var principal = httpContextAccessor.HttpContext?.User;
+        if (principal?.Identity?.IsAuthenticated != true
+            || principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+            || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId)
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId))
+            throw new UnauthorizedAccessException("An authenticated company context is required.");
+
+        var user = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(candidate => candidate.Id == userId && candidate.IsActive, cancellationToken);
+        var session = await dbContext.UserSessions.AsNoTracking().SingleOrDefaultAsync(
+            candidate => candidate.Id == sessionId && candidate.UserId == userId, cancellationToken);
+        var membership = await dbContext.CompanyMemberships.AsNoTracking().SingleOrDefaultAsync(
+            candidate => candidate.UserId == userId && candidate.CompanyId == companyId && candidate.IsActive, cancellationToken);
+        var role = membership is null ? null : await dbContext.AccessRoles.AsNoTracking().SingleOrDefaultAsync(
+            candidate => candidate.CompanyId == companyId && candidate.Name == membership.Role && candidate.IsActive, cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        var claimedStamp = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType);
+        var authenticationMethod = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType);
+        if (user is null || user.LockoutEndUtc > now)
+            throw new UnauthorizedAccessException("The active operator is unavailable.");
+        if (session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= now
+            || !string.Equals(user.SecurityStamp, claimedStamp, StringComparison.Ordinal)
+            || !string.Equals(session.SecurityStamp, claimedStamp, StringComparison.Ordinal)
+            || !string.Equals(session.AuthenticationMethod,
+                authenticationMethod == "mfa" ? "Password + MFA" : authenticationMethod == "pwd" ? "Password" : null,
+                StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("The active session is unavailable.");
+        if (membership is null || role is null
+            || !string.Equals(membership.Role, principal.FindFirstValue(ClaimTypes.Role), StringComparison.Ordinal)
+            || !await dbContext.Companies.AsNoTracking().AnyAsync(company => company.Id == companyId, cancellationToken))
+            throw new UnauthorizedAccessException("The selected company membership or role is unavailable.");
+        if ((role.RequiresMfa && !user.MfaEnabled)
+            || (user.MfaEnabled && !string.Equals(authenticationMethod, "mfa", StringComparison.Ordinal)))
+            throw new UnauthorizedAccessException("Current MFA authentication is required.");
+
+        var permissions = ParsePermissions(role.Permissions);
+        var isSystemAdministrator = role.Name is "Administrator" or "Owner/CEO";
+        return new SecurityAuthority(
+            companyId,
+            (isSystemAdministrator || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage))
+                && (isSystemAdministrator || permissions.Contains(BrassLedgerPermissions.RoleManage, StringComparer.OrdinalIgnoreCase)),
+            (isSystemAdministrator || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage))
+                && (isSystemAdministrator || permissions.Contains(BrassLedgerPermissions.UserManage, StringComparer.OrdinalIgnoreCase)));
+    }
+
+    private readonly record struct SecurityAuthority(Guid CompanyId, bool CanManageRoles, bool CanManageUsers);
 
     private bool CanManage(string permission)
     {

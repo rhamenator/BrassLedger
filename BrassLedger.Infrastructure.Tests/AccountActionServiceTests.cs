@@ -407,11 +407,18 @@ public sealed class AccountActionServiceTests : IDisposable
                 target.UserId, target.CompanyId, firstSession.SessionId!.Value, secondSession.SessionId.Value,
                 accessor.HttpContext.User, "203.0.113.7", "postgres-session-test"));
 
+            var administratorSessionId = Guid.NewGuid();
             await using (var db = await dbFactory.CreateDbContextAsync())
             {
                 var controllerRecord = await db.Users.SingleAsync(user => user.Id == controller.UserId);
                 controllerRecord.MfaEnabled = true;
                 controllerRecord.MfaSecret = "POSTGRES-CONTROLLER-SECRET";
+                (await db.CompanyMemberships.SingleAsync(membership => membership.UserId == controller.UserId && membership.CompanyId == controller.CompanyId)).Role = "Administrator";
+                db.UserSessions.Add(new UserSession
+                {
+                    Id = administratorSessionId, UserId = controller.UserId, SecurityStamp = controllerRecord.SecurityStamp,
+                    AuthenticationMethod = "Password + MFA", CreatedAtUtc = clock.GetUtcNow(), LastSeenAtUtc = clock.GetUtcNow(), ExpiresAtUtc = clock.GetUtcNow().AddHours(1)
+                });
                 var targetRecord = await db.Users.SingleAsync(user => user.Id == target.UserId);
                 targetRecord.MfaEnabled = true;
                 targetRecord.MfaSecret = "POSTGRES-TARGET-SECRET";
@@ -422,7 +429,7 @@ public sealed class AccountActionServiceTests : IDisposable
                 });
                 await db.SaveChangesAsync();
             }
-            accessor.HttpContext = CreateAdministratorContext(controller, includeMfa: true);
+            accessor.HttpContext = CreateAdministratorContext(controller.UserId, controller.CompanyId, controller.SecurityStamp, administratorSessionId, includeMfa: true);
             var administration = scope.ServiceProvider.GetRequiredService<ISecurityAdministrationService>();
             var recovered = await administration.ResetOperatorMfaAsync(new AdministratorMfaRecoveryRequest(
                 target.UserId, target.UserName, BrassLedgerAuthenticationDefaults.SeededPassword,
@@ -483,16 +490,23 @@ public sealed class AccountActionServiceTests : IDisposable
         Assert.DoesNotContain("expires@example.test", failed.LastError, StringComparison.OrdinalIgnoreCase);
 
         var accessor = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>();
-        var administratorId = await db.Users.Where(user => user.UserName == "controller").Select(user => user.Id).SingleAsync();
-        accessor.HttpContext = new DefaultHttpContext
+        var administrator = await db.Users.SingleAsync(user => user.UserName == "controller");
+        administrator.MfaEnabled = true;
+        var administratorMembership = await db.CompanyMemberships.SingleOrDefaultAsync(membership => membership.UserId == administrator.Id && membership.CompanyId == companyId);
+        if (administratorMembership is null)
         {
-            User = new ClaimsPrincipal(new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.NameIdentifier, administratorId.ToString()),
-                new Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
-                new Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)
-            ], "test"))
-        };
+            administratorMembership = new CompanyMembership { Id = Guid.NewGuid(), UserId = administrator.Id, CompanyId = companyId, IsActive = true, GrantedAtUtc = clock.GetUtcNow() };
+            db.CompanyMemberships.Add(administratorMembership);
+        }
+        administratorMembership.Role = "Administrator";
+        var administratorSessionId = Guid.NewGuid();
+        db.UserSessions.Add(new UserSession
+        {
+            Id = administratorSessionId, UserId = administrator.Id, SecurityStamp = administrator.SecurityStamp,
+            AuthenticationMethod = "Password + MFA", CreatedAtUtc = clock.GetUtcNow(), LastSeenAtUtc = clock.GetUtcNow(), ExpiresAtUtc = clock.GetUtcNow().AddHours(1)
+        });
+        await db.SaveChangesAsync();
+        accessor.HttpContext = CreateAdministratorContext(administrator.Id, companyId, administrator.SecurityStamp, administratorSessionId, includeMfa: true);
         var administration = scope.ServiceProvider.GetRequiredService<ISecurityAdministrationService>();
         var delivery = Assert.Single((await administration.GetSnapshotAsync()).SecurityEmailDeliveries);
         Assert.Equal("e***@example.test", delivery.MaskedRecipient);
@@ -546,6 +560,7 @@ public sealed class AccountActionServiceTests : IDisposable
         var target = targetSignIn.User!;
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
         Guid priorSessionId;
+        Guid administratorSessionId;
         string priorStamp;
         await using (var db = await factory.CreateDbContextAsync())
         {
@@ -560,7 +575,14 @@ public sealed class AccountActionServiceTests : IDisposable
             var controllerMembership = await db.CompanyMemberships.SingleAsync(membership => membership.UserId == controller.UserId && membership.CompanyId == controller.CompanyId);
             var targetMembership = await db.CompanyMemberships.SingleAsync(membership => membership.UserId == target.UserId && membership.CompanyId == controller.CompanyId);
             controllerMembership.IsOwner = false;
+            controllerMembership.Role = "Administrator";
             targetMembership.IsOwner = true;
+            administratorSessionId = Guid.NewGuid();
+            db.UserSessions.Add(new UserSession
+            {
+                Id = administratorSessionId, UserId = controller.UserId, SecurityStamp = controllerRecord.SecurityStamp,
+                AuthenticationMethod = "Password + MFA", CreatedAtUtc = clock.GetUtcNow(), LastSeenAtUtc = clock.GetUtcNow(), ExpiresAtUtc = clock.GetUtcNow().AddHours(1)
+            });
             db.MfaRecoveryCodes.Add(new MfaRecoveryCode
             {
                 Id = Guid.NewGuid(), UserId = target.UserId, CodeHash = "recovery-hash", CreatedAtUtc = clock.GetUtcNow()
@@ -591,7 +613,7 @@ public sealed class AccountActionServiceTests : IDisposable
         }
 
         var accessor = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>();
-        accessor.HttpContext = CreateAdministratorContext(controller, includeMfa: false);
+        accessor.HttpContext = CreateAdministratorContext(controller.UserId, controller.CompanyId, controller.SecurityStamp, administratorSessionId, includeMfa: false);
         var administration = scope.ServiceProvider.GetRequiredService<ISecurityAdministrationService>();
         var request = new AdministratorMfaRecoveryRequest(
             target.UserId, target.UserName, BrassLedgerAuthenticationDefaults.SeededPassword,
@@ -600,7 +622,7 @@ public sealed class AccountActionServiceTests : IDisposable
         Assert.False(withoutMfa.Succeeded);
         Assert.Contains("multi-factor", withoutMfa.ErrorMessage);
 
-        accessor.HttpContext = CreateAdministratorContext(controller, includeMfa: true);
+        accessor.HttpContext = CreateAdministratorContext(controller.UserId, controller.CompanyId, controller.SecurityStamp, administratorSessionId, includeMfa: true);
         var wrongPassword = await administration.ResetOperatorMfaAsync(request with { CurrentAdministratorPassword = "incorrect" });
         Assert.False(wrongPassword.Succeeded);
         Assert.Contains("password", wrongPassword.ErrorMessage);
@@ -651,15 +673,18 @@ public sealed class AccountActionServiceTests : IDisposable
         Assert.DoesNotContain("TARGET-SECRET", message.Body, StringComparison.Ordinal);
     }
 
-    private static DefaultHttpContext CreateAdministratorContext(AuthenticatedUser administrator, bool includeMfa)
+    private static DefaultHttpContext CreateAdministratorContext(Guid administratorId, Guid companyId, string securityStamp, Guid sessionId, bool includeMfa)
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, administrator.UserId.ToString()),
-            new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, administrator.CompanyId.ToString()),
+            new(ClaimTypes.NameIdentifier, administratorId.ToString()),
+            new(ClaimTypes.Role, "Administrator"),
+            new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+            new(BrassLedgerAuthenticationDefaults.SessionIdClaimType, sessionId.ToString()),
+            new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, securityStamp),
             new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)
         };
-        if (includeMfa) claims.Add(new Claim(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "mfa"));
+        claims.Add(new Claim(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, includeMfa ? "mfa" : "pwd"));
         var context = new DefaultHttpContext();
         context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.7");
         context.Request.Headers.UserAgent = "xunit-administrator";

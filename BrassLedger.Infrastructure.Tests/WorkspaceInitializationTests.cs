@@ -7135,8 +7135,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await db.SaveChangesAsync();
         }
         var request = new BrassLedger.Application.Security.CreateAccessRoleRequest("Isolated reviewer", "Company-specific review role", [BrassLedgerPermissions.ReportingManage]);
-        var readError = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.GetSnapshotAsync());
-        Assert.Contains("authenticated security-management context", readError.Message, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.GetSnapshotAsync());
         var createError = await administration.CreateRoleAsync(request);
         Assert.False(createError.Succeeded);
         Assert.Contains("not authorized", createError.ErrorMessage, StringComparison.OrdinalIgnoreCase);
@@ -7148,28 +7147,22 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.False(await db.AccessRoles.AnyAsync(role => role.Name == request.Name));
         }
 
-        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
-        {
-            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-                [new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
-                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.RoleManage),
-                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.UserManage)], "test"))
-        };
-        ActAs(originalCompanyId);
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, originalCompanyId, BrassLedgerPermissions.RoleManage, BrassLedgerPermissions.UserManage);
         var originalCreate = await administration.CreateRoleAsync(request);
         Assert.True(originalCreate.Succeeded, originalCreate.ErrorMessage);
         Assert.Contains((await administration.GetSnapshotAsync()).Roles, role => role.Name == request.Name);
         Assert.NotEmpty((await administration.GetSnapshotAsync()).Operators);
-        ActAs(secondCompanyId);
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, secondCompanyId, BrassLedgerPermissions.RoleManage, BrassLedgerPermissions.UserManage);
         var secondSnapshot = await administration.GetSnapshotAsync();
         Assert.DoesNotContain(secondSnapshot.Roles, role => role.Name == request.Name);
-        Assert.Empty(secondSnapshot.Operators);
+        Assert.Contains(secondSnapshot.Operators, user => user.UserName == "operations");
+        Assert.DoesNotContain(secondSnapshot.Operators, user => user.UserName == "controller");
         var secondCreate = await administration.CreateRoleAsync(request);
         Assert.True(secondCreate.Succeeded, secondCreate.ErrorMessage);
         Assert.Contains((await administration.GetSnapshotAsync()).Roles, role => role.Name == request.Name);
         var secondMfa = await administration.SetRoleMfaRequirementAsync(request.Name, true);
         Assert.True(secondMfa.Succeeded, secondMfa.ErrorMessage);
-        ActAs(originalCompanyId);
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, originalCompanyId, BrassLedgerPermissions.RoleManage, BrassLedgerPermissions.UserManage);
         Assert.False(Assert.Single((await administration.GetSnapshotAsync()).Roles, role => role.Name == request.Name).RequiresMfa);
         accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
         {
@@ -7179,16 +7172,24 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var missingPermission = await administration.CreateRoleAsync(new("Unauthorized reviewer", "Must not be created", [BrassLedgerPermissions.ReportingManage]));
         Assert.False(missingPermission.Succeeded);
         Assert.Contains("not authorized", missingPermission.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        ActAs(Guid.NewGuid());
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, originalCompanyId, BrassLedgerPermissions.RoleManage, BrassLedgerPermissions.UserManage);
+        var unknownCompanyIdentity = (System.Security.Claims.ClaimsIdentity)accessor.HttpContext.User.Identity!;
+        unknownCompanyIdentity.RemoveClaim(unknownCompanyIdentity.FindFirst(BrassLedgerAuthenticationDefaults.CompanyIdClaimType)!);
+        unknownCompanyIdentity.AddClaim(new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, Guid.NewGuid().ToString()));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.GetSnapshotAsync());
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.CreateRoleAsync(request));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.SetRoleMfaRequirementAsync(request.Name, true));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.InviteOperatorAsync(new("unknown-invite", "Unknown Invite", "unknown@example.test", "Controller")));
+        var unknownCreate = await administration.CreateRoleAsync(new("Unknown-company reviewer", "Must not be created", [BrassLedgerPermissions.ReportingManage]));
+        Assert.Contains("current role-management authority", unknownCreate.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var unknownMfa = await administration.SetRoleMfaRequirementAsync(request.Name, true);
+        Assert.Contains("current role-management authority", unknownMfa.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        var unknownInvite = await administration.InviteOperatorAsync(new("unknown-invite", "Unknown Invite", "unknown@example.test", "Controller"));
+        Assert.Contains("current operator-management authority", unknownInvite.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         await using (var db = await factory.CreateDbContextAsync())
         {
             Assert.Equal(1, await db.AccessRoles.CountAsync(role => role.CompanyId == originalCompanyId && role.Name == request.Name));
             Assert.Equal(1, await db.AccessRoles.CountAsync(role => role.CompanyId == secondCompanyId && role.Name == request.Name && role.RequiresMfa));
             Assert.False(await db.AccessRoles.AnyAsync(role => role.Name == "Unauthorized reviewer"));
+            Assert.False(await db.AccessRoles.AnyAsync(role => role.Name == "Unknown-company reviewer"));
+            Assert.False(await db.Users.AnyAsync(user => user.UserName == "unknown-invite"));
             Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(entry => entry.CompanyId == secondCompanyId && entry.Action == "security.role.mfa-requirement-changed"));
         }
     }
@@ -7213,14 +7214,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
 
-        accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.UserManage);
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, Guid.Parse("0e561f1b-47b0-4c33-bd9f-1a3298ed29c6"), BrassLedgerPermissions.UserManage);
         var userManagerSnapshot = await administration.GetSnapshotAsync();
         Assert.NotEmpty(userManagerSnapshot.Operators);
         var roleAttempt = await administration.CreateRoleAsync(new BrassLedger.Application.Security.CreateAccessRoleRequest("Escalation", "Should fail", [BrassLedgerPermissions.LedgerManage]));
         Assert.False(roleAttempt.Succeeded);
         Assert.Contains("not authorized", roleAttempt.ErrorMessage);
 
-        accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.RoleManage);
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, Guid.Parse("0e561f1b-47b0-4c33-bd9f-1a3298ed29c6"), BrassLedgerPermissions.RoleManage);
         var roleManagerSnapshot = await administration.GetSnapshotAsync();
         Assert.Empty(roleManagerSnapshot.Operators);
         Assert.Empty(roleManagerSnapshot.SecurityEmailDeliveries);
@@ -7244,6 +7245,88 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SecurityAdministration_RejectsRevokedOrStaleCurrentAuthority()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        var companyId = Guid.Parse("0e561f1b-47b0-4c33-bd9f-1a3298ed29c6");
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, companyId, BrassLedgerPermissions.RoleManage);
+        var request = new BrassLedger.Application.Security.CreateAccessRoleRequest("Revoked authority role", "Must not be created", [BrassLedgerPermissions.ReportingManage]);
+        Assert.NotEmpty((await administration.GetSnapshotAsync()).Roles);
+
+        async Task AssertDeniedAsync()
+        {
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => administration.GetSnapshotAsync());
+            Assert.False((await administration.CreateRoleAsync(request)).Succeeded);
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.CompanyId == companyId && item.Role == "Security Test Manager");
+            membership.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        await AssertDeniedAsync();
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var membership = await db.CompanyMemberships.SingleAsync(item => item.CompanyId == companyId && item.Role == "Security Test Manager");
+            membership.IsActive = true;
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == companyId && item.Name == "Security Test Manager");
+            role.Permissions = BrassLedgerPermissions.ReportingManage;
+            await db.SaveChangesAsync();
+        }
+        await AssertDeniedAsync();
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == companyId && item.Name == "Security Test Manager");
+            role.Permissions = BrassLedgerPermissions.RoleManage;
+            role.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        await AssertDeniedAsync();
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == companyId && item.Name == "Security Test Manager");
+            role.IsActive = true;
+            var user = await db.Users.SingleAsync(item => item.UserName == "operations");
+            user.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        await AssertDeniedAsync();
+
+        var sessionId = Guid.Parse(accessor.HttpContext!.User.FindFirst(BrassLedgerAuthenticationDefaults.SessionIdClaimType)!.Value);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.UserName == "operations");
+            user.IsActive = true;
+            var session = await db.UserSessions.SingleAsync(item => item.Id == sessionId);
+            session.RevokedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        await AssertDeniedAsync();
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var session = await db.UserSessions.SingleAsync(item => item.Id == sessionId);
+            session.RevokedAtUtc = null;
+            var user = await db.Users.SingleAsync(item => item.UserName == "operations");
+            user.SecurityStamp = Guid.NewGuid().ToString("N");
+            await db.SaveChangesAsync();
+        }
+        await AssertDeniedAsync();
+
+        await using var verified = await factory.CreateDbContextAsync();
+        Assert.False(await verified.AccessRoles.AnyAsync(role => role.Name == request.Name));
+    }
+
+    [Fact]
     public async Task SecurityAdministration_RequiresConfiguredSecureDeliveryForNewOperators()
     {
         using var services = CreateServiceProvider();
@@ -7251,7 +7334,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         using var scope = services.CreateScope();
         var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
-        accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.UserManage);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, Guid.Parse("0e561f1b-47b0-4c33-bd9f-1a3298ed29c6"), BrassLedgerPermissions.UserManage);
 
         var result = await administration.InviteOperatorAsync(new BrassLedger.Application.Security.CreateOperatorInvitationRequest(
             "new-operator",
@@ -7275,7 +7359,8 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var administration = scope.ServiceProvider.GetRequiredService<BrassLedger.Application.Security.ISecurityAdministrationService>();
         var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
-        accessor.HttpContext = CreatePermissionContext(BrassLedgerPermissions.RoleManage);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, Guid.Parse("0e561f1b-47b0-4c33-bd9f-1a3298ed29c6"), BrassLedgerPermissions.RoleManage);
 
         var initialSnapshot = await administration.GetSnapshotAsync();
         Assert.True(initialSnapshot.Roles.Single(role => role.Name == "Administrator").RequiresMfa);
@@ -9667,6 +9752,52 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var serviceCollection = new ServiceCollection();
         serviceCollection.AddBrassLedgerInfrastructure(configuration, _contentRootPath, seedSampleData: true);
         return serviceCollection.BuildServiceProvider();
+    }
+
+    private static async Task<Microsoft.AspNetCore.Http.HttpContext> CreateSecurityManagerContextAsync(
+        IDbContextFactory<BrassLedgerDbContext> factory, Guid companyId, params string[] permissions)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(candidate => candidate.UserName == "operations");
+        var userId = user.Id;
+        const string roleName = "Security Test Manager";
+        var role = await db.AccessRoles.SingleOrDefaultAsync(candidate => candidate.CompanyId == companyId && candidate.Name == roleName);
+        if (role is null)
+        {
+            role = new AccessRole { Id = Guid.NewGuid(), CompanyId = companyId, Name = roleName, Description = "Test security authority", TemplateCode = "test-security-manager", IsActive = true };
+            db.AccessRoles.Add(role);
+        }
+        role.Permissions = string.Join('|', permissions);
+        var membership = await db.CompanyMemberships.SingleOrDefaultAsync(candidate => candidate.CompanyId == companyId && candidate.UserId == userId);
+        if (membership is null)
+        {
+            membership = new CompanyMembership { Id = Guid.NewGuid(), CompanyId = companyId, UserId = userId, GrantedAtUtc = DateTimeOffset.UtcNow };
+            db.CompanyMemberships.Add(membership);
+        }
+        membership.Role = roleName;
+        membership.IsActive = true;
+        var sessionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        db.UserSessions.Add(new UserSession
+        {
+            Id = sessionId, UserId = userId, SecurityStamp = user.SecurityStamp, AuthenticationMethod = "Password",
+            CreatedAtUtc = now, LastSeenAtUtc = now, ExpiresAtUtc = now.AddHours(1)
+        });
+        await db.SaveChangesAsync();
+
+        return new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, userId.ToString()),
+                new(System.Security.Claims.ClaimTypes.Role, roleName),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SessionIdClaimType, sessionId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.SecurityStampClaimType, user.SecurityStamp),
+                new(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType, "pwd"),
+                .. permissions.Select(permission => new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission))
+            ], "test"))
+        };
     }
 
     private static Microsoft.AspNetCore.Http.HttpContext CreatePermissionContext(string permission)
