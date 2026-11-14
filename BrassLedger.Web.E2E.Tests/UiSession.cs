@@ -78,8 +78,12 @@ public sealed class UiSession : IAsyncDisposable
         _isAuthenticated = true;
     }
 
-    private Task WaitForBlazorAsync() => Page.Locator("html[data-blazor-ready='true']").WaitForAsync(
-        new LocatorWaitForOptions { State = WaitForSelectorState.Attached, Timeout = 15000 });
+    private Task WaitForBlazorAsync()
+    {
+        var url = Page.Url.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+        return Page.Locator($"html[data-blazor-ready='true'][data-blazor-ready-url=\"{url}\"]").WaitForAsync(
+            new LocatorWaitForOptions { State = WaitForSelectorState.Attached, Timeout = 15000 });
+    }
 
     public async Task WaitForHeadingAsync(string heading)
     {
