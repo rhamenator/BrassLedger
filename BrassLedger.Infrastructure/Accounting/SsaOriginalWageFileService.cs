@@ -101,21 +101,21 @@ public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbCo
     private static SsaOriginalWageFileConfigurationSnapshot ToSnapshot(PayrollSsaWageFileConfiguration x) => new(x.Id, ToSubmitter(x), x.LayoutCompatibilityCode, x.OfficialSpecificationSha256, x.SourceRetrievedOn, x.ReviewNotes, x.IsApproved, x.ApprovedAtUtc, x.IsActive, x.ConcurrencyToken);
     private static SsaOriginalWageFileSnapshot ToSnapshot(PayrollSsaOriginalWageFile x) => new(x.Id, x.PayrollFilingId, x.TaxYear, x.FileName, x.ContentSha256, x.SourceDigestSha256, x.SpecificationVersion, x.Status, x.RecordCount, x.EmployeeRecordCount, x.GeneratedAtUtc, x.ValidatedAtUtc, x.AccuWageEvidenceReference, x.ValidationNotes, x.ConcurrencyToken);
     private static void Apply(PayrollSsaWageFileConfiguration x, SaveSsaOriginalWageFileConfigurationRequest r, string url, string digest, string notes) { x.FileKind = FileKind; x.SpecificationTaxYear = r.SpecificationTaxYear; x.SpecificationVersion = r.SpecificationVersion.Trim(); x.LayoutCompatibilityCode = r.LayoutCompatibilityCode.Trim(); x.OfficialSpecificationUrl = url; x.OfficialSpecificationSha256 = digest; x.SourceRetrievedOn = r.SourceRetrievedOn; x.ReviewNotes = notes; x.SubmitterEin = r.SubmitterEin.Trim(); x.BsoUserId = r.BsoUserId.Trim(); x.SubmitterName = r.SubmitterName.Trim(); x.LocationAddress = r.LocationAddress.Trim(); x.DeliveryAddress = r.DeliveryAddress.Trim(); x.City = r.City.Trim(); x.State = r.State.Trim().ToUpperInvariant(); x.PostalCode = r.PostalCode.Trim(); x.ContactName = r.ContactName.Trim(); x.ContactPhone = r.ContactPhone.Trim(); x.ContactEmail = r.ContactEmail.Trim(); x.PreparerCode = r.PreparerCode.Trim().ToUpperInvariant(); x.EmployerLocationAddress = r.EmployerLocationAddress.Trim(); x.EmployerDeliveryAddress = r.EmployerDeliveryAddress.Trim(); x.EmployerCity = r.EmployerCity.Trim(); x.EmployerState = r.EmployerState.Trim().ToUpperInvariant(); x.EmployerPostalCode = r.EmployerPostalCode.Trim(); x.EmployerContactName = r.EmployerContactName.Trim(); x.EmployerContactPhone = r.EmployerContactPhone.Trim(); x.EmployerContactEmail = r.EmployerContactEmail.Trim(); x.KindOfEmployer = r.KindOfEmployer.Trim().ToUpperInvariant(); x.EmploymentCode = r.EmploymentCode.Trim().ToUpperInvariant(); x.EmployerSignaturePin = r.EmployerSignaturePin.Trim(); x.IsApproved = r.IsApproved; x.IsActive = r.IsActive; }
-    private static string Hash(byte[] value) => Convert.ToHexString(SHA256.HashData(value)).ToLowerInvariant(); private bool Has(string permission) => httpContextAccessor.HttpContext is null || httpContextAccessor.HttpContext.User.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission); private void RequireSensitive() { if (!Has(BrassLedgerPermissions.PayrollSensitiveData)) throw new UnauthorizedAccessException("You are not authorized to view protected SSA wage files."); }
+    private static string Hash(byte[] value) => Convert.ToHexString(SHA256.HashData(value)).ToLowerInvariant(); private bool Has(string permission) => httpContextAccessor.HttpContext?.User is { Identity.IsAuthenticated: true } principal && principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission); private void RequireSensitive() { if (!Has(BrassLedgerPermissions.PayrollSensitiveData)) throw new UnauthorizedAccessException("You are not authorized to view protected SSA wage files."); }
     private Guid? ResolveUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
     private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken token)
     {
         var context = httpContextAccessor.HttpContext;
-        var claim = context?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
+        if (context?.User.Identity?.IsAuthenticated != true
+            || !Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out _))
+            throw new UnauthorizedAccessException("An authenticated company context is required.");
+        var claim = context.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
         if (Guid.TryParse(claim, out var id))
         {
             if (await db.Companies.AnyAsync(item => item.Id == id, token)) return id;
             throw new UnauthorizedAccessException("The selected company is unavailable.");
         }
-        if (context is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
-        var companyIds = await db.Companies.Select(item => item.Id).Take(2).ToArrayAsync(token);
-        if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
-        return companyIds[0];
+        throw new UnauthorizedAccessException("An authenticated company context is required.");
     }
     private void Audit(BrassLedgerDbContext db, Guid companyId, string action, Guid id, object detail) => db.BusinessAuditEntries.Add(new() { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = nameof(PayrollSsaOriginalWageFile), EntityId = id, DetailJson = JsonSerializer.Serialize(detail), OccurredAtUtc = DateTimeOffset.UtcNow });
 }
