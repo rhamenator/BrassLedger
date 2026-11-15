@@ -6823,17 +6823,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
         var originalRequest = SsaOriginalConfigurationRequest(2026, true);
         var correctionRequest = SsaConfigurationRequest(2026, true);
-        var originalReadError = await Assert.ThrowsAsync<InvalidOperationException>(() => originals.GetAsync());
-        Assert.Contains("explicit company context", originalReadError.Message, StringComparison.OrdinalIgnoreCase);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.GetAsync());
-        await Assert.ThrowsAsync<InvalidOperationException>(() => originals.DownloadAsync(Guid.NewGuid()));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.DownloadAsync(Guid.NewGuid()));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => originals.SaveConfigurationAsync(originalRequest));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.SaveConfigurationAsync(correctionRequest));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => originals.GenerateAsync(new(Guid.NewGuid())));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.GenerateAsync(new(Guid.NewGuid())));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => originals.RecordValidationAsync(new(Guid.NewGuid(), true, "ACCUWAGE-NOCONTEXT", "Reviewed the AccuWage validation evidence.", "token")));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.RecordValidationAsync(new(Guid.NewGuid(), true, "ACCUWAGE-NOCONTEXT", "Reviewed the AccuWage validation evidence.", "token")));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.DownloadAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.DownloadAsync(Guid.NewGuid()));
+        Assert.False((await originals.SaveConfigurationAsync(originalRequest)).Succeeded);
+        Assert.False((await corrections.SaveConfigurationAsync(correctionRequest)).Succeeded);
+        Assert.False((await originals.GenerateAsync(new(Guid.NewGuid()))).Succeeded);
+        Assert.False((await corrections.GenerateAsync(new(Guid.NewGuid()))).Succeeded);
+        Assert.False((await originals.RecordValidationAsync(new(Guid.NewGuid(), true, "ACCUWAGE-NOCONTEXT", "Reviewed the AccuWage validation evidence.", "token"))).Succeeded);
+        Assert.False((await corrections.RecordValidationAsync(new(Guid.NewGuid(), true, "ACCUWAGE-NOCONTEXT", "Reviewed the AccuWage validation evidence.", "token"))).Succeeded);
         await using (var db = await factory.CreateDbContextAsync())
         {
             Assert.False(await db.PayrollSsaWageFileConfigurations.AnyAsync());
@@ -6928,18 +6927,61 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SsaWageFileServices_RejectMissingActorForSingleCompany()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var originals = scope.ServiceProvider.GetRequiredService<ISsaOriginalWageFileService>();
+        var corrections = scope.ServiceProvider.GetRequiredService<ISsaWageFileService>();
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.DownloadAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.DownloadAsync(Guid.NewGuid()));
+        Assert.False((await originals.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2026, true))).Succeeded);
+        Assert.False((await corrections.SaveConfigurationAsync(SsaConfigurationRequest(2026, true))).Succeeded);
+        Assert.False((await originals.GenerateAsync(new(Guid.NewGuid()))).Succeeded);
+        Assert.False((await corrections.GenerateAsync(new(Guid.NewGuid()))).Succeeded);
+        Assert.False((await originals.RecordValidationAsync(new(Guid.NewGuid(), true, "ACCUWAGE-NOACTOR", "No actor may validate a protected file.", "token"))).Succeeded);
+        Assert.False((await corrections.RecordValidationAsync(new(Guid.NewGuid(), true, "ACCUWAGE-NOACTOR", "No actor may validate a protected file.", "token"))).Succeeded);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        Assert.False(await db.PayrollSsaWageFileConfigurations.AnyAsync());
+        Assert.False(await db.PayrollSsaOriginalWageFiles.AnyAsync());
+        Assert.False(await db.PayrollSsaWageFiles.AnyAsync());
+        var companyId = await db.Companies.Select(item => item.Id).SingleAsync();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPrepare),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollApprove),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)
+            ], "test"))
+        };
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2026, true)));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.SaveConfigurationAsync(SsaConfigurationRequest(2026, true)));
+    }
+
+    [Fact]
     public async Task SsaWageFileWorkflow_RequiresApprovedExactYearEncryptsAndRecordsAccuWageOnce()
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
-        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); Guid correctionId;
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); Guid correctionId; Guid companyId;
         await using (var db = await factory.CreateDbContextAsync())
         {
-            var companyId = await db.Companies.Select(item => item.Id).FirstAsync(); var filingId = Guid.NewGuid(); correctionId = Guid.NewGuid();
+            companyId = await db.Companies.Select(item => item.Id).FirstAsync(); var filingId = Guid.NewGuid(); correctionId = Guid.NewGuid();
             db.PayrollFilings.Add(new PayrollFiling { Id = filingId, CompanyId = companyId, FormCode = "W2", TaxYear = 2025, PeriodKey = "2025-YEAR", PeriodStart = new DateOnly(2025, 1, 1), PeriodEnd = new DateOnly(2025, 12, 31), Status = "Reopened", DataJson = "{}", SummaryJson = "{}", SourcePayrollRunIdsJson = "[]", SourceDigestSha256 = new string('a', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/iw2w3", ContentVersion = "2025", PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedDataJson = "{}", ApprovedSourceDigestSha256 = new string('a', 64), ConcurrencyToken = Guid.NewGuid().ToString("N") });
             var previous = new W2EmployeeData(Guid.NewGuid(), "E-001", "Jane Old", "123456789", "1 Main St", "", "48201", 1000, 100, 1000, 62, 1000, 14.5m, [], "Jane", "", "Old", "Detroit", "MI"); var corrected = previous with { LastName = "Corrected", EmployeeName = "Jane Corrected", Box1WagesTipsOtherCompensation = 1100 };
             var package = new W2cPackageData(TaxYear: 2025, EmployerLegalName: "Brass Ledger Test Company", EmployerEin: "123456789", Employees: [new(previous, corrected, true, "Federal wage correction")]);
             db.PayrollFilingCorrections.Add(new PayrollFilingCorrection { Id = correctionId, CompanyId = companyId, OriginalPayrollFilingId = filingId, Sequence = 1, FormCode = "W-2c/W-3c", TaxYear = 2025, Quarter = 0, Process = "Correction", DiscoveredOn = new DateOnly(2026, 1, 20), Explanation = "Correct wage statement test values.", WageStatementsCorrected = true, WageStatementEvidenceReference = "EVIDENCE", Status = "Approved", DataJson = System.Text.Json.JsonSerializer.Serialize(package), CorrectedSourceDigestSha256 = new string('b', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/iw2w3", ContentVersion = "2025-W2C", PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }); await db.SaveChangesAsync();
         }
+        scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>().HttpContext = CreateSsaPermissionContext(companyId);
         var workflow = scope.ServiceProvider.GetRequiredService<ISsaWageFileService>();
         var future = SsaConfigurationRequest(2027, true); Assert.False((await workflow.SaveConfigurationAsync(future)).Succeeded);
         var predatesPublication = SsaConfigurationRequest(2026, true) with { SourceRetrievedOn = new DateOnly(2026, 7, 9) }; Assert.False((await workflow.SaveConfigurationAsync(predatesPublication)).Succeeded);
@@ -6960,14 +7002,15 @@ public sealed class WorkspaceInitializationTests : IDisposable
     public async Task SsaOriginalWageFileWorkflow_AllowsSeparateExactSpecEncryptsAndRecordsAccuWageOnce()
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
-        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); Guid filingId;
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>(); Guid filingId; Guid companyId;
         await using (var db = await factory.CreateDbContextAsync())
         {
-            var companyId = await db.Companies.Select(item => item.Id).FirstAsync(); filingId = Guid.NewGuid();
+            companyId = await db.Companies.Select(item => item.Id).FirstAsync(); filingId = Guid.NewGuid();
             var employee = new W2EmployeeData(Guid.NewGuid(), "E-001", "Jane Employee", "123456789", "10 Home St", "", "48201", 1100m, 110m, 1000m, 62m, 1100m, 15.95m, [], "Jane", "", "Employee", "Detroit", "MI");
             var package = new W2PackageData(TaxYear: 2026, EmployerLegalName: "Brass Ledger Test Company", EmployerEin: "123456789", Employees: [employee], W3Box1Total: 1100m, W3Box2Total: 110m, W3Box3Total: 1000m, W3Box4Total: 62m, W3Box5Total: 1100m, W3Box6Total: 15.95m);
             db.PayrollFilings.Add(new PayrollFiling { Id = filingId, CompanyId = companyId, FormCode = "W2", TaxYear = 2026, PeriodKey = "2026-YEAR", PeriodStart = new DateOnly(2026, 1, 1), PeriodEnd = new DateOnly(2026, 12, 31), Status = "Approved", DataJson = System.Text.Json.JsonSerializer.Serialize(package), SummaryJson = "{}", SourcePayrollRunIdsJson = "[]", SourceDigestSha256 = new string('a', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/iw2w3", ContentVersion = "2026", PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedAtUtc = DateTimeOffset.UtcNow, ApprovedDataJson = System.Text.Json.JsonSerializer.Serialize(package), ApprovedSourceDigestSha256 = new string('a', 64), ApprovedBaselineAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }); await db.SaveChangesAsync();
         }
+        scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>().HttpContext = CreateSsaPermissionContext(companyId);
         var workflow = scope.ServiceProvider.GetRequiredService<ISsaOriginalWageFileService>();
         Assert.False((await workflow.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2025, true))).Succeeded);
         Assert.False((await workflow.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2026, true) with { SourceRetrievedOn = new DateOnly(2026, 7, 6) })).Succeeded);
@@ -10239,6 +10282,19 @@ public sealed class WorkspaceInitializationTests : IDisposable
             ], "test"));
         return context;
     }
+
+    private static Microsoft.AspNetCore.Http.HttpContext CreateSsaPermissionContext(Guid companyId) =>
+        new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new(System.Security.Claims.ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
+                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPrepare),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollApprove),
+                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)
+            ], "test"))
+        };
 
     private static async Task<string> ReadScalarAsync(SqliteConnection connection, string sql)
     {
