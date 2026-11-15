@@ -2012,6 +2012,21 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
         await using (var db = await factory.CreateDbContextAsync())
             Assert.Equal(originalCompanyId, (await db.Customers.SingleAsync(customer => customer.CustomerNumber == "ISO-C-001")).CompanyId);
+
+        var forgedClaims = accessor.HttpContext.User.Claims
+            .Where(claim => claim.Type != BrassLedgerAuthenticationDefaults.CompanyIdClaimType)
+            .Select(claim => new System.Security.Claims.Claim(claim.Type, claim.Value))
+            .Append(new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, secondCompanyId.ToString()));
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(forgedClaims, "test"))
+        };
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ExportQuickBooksOnlineCsvAsync("customers"));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.GetRecentBatchesAsync());
+        await using (var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(importCsv)))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "forged-company.csv")));
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.False(await db.AccountingInterchangeBatches.AnyAsync(item => item.FileName == "forged-company.csv"));
     }
 
     [Fact]
