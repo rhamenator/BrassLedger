@@ -618,11 +618,7 @@ public sealed class QuickBooksOnlineInterchangeService(
     {
         var httpContext = httpContextAccessor.HttpContext;
         if (httpContext is null)
-        {
-            var companyIds = await db.Companies.Select(company => company.Id).Take(2).ToArrayAsync(ct);
-            if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
-            return new Actor(companyIds[0], null, null, null, null, null);
-        }
+            throw new UnauthorizedAccessException("An authenticated company context is required.");
         var principal = httpContext.User;
         if (principal.Identity?.IsAuthenticated != true
             || principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
@@ -670,8 +666,8 @@ public sealed class QuickBooksOnlineInterchangeService(
             throw new UnauthorizedAccessException("You are not authorized to prepare general journal drafts.");
     }
     private static bool HasPermission(Actor actor, string permission) =>
-        actor.Principal is null || (actor.Principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)
-            && actor.RolePermissions!.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(permission, StringComparer.OrdinalIgnoreCase));
-    private sealed record Actor(Guid CompanyId, Guid? UserId, Guid? SessionId, ClaimsPrincipal? Principal, string? RoleName, string? RolePermissions);
+        actor.Principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)
+        && actor.RolePermissions.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(permission, StringComparer.OrdinalIgnoreCase);
+    private sealed record Actor(Guid CompanyId, Guid UserId, Guid SessionId, ClaimsPrincipal Principal, string RoleName, string RolePermissions);
     private Guid? ResolveUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
 }
