@@ -78,6 +78,28 @@ public sealed class WorkflowDataTests
 
     [Theory]
     [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
+    public async Task QuickBooksImport_ShowsDraftPermissionDenialWithoutBreakingLedger(BrowserKind browserKind)
+    {
+        await _fixture.CreateSubledgerWorkflowUsersAsync();
+        await using var session = await _fixture.CreateSessionAsync(browserKind);
+        await session.SignInAsync("e2e-journal-approver");
+        await new LedgerPage(session).OpenAsync();
+
+        await session.Page.GetByLabel("QuickBooks data to import").SelectOptionAsync("journal-entries");
+        await session.Page.GetByLabel("QuickBooks CSV file").SetInputFilesAsync(new Microsoft.Playwright.FilePayload
+        {
+            Name = "denied-journal.csv",
+            MimeType = "text/csv",
+            Buffer = System.Text.Encoding.UTF8.GetBytes("Journal No.,Journal Date,Account Name,Debits,Credits\nDENIED-1,2026-08-10,1000,1,0")
+        });
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Button, new() { Name = "Validate only" }).ClickAsync();
+        await Microsoft.Playwright.Assertions.Expect(session.Page.GetByRole(Microsoft.Playwright.AriaRole.Status))
+            .ToContainTextAsync("not authorized to prepare general journal drafts");
+        await session.AssertNoUiFailuresAsync("QuickBooks journal import permission denial");
+    }
+
+    [Theory]
+    [MemberData(nameof(BrowserMatrix.InstalledBrowsers), MemberType = typeof(BrowserMatrix))]
     public async Task OperationsAndReportingPages_ShowExpectedOperationalArtifacts(BrowserKind browserKind)
     {
         await using var operationsSession = await _fixture.CreateSessionAsync(browserKind);

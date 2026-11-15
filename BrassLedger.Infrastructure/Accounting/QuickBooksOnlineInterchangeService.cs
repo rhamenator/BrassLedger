@@ -11,7 +11,8 @@ namespace BrassLedger.Infrastructure.Accounting;
 
 public sealed class QuickBooksOnlineInterchangeService(
     IDbContextFactory<BrassLedgerDbContext> dbContextFactory,
-    IHttpContextAccessor httpContextAccessor) : IAccountingInterchangeService
+    IHttpContextAccessor httpContextAccessor,
+    TimeProvider timeProvider) : IAccountingInterchangeService
 {
     private const int MaximumRows = 1000;
     private const int MaximumBytes = 2 * 1024 * 1024;
@@ -19,7 +20,9 @@ public sealed class QuickBooksOnlineInterchangeService(
     public async Task<AccountingInterchangeExport?> ExportQuickBooksOnlineCsvAsync(string entity, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var actor = await ResolveActorAsync(db, cancellationToken);
+        EnsurePermission(actor, null);
+        var companyId = actor.CompanyId;
         var normalizedEntity = NormalizeEntity(entity);
         var rows = normalizedEntity switch
         {
@@ -34,6 +37,7 @@ public sealed class QuickBooksOnlineInterchangeService(
             _ => null
         };
         if (rows is null) return null;
+        await EnsureStillAuthorizedAsync(db, actor, cancellationToken);
 
         var header = normalizedEntity == "journal-entries"
             ? new[] { "Journal No.", "Journal Date", "Reference", "Journal/Description", "Account Name", "Debits", "Credits", "Line Description", "Project / Job", "Project Phase", "Cost Code", "Department", "Class" }
@@ -52,14 +56,16 @@ public sealed class QuickBooksOnlineInterchangeService(
         var normalizedEntity = NormalizeEntity(entity);
         if (normalizedEntity is not ("chart-of-accounts" or "customers" or "vendors" or "journal-entries" or "invoices"))
             return AccountingInterchangeImportResult.Failure("Supported imports are chart-of-accounts, customers, vendors, general journal entries, and zero-tax invoices.");
-        if (normalizedEntity == "invoices" && (!HasPermission(BrassLedgerPermissions.SubledgerPrepare) || !HasPermission(BrassLedgerPermissions.ReceivablesManage)))
-            return AccountingInterchangeImportResult.Failure("You are not authorized to prepare accounts-receivable invoice drafts.");
-        if (normalizedEntity == "journal-entries" && !HasPermission(BrassLedgerPermissions.JournalPrepare))
-            return AccountingInterchangeImportResult.Failure("You are not authorized to prepare general journal drafts.");
-
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var actor = await ResolveActorAsync(db, cancellationToken);
+        EnsurePermission(actor, null);
+        if (normalizedEntity == "invoices" && (!HasPermission(actor, BrassLedgerPermissions.SubledgerPrepare) || !HasPermission(actor, BrassLedgerPermissions.ReceivablesManage)))
+            return AccountingInterchangeImportResult.Failure("You are not authorized to prepare accounts-receivable invoice drafts.");
+        if (normalizedEntity == "journal-entries" && !HasPermission(actor, BrassLedgerPermissions.JournalPrepare))
+            return AccountingInterchangeImportResult.Failure("You are not authorized to prepare general journal drafts.");
+        var companyId = actor.CompanyId;
         var parsed = await ReadCsvAsync(content, cancellationToken);
+        await EnsureStillAuthorizedAsync(db, actor, cancellationToken, normalizedEntity);
         if (!parsed.Succeeded)
             return await RecordRejectedBatchAsync(db, companyId, normalizedEntity, options, parsed.ContentSha256, 0, [parsed.Error!], cancellationToken);
         var rows = parsed.Rows!;
@@ -96,6 +102,7 @@ public sealed class QuickBooksOnlineInterchangeService(
             OccurredAtUtc = batch.ProcessedAtUtc,
             DetailJson = System.Text.Json.JsonSerializer.Serialize(new { provider = "quickbooks-online", entity = normalizedEntity, fileName = Path.GetFileName(options.FileName), contentSha256 = parsed.ContentSha256, rowCount = rows.Count, importedCount = result.ImportedCount, options.DryRun })
         });
+        await EnsureStillAuthorizedAsync(db, actor, cancellationToken, normalizedEntity);
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException) when (!options.DryRun)
         {
@@ -107,13 +114,16 @@ public sealed class QuickBooksOnlineInterchangeService(
     public async Task<IReadOnlyList<AccountingInterchangeBatchSnapshot>> GetRecentBatchesAsync(int limit = 20, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var actor = await ResolveActorAsync(db, cancellationToken);
+        EnsurePermission(actor, null);
+        var companyId = actor.CompanyId;
         var boundedLimit = Math.Clamp(limit, 1, 100);
         var batches = db.Database.IsSqlite()
             ? await db.AccountingInterchangeBatches.FromSqlInterpolated($"""SELECT * FROM "AccountingInterchangeBatches" WHERE "CompanyId" = {companyId} ORDER BY "ProcessedAtUtc" DESC LIMIT {boundedLimit}""").AsNoTracking().ToListAsync(cancellationToken)
             : await db.AccountingInterchangeBatches.AsNoTracking().Where(batch => batch.CompanyId == companyId).OrderByDescending(batch => batch.ProcessedAtUtc).Take(boundedLimit).ToListAsync(cancellationToken);
         var userIds = batches.Where(batch => batch.ProcessedByUserId.HasValue).Select(batch => batch.ProcessedByUserId!.Value).Distinct().ToArray();
         var users = await db.Users.AsNoTracking().Where(user => userIds.Contains(user.Id)).ToDictionaryAsync(user => user.Id, user => user.DisplayName, cancellationToken);
+        await EnsureStillAuthorizedAsync(db, actor, cancellationToken);
         return batches.Select(batch => new AccountingInterchangeBatchSnapshot(batch.Id, batch.ProviderCode, batch.EntityType, batch.FileName, batch.ContentSha256, batch.Status, batch.IsDryRun, batch.RowCount, batch.ImportedCount, batch.DuplicateCount, batch.RejectedCount, DeserializeRejections(batch.RejectionJson), batch.ProcessedByUserId is { } userId ? users.GetValueOrDefault(userId) : null, batch.ProcessedAtUtc)).ToArray();
     }
 
@@ -604,27 +614,64 @@ public sealed class QuickBooksOnlineInterchangeService(
         catch (System.Text.Json.JsonException) { return ["Stored rejection details could not be read."]; }
     }
 
-    private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken ct)
+    private async Task<Actor> ResolveActorAsync(BrassLedgerDbContext db, CancellationToken ct)
     {
         var httpContext = httpContextAccessor.HttpContext;
-        var claim = httpContext?.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
-        if (Guid.TryParse(claim, out var id))
+        if (httpContext is null)
         {
-            if (!await db.Companies.AnyAsync(company => company.Id == id, ct))
-                throw new UnauthorizedAccessException("The requested company context is not available.");
-            return id;
+            var companyIds = await db.Companies.Select(company => company.Id).Take(2).ToArrayAsync(ct);
+            if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
+            return new Actor(companyIds[0], null, null, null, null, null);
         }
-        if (httpContext is not null) throw new UnauthorizedAccessException("An authenticated company context is required.");
-        var companyIds = await db.Companies.Select(company => company.Id).Take(2).ToArrayAsync(ct);
-        if (companyIds.Length != 1) throw new InvalidOperationException("An explicit company context is required when the database does not contain exactly one company.");
-        return companyIds[0];
+        var principal = httpContext.User;
+        if (principal.Identity?.IsAuthenticated != true
+            || principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
+            || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SessionIdClaimType), out var sessionId)
+            || !Guid.TryParse(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType), out var companyId)
+            || string.IsNullOrWhiteSpace(principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType)))
+            throw new UnauthorizedAccessException("An authenticated company context is required.");
+
+        var now = timeProvider.GetUtcNow();
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(item => item.Id == userId && item.IsActive, ct);
+        var session = await db.UserSessions.AsNoTracking().SingleOrDefaultAsync(item => item.Id == sessionId && item.UserId == userId, ct);
+        var membership = await db.CompanyMemberships.AsNoTracking().SingleOrDefaultAsync(item => item.UserId == userId && item.CompanyId == companyId && item.IsActive, ct);
+        var stamp = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.SecurityStampClaimType);
+        var method = principal.FindFirstValue(BrassLedgerAuthenticationDefaults.AuthenticationMethodClaimType);
+        if (user is null || user.LockoutEndUtc > now || membership is null
+            || session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= now
+            || !string.Equals(user.SecurityStamp, stamp, StringComparison.Ordinal)
+            || !string.Equals(session.SecurityStamp, stamp, StringComparison.Ordinal)
+            || !string.Equals(session.AuthenticationMethod, method == "mfa" ? "Password + MFA" : method == "pwd" ? "Password" : null, StringComparison.Ordinal)
+            || !string.Equals(membership.Role, principal.FindFirstValue(ClaimTypes.Role), StringComparison.Ordinal)
+            || !await db.Companies.AsNoTracking().AnyAsync(company => company.Id == companyId, ct))
+            throw new UnauthorizedAccessException("The requested company context is not available.");
+        var role = await db.AccessRoles.AsNoTracking().SingleOrDefaultAsync(item => item.CompanyId == companyId && item.Name == membership.Role && item.IsActive, ct);
+        if (role is null
+            || ((role.RequiresMfa || BrassLedgerRoleTemplates.IsMandatoryMfaRole(role.Name)) && !user.MfaEnabled)
+            || (user.MfaEnabled && !string.Equals(method, "mfa", StringComparison.Ordinal)))
+            throw new UnauthorizedAccessException("The current role requires a valid MFA session.");
+        return new Actor(companyId, userId, sessionId, principal, role.Name, role.Permissions);
     }
-    private bool HasPermission(string permission)
+    private async Task EnsureStillAuthorizedAsync(BrassLedgerDbContext db, Actor original, CancellationToken ct, string? importEntity = null)
     {
-        var principal = httpContextAccessor.HttpContext?.User;
-        return principal is null
-            || (!principal.HasClaim(BrassLedgerAuthenticationDefaults.MfaEnrollmentRequiredClaimType, "true")
-                && (principal.IsInRole("Administrator") || principal.IsInRole("Owner/CEO") || principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)));
+        var current = await ResolveActorAsync(db, ct);
+        if (current.CompanyId != original.CompanyId || current.UserId != original.UserId || current.SessionId != original.SessionId)
+            throw new UnauthorizedAccessException("The authenticated company context changed during the operation.");
+        EnsurePermission(current, importEntity);
     }
+    private static void EnsurePermission(Actor actor, string? importEntity)
+    {
+        if (!HasPermission(actor, BrassLedgerPermissions.LedgerManage))
+            throw new UnauthorizedAccessException("You are not authorized to manage QuickBooks CSV interchange.");
+        if (importEntity == "invoices" && (!HasPermission(actor, BrassLedgerPermissions.SubledgerPrepare) || !HasPermission(actor, BrassLedgerPermissions.ReceivablesManage)))
+            throw new UnauthorizedAccessException("You are not authorized to prepare accounts-receivable invoice drafts.");
+        if (importEntity == "journal-entries" && !HasPermission(actor, BrassLedgerPermissions.JournalPrepare))
+            throw new UnauthorizedAccessException("You are not authorized to prepare general journal drafts.");
+    }
+    private static bool HasPermission(Actor actor, string permission) =>
+        actor.Principal is null || (actor.Principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission)
+            && actor.RolePermissions!.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(permission, StringComparer.OrdinalIgnoreCase));
+    private sealed record Actor(Guid CompanyId, Guid? UserId, Guid? SessionId, ClaimsPrincipal? Principal, string? RoleName, string? RolePermissions);
     private Guid? ResolveUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
 }

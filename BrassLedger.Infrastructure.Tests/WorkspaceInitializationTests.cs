@@ -1929,19 +1929,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var db = await factory.CreateDbContextAsync();
         var companyId = await db.Companies.Select(company => company.Id).FirstAsync();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
-        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
-        {
-            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-            [
-                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
-                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.LedgerManage)
-            ], "test"))
-        };
+        var signedIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!, BrassLedgerPermissions.LedgerManage);
         var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
         await using var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("Invoice No.,Customer,Invoice Date,Due Date,Item Amount\r\nDENIED-1,C-1001,2026-05-10,2026-06-09,50.00"));
 
         var result = await interchange.ImportQuickBooksOnlineCsvAsync("invoices", csv, new(true, "denied.csv"));
-
         Assert.False(result.Succeeded);
         Assert.Contains("not authorized", result.Errors.Single(), StringComparison.OrdinalIgnoreCase);
         Assert.False(await db.AccountingInterchangeBatches.AnyAsync(batch => batch.CompanyId == companyId && batch.FileName == "denied.csv"));
@@ -1992,28 +1987,111 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
 
         accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, originalCompanyId.ToString())], "test")) };
-        var originalExport = await interchange.ExportQuickBooksOnlineCsvAsync("customers");
-        Assert.NotNull(originalExport);
-        Assert.Contains(originalCustomerName, System.Text.Encoding.UTF8.GetString(originalExport.Content), StringComparison.Ordinal);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ExportQuickBooksOnlineCsvAsync("customers"));
         accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, secondCompanyId.ToString())], "test")) };
-        var secondExport = await interchange.ExportQuickBooksOnlineCsvAsync("customers");
-        Assert.NotNull(secondExport);
-        var emptySecondCsv = System.Text.Encoding.UTF8.GetString(secondExport.Content);
-        Assert.DoesNotContain(originalCustomerName, emptySecondCsv, StringComparison.Ordinal);
-        Assert.Single(emptySecondCsv.Split("\r\n", StringSplitOptions.RemoveEmptyEntries));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ExportQuickBooksOnlineCsvAsync("customers"));
         await using (var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(importCsv)))
-        {
-            var imported = await interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "isolation.csv"));
-            Assert.True(imported.Succeeded, string.Join("; ", imported.Errors));
-            Assert.Equal(1, imported.ImportedCount);
-        }
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "isolation.csv")));
         await using (var db = await factory.CreateDbContextAsync())
         {
-            var imported = await db.Customers.SingleAsync(customer => customer.CustomerNumber == "ISO-C-001");
-            Assert.Equal(secondCompanyId, imported.CompanyId);
-            var batch = await db.AccountingInterchangeBatches.SingleAsync(item => item.FileName == "isolation.csv");
-            Assert.Equal(secondCompanyId, batch.CompanyId);
+            Assert.False(await db.Customers.AnyAsync(customer => customer.CustomerNumber == "ISO-C-001"));
+            Assert.False(await db.AccountingInterchangeBatches.AnyAsync(item => item.FileName == "isolation.csv"));
         }
+
+        var signedIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!, BrassLedgerPermissions.LedgerManage);
+        var authorizedExport = await interchange.ExportQuickBooksOnlineCsvAsync("customers");
+        Assert.NotNull(authorizedExport);
+        Assert.Contains(originalCustomerName, System.Text.Encoding.UTF8.GetString(authorizedExport.Content), StringComparison.Ordinal);
+        await using (var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(importCsv)))
+        {
+            var result = await interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "authorized-isolation.csv"));
+            Assert.True(result.Succeeded, string.Join("; ", result.Errors));
+        }
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Equal(originalCompanyId, (await db.Customers.SingleAsync(customer => customer.CustomerNumber == "ISO-C-001")).CompanyId);
+    }
+
+    [Fact]
+    public async Task QuickBooksInterchange_RejectsRevokedSessionAndStoredPermissionDrift()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var authentication = scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>();
+        var signedIn = await authentication.AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!, BrassLedgerPermissions.LedgerManage);
+        var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+
+        Assert.NotNull(await interchange.ExportQuickBooksOnlineCsvAsync("customers"));
+        Assert.Empty(await interchange.GetRecentBatchesAsync());
+        await using (var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("Display Name,Company Name,Email,Customer Number\r\nAllowed,Allowed,,ALLOW-1\r\n")))
+        {
+            var imported = await interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "allowed.csv"));
+            Assert.True(imported.Succeeded, string.Join("; ", imported.Errors));
+        }
+        Assert.Single(await interchange.GetRecentBatchesAsync());
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.Name == signedIn.User!.Role);
+            role.Permissions = string.Join('|', role.Permissions.Split('|').Where(permission => permission != BrassLedgerPermissions.LedgerManage));
+            await db.SaveChangesAsync();
+        }
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ExportQuickBooksOnlineCsvAsync("customers"));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.GetRecentBatchesAsync());
+        await using (var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("Display Name,Company Name,Email,Customer Number\r\nDenied,Denied,,DEN-1\r\n")))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "denied.csv")));
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.Name == signedIn.User!.Role);
+            role.Permissions += $"|{BrassLedgerPermissions.LedgerManage}";
+            var sessionId = Guid.Parse(accessor.HttpContext!.User.FindFirst(BrassLedgerAuthenticationDefaults.SessionIdClaimType)!.Value);
+            var session = await db.UserSessions.SingleAsync(item => item.Id == sessionId);
+            session.RevokedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ExportQuickBooksOnlineCsvAsync("customers"));
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            Assert.False(await db.Customers.AnyAsync(item => item.CustomerNumber == "DEN-1"));
+            Assert.False(await db.AccountingInterchangeBatches.AnyAsync(item => item.FileName == "denied.csv"));
+        }
+    }
+
+    [Fact]
+    public async Task QuickBooksInterchange_RejectsSessionRevokedWhileReadingCsv()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var signedIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!, BrassLedgerPermissions.LedgerManage);
+        var sessionId = Guid.Parse(accessor.HttpContext.User.FindFirst(BrassLedgerAuthenticationDefaults.SessionIdClaimType)!.Value);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
+        await using var csv = new CallbackReadStream(
+            System.Text.Encoding.UTF8.GetBytes("Display Name,Company Name,Email,Customer Number\r\nRevoked,Revoked,,REVOKED-CSV-1\r\n"),
+            async () =>
+            {
+                await using var db = await factory.CreateDbContextAsync();
+                var session = await db.UserSessions.SingleAsync(item => item.Id == sessionId);
+                session.RevokedAtUtc = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync();
+            });
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "revoked.csv")));
+        await using var verification = await factory.CreateDbContextAsync();
+        Assert.False(await verification.Customers.AnyAsync(item => item.CustomerNumber == "REVOKED-CSV-1"));
+        Assert.False(await verification.AccountingInterchangeBatches.AnyAsync(item => item.FileName == "revoked.csv"));
     }
 
     [Fact]
@@ -8719,6 +8797,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(costCodeResult.Id, requisitionLineSnapshot.ProjectCostCodeId);
 
         const string importHeader = "Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description,Project / Job,Project Phase,Cost Code\r\n";
+        var csvSignIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, csvSignIn.Outcome);
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, csvSignIn.User!,
+            BrassLedgerPermissions.LedgerManage, BrassLedgerPermissions.JournalPrepare);
         var importCsv = importHeader
             + $"DIM-IMPORT,2026-01-15,DIM-REF,Dimension import,5100,10,0,Imported project cost,{project.JobNumber},{child.Code},LAB\r\n"
             + $"DIM-IMPORT,2026-01-15,DIM-REF,Dimension import,4000,0,10,Imported project revenue,{project.JobNumber},{child.Code},LAB\r\n";
@@ -8891,6 +8974,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.All(await db.PayrollTimeEntries.Where(line => line.PayrollTimecardId == timecard.Id).ToListAsync(), line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
         }
 
+        var csvSignIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, csvSignIn.Outcome);
+        var csvContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, csvSignIn.User!,
+            BrassLedgerPermissions.LedgerManage, BrassLedgerPermissions.SubledgerPrepare,
+            BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.JournalPrepare);
+        accessor.HttpContext = csvContext;
         var invoiceExport = await interchange.ExportQuickBooksOnlineCsvAsync("invoices");
         Assert.NotNull(invoiceExport);
         var invoiceCsv = System.Text.Encoding.UTF8.GetString(invoiceExport.Content);
@@ -8901,6 +8991,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var invoiceImportCsv = "Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Item Description,Quantity,Rate,Project / Job,Project Phase,Cost Code,Department,Class\r\n"
             + $"DIM-QB-AR-1,{customerReference},2026-06-20,2026-07-20,9.00,Imported tracked invoice,1,9.00,,,,FIELD,COMMERCIAL\r\n";
         SetUser(Guid.NewGuid(), BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage);
+        accessor.HttpContext = csvContext;
         await using (var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(invoiceImportCsv)))
         {
             var imported = await interchange.ImportQuickBooksOnlineCsvAsync("invoices", content, new(false, "tracked-invoices.csv"));
@@ -8922,6 +9013,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             + "DIM-IMPORT-TRACK,2026-06-20,DIM-IMPORT,Tracking import,5100,12,0,Imported cost,,,,FIELD,COMMERCIAL\r\n"
             + "DIM-IMPORT-TRACK,2026-06-20,DIM-IMPORT,Tracking import,4000,0,12,Imported offset,,,,FIELD,COMMERCIAL\r\n";
         SetUser(preparerId, BrassLedgerPermissions.JournalPrepare);
+        accessor.HttpContext = csvContext;
         await using (var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(dimensionImport)))
         {
             var imported = await interchange.ImportQuickBooksOnlineCsvAsync("journal-entries", content, new(false, "tracking-dimensions.csv"));
@@ -10119,6 +10211,21 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         return (await command.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+    }
+
+    private sealed class CallbackReadStream(byte[] buffer, Func<Task> beforeFirstRead) : MemoryStream(buffer)
+    {
+        private bool _called;
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken cancellationToken = default)
+        {
+            if (!_called)
+            {
+                _called = true;
+                await beforeFirstRead();
+            }
+            return await base.ReadAsync(destination, cancellationToken);
+        }
     }
 
     private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider

@@ -108,8 +108,12 @@ app.MapGet("/integrations/quickbooks-online/callback", async (
 
 app.MapGet("/interchange/quickbooks-online/{entity}.csv", async (string entity, BrassLedger.Application.Accounting.IAccountingInterchangeService service, CancellationToken cancellationToken) =>
 {
-    var export = await service.ExportQuickBooksOnlineCsvAsync(entity, cancellationToken);
-    return export is null ? Results.NotFound() : Results.File(export.Content, export.ContentType, export.FileName);
+    try
+    {
+        var export = await service.ExportQuickBooksOnlineCsvAsync(entity, cancellationToken);
+        return export is null ? Results.NotFound() : Results.File(export.Content, export.ContentType, export.FileName);
+    }
+    catch (UnauthorizedAccessException) { return Results.Forbid(); }
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 
 app.MapGet("/reports/{code}.csv", async (string code, BrassLedger.Application.Accounting.IBusinessWorkspaceService workspaceService, CancellationToken cancellationToken) =>

@@ -645,6 +645,10 @@ else
         {
             StatusMessage = "The selected file could not be read. Choose a CSV no larger than 2 MB.";
         }
+        catch (UnauthorizedAccessException)
+        {
+            StatusMessage = "Your access to QuickBooks CSV interchange changed. Refresh the page and sign in again if needed.";
+        }
     }
 
     private void SelectBankStatement(InputFileChangeEventArgs args) { var file = args.File; StatementImportForm.File = file; StatementImportForm.FileName = file.Name; var extension = Path.GetExtension(file.Name).TrimStart('.').ToUpperInvariant(); if (extension is "OFX" or "QFX" or "CSV" or "MT940") StatementImportForm.Format = extension; else if (extension is "XML") StatementImportForm.Format = "CAMT.053"; }
