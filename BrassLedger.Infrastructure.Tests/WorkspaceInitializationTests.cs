@@ -2048,6 +2048,36 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task QuickBooksInterchange_RejectsSessionRevokedWhileReadingCsv()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var signedIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!, BrassLedgerPermissions.LedgerManage);
+        var sessionId = Guid.Parse(accessor.HttpContext.User.FindFirst(BrassLedgerAuthenticationDefaults.SessionIdClaimType)!.Value);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
+        await using var csv = new CallbackReadStream(
+            System.Text.Encoding.UTF8.GetBytes("Display Name,Company Name,Email,Customer Number\r\nRevoked,Revoked,,REVOKED-CSV-1\r\n"),
+            async () =>
+            {
+                await using var db = await factory.CreateDbContextAsync();
+                var session = await db.UserSessions.SingleAsync(item => item.Id == sessionId);
+                session.RevokedAtUtc = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync();
+            });
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "revoked.csv")));
+        await using var verification = await factory.CreateDbContextAsync();
+        Assert.False(await verification.Customers.AnyAsync(item => item.CustomerNumber == "REVOKED-CSV-1"));
+        Assert.False(await verification.AccountingInterchangeBatches.AnyAsync(item => item.FileName == "revoked.csv"));
+    }
+
+    [Fact]
     public async Task FakeDataPopulation_RejectsMultipleCompaniesBeforeWriting()
     {
         using var services = CreateServiceProvider();
@@ -10164,6 +10194,21 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         return (await command.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+    }
+
+    private sealed class CallbackReadStream(byte[] buffer, Func<Task> beforeFirstRead) : MemoryStream(buffer)
+    {
+        private bool _called;
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken cancellationToken = default)
+        {
+            if (!_called)
+            {
+                _called = true;
+                await beforeFirstRead();
+            }
+            return await base.ReadAsync(destination, cancellationToken);
+        }
     }
 
     private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
