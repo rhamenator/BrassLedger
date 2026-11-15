@@ -1952,9 +1952,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
         Guid originalCompanyId; Guid secondCompanyId = Guid.NewGuid();
+        string originalCustomerName;
         await using (var db = await factory.CreateDbContextAsync())
         {
             originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            originalCustomerName = await db.Customers.Where(customer => customer.CompanyId == originalCompanyId).Select(customer => customer.Name).FirstAsync();
             db.Companies.Add(new Company { Id = secondCompanyId, Name = "Interchange isolation subsidiary", LegalName = "Interchange Isolation Subsidiary Ltd.", TaxId = "QBO-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
             await db.SaveChangesAsync();
         }
@@ -1995,6 +1997,21 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.False(await db.Customers.AnyAsync(customer => customer.CustomerNumber == "ISO-C-001"));
             Assert.False(await db.AccountingInterchangeBatches.AnyAsync(item => item.FileName == "isolation.csv"));
         }
+
+        var signedIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!, BrassLedgerPermissions.LedgerManage);
+        var authorizedExport = await interchange.ExportQuickBooksOnlineCsvAsync("customers");
+        Assert.NotNull(authorizedExport);
+        Assert.Contains(originalCustomerName, System.Text.Encoding.UTF8.GetString(authorizedExport.Content), StringComparison.Ordinal);
+        await using (var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(importCsv)))
+        {
+            var result = await interchange.ImportQuickBooksOnlineCsvAsync("customers", csv, new(false, "authorized-isolation.csv"));
+            Assert.True(result.Succeeded, string.Join("; ", result.Errors));
+        }
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Equal(originalCompanyId, (await db.Customers.SingleAsync(customer => customer.CustomerNumber == "ISO-C-001")).CompanyId);
     }
 
     [Fact]
