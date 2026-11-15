@@ -59,7 +59,8 @@ public sealed class AccountSecurityTests
         var finalContent = await session.Page.Locator("body").InnerTextAsync();
         Assert.Contains("Authenticator MFA and all remaining recovery codes were disabled", finalContent);
         Assert.Contains("Not enabled", finalContent);
-        await session.AssertNoUiFailuresAsync("authenticator MFA lifecycle");
+        // Enabling and disabling MFA deliberately revokes the current circuit.
+        await session.AssertNoUiFailuresAsync("authenticator MFA lifecycle", allowExpectedSessionRevocationDisconnect: true);
     }
 
     [Theory]
