@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BrassLedger.Infrastructure.Accounting;
 
-public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbContext> dbContextFactory, IHttpContextAccessor httpContextAccessor) : ISsaOriginalWageFileService
+public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbContext> dbContextFactory, IHttpContextAccessor httpContextAccessor, TimeProvider timeProvider) : ISsaOriginalWageFileService
 {
     private const string FileKind = "EFW2";
     public const string SupportedLayoutCode = "EFW2-2026-512-RA-RE-RW-RO-RT-RU-RF";
@@ -20,9 +20,10 @@ public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbCo
 
     public async Task<SsaOriginalWageFileWorkspace> GetAsync(CancellationToken cancellationToken = default)
     {
-        RequireSensitive(); await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        RequireSensitive(); await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken, BrassLedgerPermissions.PayrollSensitiveData);
         var configurations = await db.PayrollSsaWageFileConfigurations.AsNoTracking().Where(item => item.CompanyId == companyId && item.FileKind == FileKind).OrderByDescending(item => item.SpecificationTaxYear).ToListAsync(cancellationToken);
         var files = await db.PayrollSsaOriginalWageFiles.AsNoTracking().Where(item => item.CompanyId == companyId).ToListAsync(cancellationToken);
+        await RecheckCompanyIdAsync(db, companyId, cancellationToken, BrassLedgerPermissions.PayrollSensitiveData);
         return new(configurations.Select(ToSnapshot).ToArray(), files.OrderByDescending(item => item.GeneratedAtUtc).Select(ToSnapshot).ToArray());
     }
 
@@ -39,10 +40,18 @@ public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbCo
         if (request.IsApproved && request.SourceRetrievedOn < SupportedPublicationDate) return TransactionResult.Failure($"The reviewed SSA tax year 2026 EFW2 publication was issued on {SupportedPublicationDate:yyyy-MM-dd}; the retrieval date cannot precede it.");
         if (request.IsApproved && (request.LayoutCompatibilityCode != SupportedLayoutCode || digest.Length != 64 || digest.Any(character => !Uri.IsHexDigit(character)) || notes.Length < 30)) return TransactionResult.Failure("Approval requires the supported reviewed layout code, the official PDF SHA-256, and substantive review notes.");
         var submitter = ToSubmitter(request); var validation = SsaEfw2FileBuilder.Build(ValidationPackage(request.SpecificationTaxYear), submitter); if (!validation.Succeeded) return TransactionResult.Failure(string.Join(" ", validation.Errors));
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken); PayrollSsaWageFileConfiguration entity;
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var companyId = request.IsApproved
+            ? await ResolveCompanyIdAsync(db, cancellationToken, BrassLedgerPermissions.PayrollPrepare, BrassLedgerPermissions.PayrollSensitiveData, BrassLedgerPermissions.PayrollApprove)
+            : await ResolveCompanyIdAsync(db, cancellationToken, BrassLedgerPermissions.PayrollPrepare, BrassLedgerPermissions.PayrollSensitiveData);
+        PayrollSsaWageFileConfiguration entity;
         if (request.Id.HasValue) { entity = await db.PayrollSsaWageFileConfigurations.SingleOrDefaultAsync(item => item.Id == request.Id && item.CompanyId == companyId && item.FileKind == FileKind, cancellationToken) ?? new(); if (entity.Id == Guid.Empty) return TransactionResult.Failure("SSA EFW2 configuration not found."); if (entity.ConcurrencyToken != request.ConcurrencyToken) return TransactionResult.Failure("The SSA configuration changed after it was opened. Refresh and try again."); }
         else { if (await db.PayrollSsaWageFileConfigurations.AnyAsync(item => item.CompanyId == companyId && item.SpecificationTaxYear == request.SpecificationTaxYear && item.FileKind == FileKind, cancellationToken)) return TransactionResult.Failure("This company already has an SSA EFW2 configuration for that tax year."); entity = new() { Id = Guid.NewGuid(), CompanyId = companyId, FileKind = FileKind }; db.Add(entity); }
         Apply(entity, request, sourceUrl, digest, notes); entity.ApprovedByUserId = request.IsApproved ? ResolveUserId() : null; entity.ApprovedAtUtc = request.IsApproved ? DateTimeOffset.UtcNow : null; entity.ConcurrencyToken = Guid.NewGuid().ToString("N"); Audit(db, companyId, request.Id.HasValue ? "ssa-efw2.configuration.updated" : "ssa-efw2.configuration.created", entity.Id, new { entity.SpecificationTaxYear, entity.SpecificationVersion, entity.LayoutCompatibilityCode, entity.OfficialSpecificationUrl, entity.OfficialSpecificationSha256, entity.SourceRetrievedOn, entity.ReviewNotes, entity.KindOfEmployer, entity.EmploymentCode, hasEmployerSignaturePin = !string.IsNullOrEmpty(entity.EmployerSignaturePin), entity.IsApproved, entity.IsActive });
+        if (request.IsApproved)
+            await RecheckCompanyIdAsync(db, companyId, cancellationToken, BrassLedgerPermissions.PayrollPrepare, BrassLedgerPermissions.PayrollSensitiveData, BrassLedgerPermissions.PayrollApprove);
+        else
+            await RecheckCompanyIdAsync(db, companyId, cancellationToken, BrassLedgerPermissions.PayrollPrepare, BrassLedgerPermissions.PayrollSensitiveData);
         try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The SSA configuration changed while saving. Refresh and try again."); } catch (DbUpdateException) { return TransactionResult.Failure("The SSA EFW2 specification tax year conflicts with an existing company configuration."); }
         return TransactionResult.Success(entity.Id);
     }
@@ -50,13 +59,14 @@ public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbCo
     public async Task<TransactionResult> GenerateAsync(GenerateSsaOriginalWageFileRequest request, CancellationToken cancellationToken = default)
     {
         if (!Has(BrassLedgerPermissions.PayrollPrepare) || !Has(BrassLedgerPermissions.PayrollSensitiveData)) return TransactionResult.Failure("You are not authorized to generate protected SSA original wage files.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken); var filing = await db.PayrollFilings.AsNoTracking().SingleOrDefaultAsync(item => item.Id == request.PayrollFilingId && item.CompanyId == companyId && item.FormCode == "W2" && item.Status == "Approved" && item.ApprovedSourceDigestSha256 != "", cancellationToken); if (filing is null) return TransactionResult.Failure("Select a currently approved source-locked W-2/W-3 filing from this company.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken, BrassLedgerPermissions.PayrollPrepare, BrassLedgerPermissions.PayrollSensitiveData); var filing = await db.PayrollFilings.AsNoTracking().SingleOrDefaultAsync(item => item.Id == request.PayrollFilingId && item.CompanyId == companyId && item.FormCode == "W2" && item.Status == "Approved" && item.ApprovedSourceDigestSha256 != "", cancellationToken); if (filing is null) return TransactionResult.Failure("Select a currently approved source-locked W-2/W-3 filing from this company.");
         if (await db.PayrollSsaOriginalWageFiles.AnyAsync(item => item.CompanyId == companyId && item.PayrollFilingId == filing.Id, cancellationToken)) return TransactionResult.Failure("An immutable original SSA wage file already exists for this filing.");
         var configuration = await db.PayrollSsaWageFileConfigurations.AsNoTracking().SingleOrDefaultAsync(item => item.CompanyId == companyId && item.SpecificationTaxYear == filing.TaxYear && item.FileKind == FileKind && item.IsApproved && item.IsActive, cancellationToken); if (configuration is null) return TransactionResult.Failure($"No approved active SSA EFW2 specification exists for tax year {filing.TaxYear}; do not reuse another year's layout.");
         if (configuration.LayoutCompatibilityCode != SupportedLayoutCode) return TransactionResult.Failure("The active SSA EFW2 configuration was approved for an older encoder layout. Re-review and approve the current layout before generation.");
         var package = JsonSerializer.Deserialize<W2PackageData>(filing.ApprovedDataJson) ?? new(); var built = SsaEfw2FileBuilder.Build(package, ToSubmitter(configuration)); if (!built.Succeeded) return TransactionResult.Failure(string.Join(" ", built.Errors));
         var contentHash = Hash(built.Content); var sourceHash = Hash(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filingId = filing.Id, filing.ApprovedSourceDigestSha256, filing.ApprovedDataJson, configurationId = configuration.Id, configuration.ConcurrencyToken, configuration.OfficialSpecificationSha256 })));
         var file = new PayrollSsaOriginalWageFile { Id = Guid.NewGuid(), CompanyId = companyId, PayrollFilingId = filing.Id, PayrollSsaWageFileConfigurationId = configuration.Id, TaxYear = filing.TaxYear, FileName = $"EFW2-{filing.TaxYear}.txt", ContentBase64 = Convert.ToBase64String(built.Content), ContentSha256 = contentHash, SourceDigestSha256 = sourceHash, SpecificationVersion = configuration.SpecificationVersion, Status = "GeneratedForAccuWage", RecordCount = built.RecordCount, EmployeeRecordCount = built.EmployeeRecordCount, GeneratedByUserId = ResolveUserId(), GeneratedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }; db.Add(file); Audit(db, companyId, "ssa-efw2.generated", file.Id, new { filing.Id, file.TaxYear, file.FileName, file.ContentSha256, file.SourceDigestSha256, file.SpecificationVersion, file.RecordCount, file.EmployeeRecordCount, file.Status });
+        await RecheckCompanyIdAsync(db, companyId, cancellationToken, BrassLedgerPermissions.PayrollPrepare, BrassLedgerPermissions.PayrollSensitiveData);
         try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateException) { return TransactionResult.Failure("An SSA EFW2 wage file was already generated for this filing."); }
         return TransactionResult.Success(file.Id);
     }
@@ -64,7 +74,9 @@ public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbCo
     public async Task<TransactionResult> RecordValidationAsync(RecordSsaWageFileValidationRequest request, CancellationToken cancellationToken = default)
     {
         if (!Has(BrassLedgerPermissions.PayrollApprove) || !Has(BrassLedgerPermissions.PayrollSensitiveData)) return TransactionResult.Failure("You are not authorized to record AccuWage review of protected wage files."); var evidence = request.EvidenceReference?.Trim() ?? string.Empty; var notes = request.Notes?.Trim() ?? string.Empty; if (evidence.Length < 5 || notes.Length < 20) return TransactionResult.Failure("Retain the AccuWage evidence reference and substantive validation notes.");
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken); var file = await db.PayrollSsaOriginalWageFiles.SingleOrDefaultAsync(item => item.Id == request.FileId && item.CompanyId == companyId, cancellationToken); if (file is null) return TransactionResult.Failure("SSA original wage file not found."); if (file.Status != "GeneratedForAccuWage") return TransactionResult.Failure("AccuWage outcome has already been recorded for this immutable file."); if (file.ConcurrencyToken != request.ConcurrencyToken) return TransactionResult.Failure("The wage file changed after it was opened. Refresh and try again."); file.Status = request.Passed ? "AccuWageValidated" : "AccuWageRejected"; file.AccuWageEvidenceReference = evidence; file.ValidationNotes = notes; file.ValidatedByUserId = ResolveUserId(); file.ValidatedAtUtc = DateTimeOffset.UtcNow; file.ConcurrencyToken = Guid.NewGuid().ToString("N"); Audit(db, companyId, "ssa-efw2.accuwage-recorded", file.Id, new { file.Status, file.AccuWageEvidenceReference, file.ValidationNotes, file.ContentSha256 }); try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The wage file changed while validation was recorded. Refresh and try again."); }
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken); var companyId = await ResolveCompanyIdAsync(db, cancellationToken, BrassLedgerPermissions.PayrollApprove, BrassLedgerPermissions.PayrollSensitiveData); var file = await db.PayrollSsaOriginalWageFiles.SingleOrDefaultAsync(item => item.Id == request.FileId && item.CompanyId == companyId, cancellationToken); if (file is null) return TransactionResult.Failure("SSA original wage file not found."); if (file.Status != "GeneratedForAccuWage") return TransactionResult.Failure("AccuWage outcome has already been recorded for this immutable file."); if (file.ConcurrencyToken != request.ConcurrencyToken) return TransactionResult.Failure("The wage file changed after it was opened. Refresh and try again."); file.Status = request.Passed ? "AccuWageValidated" : "AccuWageRejected"; file.AccuWageEvidenceReference = evidence; file.ValidationNotes = notes; file.ValidatedByUserId = ResolveUserId(); file.ValidatedAtUtc = DateTimeOffset.UtcNow; file.ConcurrencyToken = Guid.NewGuid().ToString("N"); Audit(db, companyId, "ssa-efw2.accuwage-recorded", file.Id, new { file.Status, file.AccuWageEvidenceReference, file.ValidationNotes, file.ContentSha256 });
+        await RecheckCompanyIdAsync(db, companyId, cancellationToken, BrassLedgerPermissions.PayrollApprove, BrassLedgerPermissions.PayrollSensitiveData);
+        try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { return TransactionResult.Failure("The wage file changed while validation was recorded. Refresh and try again."); }
         return TransactionResult.Success(file.Id);
     }
 
@@ -72,7 +84,7 @@ public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbCo
     {
         RequireSensitive();
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var companyId = await ResolveCompanyIdAsync(db, cancellationToken);
+        var companyId = await ResolveCompanyIdAsync(db, cancellationToken, BrassLedgerPermissions.PayrollSensitiveData);
         var file = await db.PayrollSsaOriginalWageFiles.AsNoTracking().SingleOrDefaultAsync(item => item.Id == fileId && item.CompanyId == companyId, cancellationToken);
         if (file is null) return null;
         byte[] bytes;
@@ -90,6 +102,7 @@ public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbCo
             await db.SaveChangesAsync(cancellationToken);
             throw new InvalidOperationException("Stored SSA original wage-file integrity validation failed.");
         }
+        await RecheckCompanyIdAsync(db, companyId, cancellationToken, BrassLedgerPermissions.PayrollSensitiveData);
         Audit(db, companyId, "ssa-efw2.downloaded", file.Id, new { file.Status, file.ContentSha256 });
         await db.SaveChangesAsync(cancellationToken);
         return new(file.FileName, bytes, file.ContentSha256, file.Status);
@@ -103,19 +116,12 @@ public sealed class SsaOriginalWageFileService(IDbContextFactory<BrassLedgerDbCo
     private static void Apply(PayrollSsaWageFileConfiguration x, SaveSsaOriginalWageFileConfigurationRequest r, string url, string digest, string notes) { x.FileKind = FileKind; x.SpecificationTaxYear = r.SpecificationTaxYear; x.SpecificationVersion = r.SpecificationVersion.Trim(); x.LayoutCompatibilityCode = r.LayoutCompatibilityCode.Trim(); x.OfficialSpecificationUrl = url; x.OfficialSpecificationSha256 = digest; x.SourceRetrievedOn = r.SourceRetrievedOn; x.ReviewNotes = notes; x.SubmitterEin = r.SubmitterEin.Trim(); x.BsoUserId = r.BsoUserId.Trim(); x.SubmitterName = r.SubmitterName.Trim(); x.LocationAddress = r.LocationAddress.Trim(); x.DeliveryAddress = r.DeliveryAddress.Trim(); x.City = r.City.Trim(); x.State = r.State.Trim().ToUpperInvariant(); x.PostalCode = r.PostalCode.Trim(); x.ContactName = r.ContactName.Trim(); x.ContactPhone = r.ContactPhone.Trim(); x.ContactEmail = r.ContactEmail.Trim(); x.PreparerCode = r.PreparerCode.Trim().ToUpperInvariant(); x.EmployerLocationAddress = r.EmployerLocationAddress.Trim(); x.EmployerDeliveryAddress = r.EmployerDeliveryAddress.Trim(); x.EmployerCity = r.EmployerCity.Trim(); x.EmployerState = r.EmployerState.Trim().ToUpperInvariant(); x.EmployerPostalCode = r.EmployerPostalCode.Trim(); x.EmployerContactName = r.EmployerContactName.Trim(); x.EmployerContactPhone = r.EmployerContactPhone.Trim(); x.EmployerContactEmail = r.EmployerContactEmail.Trim(); x.KindOfEmployer = r.KindOfEmployer.Trim().ToUpperInvariant(); x.EmploymentCode = r.EmploymentCode.Trim().ToUpperInvariant(); x.EmployerSignaturePin = r.EmployerSignaturePin.Trim(); x.IsApproved = r.IsApproved; x.IsActive = r.IsActive; }
     private static string Hash(byte[] value) => Convert.ToHexString(SHA256.HashData(value)).ToLowerInvariant(); private bool Has(string permission) => httpContextAccessor.HttpContext?.User is { Identity.IsAuthenticated: true } principal && principal.HasClaim(BrassLedgerAuthenticationDefaults.PermissionClaimType, permission); private void RequireSensitive() { if (!Has(BrassLedgerPermissions.PayrollSensitiveData)) throw new UnauthorizedAccessException("You are not authorized to view protected SSA wage files."); }
     private Guid? ResolveUserId() => Guid.TryParse(httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
-    private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken token)
+    private async Task<Guid> ResolveCompanyIdAsync(BrassLedgerDbContext db, CancellationToken token, params string[] permissions) =>
+        (await SsaWageFileActorAuthority.RequireAsync(db, httpContextAccessor.HttpContext?.User, timeProvider, permissions, token)).CompanyId;
+    private async Task RecheckCompanyIdAsync(BrassLedgerDbContext db, Guid companyId, CancellationToken token, params string[] permissions)
     {
-        var context = httpContextAccessor.HttpContext;
-        if (context?.User.Identity?.IsAuthenticated != true
-            || !Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out _))
-            throw new UnauthorizedAccessException("An authenticated company context is required.");
-        var claim = context.User.FindFirstValue(BrassLedgerAuthenticationDefaults.CompanyIdClaimType);
-        if (Guid.TryParse(claim, out var id))
-        {
-            if (await db.Companies.AnyAsync(item => item.Id == id, token)) return id;
-            throw new UnauthorizedAccessException("The selected company is unavailable.");
-        }
-        throw new UnauthorizedAccessException("An authenticated company context is required.");
+        if (await ResolveCompanyIdAsync(db, token, permissions) != companyId)
+            throw new UnauthorizedAccessException("The protected SSA wage-file company changed during the operation.");
     }
     private void Audit(BrassLedgerDbContext db, Guid companyId, string action, Guid id, object detail) => db.BusinessAuditEntries.Add(new() { Id = Guid.NewGuid(), CompanyId = companyId, UserId = ResolveUserId(), Action = action, EntityType = nameof(PayrollSsaOriginalWageFile), EntityId = id, DetailJson = JsonSerializer.Serialize(detail), OccurredAtUtc = DateTimeOffset.UtcNow });
 }

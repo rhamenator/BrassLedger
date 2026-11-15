@@ -6814,10 +6814,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var corrections = scope.ServiceProvider.GetRequiredService<ISsaWageFileService>();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
         Guid originalCompanyId; var secondCompanyId = Guid.NewGuid();
-        var actorId = Guid.NewGuid();
+        Guid actorId;
         await using (var db = await factory.CreateDbContextAsync())
         {
             originalCompanyId = await db.Companies.Select(company => company.Id).SingleAsync();
+            actorId = await db.Users.Where(user => user.UserName == "operations").Select(user => user.Id).SingleAsync();
             db.Companies.Add(new Company { Id = secondCompanyId, Name = "SSA isolation subsidiary", LegalName = "SSA Isolation Subsidiary Ltd.", TaxId = "SSA-ISO", BaseCurrency = "USD", FiscalYearStartMonth = 1 });
             await db.SaveChangesAsync();
         }
@@ -6839,16 +6840,10 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.False(await db.BusinessAuditEntries.AnyAsync(item => item.Action == "ssa-efw2.configuration.created" || item.Action == "ssa-wage-file.configuration.created"));
         }
 
-        void ActAs(Guid companyId) => accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
-        {
-            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-                [new(System.Security.Claims.ClaimTypes.NameIdentifier, actorId.ToString()),
-                 new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
-                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPrepare),
-                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollApprove),
-                 new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)], "test"))
-        };
-        ActAs(originalCompanyId);
+        Task<Microsoft.AspNetCore.Http.HttpContext> ActorContextAsync(Guid companyId) =>
+            CreateSecurityManagerContextAsync(factory, companyId, BrassLedgerPermissions.PayrollPrepare,
+                BrassLedgerPermissions.PayrollApprove, BrassLedgerPermissions.PayrollSensitiveData);
+        accessor.HttpContext = await ActorContextAsync(originalCompanyId);
         var originalEfw2 = await originals.SaveConfigurationAsync(originalRequest);
         Assert.True(originalEfw2.Succeeded, originalEfw2.ErrorMessage);
         var originalEfw2c = await corrections.SaveConfigurationAsync(correctionRequest);
@@ -6873,7 +6868,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             await db.SaveChangesAsync();
         }
 
-        ActAs(secondCompanyId);
+        accessor.HttpContext = await ActorContextAsync(secondCompanyId);
         Assert.Empty((await originals.GetAsync()).Configurations);
         Assert.Empty((await corrections.GetAsync()).Configurations);
         Assert.Null(await originals.DownloadAsync(originalFileId));
@@ -6892,7 +6887,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.True(secondEfw2c.Succeeded, secondEfw2c.ErrorMessage);
         Assert.Equal(secondEfw2.Id, Assert.Single((await originals.GetAsync()).Configurations).Id);
         Assert.Equal(secondEfw2c.Id, Assert.Single((await corrections.GetAsync()).Configurations).Id);
-        ActAs(originalCompanyId);
+        accessor.HttpContext = await ActorContextAsync(originalCompanyId);
         Assert.Equal(originalEfw2.Id, Assert.Single((await originals.GetAsync()).Configurations).Id);
         Assert.Equal(originalEfw2c.Id, Assert.Single((await corrections.GetAsync()).Configurations).Id);
         Assert.Equal(fileBytes, (await originals.DownloadAsync(originalFileId))!.Content);
@@ -6907,7 +6902,14 @@ public sealed class WorkspaceInitializationTests : IDisposable
         }
         await Assert.ThrowsAsync<InvalidOperationException>(() => originals.DownloadAsync(originalFileId));
         await Assert.ThrowsAsync<InvalidOperationException>(() => corrections.DownloadAsync(correctionFileId));
-        ActAs(Guid.NewGuid());
+        var forgedClaims = accessor.HttpContext!.User.Claims
+            .Where(claim => claim.Type != BrassLedgerAuthenticationDefaults.CompanyIdClaimType)
+            .Select(claim => new System.Security.Claims.Claim(claim.Type, claim.Value))
+            .Append(new System.Security.Claims.Claim(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, Guid.NewGuid().ToString()));
+        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(forgedClaims, "test"))
+        };
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.GetAsync());
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.GetAsync());
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.DownloadAsync(originalFileId));
@@ -6969,6 +6971,51 @@ public sealed class WorkspaceInitializationTests : IDisposable
     }
 
     [Fact]
+    public async Task SsaWageFileServices_RejectRevokedSessionAndStoredPermissionDrift()
+    {
+        using var services = CreateServiceProvider();
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        Guid companyId;
+        await using (var db = await factory.CreateDbContextAsync())
+            companyId = await db.Companies.Select(item => item.Id).SingleAsync();
+        var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        accessor.HttpContext = await CreateSecurityManagerContextAsync(factory, companyId,
+            BrassLedgerPermissions.PayrollPrepare, BrassLedgerPermissions.PayrollApprove, BrassLedgerPermissions.PayrollSensitiveData);
+        var originals = scope.ServiceProvider.GetRequiredService<ISsaOriginalWageFileService>();
+        var corrections = scope.ServiceProvider.GetRequiredService<ISsaWageFileService>();
+        Assert.Empty((await originals.GetAsync()).Configurations);
+        Assert.Empty((await corrections.GetAsync()).Configurations);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == companyId && item.Name == "Security Test Manager");
+            role.Permissions = string.Join('|', role.Permissions.Split('|').Where(permission => permission != BrassLedgerPermissions.PayrollSensitiveData));
+            await db.SaveChangesAsync();
+        }
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2026, true)));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.SaveConfigurationAsync(SsaConfigurationRequest(2026, true)));
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var role = await db.AccessRoles.SingleAsync(item => item.CompanyId == companyId && item.Name == "Security Test Manager");
+            role.Permissions += $"|{BrassLedgerPermissions.PayrollSensitiveData}";
+            var sessionId = Guid.Parse(accessor.HttpContext!.User.FindFirst(BrassLedgerAuthenticationDefaults.SessionIdClaimType)!.Value);
+            (await db.UserSessions.SingleAsync(item => item.Id == sessionId)).RevokedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.GetAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => originals.DownloadAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => corrections.DownloadAsync(Guid.NewGuid()));
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.False(await db.PayrollSsaWageFileConfigurations.AnyAsync());
+    }
+
+    [Fact]
     public async Task SsaWageFileWorkflow_RequiresApprovedExactYearEncryptsAndRecordsAccuWageOnce()
     {
         using var services = CreateServiceProvider(); await services.InitializeBrassLedgerAsync(); using var scope = services.CreateScope();
@@ -6981,7 +7028,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var package = new W2cPackageData(TaxYear: 2025, EmployerLegalName: "Brass Ledger Test Company", EmployerEin: "123456789", Employees: [new(previous, corrected, true, "Federal wage correction")]);
             db.PayrollFilingCorrections.Add(new PayrollFilingCorrection { Id = correctionId, CompanyId = companyId, OriginalPayrollFilingId = filingId, Sequence = 1, FormCode = "W-2c/W-3c", TaxYear = 2025, Quarter = 0, Process = "Correction", DiscoveredOn = new DateOnly(2026, 1, 20), Explanation = "Correct wage statement test values.", WageStatementsCorrected = true, WageStatementEvidenceReference = "EVIDENCE", Status = "Approved", DataJson = System.Text.Json.JsonSerializer.Serialize(package), CorrectedSourceDigestSha256 = new string('b', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/iw2w3", ContentVersion = "2025-W2C", PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }); await db.SaveChangesAsync();
         }
-        scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>().HttpContext = CreateSsaPermissionContext(companyId);
+        scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>().HttpContext =
+            await CreateSecurityManagerContextAsync(factory, companyId, BrassLedgerPermissions.PayrollPrepare,
+                BrassLedgerPermissions.PayrollApprove, BrassLedgerPermissions.PayrollSensitiveData);
         var workflow = scope.ServiceProvider.GetRequiredService<ISsaWageFileService>();
         var future = SsaConfigurationRequest(2027, true); Assert.False((await workflow.SaveConfigurationAsync(future)).Succeeded);
         var predatesPublication = SsaConfigurationRequest(2026, true) with { SourceRetrievedOn = new DateOnly(2026, 7, 9) }; Assert.False((await workflow.SaveConfigurationAsync(predatesPublication)).Succeeded);
@@ -7010,7 +7059,9 @@ public sealed class WorkspaceInitializationTests : IDisposable
             var package = new W2PackageData(TaxYear: 2026, EmployerLegalName: "Brass Ledger Test Company", EmployerEin: "123456789", Employees: [employee], W3Box1Total: 1100m, W3Box2Total: 110m, W3Box3Total: 1000m, W3Box4Total: 62m, W3Box5Total: 1100m, W3Box6Total: 15.95m);
             db.PayrollFilings.Add(new PayrollFiling { Id = filingId, CompanyId = companyId, FormCode = "W2", TaxYear = 2026, PeriodKey = "2026-YEAR", PeriodStart = new DateOnly(2026, 1, 1), PeriodEnd = new DateOnly(2026, 12, 31), Status = "Approved", DataJson = System.Text.Json.JsonSerializer.Serialize(package), SummaryJson = "{}", SourcePayrollRunIdsJson = "[]", SourceDigestSha256 = new string('a', 64), OfficialSourceUrl = "https://www.irs.gov/instructions/iw2w3", ContentVersion = "2026", PreparedAtUtc = DateTimeOffset.UtcNow, ApprovedAtUtc = DateTimeOffset.UtcNow, ApprovedDataJson = System.Text.Json.JsonSerializer.Serialize(package), ApprovedSourceDigestSha256 = new string('a', 64), ApprovedBaselineAtUtc = DateTimeOffset.UtcNow, ConcurrencyToken = Guid.NewGuid().ToString("N") }); await db.SaveChangesAsync();
         }
-        scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>().HttpContext = CreateSsaPermissionContext(companyId);
+        scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>().HttpContext =
+            await CreateSecurityManagerContextAsync(factory, companyId, BrassLedgerPermissions.PayrollPrepare,
+                BrassLedgerPermissions.PayrollApprove, BrassLedgerPermissions.PayrollSensitiveData);
         var workflow = scope.ServiceProvider.GetRequiredService<ISsaOriginalWageFileService>();
         Assert.False((await workflow.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2025, true))).Succeeded);
         Assert.False((await workflow.SaveConfigurationAsync(SsaOriginalConfigurationRequest(2026, true) with { SourceRetrievedOn = new DateOnly(2026, 7, 6) })).Succeeded);
@@ -10282,19 +10333,6 @@ public sealed class WorkspaceInitializationTests : IDisposable
             ], "test"));
         return context;
     }
-
-    private static Microsoft.AspNetCore.Http.HttpContext CreateSsaPermissionContext(Guid companyId) =>
-        new Microsoft.AspNetCore.Http.DefaultHttpContext
-        {
-            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-            [
-                new(System.Security.Claims.ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
-                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
-                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollPrepare),
-                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollApprove),
-                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.PayrollSensitiveData)
-            ], "test"))
-        };
 
     private static async Task<string> ReadScalarAsync(SqliteConnection connection, string sql)
     {
