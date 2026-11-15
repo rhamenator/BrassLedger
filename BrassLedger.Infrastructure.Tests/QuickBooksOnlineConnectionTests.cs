@@ -246,6 +246,146 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
     }
 
     [Fact]
+    public async Task OAuthCallback_CancelledDuringProviderValidation_RevokesIssuedGrantWithoutSavingCredentials()
+    {
+        var provider = new FakeQuickBooksOnlineClient
+        {
+            CompanyValidationEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            ReleaseCompanyValidation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+        var started = await service.BeginAuthorizationAsync(new(null, "Cancelled callback books", "Sandbox"));
+        Assert.True(started.Succeeded, started.ErrorMessage);
+        var state = QueryHelpers.ParseQuery(new Uri(started.AuthorizationUrl!).Query)["state"].ToString();
+
+        using var cancellation = new CancellationTokenSource();
+        var completionTask = service.CompleteAuthorizationAsync(new(state, "unused-code", "123456789", null, null), cancellation.Token);
+        await provider.CompanyValidationEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completionTask.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal("refresh-token-one", provider.LastRevokedToken);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var connection = await db.IntegrationConnections.SingleAsync(item => item.Name == "Cancelled callback books");
+        Assert.Equal("AuthorizationPending", connection.Status);
+        Assert.Equal("{}", connection.CredentialsJson);
+        Assert.DoesNotContain(await db.BusinessAuditEntries.ToArrayAsync(), entry => entry.Action == "integration.connected" && entry.EntityId == connection.Id);
+        Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), entry => entry.Action == "integration.oauth_unused_grant_revoked");
+    }
+
+    [Fact]
+    public async Task OAuthCallback_CancelledBeforeTokenResponse_AuditsUnknownGrantOutcome()
+    {
+        var provider = new FakeQuickBooksOnlineClient
+        {
+            ExchangeEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            ReleaseExchange = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+        var started = await service.BeginAuthorizationAsync(new(null, "Unknown grant books", "Sandbox"));
+        Assert.True(started.Succeeded, started.ErrorMessage);
+        var state = QueryHelpers.ParseQuery(new Uri(started.AuthorizationUrl!).Query)["state"].ToString();
+
+        using var cancellation = new CancellationTokenSource();
+        var completionTask = service.CompleteAuthorizationAsync(new(state, "unused-code", "123456789", null, null), cancellation.Token);
+        await provider.ExchangeEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completionTask.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal(string.Empty, provider.LastRevokedToken);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var connection = await db.IntegrationConnections.SingleAsync(item => item.Name == "Unknown grant books");
+        Assert.Equal("AuthorizationPending", connection.Status);
+        Assert.Equal("{}", connection.CredentialsJson);
+        Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), entry => entry.Action == "integration.oauth_cancelled_outcome_unknown");
+    }
+
+    [Fact]
+    public async Task OAuthCallback_ProviderReturnsAfterCancellation_RevokesGrantWithoutSavingCredentials()
+    {
+        var provider = new FakeQuickBooksOnlineClient
+        {
+            CompanyValidationEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            ReleaseCompanyValidation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            IgnoreCompanyValidationCancellation = true
+        };
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+        var started = await service.BeginAuthorizationAsync(new(null, "Late provider books", "Sandbox"));
+        Assert.True(started.Succeeded, started.ErrorMessage);
+        var state = QueryHelpers.ParseQuery(new Uri(started.AuthorizationUrl!).Query)["state"].ToString();
+
+        using var cancellation = new CancellationTokenSource();
+        var completionTask = service.CompleteAuthorizationAsync(new(state, "unused-code", "123456789", null, null), cancellation.Token);
+        await provider.CompanyValidationEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cancellation.Cancel();
+        provider.ReleaseCompanyValidation.TrySetResult(true);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completionTask.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal("refresh-token-one", provider.LastRevokedToken);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var connection = await db.IntegrationConnections.SingleAsync(item => item.Name == "Late provider books");
+        Assert.Equal("AuthorizationPending", connection.Status);
+        Assert.Equal("{}", connection.CredentialsJson);
+        Assert.Contains(await db.BusinessAuditEntries.ToArrayAsync(), entry => entry.Action == "integration.oauth_unused_grant_revoked");
+    }
+
+    [Fact]
+    public async Task OAuthReconnect_CancelledDuringProviderValidation_RetainsCredentialsAndReleasesLease()
+    {
+        var provider = new FakeQuickBooksOnlineClient();
+        using var services = CreateServiceProvider(provider);
+        await services.InitializeBrassLedgerAsync();
+        using var scope = services.CreateScope();
+        var actor = await SetOwnerContextAsync(scope.ServiceProvider);
+        SetContext(scope.ServiceProvider, actor, actor.CompanyId);
+        var service = scope.ServiceProvider.GetRequiredService<IQuickBooksOnlineConnectionService>();
+        var connectionId = await ConnectAsync(scope.ServiceProvider);
+        provider.CompanyValidationEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        provider.ReleaseCompanyValidation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = await service.BeginAuthorizationAsync(new(connectionId, "ignored", "Sandbox"));
+        Assert.True(started.Succeeded, started.ErrorMessage);
+        var state = QueryHelpers.ParseQuery(new Uri(started.AuthorizationUrl!).Query)["state"].ToString();
+
+        using var cancellation = new CancellationTokenSource();
+        var completionTask = service.CompleteAuthorizationAsync(new(state, "unused-code", "123456789", null, null), cancellation.Token);
+        await provider.CompanyValidationEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completionTask.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal("refresh-token-reconnected", provider.LastRevokedToken);
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BrassLedgerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var connection = await db.IntegrationConnections.SingleAsync(item => item.Id == connectionId);
+            Assert.Equal("Connected", connection.Status);
+            Assert.Contains("refresh-token-one", connection.CredentialsJson, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, connection.CredentialOperationLeaseId);
+            Assert.Null(connection.CredentialOperationLeaseExpiresAtUtc);
+            Assert.Equal(1, await db.BusinessAuditEntries.CountAsync(entry => entry.Action == "integration.connected" && entry.EntityId == connectionId));
+        }
+        var retried = await service.BeginAuthorizationAsync(new(connectionId, "ignored", "Sandbox"));
+        Assert.True(retried.Succeeded, retried.ErrorMessage);
+    }
+
+    [Fact]
     public async Task OAuthManagement_EnforcesAdministratorMfaDespiteCorruptedRoleFlag()
     {
         var provider = new FakeQuickBooksOnlineClient();
@@ -1130,6 +1270,9 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
         public int QueryCount { get; private set; }
         public TaskCompletionSource<bool>? QueryEntered { get; set; }
         public TaskCompletionSource<bool>? ReleaseQuery { get; set; }
+        public TaskCompletionSource<bool>? CompanyValidationEntered { get; set; }
+        public TaskCompletionSource<bool>? ReleaseCompanyValidation { get; set; }
+        public bool IgnoreCompanyValidationCancellation { get; set; }
         public int RefreshCount { get; private set; }
         public string LastRefreshToken { get; private set; } = string.Empty;
         public string LastRevokedToken { get; private set; } = string.Empty;
@@ -1172,11 +1315,14 @@ public sealed class QuickBooksOnlineConnectionTests : IDisposable
             return Task.FromResult(new QuickBooksProviderResult(RevocationSucceeds, RevocationSucceeds ? string.Empty : "temporarily_unavailable"));
         }
 
-        public Task<QuickBooksCompanyInfoResponse> GetCompanyInfoAsync(string environment, string realmId, string accessToken, CancellationToken cancellationToken = default)
+        public async Task<QuickBooksCompanyInfoResponse> GetCompanyInfoAsync(string environment, string realmId, string accessToken, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(CompanyValidationSucceeds
+            CompanyValidationEntered?.TrySetResult(true);
+            if (ReleaseCompanyValidation is { } release)
+                await release.Task.WaitAsync(IgnoreCompanyValidationCancellation ? CancellationToken.None : cancellationToken);
+            return CompanyValidationSucceeds
                 ? new QuickBooksCompanyInfoResponse(true, string.Empty, "Acme QuickBooks", "Acme QuickBooks LLC", "US")
-                : new QuickBooksCompanyInfoResponse(false, "company_validation_failed", string.Empty, string.Empty, string.Empty));
+                : new QuickBooksCompanyInfoResponse(false, "company_validation_failed", string.Empty, string.Empty, string.Empty);
         }
 
         public async Task<QuickBooksEntityQueryResponse> QueryEntitiesAsync(string environment, string realmId, string accessToken, string entityType, CancellationToken cancellationToken = default)

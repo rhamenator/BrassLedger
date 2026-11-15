@@ -108,11 +108,14 @@ public sealed class UiSession : IAsyncDisposable
         }
     }
 
-    public async Task AssertNoUiFailuresAsync(string scenario)
+    public async Task AssertNoUiFailuresAsync(string scenario, bool allowExpectedSessionRevocationDisconnect = false)
     {
         await Page.WaitForTimeoutAsync(300);
         Assert.DoesNotContain("That screen hit a snag.", await Page.ContentAsync());
-        Assert.False(_consoleErrors.Any(), BuildFailureMessage($"Browser console errors were detected during {scenario}.", _consoleErrors));
+        var unexpectedConsoleErrors = _consoleErrors.Where(error =>
+            !allowExpectedSessionRevocationDisconnect
+            || !error.Contains("Failed to complete negotiation with the server: TypeError: Failed to fetch", StringComparison.Ordinal)).ToArray();
+        Assert.False(unexpectedConsoleErrors.Length > 0, BuildFailureMessage($"Browser console errors were detected during {scenario}.", unexpectedConsoleErrors));
         Assert.False(_pageErrors.Any(), BuildFailureMessage($"Page errors were detected during {scenario}.", _pageErrors));
         Assert.False(_requestFailures.Any(), BuildFailureMessage($"Request failures were detected during {scenario}.", _requestFailures));
         Assert.False(_serverFailures.Any(), BuildFailureMessage($"Server responses >= 500 were detected during {scenario}.", _serverFailures));
