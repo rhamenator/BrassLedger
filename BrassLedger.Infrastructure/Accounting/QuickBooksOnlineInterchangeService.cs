@@ -58,7 +58,11 @@ public sealed class QuickBooksOnlineInterchangeService(
             return AccountingInterchangeImportResult.Failure("Supported imports are chart-of-accounts, customers, vendors, general journal entries, and zero-tax invoices.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var actor = await ResolveActorAsync(db, cancellationToken);
-        EnsurePermission(actor, normalizedEntity);
+        EnsurePermission(actor, null);
+        if (normalizedEntity == "invoices" && (!HasPermission(actor, BrassLedgerPermissions.SubledgerPrepare) || !HasPermission(actor, BrassLedgerPermissions.ReceivablesManage)))
+            return AccountingInterchangeImportResult.Failure("You are not authorized to prepare accounts-receivable invoice drafts.");
+        if (normalizedEntity == "journal-entries" && !HasPermission(actor, BrassLedgerPermissions.JournalPrepare))
+            return AccountingInterchangeImportResult.Failure("You are not authorized to prepare general journal drafts.");
         var companyId = actor.CompanyId;
         var parsed = await ReadCsvAsync(content, cancellationToken);
         await EnsureStillAuthorizedAsync(db, actor, cancellationToken, normalizedEntity);

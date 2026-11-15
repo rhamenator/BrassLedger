@@ -1581,11 +1581,19 @@ api.MapPost("/landed-cost-allocations/{landedCostAllocationId:guid}/reversal", a
 
 api.MapGet("/interchange/quickbooks-online/{entity}.csv", async (string entity, IAccountingInterchangeService service, CancellationToken cancellationToken) =>
 {
-    var export = await service.ExportQuickBooksOnlineCsvAsync(entity, cancellationToken);
-    return export is null ? Results.NotFound() : Results.File(export.Content, export.ContentType, export.FileName);
+    try
+    {
+        var export = await service.ExportQuickBooksOnlineCsvAsync(entity, cancellationToken);
+        return export is null ? Results.NotFound() : Results.File(export.Content, export.ContentType, export.FileName);
+    }
+    catch (UnauthorizedAccessException) { return Results.Forbid(); }
 }).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 
-api.MapGet("/interchange/batches", async (int? limit, IAccountingInterchangeService service, CancellationToken cancellationToken) => Results.Ok(await service.GetRecentBatchesAsync(limit ?? 20, cancellationToken))).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
+api.MapGet("/interchange/batches", async (int? limit, IAccountingInterchangeService service, CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await service.GetRecentBatchesAsync(limit ?? 20, cancellationToken)); }
+    catch (UnauthorizedAccessException) { return Results.Forbid(); }
+}).RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 
 api.MapPost("/interchange/quickbooks-online/{entity}", async (string entity, IFormFile? file, bool? dryRun, IAccountingInterchangeService service, CancellationToken cancellationToken) =>
 {
@@ -1593,8 +1601,12 @@ api.MapPost("/interchange/quickbooks-online/{entity}", async (string entity, IFo
     if (file.Length > 2 * 1024 * 1024) return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["QuickBooks CSV imports are limited to 2 MB."] });
     if (!string.Equals(Path.GetExtension(file.FileName), ".csv", StringComparison.OrdinalIgnoreCase)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Upload a .csv file."] });
     await using var stream = file.OpenReadStream();
-    var result = await service.ImportQuickBooksOnlineCsvAsync(entity, stream, new(dryRun ?? false, file.FileName), cancellationToken);
-    return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["import"] = result.Errors.ToArray() });
+    try
+    {
+        var result = await service.ImportQuickBooksOnlineCsvAsync(entity, stream, new(dryRun ?? false, file.FileName), cancellationToken);
+        return result.Succeeded ? Results.Ok(result) : Results.ValidationProblem(new Dictionary<string, string[]> { ["import"] = result.Errors.ToArray() });
+    }
+    catch (UnauthorizedAccessException) { return Results.Forbid(); }
 }).Accepts<IFormFile>("multipart/form-data").RequireAuthorization(BrassLedgerAuthorizationPolicies.ManageLedger);
 
 api.MapGet("/reports/{code}.csv", async (string code, IBusinessWorkspaceService service, CancellationToken cancellationToken) =>

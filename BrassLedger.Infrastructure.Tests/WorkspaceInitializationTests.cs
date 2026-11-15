@@ -1929,19 +1929,16 @@ public sealed class WorkspaceInitializationTests : IDisposable
         await using var db = await factory.CreateDbContextAsync();
         var companyId = await db.Companies.Select(company => company.Id).FirstAsync();
         var accessor = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
-        accessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
-        {
-            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-            [
-                new(BrassLedgerAuthenticationDefaults.CompanyIdClaimType, companyId.ToString()),
-                new(BrassLedgerAuthenticationDefaults.PermissionClaimType, BrassLedgerPermissions.LedgerManage)
-            ], "test"))
-        };
+        var signedIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, signedIn.Outcome);
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, signedIn.User!, BrassLedgerPermissions.LedgerManage);
         var interchange = scope.ServiceProvider.GetRequiredService<IAccountingInterchangeService>();
         await using var csv = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("Invoice No.,Customer,Invoice Date,Due Date,Item Amount\r\nDENIED-1,C-1001,2026-05-10,2026-06-09,50.00"));
 
-        var error = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => interchange.ImportQuickBooksOnlineCsvAsync("invoices", csv, new(true, "denied.csv")));
-        Assert.Contains("authenticated company context", error.Message, StringComparison.OrdinalIgnoreCase);
+        var result = await interchange.ImportQuickBooksOnlineCsvAsync("invoices", csv, new(true, "denied.csv"));
+        Assert.False(result.Succeeded);
+        Assert.Contains("not authorized", result.Errors.Single(), StringComparison.OrdinalIgnoreCase);
         Assert.False(await db.AccountingInterchangeBatches.AnyAsync(batch => batch.CompanyId == companyId && batch.FileName == "denied.csv"));
     }
 
@@ -8753,6 +8750,11 @@ public sealed class WorkspaceInitializationTests : IDisposable
         Assert.Equal(costCodeResult.Id, requisitionLineSnapshot.ProjectCostCodeId);
 
         const string importHeader = "Journal No.,Journal Date,Reference,Journal/Description,Account Name,Debits,Credits,Line Description,Project / Job,Project Phase,Cost Code\r\n";
+        var csvSignIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, csvSignIn.Outcome);
+        accessor.HttpContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, csvSignIn.User!,
+            BrassLedgerPermissions.LedgerManage, BrassLedgerPermissions.JournalPrepare);
         var importCsv = importHeader
             + $"DIM-IMPORT,2026-01-15,DIM-REF,Dimension import,5100,10,0,Imported project cost,{project.JobNumber},{child.Code},LAB\r\n"
             + $"DIM-IMPORT,2026-01-15,DIM-REF,Dimension import,4000,0,10,Imported project revenue,{project.JobNumber},{child.Code},LAB\r\n";
@@ -8925,6 +8927,13 @@ public sealed class WorkspaceInitializationTests : IDisposable
             Assert.All(await db.PayrollTimeEntries.Where(line => line.PayrollTimecardId == timecard.Id).ToListAsync(), line => { Assert.Equal(child.Id, line.DepartmentId); Assert.Equal(accountingClass.Id, line.ClassId); });
         }
 
+        var csvSignIn = await scope.ServiceProvider.GetRequiredService<IUserAuthenticationService>()
+            .AuthenticateAsync("controller", BrassLedgerAuthenticationDefaults.SeededPassword, "127.0.0.1", "xunit");
+        Assert.Equal(AuthenticationOutcome.Succeeded, csvSignIn.Outcome);
+        var csvContext = await CreateCompanyOwnerContextAsync(scope.ServiceProvider, csvSignIn.User!,
+            BrassLedgerPermissions.LedgerManage, BrassLedgerPermissions.SubledgerPrepare,
+            BrassLedgerPermissions.ReceivablesManage, BrassLedgerPermissions.JournalPrepare);
+        accessor.HttpContext = csvContext;
         var invoiceExport = await interchange.ExportQuickBooksOnlineCsvAsync("invoices");
         Assert.NotNull(invoiceExport);
         var invoiceCsv = System.Text.Encoding.UTF8.GetString(invoiceExport.Content);
@@ -8935,6 +8944,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
         var invoiceImportCsv = "Invoice No.,Customer,Invoice Date,Due Date,Item Amount,Item Description,Quantity,Rate,Project / Job,Project Phase,Cost Code,Department,Class\r\n"
             + $"DIM-QB-AR-1,{customerReference},2026-06-20,2026-07-20,9.00,Imported tracked invoice,1,9.00,,,,FIELD,COMMERCIAL\r\n";
         SetUser(Guid.NewGuid(), BrassLedgerPermissions.SubledgerPrepare, BrassLedgerPermissions.ReceivablesManage);
+        accessor.HttpContext = csvContext;
         await using (var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(invoiceImportCsv)))
         {
             var imported = await interchange.ImportQuickBooksOnlineCsvAsync("invoices", content, new(false, "tracked-invoices.csv"));
@@ -8956,6 +8966,7 @@ public sealed class WorkspaceInitializationTests : IDisposable
             + "DIM-IMPORT-TRACK,2026-06-20,DIM-IMPORT,Tracking import,5100,12,0,Imported cost,,,,FIELD,COMMERCIAL\r\n"
             + "DIM-IMPORT-TRACK,2026-06-20,DIM-IMPORT,Tracking import,4000,0,12,Imported offset,,,,FIELD,COMMERCIAL\r\n";
         SetUser(preparerId, BrassLedgerPermissions.JournalPrepare);
+        accessor.HttpContext = csvContext;
         await using (var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(dimensionImport)))
         {
             var imported = await interchange.ImportQuickBooksOnlineCsvAsync("journal-entries", content, new(false, "tracking-dimensions.csv"));
